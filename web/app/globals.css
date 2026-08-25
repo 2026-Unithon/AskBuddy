@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f9f6;
+  --surface: #ffffff;
+  --surface-muted: #e0eee3;
+  --foreground: #1e2a22;
+  --muted: rgba(30, 42, 34, 0.55);
+  --border: #e0eee3;
+
+  /* 디자인 보드(Figma) 기준 그린 팔레트 */
+  --brand-50: rgba(91, 191, 106, 0.08);
+  --brand-100: rgba(91, 191, 106, 0.14);
+  --brand-200: #b0e8c8;
+  --brand-300: #7ed6a8;
+  --brand-400: #6fcb7f;
+  --brand-500: #5bbf6a;
+  --brand-600: #4aab59;
+  --brand-700: #2e6b3c;
+  --brand-800: #245a30;
+  --brand-900: #1a4523;
+
+  /* 포인트 핑크 — Buddy 말풍선, 하트, 강조 마커 */
+  --accent-50: rgba(240, 123, 138, 0.1);
+  --accent-100: rgba(240, 123, 138, 0.14);
+  --accent-500: #f07b8a;
+  --accent-700: #c14f5e;
+
+  --warn-50: #fff7ed;
+  --warn-500: #f0a53d;
+  --warn-700: #b3690f;
+
+  --danger-50: #fef2f2;
+  --danger-500: #e6604f;
+  --danger-700: #b0341f;
+
+  --radius-lg: 1.5rem;
+  --radius-md: 1rem;
+  --radius-sm: 0.65rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-500: var(--accent-500);
+  --color-accent-700: var(--accent-700);
+
+  --color-warn-50: var(--warn-50);
+  --color-warn-500: var(--warn-500);
+  --color-warn-700: var(--warn-700);
+
+  --color-danger-50: var(--danger-50);
+  --color-danger-500: var(--danger-500);
+  --color-danger-700: var(--danger-700);
+
+  --font-sans: var(--font-pretendard);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+::selection {
+  background: var(--brand-200);
+}
+
+input, textarea {
+  font-family: inherit;
+}
