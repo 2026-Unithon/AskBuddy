@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Buddy, BuddyBubble, Button, Card, Input } from "@/components/ui";
 import { useApp } from "@/lib/store";
-import { ApiError, answerPending, listPending, type LearnPendingItem } from "@/lib/api";
-import type { PendingQuestion, StaffLevel } from "@/lib/types";
+import { ApiError, answerPending, listPending, listStaff, type LearnPendingItem, type LearnStaffItem } from "@/lib/api";
+import type { PendingQuestion, StaffLevel, StaffMember } from "@/lib/types";
 
 const LEVEL_TONE: Record<StaffLevel, "brand" | "warn" | "danger"> = {
   great: "brand",
@@ -19,6 +19,23 @@ const LEVEL_LABEL: Record<StaffLevel, string> = {
 };
 
 const POLL_MS = 2000;
+
+function staffLevel(progressRate: number, deployThreshold: number): StaffLevel {
+  if (progressRate >= deployThreshold) return "great";
+  if (progressRate >= 50) return "good";
+  return "warn";
+}
+
+function toStaff(item: LearnStaffItem, deployThreshold: number): StaffMember {
+  const progressPct = Math.round(item.progress_rate);
+  return {
+    id: String(item.member_id),
+    name: item.name,
+    label: `알바생 (${item.day_count}일차)`,
+    progressPct,
+    level: staffLevel(progressPct, deployThreshold),
+  };
+}
 
 function toPending(item: LearnPendingItem): PendingQuestion {
   return {
@@ -46,7 +63,7 @@ export default function DashboardPage() {
     if (!state.token) return;
     let cancelled = false;
 
-    async function refresh() {
+    async function refreshPending() {
       try {
         const res = await listPending(state.token!);
         if (cancelled) return;
@@ -58,8 +75,24 @@ export default function DashboardPage() {
       }
     }
 
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), POLL_MS);
+    async function refreshStaff() {
+      try {
+        const res = await listStaff(state.token!);
+        if (cancelled) return;
+        const threshold = res.deploy_threshold ?? 80;
+        dispatch({
+          type: "SET_STAFF",
+          staff: (res.items ?? []).map((item) => toStaff(item, threshold)),
+        });
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof ApiError ? e.detail || "직원 목록을 불러오지 못했어요" : "서버에 연결할 수 없습니다");
+      }
+    }
+
+    void refreshPending();
+    void refreshStaff();
+    const timer = window.setInterval(() => void refreshPending(), POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

@@ -185,6 +185,63 @@ async def list_pending(
     }
 
 
+@router.get("/staff")
+async def list_staff(
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+):
+    """점주 대시보드 직원 목록. STAFF 만. store_id 는 JWT.
+
+    StaffLevel 은 DB 컬럼이 아니다. progress_rate 와 deploy_threshold 를 내려 프론트가 나눈다.
+    """
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+
+    store = await db.fetchrow(
+        """
+        select deploy_threshold
+        from stores
+        where store_id = $1
+        """,
+        store_id,
+    )
+    if not store:
+        raise HTTPException(404, "store not found")
+    threshold = int(store["deploy_threshold"])
+
+    rows = await db.fetch(
+        """
+        select
+          m.member_id,
+          u.name,
+          m.day_count,
+          m.progress_rate,
+          m.is_deployable
+        from store_members m
+        join users u on u.user_id = m.user_id
+        where m.store_id = $1
+          and m.member_role = 'STAFF'
+        order by m.joined_at asc, m.member_id asc
+        """,
+        store_id,
+    )
+    return {
+        "store_id": store_id,
+        "deploy_threshold": threshold,
+        "items": [
+            {
+                "member_id": int(r["member_id"]),
+                "name": r["name"],
+                "day_count": int(r["day_count"]),
+                "progress_rate": float(r["progress_rate"]),
+                "is_deployable": bool(r["is_deployable"]),
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/questions")
 async def list_questions(
     db: Db,

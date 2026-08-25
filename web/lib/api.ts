@@ -379,6 +379,21 @@ export async function listPending(token: string, status: "WAITING" | "ANSWERED" 
   );
 }
 
+export type LearnStaffItem = {
+  member_id: number;
+  name: string;
+  day_count: number;
+  progress_rate: number;
+  is_deployable: boolean;
+};
+
+export async function listStaff(token: string) {
+  return fetchJson<{ store_id: number; deploy_threshold: number; items: LearnStaffItem[] }>(
+    "/learn/staff",
+    { headers: authHeader(token) }
+  );
+}
+
 // ---- /learn/questions — 점주 전체 질문 최신순 (hit·점주답·대기) ----
 
 export type LearnQuestionItem = {
