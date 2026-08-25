@@ -35,7 +35,7 @@ import type {
 const STORAGE_KEY = "askbuddy_state";
 // 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
 // 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 type AppState = {
   hydrated: boolean;
@@ -220,6 +220,45 @@ type AppContextValue = {
   progressPct: number;
 };
 
+// 저장된 상태를 그대로 믿지 않는다.
+//
+// 버전을 올려도 사람 손으로 올리는 것이라 빠뜨릴 수 있고, 그러면 옛 모양이
+// 그대로 화면까지 올라가 렌더 중에 터진다 — 실제로 roadmap 노드에 pos 가 없어
+// node.pos.x 에서 "This page couldn't load" 가 났다.
+// 모양이 맞지 않는 항목은 통째로 버리고 기본값으로 되돌린다.
+function isRoadmapNode(n: unknown): n is RoadmapNode {
+  if (!n || typeof n !== "object") return false;
+  const v = n as Partial<RoadmapNode>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.label === "string" &&
+    typeof v.status === "string" &&
+    typeof v.pos === "object" &&
+    v.pos !== null &&
+    typeof (v.pos as { x?: unknown }).x === "number" &&
+    typeof (v.pos as { y?: unknown }).y === "number" &&
+    Array.isArray(v.details)
+  );
+}
+
+function sanitize(data: Partial<AppState>): Partial<AppState> {
+  const clean: Partial<AppState> = { ...data };
+
+  if (!Array.isArray(data.roadmap) || !data.roadmap.every(isRoadmapNode)) {
+    clean.roadmap = initialState.roadmap;
+  }
+  if (!Array.isArray(data.knowledgeSections)) {
+    clean.knowledgeSections = initialState.knowledgeSections;
+  }
+  if (!Array.isArray(data.categories)) clean.categories = initialState.categories;
+  if (!Array.isArray(data.uploadSources)) clean.uploadSources = [];
+  if (!Array.isArray(data.chatMessages)) clean.chatMessages = initialState.chatMessages;
+  if (!Array.isArray(data.staff)) clean.staff = initialState.staff;
+  if (!Array.isArray(data.pendingQuestions)) clean.pendingQuestions = initialState.pendingQuestions;
+
+  return clean;
+}
+
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -231,7 +270,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const parsed = raw ? JSON.parse(raw) : null;
       // 버전이 다르면(스키마가 바뀌었으면) 옛 캐시를 신뢰하지 않고 그냥 버린다.
       if (parsed && parsed.v === STATE_VERSION && parsed.data) {
-        dispatch({ type: "HYDRATE", payload: parsed.data });
+        dispatch({ type: "HYDRATE", payload: sanitize(parsed.data) });
       } else {
         window.localStorage.removeItem(STORAGE_KEY);
         dispatch({ type: "HYDRATE", payload: {} });
