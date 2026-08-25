@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 // Buddy 마스코트(러브버드) — 누끼딴 투명 PNG라 배경 없이 바로 얹으면 된다.
+// unoptimized 필수: Next/Image 최적화 파이프라인이 포맷 협상 과정에서
+// 알파 채널을 흰 배경으로 눌러버리는 경우가 있다 — 원본 PNG를 그대로 내려준다.
 export function Buddy({ size = 64, className = "" }: { size?: number; className?: string }) {
   return (
     <Image
@@ -13,6 +15,7 @@ export function Buddy({ size = 64, className = "" }: { size?: number; className?
       alt="Buddy"
       width={size}
       height={size}
+      unoptimized
       draggable={false}
       className={`object-contain shrink-0 select-none ${className}`}
       style={{ width: size, height: size }}

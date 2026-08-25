@@ -19,7 +19,14 @@ export default function WelcomePage() {
           aria-labelledby="welcome-title"
         >
           <div className="w-[190px] h-[190px] relative drop-shadow-[0_12px_24px_rgba(0,0,0,0.18)]">
-            <Image src="/images/buddy.png" alt="AskBuddy 마스코트" fill className="object-contain" priority />
+            <Image
+              src="/images/buddy.png"
+              alt="AskBuddy 마스코트"
+              fill
+              unoptimized
+              className="object-contain"
+              priority
+            />
           </div>
           <div className="w-full max-w-[260px] mt-4">
             <h1
