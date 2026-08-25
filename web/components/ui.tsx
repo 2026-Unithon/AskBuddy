@@ -1,8 +1,43 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+
+// Buddy 마스코트(러브버드) — 디자인 보드 전 화면에서 공용으로 쓰는 캐릭터 이미지.
+export function Buddy({ size = 64, className = "" }: { size?: number; className?: string }) {
+  return (
+    <Image
+      src="/images/buddy.png"
+      alt="Buddy"
+      width={size}
+      height={size}
+      draggable={false}
+      className={`object-contain shrink-0 select-none ${className}`}
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+export function BuddyBubble({
+  text,
+  size = 40,
+  className = "",
+}: {
+  text: string;
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-end gap-2 ${className}`}>
+      <Buddy size={size} />
+      <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 shadow-sm max-w-[80%] bg-accent-100">
+        <p className="text-sm font-medium text-foreground leading-snug">{text}</p>
+      </div>
+    </div>
+  );
+}
 
 // 온보딩·로드맵·채팅처럼 손에 든 화면은 모바일 폭으로 가운데 정렬한다 (레퍼런스가 폰 목업 기준).
 export function Shell({ children }: { children: ReactNode }) {

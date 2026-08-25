@@ -14,8 +14,7 @@ export const BUSINESS_TYPES: { key: BusinessType; label: string; emoji: string }
   { key: "BAKERY", label: "베이커리", emoji: "🥐" },
   { key: "BAR", label: "바·주점", emoji: "🍺" },
   { key: "CVS", label: "편의점", emoji: "🏪" },
-  // 화면 라벨은 "기타"로 보이지만 내부 전송값은 백엔드 enum(SALON)을 그대로 쓴다.
-  { key: "SALON", label: "기타", emoji: "🌴" },
+  { key: "SALON", label: "미용실", emoji: "💇" },
 ];
 
 export type TaskCategory = {
@@ -67,11 +66,9 @@ export type KnowledgeSection = {
 
 export type NodeStatus = "DONE" | "IN_PROGRESS" | "LOCKED";
 
-export type RoadmapNodeItem = {
-  id: string;
-  text: string;
-  done: boolean;
-};
+export type DetailCard =
+  | { type: "doc"; title: string; image?: string; text: string; tags?: string[] }
+  | { type: "buddy"; text: string };
 
 export type RoadmapNode = {
   id: string;
@@ -80,7 +77,9 @@ export type RoadmapNode = {
   emoji: string;
   introMessage: string;
   status: NodeStatus;
-  items: RoadmapNodeItem[];
+  /** 경로 배경 이미지(616×1089) 기준 원본 좌표 — % 환산해 반응형으로 배치한다 */
+  pos: { x: number; y: number };
+  details: DetailCard[];
 };
 
 export type ChatFrom = "BUDDY" | "USER";
