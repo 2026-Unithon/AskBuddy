@@ -373,6 +373,11 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | 2026-08-25 | 입력 | `ingest/embed/service.py` 가 `reg.embeddings.embed_texts` 를 호출하도록 교체 (N6 해소) | 동기 함수라 `asyncio.to_thread` 로 감쌈 |
 | 2026-08-25 | 공통 | `supabase/config.toml` 의 `project_id` 를 **`AskBuddy`** 로 통일 | 폴더명이 달라 각자 다른 값이 생성됐다. 컨테이너 이름(`supabase_db_AskBuddy`)이 갈라진다 |
 | 2026-08-25 | 공통 | `.env.example` 인라인 주석 제거 | dotenv 가 값에 주석을 붙여 읽을 수 있다 |
+| 2026-08-26 | 공통 | **CLAUDE.md 를 사업계획서 v5·목업 기준으로 갱신** | 디자인 시스템·제품 규칙이 개발 문서에 전혀 없었다. 등록이 먼저라는 흐름(게이지 80% → 미리보기 → 초대코드)은 그대로 두고, 등록 이후 질문으로 지식이 자라는 순환을 함께 명시 |
+| 2026-08-26 | 공통 | **"게임화 요소 추가" 금지 항목 삭제** | 기획서·목업 모두 듀오링고형 스킬트리와 스트릭·젬·하트를 핵심으로 둔다. 금지가 설계와 정면충돌 |
+| 2026-08-26 | 공통 | 디자인 시스템(색상 7토큰·Buddy 톤) 을 CLAUDE.md 에 명시 | 어디에도 적혀 있지 않아 화면마다 색이 갈라질 수 있었다 |
+| 2026-08-26 | 공통 | 제품 규칙 4건 추가 — 영상 단독 등록 불가 · 촬영 체크리스트 · 사진 블러 · 게이지 가중치 | 기획서 1-2 의 인터뷰 반영 사항이 개발 문서에 전혀 없었다 |
+| 2026-08-26 | 공통 | **'신뢰도 %' 사용자 노출 금지** 를 명문화 | 기획서가 폐기한 지표다. `confidence` 는 검수 정렬용 내부 값으로만 쓴다 |
 | 2026-08-25 | 입력 | **`GEMINI_MODEL` 을 `gemini-3.6-flash` 로 변경** | `gemini-2.5-flash` 가 신규 사용자에게 막혔다. 404 응답이 대체 모델을 지정한다 |
 | 2026-08-25 | 입력 | 전사문이 있으면 STT 를 건너뛴다 | 가이드 8장 `--skip-stt`. 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다 |
 | 2026-08-25 | 입력 | `scripts/set_transcript.py`·`scripts/extract_preview.py` 추가 | STT 없이 추출부터 개발·튜닝하기 위한 반복 루프 |
@@ -412,6 +417,8 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
 | ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
+| N12 | **게임화 지표를 담을 컬럼이 없다.** 목업에 스트릭🔥·젬💎·하트❤️ 가 상단 고정으로 들어가는데 `store_members` 에는 `day_count`·`progress_rate`·`is_deployable` 뿐이다. 데모용 프론트 상수로 갈지, 컬럼을 팔지 정해야 한다 | 관호·도영 | M3 |
+| N13 | **사진 검토·제외·블러 단계가 스키마에 없다.** 기획서 1-2 의 인터뷰 반영 필수 항목인데 `sources`·`source_scan` 어디에도 노출 여부 플래그가 없다 | 관호·준혁 | M3 |
 | N11 | **`testdata/expected.json` 14케이스 중 7개가 현 스키마로 표현 불가.** `provenance`(observed/transcribed/inferred), `supersedes`·`is_current`(충돌 시 최신 우선), `knowledge_gaps`, 화자별 승격, 교차소스 병합이 없다. 값은 전부 포착되지만 어느 쪽이 최신인지 DB 가 모른다 | 전원 | M3 |
 | N10 | **임계 0.6 에서는 추출 카드가 miss 로 빠진다.** 실측 0.591 < 0.6. 점주가 승인한 카드로 답하는 장면을 데모에 넣으려면 0.4~0.5 가 필요하다 (N9 와 같은 뿌리) | 관호·PM | M3 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
