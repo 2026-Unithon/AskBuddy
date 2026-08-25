@@ -25,18 +25,17 @@ export default function StaffAuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleFailure(e: unknown, fallback: () => void) {
+  // 인증은 실패하면 절대 넘어가지 않는다. 회원이 아니면 들어올 수 없다.
+  // 백엔드가 꺼져 있어도 마찬가지다 — 통과시키면 로그인이 없는 것과 같다.
+  function describe(e: unknown): string {
     if (e instanceof ApiError) {
-      setError(
-        e.status === 401
-          ? "이메일 또는 비밀번호가 맞지 않습니다"
-          : e.detail || `요청이 실패했습니다 (${e.status})`
-      );
-      return;
+      if (e.status === 401) return "이메일 또는 비밀번호가 맞지 않습니다";
+      if (e.status === 409) return "이미 가입된 이메일입니다";
+      if (e.status === 404) return "초대코드가 올바르지 않습니다. 사장님께 다시 확인해주세요";
+      if (e.status === 422) return "초대코드를 입력해주세요";
+      return e.detail || `요청이 실패했습니다 (${e.status})`;
     }
-    // 백엔드가 꺼져 있으면 데모가 멈추지 않도록 로컬 상태로 진행한다
-    setError(null);
-    fallback();
+    return "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요";
   }
 
   async function handleLogin(e: FormEvent) {
@@ -56,10 +55,7 @@ export default function StaffAuthPage() {
       });
       router.push("/staff/roadmap");
     } catch (err) {
-      handleFailure(err, () => {
-        dispatch({ type: "LOGIN_STAFF", name: loginId, inviteCode: loginCode });
-        router.push("/staff/roadmap");
-      });
+      setError(describe(err));
     } finally {
       setBusy(false);
     }
@@ -88,10 +84,7 @@ export default function StaffAuthPage() {
       });
       router.push("/staff/roadmap");
     } catch (err) {
-      handleFailure(err, () => {
-        dispatch({ type: "LOGIN_STAFF", name: name || signupId, inviteCode: signupCode });
-        router.push("/staff/roadmap");
-      });
+      setError(describe(err));
     } finally {
       setBusy(false);
     }
@@ -116,9 +109,13 @@ export default function StaffAuthPage() {
         </div>
 
         {error && (
-          <p className="mb-3 text-sm text-danger-700" role="alert">
-            {error}
-          </p>
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-danger-700"
+          >
+            <span className="text-base leading-5">⚠️</span>
+            <p className="flex-1 text-sm font-medium leading-5">{error}</p>
+          </div>
         )}
 
         {tab === "login" ? (
@@ -140,10 +137,9 @@ export default function StaffAuthPage() {
               required
             />
             <Input
-              placeholder="초대코드 (예: CAFE-DEMO)"
+              placeholder="초대코드 (이미 가입했다면 비워도 됩니다)"
               value={loginCode}
               onChange={(e) => setLoginCode(e.target.value.toUpperCase())}
-              required
             />
             <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
               로그인

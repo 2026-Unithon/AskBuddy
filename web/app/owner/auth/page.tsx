@@ -24,19 +24,17 @@ export default function OwnerAuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 백엔드가 안 떠 있어도 데모는 계속돼야 한다. 네트워크 단절이면 로컬 상태로 진행하고,
-  // 401·409 처럼 서버가 내린 판정이면 그대로 사용자에게 보여준다.
-  function handleFailure(e: unknown, fallback: () => void) {
+  // 인증은 실패하면 절대 넘어가지 않는다. 회원이 아니면 들어올 수 없다.
+  // 백엔드가 꺼져 있어도 마찬가지다 — 통과시키면 로그인이 없는 것과 같다.
+  function describe(e: unknown): string {
     if (e instanceof ApiError) {
-      setError(
-        e.status === 401
-          ? "아이디 또는 비밀번호가 맞지 않습니다"
-          : e.detail || `요청이 실패했습니다 (${e.status})`
-      );
-      return;
+      if (e.status === 401) return "이메일 또는 비밀번호가 맞지 않습니다";
+      if (e.status === 409) return "이미 가입된 이메일입니다";
+      if (e.status === 404) return e.detail || "찾을 수 없습니다";
+      if (e.status === 422) return "입력값을 다시 확인해주세요";
+      return e.detail || `요청이 실패했습니다 (${e.status})`;
     }
-    setError(null);
-    fallback();
+    return "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요";
   }
 
   async function handleLogin(e: FormEvent) {
@@ -55,10 +53,7 @@ export default function OwnerAuthPage() {
       });
       router.push("/owner/intent");
     } catch (err) {
-      handleFailure(err, () => {
-        dispatch({ type: "LOGIN_OWNER", name: loginId, storeName: "" });
-        router.push("/owner/intent");
-      });
+      setError(describe(err));
     } finally {
       setBusy(false);
     }
@@ -98,10 +93,7 @@ export default function OwnerAuthPage() {
       });
       router.push("/owner/intent");
     } catch (err) {
-      handleFailure(err, () => {
-        dispatch({ type: "LOGIN_OWNER", name: name || signupId, storeName });
-        router.push("/owner/intent");
-      });
+      setError(describe(err));
     } finally {
       setBusy(false);
     }
@@ -126,9 +118,13 @@ export default function OwnerAuthPage() {
         </div>
 
         {error && (
-          <p className="mb-3 text-sm text-danger-700" role="alert">
-            {error}
-          </p>
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-danger-700"
+          >
+            <span className="text-base leading-5">⚠️</span>
+            <p className="flex-1 text-sm font-medium leading-5">{error}</p>
+          </div>
         )}
 
         {tab === "login" ? (
