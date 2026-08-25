@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
+import { ApiError, createStore, login, signup } from "@/lib/api";
 
 type Tab = "login" | "signup";
 
@@ -20,16 +21,90 @@ export default function OwnerAuthPage() {
   const [signupId, setSignupId] = useState("");
   const [signupPw, setSignupPw] = useState("");
 
-  function handleLogin(e: FormEvent) {
-    e.preventDefault();
-    dispatch({ type: "LOGIN_OWNER", name: loginId, storeName: "" });
-    router.push("/owner/intent");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 백엔드가 안 떠 있어도 데모는 계속돼야 한다. 네트워크 단절이면 로컬 상태로 진행하고,
+  // 401·409 처럼 서버가 내린 판정이면 그대로 사용자에게 보여준다.
+  function handleFailure(e: unknown, fallback: () => void) {
+    if (e instanceof ApiError) {
+      setError(
+        e.status === 401
+          ? "아이디 또는 비밀번호가 맞지 않습니다"
+          : e.detail || `요청이 실패했습니다 (${e.status})`
+      );
+      return;
+    }
+    setError(null);
+    fallback();
   }
 
-  function handleSignup(e: FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
-    dispatch({ type: "LOGIN_OWNER", name: name || signupId, storeName });
-    router.push("/owner/intent");
+    setBusy(true);
+    setError(null);
+    try {
+      const { token, user } = await login(loginId, loginPw, "OWNER");
+      dispatch({
+        type: "SET_AUTH",
+        token,
+        role: "OWNER",
+        displayName: user.name,
+        userId: user.user_id,
+        storeId: user.store_id ?? null,
+      });
+      router.push("/owner/intent");
+    } catch (err) {
+      handleFailure(err, () => {
+        dispatch({ type: "LOGIN_OWNER", name: loginId, storeName: "" });
+        router.push("/owner/intent");
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSignup(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await signup({
+        name: name || signupId,
+        email: signupId,
+        password: signupPw,
+        role: "OWNER",
+      });
+      dispatch({
+        type: "SET_AUTH",
+        token: created.token,
+        role: "OWNER",
+        displayName: created.user.name,
+        userId: created.user.user_id,
+        storeId: created.user.store_id ?? null,
+      });
+
+      // 가입 직후 토큰에는 store_id 가 없다. 매장을 만들어야 /ingest/* 가 열린다.
+      const store = await createStore(
+        { storeName, businessType: "CAFE" },
+        created.token
+      );
+      dispatch({
+        type: "SET_STORE",
+        token: store.token,
+        storeId: store.store.store_id,
+        storeSlug: store.store.store_slug,
+        storeName: store.store.store_name,
+      });
+      router.push("/owner/intent");
+    } catch (err) {
+      handleFailure(err, () => {
+        dispatch({ type: "LOGIN_OWNER", name: name || signupId, storeName });
+        router.push("/owner/intent");
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -50,13 +125,20 @@ export default function OwnerAuthPage() {
           ))}
         </div>
 
+        {error && (
+          <p className="mb-3 text-sm text-danger-700" role="alert">
+            {error}
+          </p>
+        )}
+
         {tab === "login" ? (
           <form onSubmit={handleLogin} className="flex flex-col gap-3">
             <Input
-              placeholder="아이디"
+              placeholder="이메일 (예: owner@demo.cafe)"
               value={loginId}
               onChange={(e) => setLoginId(e.target.value)}
-              autoComplete="username"
+              autoComplete="email"
+              type="email"
               required
             />
             <Input
@@ -67,8 +149,8 @@ export default function OwnerAuthPage() {
               autoComplete="current-password"
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3">
-              로그인
+            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
+              {busy ? "확인 중…" : "로그인"}
             </Button>
           </form>
         ) : (
@@ -86,10 +168,11 @@ export default function OwnerAuthPage() {
               required
             />
             <Input
-              placeholder="아이디"
+              placeholder="이메일 (예: owner@demo.cafe)"
               value={signupId}
               onChange={(e) => setSignupId(e.target.value)}
-              autoComplete="username"
+              autoComplete="email"
+              type="email"
               required
             />
             <Input
@@ -100,8 +183,8 @@ export default function OwnerAuthPage() {
               autoComplete="new-password"
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3">
-              가입하고 시작하기
+            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
+              {busy ? "만드는 중…" : "가입하고 시작하기"}
             </Button>
           </form>
         )}

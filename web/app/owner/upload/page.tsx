@@ -60,23 +60,38 @@ export default function UploadPage() {
     try {
       // 실제 백엔드 연동 경로 (docs/ingest-contract.md 3단계). 토큰이 없으면 401로 실패하고
       // catch 블록에서 로컬 시뮬레이션으로 대체한다 — 배포된 프론트만으로도 데모가 끊기지 않게.
-      const { upload_url, file_url } = await requestUploadUrl(type, file.name);
+      const token = state.token ?? undefined;
+      const { upload_url, file_url } = await requestUploadUrl(type, file.name, token);
       await putToStorage(upload_url, file);
       const contentHash = await computeContentHash(file);
-      const { source_id } = await registerSource({
-        sourceType: type,
-        fileUrl: file_url,
-        title: file.name,
-        fileSize: file.size,
-        contentHash,
-        meta: metaFor(type, file),
-      });
-      await startProcessing(source_id);
+      const { source_id, duplicate } = await registerSource(
+        {
+          sourceType: type,
+          fileUrl: file_url,
+          title: file.name,
+          fileSize: file.size,
+          contentHash,
+          meta: metaFor(type, file),
+        },
+        token
+      );
+      if (duplicate) {
+        // 같은 파일을 이미 올렸다. 새로 처리하지 않고 완료로 표시한다 (D9).
+        dispatch({
+          type: "UPDATE_UPLOAD_SOURCE",
+          id,
+          patch: { status: "DONE", title: `${file.name} (이미 올린 파일)` },
+        });
+        return;
+      }
+      await startProcessing(source_id, token);
 
+      // 영상은 프레임 추출 + 멀티모달 판독이라 분 단위로 걸린다. 60회 × 2초 = 2분까지 기다린다.
+      const maxPolls = type === "VIDEO" ? 60 : 30;
       let done = false;
-      for (let i = 0; i < 15 && !done; i++) {
+      for (let i = 0; i < maxPolls && !done; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        const s = await getIngestStatus(source_id);
+        const s = await getIngestStatus(source_id, token);
         if (s.status === "DONE") {
           dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "DONE" } });
           done = true;
