@@ -91,7 +91,7 @@ export default function PreviewPage() {
 
   return (
     <Shell>
-      <TopBar title="학습 미리보기" />
+      <TopBar title="학습 미리보기" backHref="/owner/upload" />
       <div className="px-5 pt-1 pb-3">
         <BuddyBubble text="Buddy가 이렇게 이해했어요! 틀리거나 빠진 부분이 있으면 소스를 추가해주세요 😊" />
       </div>

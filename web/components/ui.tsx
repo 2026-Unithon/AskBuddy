@@ -5,24 +5,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
-// Buddy 마스코트(러브버드) — 원본 PNG가 불투명(흰 배경)이라 어느 배경 위에 놓여도
-// 항상 흰 원형 플레이트 위에 얹혀 "네모난 흰 배경이 삐져나오는" 문제 없이 자연스럽게 보이게 한다.
+// Buddy 마스코트(러브버드) — 누끼딴 투명 PNG라 배경 없이 바로 얹으면 된다.
+// unoptimized 필수: Next/Image 최적화 파이프라인이 포맷 협상 과정에서
+// 알파 채널을 흰 배경으로 눌러버리는 경우가 있다 — 원본 PNG를 그대로 내려준다.
 export function Buddy({ size = 64, className = "" }: { size?: number; className?: string }) {
   return (
-    <div
-      className={`rounded-full bg-white shrink-0 overflow-hidden flex items-center justify-center select-none ${className}`}
-      style={{ width: size, height: size, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
-    >
-      <Image
-        src="/images/buddy.png"
-        alt="Buddy"
-        width={size}
-        height={size}
-        draggable={false}
-        className="object-cover scale-[1.18]"
-        style={{ width: "100%", height: "100%" }}
-      />
-    </div>
+    <Image
+      src="/images/buddy.png"
+      alt="Buddy"
+      width={size}
+      height={size}
+      unoptimized
+      draggable={false}
+      className={`object-contain shrink-0 select-none ${className}`}
+      style={{ width: size, height: size }}
+    />
   );
 }
 
@@ -68,22 +65,34 @@ export function WideShell({ children }: { children: ReactNode }) {
 export function TopBar({
   title,
   onBack,
+  backHref,
   right,
 }: {
   title?: string;
   onBack?: () => void;
+  /** 화면 흐름상 정해진 이전 화면. 직접 URL로 들어오거나 새로고침해도 항상 같은 곳으로 간다 —
+   *  router.back()은 브라우저 히스토리가 없으면 엉뚱한 곳으로 가거나 아무 반응이 없다. */
+  backHref?: string;
   right?: ReactNode;
 }) {
   const router = useRouter();
+  const backButtonClass =
+    "w-9 h-9 rounded-full flex items-center justify-center text-foreground hover:bg-surface-muted transition-colors";
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 bg-background/90 backdrop-blur">
-      <button
-        aria-label="뒤로가기"
-        onClick={onBack ?? (() => router.back())}
-        className="w-9 h-9 rounded-full flex items-center justify-center text-foreground hover:bg-surface-muted transition-colors"
-      >
-        ←
-      </button>
+      {backHref ? (
+        <Link href={backHref} aria-label="뒤로가기" className={backButtonClass}>
+          ←
+        </Link>
+      ) : (
+        <button
+          aria-label="뒤로가기"
+          onClick={onBack ?? (() => router.back())}
+          className={backButtonClass}
+        >
+          ←
+        </button>
+      )}
       {title && <h1 className="text-base font-semibold flex-1 text-center -ml-9">{title}</h1>}
       <div className="min-w-9 flex justify-end">{right}</div>
     </div>
@@ -116,7 +125,7 @@ export function Button({
   size?: "md" | "lg";
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors disabled:opacity-40 disabled:pointer-events-none";
+    "inline-flex items-center justify-center gap-2 rounded-2xl font-semibold transition-colors disabled:opacity-40 disabled:pointer-events-none";
   const sizes = {
     md: "h-11 px-5 text-sm",
     lg: "h-13 px-6 text-base",
@@ -147,7 +156,7 @@ export function LinkButton({
   className?: string;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors h-11 px-5 text-sm";
+    "inline-flex items-center justify-center gap-2 rounded-2xl font-semibold transition-colors h-11 px-5 text-sm";
   const variants = {
     primary: "bg-brand-600 text-white hover:bg-brand-700",
     secondary: "bg-brand-50 text-brand-700 hover:bg-brand-100",

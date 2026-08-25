@@ -92,7 +92,7 @@ export default function StaffAuthPage() {
 
   return (
     <Shell>
-      <TopBar title="알바생" />
+      <TopBar title="알바생" backHref="/role" />
       <div className="flex-1 flex flex-col px-6 pt-4 pb-10">
         <div className="flex rounded-full bg-surface-muted p-1 mb-6">
           {(["login", "signup"] as const).map((t) => (
