@@ -1,5 +1,7 @@
 """준혁 — 임베딩 적재.
 
-임베딩 생성 자체는 관호님 기존 OpenAI 코드를 호출한다.
-새 임베딩 함수를 만들면 모델명·차원이 갈라진다 (D4).
+임베딩 생성 자체의 모델·차원은 app.config 가 단일 출처다 (D4).
 """
+from app.ingest.embed.service import embed_card
+
+__all__ = ["embed_card"]

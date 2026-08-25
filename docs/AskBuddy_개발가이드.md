@@ -4,9 +4,10 @@
 > 입력(준혁)·DB(관호)·출력(도영) 세 파트의 공통 계약서이자, AI 코딩 에이전트에 통째로 던지는 컨텍스트 문서다.
 > **수정 규칙: 기존 내용을 지우지 말고 아래로 append 한다.** 결정이 바뀌면 원문은 두고 11장 변경 로그에 사유를 남긴다.
 >
-> 최종 수정: 2026-08-25 · **문서 버전 v0.3**
+> 최종 수정: 2026-08-25 · **문서 버전 v0.4**
 > v0.2: 미확정 6건 전부 결정 · 관호님 기존 FastAPI 구현을 정본으로 반영 · 도영님 ver2 프로토타입 화면 흐름 반영
 > v0.3: **RLS 제거.** 매장 격리는 API 코드 레이어 단독. `users.auth_uid` 삭제, `002_rls.sql` 폐기, 시드는 `002_seed_demo.sql`로 변경
+> v0.4: 리포 껍데기 확정 · 입력 파트 M1 관통 · 업로드 경로를 서명 URL 방식으로 확정(D8) · STT 확정(D7) · 테이블 수 21→24 정정
 
 ---
 
@@ -136,6 +137,8 @@ welcome → role-select
 
 ## 6. 인터페이스 계약
 
+> **`/ingest/*` 의 상세 계약은 `docs/ingest-contract.md` 에 있다.** 요청·응답 예시, 에러 코드, 프론트 코드까지 그쪽에 있고, 이 절은 원칙만 남긴다.
+
 ### 6-1. 자료 처리 상태 머신 (D6 폴링)
 
 ```
@@ -143,7 +146,8 @@ UPLOADED → PROCESSING → DONE
                      ↘ FAILED (error_message 필수)
 ```
 
-- 프론트가 Storage에 직접 업로드 → `sources` 행 생성(`UPLOADED`) → `POST /ingest/process`
+- 업로드는 3단계다 (D8). `POST /ingest/upload-url` 로 서명 URL 을 받고 → 브라우저가 그 URL 로 파일을 PUT 하고 → `POST /ingest/sources` 로 행을 만든다(`UPLOADED`). 그 뒤 `POST /ingest/process`
+- **브라우저는 Supabase 키를 갖지 않는다.** 서명 URL 발급은 API 만 한다
 - 프론트는 `GET /ingest/status?source_id=` 를 **2초 간격 폴링**
 - **`FAILED`를 화면에 표시하지 않으면 스피너가 영원히 돈다.** 필수 구현
 - 파일 바이너리를 API로 POST하지 않는다. 경로 문자열만 넘긴다
@@ -232,6 +236,40 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 
 **원칙: 3개 기능이 완결된 데모 > 10개 기능의 미완성 데모.**
 
+### 현재 상태 (2026-08-25 기준)
+
+| 마일스톤 | 상태 | 비고 |
+|---|---|---|
+| M0 스키마 정합 | 진행중 | `db/001`·`002` 는 로컬 적용·검증 완료. `/reg/*` 의 `store_slug` 해석은 관호 |
+| M1 목 데이터 관통 | **입력 완료** | `/ingest/*` 전 구간 통과(업로드→처리→폴링→카드 3건). 출력·DB 는 진행중 |
+| M2 음성 관통 | 미착수 | 준혁 |
+| M3 미답변 순환 | 미착수 | 도영 |
+| M4 채널 확장 | 미착수 | 준혁 |
+
+### 다음 할 일
+
+**준혁 (입력)**
+1. 샘플 음성으로 `audio.probe()` → `audio.transcribe()` 단독 확인 (`OPENAI_API_KEY` 최초 사용)
+2. `INGEST_MODE=real` 로 Gemini 1회 호출. 볼 것은 셋 — 카테고리를 지어내는가 / 위치를 랜드마크로 쓰는가 / `confidence` 가 전부 0.9 로 몰리는가
+3. 프롬프트 튜닝은 `api/prompts/extract_cards.ko.txt` 만 고친다. 코드는 안 건드린다
+4. M4 는 VIDEO → KAKAO → SCAN 순. 영상은 프레임 인덱스를 0-base 로 맞춰 `timestamp_sec = index * 3` 이 성립해야 한다
+
+**관호 (DB)**
+1. `/reg/*`·`/auth/*` 를 `api/app/reg/`·`api/app/auth/` 로 이식. 라우터는 `main.py` 에 이미 등록돼 있다
+2. `/auth` 가 붙으면 `scripts/dev_token.py` 는 폐기한다
+3. **점주 승인 직후 `POST /ingest/embed?card_id=` 를 호출한다.** 이걸 안 부르면 승인해도 검색에 안 걸린다
+4. 기존 임베딩 함수를 `ingest/embed/service.py` 의 `_embed()` 와 통합 (N6)
+
+**도영 (출력)**
+1. `docs/ingest-contract.md` 대로 업로드 3단계 연동
+2. 폴링에서 `FAILED` 분기 필수. 빠지면 데모에서 스피너가 영원히 돈다
+3. 검수 화면은 `confidence < 60` 을 상단 우선 노출 (D3). 목 카드에 `42.0` 짜리를 하나 넣어뒀다
+4. 로그인 전까지 토큰은 `python api/scripts/dev_token.py`
+
+**공통**
+- 하루 한 번 이상 `main` 을 자기 브랜치로 rebase
+- 머지 순서는 `feat/db` → `feat/input` → `feat/output`
+
 ---
 
 ## 8. 코딩 규칙
@@ -309,7 +347,19 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | 2026-08-25 | DB | `store_slug`·`content_hash`·`miss_reason` 추가 | API 호환 + 멱등 + miss 분석 |
 | 2026-08-25 | 공통 | v0.3. **RLS 제거**, `users.auth_uid` 삭제, `002_rls.sql` 폐기 | 해커톤 범위에서 정책 디버깅 비용 대비 이득 없음. 브라우저가 DB를 직접 치지 않으므로 노출면이 없음 |
 | 2026-08-25 | 출력 | 진행도 계산식을 체크리스트 완료 비율로 확정 | ver2 스펙 7번 미결 해소 |
-|  |  |  |  |
+| 2026-08-25 | 공통 | v0.4. 리포 껍데기를 main 에 올리고 `db/`·`docs/`·`api/`·`web/` 구조 확정 | 브랜치 3개가 각자 구조를 만들면 머지 때 세 벌로 갈라진다 |
+| 2026-08-25 | 공통 | 스키마 테이블 수 **21 → 24** 로 정정 | 실제 `001_init_schema.sql` 이 24개. 문서 숫자가 틀렸다 |
+| 2026-08-25 | 입력 | `/ingest/*` M1 관통 구현 (목 추출 → 카드 적재 → 폴링) | 가이드 7장 M1. Gemini 는 붙이지 않음 |
+| 2026-08-25 | 입력 | `POST /ingest/sources` 신설 | `sources` 행 생성 주체가 문서에 없었다. 브라우저는 DB 를 못 치므로 API 가 만든다 |
+| 2026-08-25 | 입력 | `POST /ingest/upload-url` 신설, 서명 URL 방식으로 확정 | "프론트 직접 업로드"와 불변식 1·2 가 충돌. 브라우저에 키를 주지 않으면서 파일이 API 를 거치지 않게 하는 유일한 방법 |
+| 2026-08-25 | 입력 | `POST /ingest/embed` 신설 | 승인 → 임베딩을 잇는 지점. 관호님 승인 플로우에서 호출한다 |
+| 2026-08-25 | 입력 | `INGEST_MODE` 도입, 기본값 `mock` | "M1 전에 Gemini 를 붙이지 않는다"를 코드로 강제 |
+| 2026-08-25 | 공통 | `scripts/dev_token.py` 추가 | `/auth` 가 붙기 전까지의 임시 토큰. 인증 우회 엔드포인트를 만들지 않기 위함 |
+| 2026-08-25 | DB | `users` 에 `email`·`password_hash` 병합. 시드에 bcrypt 해시(`demo1234`) | M0. `identity.sql` 인증 컬럼 흡수 |
+| 2026-08-25 | DB | `app/reg/embeddings.py` 신설 — `embed_texts` 단일 진입점 | D4. 임베딩 함수가 두 벌이 되는 것을 막는다 |
+| 2026-08-25 | 입력 | `ingest/embed/service.py` 가 `reg.embeddings.embed_texts` 를 호출하도록 교체 (N6 해소) | 동기 함수라 `asyncio.to_thread` 로 감쌈 |
+| 2026-08-25 | 공통 | `supabase/config.toml` 의 `project_id` 를 **`AskBuddy`** 로 통일 | 폴더명이 달라 각자 다른 값이 생성됐다. 컨테이너 이름(`supabase_db_AskBuddy`)이 갈라진다 |
+| 2026-08-25 | 공통 | `.env.example` 인라인 주석 제거 | dotenv 가 값에 주석을 붙여 읽을 수 있다 |
 
 ---
 
@@ -323,6 +373,10 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | D4 | OpenAI text-embedding-3-small 1536 | 2026-08-25 | ERD 값과 일치, 임계값·회귀가 이 기준 실측 |
 | D5 | `is_sensitive`·`dek_encrypted` 예약 필드로만 유지 | 2026-08-25 | 이번 범위 밖. 구현했다고 말하지 않는다 |
 | D6 | 폴링 (2초) | 2026-08-25 | Realtime은 구현·디버깅 비용 대비 이득 없음 |
+| D7 | STT 는 OpenAI `whisper-1` | 2026-08-25 | 한국어 지원·비용·안정성. 검색은 임베딩 기준이라 교체해도 임계값에 영향 없음 |
+| D8 | Storage 버킷 `sources`(비공개). 오브젝트 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 API 가 발급한 **서명 URL** 로만 | 2026-08-25 | 브라우저에 Supabase 키를 주지 않으면서 파일 바이너리가 API 를 거치지 않게 하는 유일한 방법. 원본 파일명을 경로에 쓰지 않는 것은 한글·공백 인코딩 사고와 덮어쓰기 방지 |
+| D9 | `content_hash` 는 프론트가 SHA-256 계산해 전달. 누락 시 서버가 처리 중 backfill | 2026-08-25 | `crypto.subtle` 은 https·localhost 에서만 동작한다. 프론트가 실패해도 중복 방지가 죽지 않게 |
+| D10 | `INGEST_MODE` 기본값 `mock` | 2026-08-25 | 통합 실패는 항상 M1 구간에서 난다. 목 경로를 기본값으로 두어 키 없이도 전 구간이 돌게 |
 
 ---
 
@@ -335,3 +389,8 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | N3 | miss UX 문구 통일 ("사장님께 확인 중" 제안) | PM | M1 |
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
+| ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
+| N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
+| N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
+
+> **해소됨:** 도영님이 물은 Storage 경로 규약과 `content_hash` 계산 주체는 D8·D9 로 확정했다. 상세는 `docs/ingest-contract.md`.

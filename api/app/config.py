@@ -1,5 +1,6 @@
 """공용 — 환경변수 로딩. 수정 전 팀 합의."""
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,11 +22,17 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.6
     frame_interval_sec: int = 3
 
+    # ingest (준혁) — mock: LLM 미호출(M1 기본값) / real: Gemini 호출
+    ingest_mode: Literal["mock", "real"] = "mock"
+    gemini_model: str = "gemini-2.5-flash"
+    stt_model: str = "whisper-1"
+
+    storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""
     supabase_db_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
-    jwt_secret: str = "dev-only-change-me"
+    jwt_secret: str = "dev-only-change-me-32bytes-minimum"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
 
