@@ -243,8 +243,13 @@ async def upsert_embedding(
     model_name: str,
     dimension: int,
 ) -> None:
-    """asyncpg 는 vector 타입을 모른다. 문자열로 넘기고 SQL 에서 캐스팅한다."""
-    literal = "[" + ",".join(f"{x:.7f}" for x in embedding) + "]"
+    """asyncpg 는 vector 타입을 모른다. 문자열로 넘기고 SQL 에서 캐스팅한다.
+
+    변환은 관호님 vector_literal 을 쓴다. 자릿수가 갈라지면 같은 카드가
+    재적재될 때마다 content_hash 는 같은데 벡터만 미세하게 달라진다.
+    """
+    from app.reg.embeddings import vector_literal
+    literal = vector_literal(embedding)
     await conn.execute(
         "insert into card_embeddings "
         "  (card_id, store_id, chunk_index, chunk_text, embedding, dimension, "

@@ -92,9 +92,25 @@ main
 supabase init         # 최초 1회
 supabase start        # 첫 실행 5~10분
 
-DB=$(docker ps --format '{{.Names}}' | grep supabase_db)
-docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/001_init_schema.sql
-docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/002_seed_demo.sql
+# psql 이 있으면
+psql "$SUPABASE_DB_URL" -f db/001_init_schema.sql
+psql "$SUPABASE_DB_URL" -f db/002_seed_demo.sql
+
+# 없으면 컨테이너 안의 psql 을 쓴다 (mac/linux)
+docker exec -i supabase_db_AskBuddy psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/001_init_schema.sql
+docker exec -i supabase_db_AskBuddy psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/002_seed_demo.sql
+
+# Windows PowerShell
+#   Get-Content db/001_init_schema.sql -Raw -Encoding UTF8 | docker exec -i supabase_db_AskBuddy psql -U postgres -d postgres -v ON_ERROR_STOP=1
+#   Get-Content db/002_seed_demo.sql   -Raw -Encoding UTF8 | docker exec -i supabase_db_AskBuddy psql -U postgres -d postgres -v ON_ERROR_STOP=1
+```
+
+시드 카드 임베딩 (검색 hit 에 필요, 관호):
+
+```bash
+cd api
+# .env 에 OPENAI_API_KEY 채운 뒤
+python scripts/seed_embeddings.py
 ```
 
 ### 2. API
@@ -103,12 +119,14 @@ docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/002_seed
 cd api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env             # SUPABASE_SERVICE_KEY 만 채우면 M1 은 돈다
+cp .env.example .env             # 키 채우기. 인라인 주석 금지
 python scripts/init_storage.py   # 버킷 sources 생성. 최초 1회
 uvicorn app.main:app --reload --port 8000
 ```
 
 → http://localhost:8000/docs
+
+> **임베딩은 `app.reg.embeddings.embed_texts` 만 쓴다.** 새 임베딩 함수를 만들지 않는다 (D4).
 
 M1 은 LLM 키 없이 전 구간이 돈다 (`INGEST_MODE=mock`).
 

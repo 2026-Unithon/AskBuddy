@@ -20,7 +20,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 | `docs/AskBuddy_개발가이드.md` | 아키텍처·계약·결정사항·개발 순서. **정본** |
 | `docs/AskBuddy_환경세팅.md` | 파트별 환경 구성, 실행 방법 |
 | `docs/ingest-contract.md` | `/ingest/*` 상세 계약. 업로드 3단계·에러 코드·프론트 예시 |
-| `db/001_init_schema.sql` | 스키마 원천(24 테이블). 컬럼명·타입은 이 파일이 기준 |
+| `db/001_init_schema.sql` | 스키마 원천(24 테이블). 컬럼명·타입은 이 파일이 기준. `users` 에 `email`·`password_hash` 포함 |
 | `db/002_seed_demo.sql` | 데모 매장 시드. `demo-cafe` |
 
 ---
@@ -69,6 +69,8 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 6. **`ANSWERED` 메시지는 `message_citations`가 1건 이상이어야 한다.** 0건이면 답변을 폐기한다.
 7. **브라우저는 Supabase Storage 에도 키로 접근하지 않는다.** `POST /ingest/upload-url` 이 발급한 서명 URL 로만 올린다. 파일 바이너리는 API 를 거치지 않는다.
 8. **모델명·차원·임계값은 `api/app/config.py` 가 단일 출처다.** 코드에 리터럴로 쓰지 않는다.
+9. **임베딩 생성은 `app.reg.embeddings.embed_texts` 하나만 쓴다.** 새 임베딩 함수를 만들지 않는다 (D4). 동기 함수이므로 async 문맥에서는 `asyncio.to_thread` 로 감싼다.
+10. **`.env` 에 인라인 주석을 쓰지 않는다.** dotenv 가 값에 주석을 붙여 읽을 수 있다.
 
 ---
 

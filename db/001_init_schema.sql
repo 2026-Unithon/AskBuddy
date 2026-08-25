@@ -21,15 +21,16 @@ create extension if not exists pg_trgm;
 -- ---------------------------------------------------------------------
 
 create table users (
-  user_id     bigint generated always as identity primary key,
-  name        varchar(50)  not null,
-  phone       varchar(20),
-  role        varchar(20)  not null
-              check (role in ('OWNER','STAFF')),
-  created_at  timestamptz  not null default now()
+  user_id         bigint generated always as identity primary key,
+  name            varchar(50)  not null,
+  phone           varchar(20),
+  email           varchar(255) unique,
+  password_hash   text,
+  role            varchar(20)  not null
+                  check (role in ('OWNER','STAFF')),
+  created_at      timestamptz  not null default now()
 );
--- 인증 컬럼(email·password_hash 등)은 기존 api/sql/identity.sql 의 정의를 따른다.
--- 관호님 인증 구현과 합칠 때 이 테이블에 병합할 것.
+-- identity.sql 인증 컬럼(email·password_hash)을 users 에 병합했다.
 
 create table stores (
   store_id            bigint generated always as identity primary key,

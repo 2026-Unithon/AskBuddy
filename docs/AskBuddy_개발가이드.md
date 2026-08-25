@@ -355,6 +355,11 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | 2026-08-25 | 입력 | `POST /ingest/embed` 신설 | 승인 → 임베딩을 잇는 지점. 관호님 승인 플로우에서 호출한다 |
 | 2026-08-25 | 입력 | `INGEST_MODE` 도입, 기본값 `mock` | "M1 전에 Gemini 를 붙이지 않는다"를 코드로 강제 |
 | 2026-08-25 | 공통 | `scripts/dev_token.py` 추가 | `/auth` 가 붙기 전까지의 임시 토큰. 인증 우회 엔드포인트를 만들지 않기 위함 |
+| 2026-08-25 | DB | `users` 에 `email`·`password_hash` 병합. 시드에 bcrypt 해시(`demo1234`) | M0. `identity.sql` 인증 컬럼 흡수 |
+| 2026-08-25 | DB | `app/reg/embeddings.py` 신설 — `embed_texts` 단일 진입점 | D4. 임베딩 함수가 두 벌이 되는 것을 막는다 |
+| 2026-08-25 | 입력 | `ingest/embed/service.py` 가 `reg.embeddings.embed_texts` 를 호출하도록 교체 (N6 해소) | 동기 함수라 `asyncio.to_thread` 로 감쌈 |
+| 2026-08-25 | 공통 | `supabase/config.toml` 의 `project_id` 를 **`AskBuddy`** 로 통일 | 폴더명이 달라 각자 다른 값이 생성됐다. 컨테이너 이름(`supabase_db_AskBuddy`)이 갈라진다 |
+| 2026-08-25 | 공통 | `.env.example` 인라인 주석 제거 | dotenv 가 값에 주석을 붙여 읽을 수 있다 |
 
 ---
 
@@ -384,7 +389,7 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | N3 | miss UX 문구 통일 ("사장님께 확인 중" 제안) | PM | M1 |
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
-| N6 | 관호님 기존 임베딩 함수 통합 — `api/app/ingest/embed/service.py` 의 `_embed()` 를 그 함수 호출로 교체 | 관호·준혁 | M2 |
+| ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
 | N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
 

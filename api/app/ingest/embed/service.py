@@ -1,42 +1,18 @@
 """준혁 — 승인된 카드의 임베딩 적재.
 
-모델명·차원은 config 에서만 읽는다 (D4). 여기에 리터럴로 쓰지 않는다.
-관호님 /reg/* 의 임베딩 함수가 리포에 합류하면 _embed() 한 줄을 그 함수 호출로
-바꾸면 된다. 양쪽 모두 config 를 보므로 모델·차원이 갈라지지 않는다.
+임베딩 생성 자체는 관호님 `app.reg.embeddings.embed_texts` 를 호출한다.
+여기에 새 임베딩 함수를 만들지 않는다 — 모델명·차원이 갈라진다 (D4).
+그쪽은 동기 함수라 이벤트 루프를 막지 않도록 to_thread 로 감싼다.
 """
-import hashlib
+import asyncio
 import logging
-import time
 
 import asyncpg
-from openai import AsyncOpenAI
 
-from app.config import get_settings
 from app.ingest import repository as repo
+from app.reg.embeddings import content_hash, embed_texts
 
 logger = logging.getLogger(__name__)
-
-
-async def _embed(texts: list[str]) -> list[list[float]]:
-    s = get_settings()
-    if not s.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY 가 없다. api/.env 를 확인하라")
-
-    client = AsyncOpenAI(api_key=s.openai_api_key)
-    started = time.perf_counter()
-    res = await client.embeddings.create(model=s.embedding_model, input=texts)
-    logger.info("embed model=%s n=%d elapsed=%.1fs tokens=%s",
-                s.embedding_model, len(texts), time.perf_counter() - started,
-                getattr(res.usage, "total_tokens", "?"))
-
-    vectors = [d.embedding for d in res.data]
-    for v in vectors:
-        if len(v) != s.embedding_dim:
-            raise RuntimeError(
-                f"임베딩 차원 불일치: {len(v)} != {s.embedding_dim}. "
-                "모델을 바꿨다면 임계값·골든셋을 전면 재측정해야 한다 (D4)"
-            )
-    return vectors
 
 
 async def embed_card(conn: asyncpg.Connection, store_id: int, card_id: int) -> int:
@@ -51,17 +27,19 @@ async def embed_card(conn: asyncpg.Connection, store_id: int, card_id: int) -> i
 
     # 카드는 짧다. 청크를 나누지 않고 제목+본문 한 덩어리로 넣는다
     chunk_text = f"{card['title']}\n{card['content']}".strip()
-    vector = (await _embed([chunk_text]))[0]
-    s = get_settings()
+    vectors = await asyncio.to_thread(embed_texts, [chunk_text])
 
+    from app.config import get_settings
+    s = get_settings()
     await repo.upsert_embedding(
         conn, store_id,
         card_id=card_id,
         chunk_index=0,
         chunk_text=chunk_text,
-        embedding=vector,
-        content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+        embedding=vectors[0],
+        content_hash=content_hash(chunk_text),
         model_name=s.embedding_model,
         dimension=s.embedding_dim,
     )
+    logger.info("embed card=%s store=%s chunks=1", card_id, store_id)
     return 1
