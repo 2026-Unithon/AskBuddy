@@ -17,8 +17,18 @@ const CATEGORY_ICON: Record<string, string> = {
 
 // 카드는 한 장씩 오고 화면은 카테고리 묶음으로 보여준다. 여기서 접는다.
 function groupByCategory(cards: ReviewCard[]): KnowledgeSection[] {
+  // 같은 내용이 여러 자료에서 반복해 나온다. 화면에 세 번 찍히면 읽을 수 없으므로
+  // 제목+본문이 같으면 한 줄로 합친다.
+  const seen = new Set<string>();
+  const unique = cards.filter((c) => {
+    const key = `${c.title}\u0000${c.content}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   const buckets = new Map<string, ReviewCard[]>();
-  for (const card of cards) {
+  for (const card of unique) {
     const key = card.category_name || "미분류";
     const list = buckets.get(key);
     if (list) list.push(card);
@@ -33,7 +43,11 @@ function groupByCategory(cards: ReviewCard[]): KnowledgeSection[] {
     confidence: Math.round(
       group.reduce((sum, c) => sum + Number(c.confidence), 0) / group.length
     ),
-    items: group.map((c) => ({ id: `card-${c.card_id}`, text: c.title })),
+    items: group.map((c) => ({
+      id: `card-${c.card_id}`,
+      text: c.title,
+      detail: c.content,
+    })),
   }));
 }
 
@@ -130,7 +144,12 @@ export default function PreviewPage() {
                 {s.items.map((item) => (
                   <li key={item.id} className="flex items-start gap-2 text-sm">
                     <span className="text-brand-500 font-bold mt-0.5 shrink-0">✓</span>
-                    <span className="text-foreground font-medium">{item.text}</span>
+                    <div className="min-w-0">
+                      <p className="text-foreground font-semibold">{item.text}</p>
+                      {item.detail && (
+                        <p className="text-xs text-muted mt-0.5 leading-relaxed">{item.detail}</p>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>

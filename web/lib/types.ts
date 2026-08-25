@@ -55,6 +55,8 @@ export type UploadSource = {
 export type KnowledgeItem = {
   id: string;
   text: string;
+  /** 카드 본문. 제목만으론 무슨 내용인지 알 수 없어 함께 보여준다. */
+  detail?: string;
 };
 
 export type KnowledgeSection = {

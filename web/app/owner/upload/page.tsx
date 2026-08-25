@@ -22,11 +22,20 @@ const SHEET_COPY: Record<UploadSourceType, string> = {
   SCAN: "메뉴판, 매뉴얼 사진, PDF 파일을 올려주세요. AI가 텍스트를 읽어 분석해요.",
 };
 
+// 백엔드가 받는 확장자와 정확히 같아야 한다. 넓게 열면 파일 선택창에서는 고를 수 있는데
+// /ingest/upload-url 이 422 로 거절한다 (aac·webp·avi·heic 등).
+const ALLOWED_EXT: Record<UploadSourceType, string[]> = {
+  VOICE: ["mp3", "m4a", "wav"],
+  VIDEO: ["mp4", "mov"],
+  KAKAO: ["txt", "zip", "png", "jpg", "jpeg"],
+  SCAN: ["pdf", "png", "jpg", "jpeg"],
+};
+
 const ACCEPT: Record<UploadSourceType, string> = {
-  VOICE: "audio/*",
-  VIDEO: "video/*",
-  KAKAO: ".txt,image/*",
-  SCAN: ".pdf,image/*",
+  VOICE: ".mp3,.m4a,.wav",
+  VIDEO: ".mp4,.mov",
+  KAKAO: ".txt,.zip,.png,.jpg,.jpeg",
+  SCAN: ".pdf,.png,.jpg,.jpeg",
 };
 
 // 백엔드 enum 과 정확히 맞춰야 한다. 어긋나면 /ingest/sources 가 422 를 준다.
@@ -88,6 +97,26 @@ export default function UploadPage() {
   async function handleFile(type: UploadSourceType, file: File) {
     uploadSeq.current += 1;
     const id = `${type}-${uploadSeq.current}`;
+
+    // 허용 목록 밖이면 서버에 보내지 않고 여기서 막는다.
+    // 보내면 /ingest/upload-url 이 422 를 주는데, 그 사이 화면은 "처리 중" 으로 보인다.
+    const ext = extOf(file);
+    if (!ALLOWED_EXT[type].includes(ext)) {
+      dispatch({
+        type: "ADD_UPLOAD_SOURCE",
+        source: {
+          id,
+          type,
+          title: file.name,
+          status: "FAILED",
+          errorMessage: `${ext ? `.${ext}` : "이 파일"} 형식은 안 돼요 — ${ALLOWED_EXT[type]
+            .map((e) => `.${e}`)
+            .join(", ")} 만 올릴 수 있어요`,
+        },
+      });
+      return;
+    }
+
     dispatch({
       type: "ADD_UPLOAD_SOURCE",
       source: { id, type, title: file.name, status: "UPLOADED" },
@@ -283,7 +312,6 @@ export default function UploadPage() {
           }}
           type="file"
           accept={ACCEPT[m.type]}
-          {...(m.type === "VIDEO" ? { capture: "environment" as const } : {})}
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -437,7 +465,7 @@ function UploadSheet({
                 ) : (
                   <>
                     <span className="text-2xl">🎥</span>
-                    <span className="text-sm font-bold text-white">촬영 시작하기</span>
+                    <span className="text-sm font-bold text-white">영상 올리기 (mp4, mov)</span>
                   </>
                 )}
               </button>

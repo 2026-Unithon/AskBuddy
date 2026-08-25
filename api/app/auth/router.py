@@ -347,6 +347,27 @@ async def create_invite(
     if not biz:
         raise HTTPException(404, "store not found")
 
+    # 이미 쓸 수 있는 코드가 있으면 그걸 돌려준다.
+    # 화면에 들어올 때마다 새로 발급하면 사장님이 알바에게 알려준 코드가 계속 바뀐다.
+    existing = await db.fetchrow(
+        """
+        select invite_id, code, expires_at, store_id
+        from invite_codes
+        where store_id = $1 and is_used = false and expires_at > now()
+        order by invite_id
+        limit 1
+        """,
+        store_id,
+    )
+    if existing:
+        return {
+            "invite_id": int(existing["invite_id"]),
+            "code": existing["code"],
+            "store_id": int(existing["store_id"]),
+            "expires_at": existing["expires_at"].isoformat(),
+            "reused": True,
+        }
+
     expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_TTL_DAYS)
 
     # unique 충돌 시 몇 번 재시도
@@ -368,6 +389,7 @@ async def create_invite(
                 "code": row["code"],
                 "store_id": int(row["store_id"]),
                 "expires_at": row["expires_at"].isoformat(),
+                "reused": False,
             }
         except asyncpg.UniqueViolationError:
             continue
