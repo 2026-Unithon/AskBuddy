@@ -204,7 +204,7 @@ export default function UploadPage() {
 
   return (
     <Shell>
-      <TopBar title="자료 업로드" />
+      <TopBar title="자료 업로드" backHref="/owner/category" />
 
       <div className="px-4 pt-1 pb-3 shrink-0">
         <div className="flex justify-between mb-1.5">

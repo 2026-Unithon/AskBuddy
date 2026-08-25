@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Badge, Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { retrieve } from "@/lib/api";
@@ -29,7 +29,6 @@ function simulateRetrieve(question: string) {
 }
 
 export default function ChatPage() {
-  const router = useRouter();
   const { state, dispatch } = useApp();
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -98,12 +97,13 @@ export default function ChatPage() {
       <div className="w-full max-w-[480px] min-h-dvh flex flex-col bg-[#EEF4EF]">
         {/* 헤더 */}
         <div className="shrink-0 bg-surface border-b border-border px-4 py-3 flex items-center gap-3">
-          <button
-            onClick={() => router.back()}
+          <Link
+            href="/staff/roadmap"
+            aria-label="뒤로가기"
             className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-muted transition-colors"
           >
             ←
-          </button>
+          </Link>
           <Buddy size={36} />
           <div>
             <p className="text-sm font-bold text-brand-700">Buddy</p>

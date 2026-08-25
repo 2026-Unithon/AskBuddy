@@ -4,7 +4,7 @@ import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 export default function RoleSelectPage() {
   return (
     <Shell>
-      <TopBar />
+      <TopBar backHref="/" />
       <div className="flex-1 flex flex-col px-6 pt-1 pb-10 gap-5">
         <BuddyBubble text="안녕하세요! 저는 Buddy예요 😊" />
 

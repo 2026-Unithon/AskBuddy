@@ -71,7 +71,7 @@ export default function CategoryPage() {
 
   return (
     <Shell>
-      <TopBar title="업종 선택" />
+      <TopBar title="업종 선택" backHref="/owner/intent" />
       <div className="flex-1 overflow-y-auto px-5 pt-1 pb-4 flex flex-col">
         <p className="text-sm text-muted">우리 매장의 업종을 골라주세요</p>
 
