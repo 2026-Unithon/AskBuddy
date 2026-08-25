@@ -29,3 +29,6 @@ supabase/.temp/
 .DS_Store
 .idea/
 .vscode/
+
+# next 생성 산출물
+web/next-env.d.ts

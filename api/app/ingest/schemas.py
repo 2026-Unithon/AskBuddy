@@ -87,6 +87,23 @@ class CreateSourceRequest(BaseModel):
     meta: VoiceMeta | VideoMeta | KakaoMeta | ScanMeta | None = None
 
 
+class CategoryToggle(BaseModel):
+    category_name: str = Field(max_length=50)
+    is_enabled: bool
+
+
+class UpdateCategoriesRequest(BaseModel):
+    """켜짐 여부만 바꾼다. 새 카테고리를 만들지 않는다."""
+    categories: list[CategoryToggle]
+
+
+class CategoryOut(BaseModel):
+    category_id: int
+    category_name: str
+    is_enabled: bool
+    sort_order: int
+
+
 class ProcessRequest(BaseModel):
     source_id: int
     force: bool = False     # DONE 인 자료를 다시 돌린다
