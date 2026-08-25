@@ -54,7 +54,7 @@ export default function RoadmapPage() {
               src="/images/roadmap-bg.png"
               alt=""
               fill
-              className="object-cover select-none"
+              className="object-contain select-none"
               sizes="480px"
               priority
             />
@@ -152,7 +152,7 @@ function NodeButton({
           className={`block text-[11px] leading-tight ${
             current ? "font-bold text-white" : locked ? "text-white/60" : "font-semibold text-white/90"
           }`}
-          style={!locked ? { textShadow: "0 1px 5px rgba(255,255,255,0.5)" } : undefined}
+          style={!locked ? { textShadow: "0 1px 5px rgba(0,0,0,0.45)" } : undefined}
         >
           {node.label}
         </span>

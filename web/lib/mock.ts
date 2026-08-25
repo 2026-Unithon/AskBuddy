@@ -60,7 +60,9 @@ export const MOCK_KNOWLEDGE_SECTIONS: KnowledgeSection[] = [
   },
 ];
 
-// 경로 화면(roadmap-bg.png, 616×1089) 위에 손으로 배치한 노드 좌표 — 원본 이미지 픽셀 기준.
+// 경로 화면(roadmap-bg.png, 616×1089). 원 7개는 지그재그 돌 중심(계산값)에 앉힌다.
+export const ROADMAP_BG_SIZE = { width: 616, height: 1089 };
+
 export const MOCK_ROADMAP: RoadmapNode[] = [
   {
     id: "node-1",
@@ -69,7 +71,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "🏪",
     introMessage: "가게 투어 완료! 어디에 뭐가 있는지 이제 알겠죠?",
     status: "DONE",
-    pos: { x: 257, y: 582 },
+    pos: { x: 244, y: 1058 }, // 돌 1 시작
     details: [
       {
         type: "doc",
@@ -86,7 +88,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "☀️",
     introMessage: "오픈 준비 완료! 손님 맞을 준비가 됐어요.",
     status: "DONE",
-    pos: { x: 98, y: 484 },
+    pos: { x: 456, y: 916 }, // 돌 4 우측 꺾임
     details: [
       {
         type: "doc",
@@ -103,7 +105,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "📦",
     introMessage: "재고 위치를 완벽히 파악했어요!",
     status: "DONE",
-    pos: { x: 256, y: 393 },
+    pos: { x: 409, y: 748 }, // 돌 6 좌상 구간
     details: [
       {
         type: "doc",
@@ -121,7 +123,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "☕",
     introMessage: "음료 제조법 미션 시작! 레시피 순서대로 따라가 봐요 ☕",
     status: "IN_PROGRESS",
-    pos: { x: 101, y: 304 },
+    pos: { x: 223, y: 581 }, // 돌 9 좌측 꺾임
     details: [
       {
         type: "doc",
@@ -145,7 +147,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "🌙",
     introMessage: "마감 업무를 배워볼까요?",
     status: "LOCKED",
-    pos: { x: 250, y: 215 },
+    pos: { x: 358, y: 401 }, // 돌 12 우상 구간
     details: [
       { type: "doc", title: "마감 체크리스트", text: "① 매출 정산\n② 머신 세척\n③ 쓰레기 분리배출\n④ 보안 시스템 작동 확인" },
       { type: "buddy", text: "마감 순서가 궁금하면 '마감 순서 알려줘' 라고 물어보세요 🦜" },
@@ -158,7 +160,7 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "🤝",
     introMessage: "단골 손님 응대법을 배워볼까요?",
     status: "LOCKED",
-    pos: { x: 111, y: 130 },
+    pos: { x: 463, y: 291 }, // 돌 14 우측 꺾임
     details: [
       { type: "doc", title: "단골 응대", text: "① 자주 오시는 손님 얼굴·이름 기억하기\n② 즐겨 시키는 메뉴 파악\n③ 먼저 인사하고 안부 묻기" },
       { type: "buddy", text: "단골 손님 정보는 채팅으로 '단골 정보' 라고 물어보면 알려드려요 🦜" },
@@ -171,16 +173,13 @@ export const MOCK_ROADMAP: RoadmapNode[] = [
     emoji: "🔑",
     introMessage: "이제 혼자서도 오픈할 수 있어요!",
     status: "LOCKED",
-    pos: { x: 161, y: 44 },
+    pos: { x: 270, y: 74 }, // 돌 17 선물
     details: [
       { type: "doc", title: "혼자 오픈하기", text: "① 오픈 체크리스트 순서대로 진행\n② 비상 연락처 확인\n③ 문제 발생 시 사장님께 바로 연락" },
       { type: "buddy", text: "여기까지 왔다면 이제 진짜 베테랑이에요! 축하해요 🎉" },
     ],
   },
 ];
-
-// roadmap-bg.png 원본 크기 (노드 좌표 % 환산 기준)
-export const ROADMAP_BG_SIZE = { width: 616, height: 1089 };
 
 export const MOCK_CHAT_HISTORY: ChatMessage[] = [
   {

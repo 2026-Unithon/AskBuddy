@@ -32,7 +32,7 @@ import type {
 const STORAGE_KEY = "askbuddy_state";
 // 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
 // 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
-const STATE_VERSION = 4;
+const STATE_VERSION = 7;
 
 type AppState = {
   hydrated: boolean;
