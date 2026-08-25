@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import { Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { ROADMAP_BG_SIZE } from "@/lib/mock";
@@ -23,13 +24,13 @@ export default function RoadmapPage() {
       <div className="w-full max-w-[480px] min-h-dvh flex flex-col relative">
         {/* HUD — 스트릭 · 하트 */}
         <div className="sticky top-0 z-20 h-14 px-4 flex items-center bg-white/95 backdrop-blur">
-          <button
+          <Link
+            href="/role"
             aria-label="뒤로가기"
-            onClick={() => router.back()}
             className="w-9 h-9 rounded-full flex items-center justify-center text-brand-700 hover:bg-surface-muted transition-colors"
           >
             ←
-          </button>
+          </Link>
           <div className="w-[90px] flex items-center gap-1.5 pl-1">
             <span className="text-lg">🔥</span>
             <span className="text-xs font-semibold text-brand-700">{state.streakDays}일 연속</span>

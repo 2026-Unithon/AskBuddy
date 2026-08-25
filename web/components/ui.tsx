@@ -62,22 +62,34 @@ export function WideShell({ children }: { children: ReactNode }) {
 export function TopBar({
   title,
   onBack,
+  backHref,
   right,
 }: {
   title?: string;
   onBack?: () => void;
+  /** 화면 흐름상 정해진 이전 화면. 직접 URL로 들어오거나 새로고침해도 항상 같은 곳으로 간다 —
+   *  router.back()은 브라우저 히스토리가 없으면 엉뚱한 곳으로 가거나 아무 반응이 없다. */
+  backHref?: string;
   right?: ReactNode;
 }) {
   const router = useRouter();
+  const backButtonClass =
+    "w-9 h-9 rounded-full flex items-center justify-center text-foreground hover:bg-surface-muted transition-colors";
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 bg-background/90 backdrop-blur">
-      <button
-        aria-label="뒤로가기"
-        onClick={onBack ?? (() => router.back())}
-        className="w-9 h-9 rounded-full flex items-center justify-center text-foreground hover:bg-surface-muted transition-colors"
-      >
-        ←
-      </button>
+      {backHref ? (
+        <Link href={backHref} aria-label="뒤로가기" className={backButtonClass}>
+          ←
+        </Link>
+      ) : (
+        <button
+          aria-label="뒤로가기"
+          onClick={onBack ?? (() => router.back())}
+          className={backButtonClass}
+        >
+          ←
+        </button>
+      )}
       {title && <h1 className="text-base font-semibold flex-1 text-center -ml-9">{title}</h1>}
       <div className="min-w-9 flex justify-end">{right}</div>
     </div>

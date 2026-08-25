@@ -102,7 +102,7 @@ export default function OwnerAuthPage() {
 
   return (
     <Shell>
-      <TopBar title="사장님" />
+      <TopBar title="사장님" backHref="/role" />
       <div className="flex-1 flex flex-col px-6 pt-4 pb-10">
         <div className="flex rounded-full bg-surface-muted p-1 mb-6">
           {(["login", "signup"] as const).map((t) => (

@@ -4,7 +4,7 @@ import { Shell, TopBar } from "@/components/ui";
 export default function OwnerIntentPage() {
   return (
     <Shell>
-      <TopBar />
+      <TopBar backHref="/role" />
       <div className="flex-1 flex flex-col px-6 pt-2 pb-10 gap-8">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-brand-700">어떤 일로 오셨나요?</h1>
