@@ -32,7 +32,10 @@ import type {
   UploadSource,
 } from "./types";
 
-const STORAGE_KEY = "askbuddy_state_v1";
+const STORAGE_KEY = "askbuddy_state";
+// 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
+// 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
+const STATE_VERSION = 2;
 
 type AppState = {
   hydrated: boolean;
@@ -175,21 +178,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        dispatch({ type: "HYDRATE", payload: JSON.parse(raw) });
+      const parsed = raw ? JSON.parse(raw) : null;
+      // 버전이 다르면(스키마가 바뀌었으면) 옛 캐시를 신뢰하지 않고 그냥 버린다.
+      if (parsed && parsed.v === STATE_VERSION && parsed.data) {
+        dispatch({ type: "HYDRATE", payload: parsed.data });
       } else {
+        window.localStorage.removeItem(STORAGE_KEY);
         dispatch({ type: "HYDRATE", payload: {} });
       }
     } catch {
       dispatch({ type: "HYDRATE", payload: {} });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!state.hydrated) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: STATE_VERSION, data: state }));
     } catch {
       // 저장 공간이 없어도 화면 동작에는 영향 없음
     }

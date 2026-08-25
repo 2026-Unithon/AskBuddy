@@ -50,9 +50,7 @@ export default function DashboardPage() {
               <p className="text-white/55 text-xs font-semibold">사장님 대시보드</p>
               <h1 className="text-2xl font-bold text-white">{state.storeName}</h1>
             </div>
-            <div className="bg-white/15 rounded-full p-1">
-              <Buddy size={44} />
-            </div>
+            <Buddy size={44} />
           </div>
           <div className="grid grid-cols-3 gap-2.5 max-w-md">
             {[

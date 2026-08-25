@@ -6,7 +6,6 @@ import { Badge, Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { retrieve } from "@/lib/api";
 import { MOCK_KNOWLEDGE_SECTIONS } from "@/lib/mock";
-import type { ChatMessage } from "@/lib/types";
 
 // 백엔드가 연결되지 않았을 때만 쓰는 로컬 대체 판정 — 실제 판정은 전부 /reg/retrieve 가 한다 (개발가이드 6-3).
 function simulateRetrieve(question: string) {

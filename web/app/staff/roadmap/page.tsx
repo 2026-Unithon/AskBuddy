@@ -76,9 +76,7 @@ export default function RoadmapPage() {
               onClick={() => router.push("/staff/chat")}
               className="w-full bg-white rounded-[20px] px-4 py-3.5 flex items-center gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.12),0_-2px_24px_rgba(0,0,0,0.10)]"
             >
-              <div className="w-11 h-11 rounded-full bg-accent-100 flex items-center justify-center shrink-0 overflow-hidden">
-                <Buddy size={44} />
-              </div>
+              <Buddy size={44} />
               <div className="flex-1 text-left min-w-0">
                 <p className="text-[13px] font-bold text-foreground truncate">
                   {currentNode.label} 미션 시작! {currentNode.emoji}
@@ -131,7 +129,10 @@ function NodeButton({
         </div>
       )}
       {current && (
-        <div className="absolute inset-0 rounded-full animate-pulse pointer-events-none bg-accent-500/30 w-[76px] h-[76px] -left-[9px] -top-[9px]" />
+        <div
+          className="absolute rounded-full animate-pulse pointer-events-none bg-accent-500/30"
+          style={{ width: 76, height: 76, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+        />
       )}
       <button
         onClick={onOpen}

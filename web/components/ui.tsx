@@ -5,18 +5,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
-// Buddy 마스코트(러브버드) — 디자인 보드 전 화면에서 공용으로 쓰는 캐릭터 이미지.
+// Buddy 마스코트(러브버드) — 원본 PNG가 불투명(흰 배경)이라 어느 배경 위에 놓여도
+// 항상 흰 원형 플레이트 위에 얹혀 "네모난 흰 배경이 삐져나오는" 문제 없이 자연스럽게 보이게 한다.
 export function Buddy({ size = 64, className = "" }: { size?: number; className?: string }) {
   return (
-    <Image
-      src="/images/buddy.png"
-      alt="Buddy"
-      width={size}
-      height={size}
-      draggable={false}
-      className={`object-contain shrink-0 select-none ${className}`}
-      style={{ width: size, height: size }}
-    />
+    <div
+      className={`rounded-full bg-white shrink-0 overflow-hidden flex items-center justify-center select-none ${className}`}
+      style={{ width: size, height: size, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
+    >
+      <Image
+        src="/images/buddy.png"
+        alt="Buddy"
+        width={size}
+        height={size}
+        draggable={false}
+        className="object-cover scale-[1.18]"
+        style={{ width: "100%", height: "100%" }}
+      />
+    </div>
   );
 }
 

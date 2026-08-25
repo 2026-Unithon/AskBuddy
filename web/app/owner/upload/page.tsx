@@ -15,7 +15,7 @@ const SHEET_COPY: Record<UploadSourceType, string> = {
 
 export default function UploadPage() {
   const router = useRouter();
-  const { state, dispatch } = useApp();
+  const { dispatch } = useApp();
   const [pct, setPct] = useState(0);
   const [uploaded, setUploaded] = useState<Record<UploadSourceType, boolean>>({
     VOICE: false,
