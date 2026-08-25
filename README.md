@@ -89,8 +89,19 @@ main
 
 ```bash
 supabase start
+# Windows에 psql 이 없으면:
+#   Get-Content db/001_init_schema.sql -Raw -Encoding UTF8 | docker exec -i supabase_db_AskBuddy psql -U postgres -d postgres -v ON_ERROR_STOP=1
+#   Get-Content db/002_seed_demo.sql   -Raw -Encoding UTF8 | docker exec -i supabase_db_AskBuddy psql -U postgres -d postgres -v ON_ERROR_STOP=1
 psql "$SUPABASE_DB_URL" -f db/001_init_schema.sql
 psql "$SUPABASE_DB_URL" -f db/002_seed_demo.sql
+```
+
+시드 카드 임베딩 (검색 hit 에 필요, 관호):
+
+```bash
+cd api
+# .env 에 OPENAI_API_KEY 채운 뒤
+python scripts/seed_embeddings.py
 ```
 
 ### 2. API
@@ -99,11 +110,13 @@ psql "$SUPABASE_DB_URL" -f db/002_seed_demo.sql
 cd api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # 키 채우기
+cp .env.example .env      # 키 채우기 (인라인 주석 금지)
 uvicorn app.main:app --reload --port 8000
 ```
 
 → http://localhost:8000/docs
+
+> 임베딩은 `app.reg.embeddings.embed_texts` 만 쓴다. ingest 쪽에서 새 임베딩 함수를 만들지 말 것 (D4).
 
 ### 3. WEB
 

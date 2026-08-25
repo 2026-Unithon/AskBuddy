@@ -6,11 +6,17 @@
 -- =====================================================================
 
 -- 1. 사용자 -----------------------------------------------------------
-insert into users (name, phone, role) values
-  ('데모 사장님', '010-0000-0001', 'OWNER'),
-  ('박지호',      '010-0000-0002', 'STAFF'),
-  ('김민준',      '010-0000-0003', 'STAFF'),
-  ('이서연',      '010-0000-0004', 'STAFF');
+-- 비밀번호는 모두 demo1234 (bcrypt). 로컬 시연 전용.
+-- hash: demo1234 (scripts/fix_demo_passwords.py 로 재생성 가능)
+insert into users (name, phone, email, password_hash, role) values
+  ('데모 사장님', '010-0000-0001', 'owner@demo.cafe',
+   '$2b$12$dP.FhlBdp//KvEltAkbUkO4EcMNk0XfvguAOKb.UgEBlwY8N0b4ky', 'OWNER'),
+  ('박지호',      '010-0000-0002', 'jiho@demo.cafe',
+   '$2b$12$dP.FhlBdp//KvEltAkbUkO4EcMNk0XfvguAOKb.UgEBlwY8N0b4ky', 'STAFF'),
+  ('김민준',      '010-0000-0003', 'minjun@demo.cafe',
+   '$2b$12$dP.FhlBdp//KvEltAkbUkO4EcMNk0XfvguAOKb.UgEBlwY8N0b4ky', 'STAFF'),
+  ('이서연',      '010-0000-0004', 'seoyeon@demo.cafe',
+   '$2b$12$dP.FhlBdp//KvEltAkbUkO4EcMNk0XfvguAOKb.UgEBlwY8N0b4ky', 'STAFF');
 
 -- 2. 매장 -------------------------------------------------------------
 insert into stores (owner_id, store_slug, store_name, business_type, deploy_threshold)

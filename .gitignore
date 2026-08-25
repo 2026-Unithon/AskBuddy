@@ -10,6 +10,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 api/tmp/
+*.log
+api/uvicorn.*.log
 
 # node / next
 node_modules/

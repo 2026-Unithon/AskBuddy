@@ -11,6 +11,8 @@ python-multipart>=0.0.9
 # 인증 (관호)
 PyJWT>=2.9
 passlib[bcrypt]>=1.7.4
+bcrypt>=4.0
+email-validator>=2.0
 
 # 임베딩 — 관호님 코드가 이걸 쓴다. 새 임베딩 함수를 만들지 않는다 (D4)
 openai>=1.40
