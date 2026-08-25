@@ -398,7 +398,7 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | D8 | Storage 버킷 `sources`(비공개). 오브젝트 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 API 가 발급한 **서명 URL** 로만 | 2026-08-25 | 브라우저에 Supabase 키를 주지 않으면서 파일 바이너리가 API 를 거치지 않게 하는 유일한 방법. 원본 파일명을 경로에 쓰지 않는 것은 한글·공백 인코딩 사고와 덮어쓰기 방지 |
 | D9 | `content_hash` 는 프론트가 SHA-256 계산해 전달. 누락 시 서버가 처리 중 backfill | 2026-08-25 | `crypto.subtle` 은 https·localhost 에서만 동작한다. 프론트가 실패해도 중복 방지가 죽지 않게 |
 | D10 | `INGEST_MODE` 기본값 `mock` | 2026-08-25 | 통합 실패는 항상 M1 구간에서 난다. 목 경로를 기본값으로 두어 키 없이도 전 구간이 돌게 |
-| D11 | 검색 게이트 임계를 `CONFIDENCE_THRESHOLD`(D3) 에서 분리해 `RETRIEVAL_THRESHOLD` 로 두고, **값은 0** | 2026-08-25 | 한 값이 카드 검수 기준과 검색 하한을 동시에 제어하고 있었다. 분리 후 데모 편의를 위해 0. 부작용은 N10 |
+| D11 | 검색 게이트 임계를 `CONFIDENCE_THRESHOLD`(D3) 에서 분리해 `RETRIEVAL_THRESHOLD` 로 둔다. **값은 0.6** | 2026-08-26 | 한 값이 카드 검수 기준과 검색 하한을 동시에 제어하고 있었다. 분리 후 0 으로 내렸다가 0.6 으로 확정 |
 
 ---
 
@@ -412,7 +412,7 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
 | ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
-| N10 | **검색 게이트 임계를 0 으로 내렸다(D11).** 무슨 질문이든 hit 이 되므로 시나리오 7~9(미답변 순환)가 동작하지 않는다. 데모에서 그 순환을 보여주려면 `RETRIEVAL_THRESHOLD=0.4` 로 되돌려야 한다 | PM | M3 |
+| N10 | **임계 0.6 에서는 추출 카드가 miss 로 빠진다.** 실측 0.591 < 0.6. 점주가 승인한 카드로 답하는 장면을 데모에 넣으려면 0.4~0.5 가 필요하다 (N9 와 같은 뿌리) | 관호·PM | M3 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
 | N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
 | N9 | **추출 카드가 시드 카드보다 검색 점수가 낮다.** 같은 질문에 시드 0.640 / 추출 0.591. 게이트 임계(≈0.6)가 시드 기준으로 잡혀 있어, 점주가 승인한 카드가 miss 로 빠질 수 있다 | 관호·준혁 | M3 |

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
     confidence_threshold: float = 0.6    # D3 — 카드 검수 우선노출 기준. 검색과 무관
-    retrieval_threshold: float = 0.0     # 검색 게이트 하한. 0 이면 항상 hit
+    retrieval_threshold: float = 0.6     # 검색 게이트 하한. D3 와 별개 값이다
     frame_interval_sec: int = 3
 
     # ingest (준혁) — mock: LLM 미호출(M1 기본값) / real: Gemini 호출
