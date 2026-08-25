@@ -1,6 +1,6 @@
-"""관호 (feat/db) — 미답변 순환 진입점.
+"""관호 (feat/db) — 미답변 순환 · 채팅 저장.
 
-miss 판정은 POST /reg/retrieve 가 하고, 기록은 여기 POST /pending 이 한다 (선택 B).
+miss 판정은 retrieve_question, 기록은 POST /pending 또는 POST /chat 이 한다.
 점주 답변은 POST /pending/{id}/answer — 카드(승인) + 임베딩 + ANSWERED (가이드 6-4).
 store_id 는 JWT 에서만 해석한다 (불변식 4).
 """
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
 from app.ingest.embed import embed_card
+from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
 
@@ -25,6 +26,10 @@ class CreatePendingRequest(BaseModel):
 
 class AnswerPendingRequest(BaseModel):
     answer_text: str = Field(min_length=1, max_length=4000)
+
+
+class ChatAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
 
 
 async def _member_id(db: Db, store_id: int, user_id: int) -> int:
@@ -230,4 +235,230 @@ async def answer_pending(
         "status": "ANSWERED",
         "card_id": card_id,
         "answer_text": answer,
+    }
+
+
+async def _open_session(db: Db, store_id: int, member_id: int) -> int:
+    """이 멤버의 열린 세션. 없으면 하나 만든다."""
+    row = await db.fetchrow(
+        """
+        select session_id
+        from chat_sessions
+        where store_id = $1 and member_id = $2
+        order by started_at desc
+        limit 1
+        """,
+        store_id,
+        member_id,
+    )
+    if row:
+        return int(row["session_id"])
+    session_id = await db.fetchval(
+        """
+        insert into chat_sessions (store_id, member_id)
+        values ($1, $2)
+        returning session_id
+        """,
+        store_id,
+        member_id,
+    )
+    return int(session_id)
+
+
+def _iso(value) -> str:
+    return value.isoformat() if value is not None else ""
+
+
+@router.post("/chat")
+async def ask_chat(
+    req: ChatAskRequest,
+    db: Db,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+):
+    """신입 질문 한 방: 검색 → 대화 저장 → miss 면 pending 까지.
+
+    hit 1차: 상위 카드 content 를 Buddy 문장으로 쓰고 citation 을 남긴다 (LLM 없음).
+    miss: LLM 호출 없음. NO_ANSWER + pending WAITING.
+    """
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(400, "question is empty")
+
+    member_id = await _member_id(db, store_id, user_id)
+    result = await retrieve_question(db, store_id, question)
+
+    async with db.transaction():
+        session_id = await _open_session(db, store_id, member_id)
+        user_message_id = int(
+            await db.fetchval(
+                """
+                insert into chat_messages (session_id, sender_type, content)
+                values ($1, 'USER', $2)
+                returning message_id
+                """,
+                session_id,
+                question,
+            )
+        )
+
+        pending_question_id = None
+        citations: list[dict] = []
+
+        if result["kind"] == "hit":
+            top = result["candidates"][0]
+            buddy_content = top["content"]
+            buddy_id = int(
+                await db.fetchval(
+                    """
+                    insert into chat_messages (
+                      session_id, sender_type, content, answer_type
+                    )
+                    values ($1, 'BUDDY', $2, 'ANSWERED')
+                    returning message_id
+                    """,
+                    session_id,
+                    buddy_content,
+                )
+            )
+            # ANSWERED 인데 citation 0건이면 계약 위반. 상위 후보를 반드시 남긴다.
+            relevance = round(float(top["score"]) * 100, 2)
+            await db.execute(
+                """
+                insert into message_citations (message_id, card_id, relevance)
+                values ($1, $2, $3)
+                """,
+                buddy_id,
+                top["id"],
+                relevance,
+            )
+            citations = [
+                {
+                    "card_id": top["id"],
+                    "title": top["title"] or top["category"],
+                    "relevance": relevance,
+                }
+            ]
+            answer_type = "ANSWERED"
+        else:
+            buddy_content = "아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏"
+            buddy_id = int(
+                await db.fetchval(
+                    """
+                    insert into chat_messages (
+                      session_id, sender_type, content, answer_type
+                    )
+                    values ($1, 'BUDDY', $2, 'NO_ANSWER')
+                    returning message_id
+                    """,
+                    session_id,
+                    buddy_content,
+                )
+            )
+            pending_question_id = int(
+                await db.fetchval(
+                    """
+                    insert into pending_questions (
+                      store_id, member_id, message_id,
+                      question_text, miss_reason, status
+                    )
+                    values ($1, $2, $3, $4, $5, 'WAITING')
+                    returning question_id
+                    """,
+                    store_id,
+                    member_id,
+                    user_message_id,
+                    question[:500],
+                    result["reason"],
+                )
+            )
+            answer_type = "NO_ANSWER"
+
+    return {
+        "session_id": session_id,
+        "user_message_id": user_message_id,
+        "buddy": {
+            "message_id": buddy_id,
+            "answer_type": answer_type,
+            "content": buddy_content,
+            "citations": citations,
+        },
+        "pending_question_id": pending_question_id,
+    }
+
+
+@router.get("/chat")
+async def list_chat(
+    db: Db,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+):
+    """이 멤버의 최근 세션 메시지. 새로고침 검증용."""
+    member_id = await _member_id(db, store_id, user_id)
+    session = await db.fetchrow(
+        """
+        select session_id, started_at
+        from chat_sessions
+        where store_id = $1 and member_id = $2
+        order by started_at desc
+        limit 1
+        """,
+        store_id,
+        member_id,
+    )
+    if not session:
+        return {"session_id": None, "messages": []}
+
+    session_id = int(session["session_id"])
+    rows = await db.fetch(
+        """
+        select
+          m.message_id,
+          m.sender_type,
+          m.content,
+          m.answer_type,
+          m.created_at,
+          c.card_id,
+          c.relevance,
+          kc.title as card_title
+        from chat_messages m
+        left join message_citations c on c.message_id = m.message_id
+        left join knowledge_cards kc
+          on kc.card_id = c.card_id and kc.store_id = $2
+        where m.session_id = $1
+        order by m.created_at asc, m.message_id asc, c.citation_id asc
+        """,
+        session_id,
+        store_id,
+    )
+
+    messages: list[dict] = []
+    by_id: dict[int, dict] = {}
+    for r in rows:
+        mid = int(r["message_id"])
+        msg = by_id.get(mid)
+        if msg is None:
+            msg = {
+                "message_id": mid,
+                "sender_type": r["sender_type"],
+                "content": r["content"],
+                "answer_type": r["answer_type"],
+                "created_at": _iso(r["created_at"]),
+                "citations": [],
+            }
+            by_id[mid] = msg
+            messages.append(msg)
+        if r["card_id"] is not None:
+            msg["citations"].append(
+                {
+                    "card_id": int(r["card_id"]),
+                    "title": r["card_title"] or "",
+                    "relevance": float(r["relevance"]) if r["relevance"] is not None else 0,
+                }
+            )
+
+    return {
+        "session_id": session_id,
+        "started_at": _iso(session["started_at"]),
+        "messages": messages,
     }
