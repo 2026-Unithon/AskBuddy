@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # ingest (준혁) — mock: LLM 미호출(M1 기본값) / real: Gemini 호출
     ingest_mode: Literal["mock", "real"] = "mock"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
     stt_model: str = "whisper-1"
 
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개

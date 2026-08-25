@@ -107,10 +107,17 @@ async def _preprocess_voice(
     from app.config import get_settings
     source_id = src["source_id"]
 
+    # 전사문이 이미 있으면 STT 를 건너뛴다 (가이드 8장 --skip-stt).
+    # 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다.
+    # 다시 전사하려면 source_voice.transcript 를 비우고 재실행한다.
+    row = await repo.get_voice(conn, source_id)
+    if row and row["transcript"]:
+        logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s chars=%d",
+                    source_id, len(row["transcript"]))
+        return row["transcript"]
+
     if get_settings().ingest_mode == "mock":
-        row = await repo.get_voice(conn, source_id)
-        # 이미 전사문이 있으면 재사용한다 (--skip-stt 와 같은 효과)
-        return (row["transcript"] if row and row["transcript"] else MOCK_PLACEHOLDER)
+        return MOCK_PLACEHOLDER
 
     if not src["file_url"]:
         raise RuntimeError("file_url 이 비어 있다. Storage 업로드가 끝난 뒤 호출하라")

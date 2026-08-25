@@ -14,6 +14,9 @@ from app.ingest.schemas import ExtractionResult
 
 logger = logging.getLogger(__name__)
 
+# response_schema 를 쓰면 SDK 가 AFC 경고를 매 호출마다 찍는다. 우리는 함수 호출을 쓰지 않는다
+logging.getLogger("google_genai.models").setLevel(logging.ERROR)
+
 PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "extract_cards.ko.txt"
 
 

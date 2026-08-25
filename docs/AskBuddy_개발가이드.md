@@ -242,17 +242,30 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 |---|---|---|
 | M0 스키마 정합 | 진행중 | `db/001`·`002` 는 로컬 적용·검증 완료. `/reg/*` 의 `store_slug` 해석은 관호 |
 | M1 목 데이터 관통 | **입력 완료** | `/ingest/*` 전 구간 통과(업로드→처리→폴링→카드 3건). 출력·DB 는 진행중 |
-| M2 음성 관통 | 미착수 | 준혁 |
+| M2 음성 관통 | **관통 확인** | 전사(whisper-1) → Gemini 추출 → 카드 적재 → 승인 → 임베딩 → `/reg/retrieve` hit 까지 실측 통과 |
 | M3 미답변 순환 | 미착수 | 도영 |
 | M4 채널 확장 | 미착수 | 준혁 |
 
 ### 다음 할 일
 
-**준혁 (입력)**
-1. 샘플 음성으로 `audio.probe()` → `audio.transcribe()` 단독 확인 (`OPENAI_API_KEY` 최초 사용)
-2. `INGEST_MODE=real` 로 Gemini 1회 호출. 볼 것은 셋 — 카테고리를 지어내는가 / 위치를 랜드마크로 쓰는가 / `confidence` 가 전부 0.9 로 몰리는가
-3. 프롬프트 튜닝은 `api/prompts/extract_cards.ko.txt` 만 고친다. 코드는 안 건드린다
-4. M4 는 VIDEO → KAKAO → SCAN 순. 영상은 프레임 인덱스를 0-base 로 맞춰 `timestamp_sec = index * 3` 이 성립해야 한다
+**준혁 (입력)** — M2 는 관통 확인됨. 다음은 아래
+1. **실제 매장 음성으로 재검증.** 지금까지 검증은 사람이 쓴 전사문 기준이다. 실제 녹음은 잡음·말끊김·사투리가 섞인다
+2. N9 — 추출 카드의 검색 점수를 관호님과 맞춘다. 카드를 더 짧게 쪼갤지, 임계를 내릴지
+3. M4 는 VIDEO → KAKAO → SCAN 순. 영상은 프레임 인덱스를 0-base 로 맞춰 `timestamp_sec = index * 3` 이 성립해야 한다
+4. `store_glossary` (N7) — 매장 용어가 전사에서 깨지면 그때 채운다
+
+**프롬프트 튜닝 루프 (준혁)**
+
+```bash
+# 1) 전사문만 있으면 STT 없이 추출을 돌려볼 수 있다
+INGEST_MODE=real python scripts/extract_preview.py --file data/sample_transcript.ko.txt
+
+# 2) api/prompts/extract_cards.ko.txt 만 고친다. 코드는 안 건드린다
+# 3) DB 까지 넣어보려면
+python scripts/set_transcript.py --file data/sample_transcript.ko.txt
+curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"source_id":<위 출력>}'
+```
 
 **관호 (DB)**
 1. `/reg/*`·`/auth/*` 를 `api/app/reg/`·`api/app/auth/` 로 이식. 라우터는 `main.py` 에 이미 등록돼 있다
@@ -360,6 +373,10 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | 2026-08-25 | 입력 | `ingest/embed/service.py` 가 `reg.embeddings.embed_texts` 를 호출하도록 교체 (N6 해소) | 동기 함수라 `asyncio.to_thread` 로 감쌈 |
 | 2026-08-25 | 공통 | `supabase/config.toml` 의 `project_id` 를 **`AskBuddy`** 로 통일 | 폴더명이 달라 각자 다른 값이 생성됐다. 컨테이너 이름(`supabase_db_AskBuddy`)이 갈라진다 |
 | 2026-08-25 | 공통 | `.env.example` 인라인 주석 제거 | dotenv 가 값에 주석을 붙여 읽을 수 있다 |
+| 2026-08-25 | 입력 | **`GEMINI_MODEL` 을 `gemini-3.6-flash` 로 변경** | `gemini-2.5-flash` 가 신규 사용자에게 막혔다. 404 응답이 대체 모델을 지정한다 |
+| 2026-08-25 | 입력 | 전사문이 있으면 STT 를 건너뛴다 | 가이드 8장 `--skip-stt`. 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다 |
+| 2026-08-25 | 입력 | `scripts/set_transcript.py`·`scripts/extract_preview.py` 추가 | STT 없이 추출부터 개발·튜닝하기 위한 반복 루프 |
+| 2026-08-25 | 입력 | 추출 프롬프트 튜닝 — 한 카드 한 대상, confidence 구간 기준 명시 | 우유·원두·시럽이 한 카드로 합쳐져 "우유 어디 있어요?" 에 대응이 안 됐다. 4건 → 8건으로 분리됨 |
 
 ---
 
@@ -392,5 +409,6 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
 | N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
+| N9 | **추출 카드가 시드 카드보다 검색 점수가 낮다.** 같은 질문에 시드 0.640 / 추출 0.591. 게이트 임계(≈0.6)가 시드 기준으로 잡혀 있어, 점주가 승인한 카드가 miss 로 빠질 수 있다 | 관호·준혁 | M3 |
 
 > **해소됨:** 도영님이 물은 Storage 경로 규약과 `content_hash` 계산 주체는 D8·D9 로 확정했다. 상세는 `docs/ingest-contract.md`.
