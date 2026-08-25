@@ -154,6 +154,39 @@ export async function updateCategories(
   });
 }
 
+// ---- /ingest/review — 검수 목록 (미승인 포함) ----
+// /reg/cards 는 승인된 카드만 준다. 방금 등록한 카드는 미승인이라 거기 안 나온다.
+
+export type ReviewCard = {
+  card_id: number;
+  title: string;
+  content: string;
+  category_id: number | null;
+  category_name: string | null;
+  source_id: number | null;
+  source_type: string | null;
+  source_title: string | null;
+  confidence: number;
+  is_verified: boolean;
+  needs_attention: boolean;
+  created_at: string;
+};
+
+export async function listReviewCards(
+  token: string,
+  opts: { verified?: boolean; sourceId?: number; limit?: number } = {}
+) {
+  const q = new URLSearchParams();
+  if (opts.verified !== undefined) q.set("verified", String(opts.verified));
+  if (opts.sourceId !== undefined) q.set("source_id", String(opts.sourceId));
+  if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+  const res = await fetchJson<{ total: number; threshold: number; cards: ReviewCard[] }>(
+    `/ingest/review${q.toString() ? `?${q}` : ""}`,
+    { headers: authHeader(token) }
+  );
+  return res;
+}
+
 // ---- /reg/cards — 매장 지식카드 목록 ----
 
 export type KnowledgeCard = {
