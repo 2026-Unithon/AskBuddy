@@ -36,11 +36,14 @@ class SignupRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    """역할 선택 후 재진입. role 은 UI에서 고른 값이며 DB users.role 과 일치해야 한다."""
     email: EmailStr
     password: str
+    role: str = Field(pattern="^(OWNER|STAFF)$")
 
 
 class JoinRequest(BaseModel):
+    """알바 최초 합류. role 은 항상 STAFF 로 저장한다 (요청에 role 없음)."""
     email: EmailStr
     password: str
     name: str = Field(min_length=1, max_length=50)
@@ -97,6 +100,7 @@ async def signup(req: SignupRequest, db: Db):
 
 @router.post("/login")
 async def login(req: LoginRequest, db: Db):
+    """역할 선택 후 재진입. 요청 role 과 users.role 이 다르면 401 (계정 탐색 방지로 메시지 통일)."""
     row = await db.fetchrow(
         """
         select u.user_id, u.name, u.email, u.role, u.password_hash,
@@ -113,8 +117,12 @@ async def login(req: LoginRequest, db: Db):
         raise HTTPException(401, "invalid credentials")
     if not _verify_password(req.password, row["password_hash"]):
         raise HTTPException(401, "invalid credentials")
+    # PM UX: 사업자/알바 화면을 갈랐으므로, 고른 role 과 DB role 이 맞을 때만 통과
+    if row["role"] != req.role:
+        raise HTTPException(401, "invalid credentials")
 
     store_id = int(row["store_id"]) if row["store_id"] is not None else None
+    # JWT role 은 요청값이 아니라 DB 값 (요청 role 은 게이트용)
     token = _token_for(int(row["user_id"]), store_id, row["role"])
     return {
         "token": token,
@@ -130,7 +138,7 @@ async def login(req: LoginRequest, db: Db):
 
 @router.post("/join")
 async def join(req: JoinRequest, db: Db):
-    """초대코드로 매장 합류 → store_members."""
+    """알바 최초 합류: 초대코드 → users(STAFF) + store_members. 재진입은 /login."""
     invite = await db.fetchrow(
         """
         select invite_id, store_id, expires_at, is_used
