@@ -7,37 +7,39 @@ export default function OwnerIntentPage() {
       <TopBar />
       <div className="flex-1 flex flex-col px-6 pt-2 pb-10 gap-8">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold">무엇을 하러 오셨어요?</h1>
-          <p className="text-sm text-muted">언제든 다시 돌아올 수 있어요.</p>
+          <h1 className="text-2xl font-bold text-brand-700">어떤 일로 오셨나요?</h1>
+          <p className="text-sm text-muted">알맞은 화면으로 안내해드릴게요</p>
         </div>
 
         <div className="flex flex-col gap-4">
           <Link
             href="/owner/category"
-            className="group rounded-[var(--radius-lg)] bg-brand-600 text-white p-6 flex items-center gap-4 hover:bg-brand-700 transition-colors"
+            className="rounded-[var(--radius-lg)] bg-brand-700 text-white p-6 flex flex-col gap-3 shadow-[0_8px_28px_rgba(46,107,60,0.35)] hover:-translate-y-0.5 transition-transform"
           >
-            <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center text-2xl">
-              📋
+            <span className="text-4xl">📤</span>
+            <div>
+              <p className="text-xl font-bold">인수인계 하러 왔어요</p>
+              <p className="text-sm text-white/70 mt-1 leading-relaxed">
+                업무 자료를 Buddy에게 가르쳐
+                <br />
+                신입이 빠르게 배울 수 있게 해요
+              </p>
             </div>
-            <div className="flex-1">
-              <p className="font-semibold">인수인계 하러 왔어요</p>
-              <p className="text-xs text-white/80 mt-0.5">업무 자료를 올려서 Buddy를 가르쳐요</p>
-            </div>
-            <span className="group-hover:translate-x-0.5 transition-transform">→</span>
           </Link>
 
           <Link
             href="/owner/dashboard"
-            className="group rounded-[var(--radius-lg)] border border-border bg-surface p-6 flex items-center gap-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+            className="rounded-[var(--radius-lg)] bg-surface border border-border p-6 flex flex-col gap-3 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.10)] hover:-translate-y-0.5 transition-transform"
           >
-            <div className="w-14 h-14 rounded-2xl bg-brand-100 text-brand-700 flex items-center justify-center text-2xl">
-              📊
+            <span className="text-4xl">📊</span>
+            <div>
+              <p className="text-xl font-bold text-brand-700">대시보드 보러 왔어요</p>
+              <p className="text-sm text-muted mt-1 leading-relaxed">
+                직원 진행상황 확인 및
+                <br />
+                대기 중인 질문에 답변해요
+              </p>
             </div>
-            <div className="flex-1">
-              <p className="font-semibold text-foreground">대시보드 보러 왔어요</p>
-              <p className="text-xs text-muted mt-0.5">직원 진행 상황과 대기 질문을 확인해요</p>
-            </div>
-            <span className="text-muted group-hover:translate-x-0.5 transition-transform">→</span>
           </Link>
         </div>
       </div>

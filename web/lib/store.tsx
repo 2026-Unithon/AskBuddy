@@ -50,6 +50,8 @@ type AppState = {
   staff: StaffMember[];
   pendingQuestions: PendingQuestion[];
   emptyKnowledge: EmptyKnowledgeAlert[];
+  streakDays: number;
+  hearts: number;
 };
 
 const initialState: AppState = {
@@ -68,6 +70,8 @@ const initialState: AppState = {
   staff: MOCK_STAFF,
   pendingQuestions: MOCK_PENDING_QUESTIONS,
   emptyKnowledge: MOCK_EMPTY_KNOWLEDGE,
+  streakDays: 3,
+  hearts: 3,
 };
 
 type Action =

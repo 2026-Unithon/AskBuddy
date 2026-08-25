@@ -10,11 +10,12 @@ export type BusinessType =
 
 export const BUSINESS_TYPES: { key: BusinessType; label: string; emoji: string }[] = [
   { key: "CAFE", label: "카페", emoji: "☕" },
-  { key: "RESTAURANT", label: "음식점", emoji: "🍽️" },
+  { key: "RESTAURANT", label: "식당", emoji: "🍽️" },
   { key: "BAKERY", label: "베이커리", emoji: "🥐" },
-  { key: "BAR", label: "바", emoji: "🍸" },
+  { key: "BAR", label: "바·주점", emoji: "🍺" },
   { key: "CVS", label: "편의점", emoji: "🏪" },
-  { key: "SALON", label: "미용실", emoji: "💇" },
+  // 화면 라벨은 "기타"로 보이지만 내부 전송값은 백엔드 enum(SALON)을 그대로 쓴다.
+  { key: "SALON", label: "기타", emoji: "🌴" },
 ];
 
 export type TaskCategory = {

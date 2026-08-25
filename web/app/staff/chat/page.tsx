@@ -106,7 +106,7 @@ export default function ChatPage() {
               className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                 m.from === "USER"
                   ? "bg-brand-600 text-white rounded-br-sm"
-                  : "bg-surface border border-border rounded-bl-sm"
+                  : "bg-accent-100 text-foreground rounded-bl-sm"
               }`}
             >
               <p>{m.text}</p>
@@ -129,7 +129,7 @@ export default function ChatPage() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-surface border border-border rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-muted">
+            <div className="bg-accent-100 rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-muted">
               Buddy가 찾아보는 중…
             </div>
           </div>
