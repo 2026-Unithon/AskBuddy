@@ -74,7 +74,7 @@ import uuid as _uuid
 _EXT = {
     "VOICE": {"mp3", "m4a", "wav"},
     "VIDEO": {"mp4", "mov"},
-    "KAKAO": {"txt", "zip"},
+    "KAKAO": {"txt", "zip", "png", "jpg", "jpeg"},  # SCREENSHOT 지원
     "SCAN": {"pdf", "jpg", "jpeg", "png"},
 }
 

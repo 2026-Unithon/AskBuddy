@@ -10,6 +10,7 @@
 """
 import argparse
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,56 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import asyncpg  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
+
+# 타임스탬프 대본 형식 (음성 대체용)
+#   00:03–00:05  [c2] 언더카운터 냉장고
+#     "머신 아래 작업대 하부가 언더카운터 냉장고고, 우유는 여기 들어있어요."
+_CUE = re.compile(
+    r"^(?P<t>\d{1,2}:\d{2})\s*[–\-~]\s*\d{1,2}:\d{2}\s+"
+    r"\[(?P<id>c\d+)\]\s*(?P<label>.*)$")
+_OPEN = re.compile(r'^\s*["\u201c](?P<say>.*)$')
+
+
+def parse_script(raw: str) -> tuple[str, int]:
+    """대본에서 실제 발화만 뽑는다. 반환 (전사문, 구간 수).
+
+    무음 표시·규칙 안내·[cN] 마커·※ 주석이 전사문에 섞이면 추출 품질 비교가
+    무의미해진다. 대사는 여러 줄에 걸쳐 있고 닫는 따옴표에서 끝난다.
+    대본 형식이 아니면 (원문, 0) 을 돌려준다.
+    """
+    lines = raw.replace("\r\n", "\n").split("\n")
+    out: list[str] = []
+    cue: str | None = None
+    buf: list[str] | None = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        if buf is not None:                       # 대사 이어받는 중
+            if stripped.startswith("※"):          # 작성자 주석은 대사가 아니다
+                continue
+            closed = stripped.endswith('"') or stripped.endswith("\u201d")
+            buf.append(stripped.rstrip('"\u201d'))
+            if closed:
+                out.append(f"[{cue}] " + " ".join(x for x in buf if x))
+                cue, buf = None, None
+            continue
+
+        if (m := _CUE.match(stripped)):
+            cue = m.group("t")
+            continue
+
+        if cue and (m := _OPEN.match(line)):
+            body = m.group("say").strip()
+            closed = body.endswith('"') or body.endswith("\u201d")
+            buf = [body.rstrip('"\u201d')]
+            if closed:
+                out.append(f"[{cue}] " + buf[0])
+                cue, buf = None, None
+
+    if not out:
+        return raw.strip(), 0
+    return "\n".join(out), len(out)
 
 
 async def main() -> int:
@@ -37,6 +88,11 @@ async def main() -> int:
     if not args.clear and not text:
         print(f"{args.file} 이 비어 있다", file=sys.stderr)
         return 2
+
+    if not args.clear:
+        text, cues = parse_script(text)
+        if cues:
+            print(f"타임스탬프 대본 인식 — 발화 {cues}구간만 추출 (무음·마커 제거)")
 
     s = get_settings()
     conn = await asyncpg.connect(s.supabase_db_url)

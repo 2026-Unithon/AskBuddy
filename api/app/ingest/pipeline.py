@@ -172,6 +172,15 @@ async def _preprocess_kakao(
         raise RuntimeError("source_kakao 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
     path = await _download(conn, store_id, src)
+
+    # 캡처 이미지는 파싱할 텍스트가 없다. 모델이 그림째 읽는다 (import_type SCREENSHOT)
+    if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+        await repo.update_kakao_result(
+            conn, source_id, room_name=None, message_count=0, participant_cnt=0,
+            period_start=None, period_end=None, parsed_text="",
+        )
+        return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path]
+
     raw = path.read_text(encoding="utf-8", errors="replace")
     parsed = kakao.parse(raw)
 

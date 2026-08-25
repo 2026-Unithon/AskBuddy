@@ -25,17 +25,27 @@ _IOS = re.compile(
     r"^(?P<y>\d{4})\.\s*(?P<mo>\d{1,2})\.\s*(?P<d>\d{1,2})\.\s*"
     r"(?P<ampm>오전|오후)\s*(?P<h>\d{1,2}):(?P<mi>\d{2}),\s*"
     r"(?P<who>[^:]+?)\s*:\s*(?P<msg>.*)$")
+# PC 내보내기는 날짜가 구분선에만 있고 메시지 줄에는 시각만 있다
+#   --------------- 2026년 8월 18일 화요일 ---------------
+#   [박사장] [오전 8:52] 오늘 오픈조 ...
+_PC_DATE = re.compile(
+    r"^-{3,}\s*(?P<y>\d{4})년\s*(?P<mo>\d{1,2})월\s*(?P<d>\d{1,2})일.*?-{3,}\s*$")
+_PC = re.compile(
+    r"^\[(?P<who>[^\]]{1,40})\]\s*\[(?P<ampm>오전|오후)\s*"
+    r"(?P<h>\d{1,2}):(?P<mi>\d{2})\]\s*(?P<msg>.*)$")
 # 사진·이모티콘·입퇴장 같은 내용 없는 줄
 _NOISE = re.compile(r"^(사진|동영상|이모티콘|삭제된 메시지입니다\.?|"
                     r".*님이 (들어왔습니다|나갔습니다)\.?)$")
 
 
-def _ts(m: re.Match) -> datetime:
+def _hour(m: re.Match) -> int:
     h = int(m.group("h")) % 12
-    if m.group("ampm") == "오후":
-        h += 12
-    return datetime(int(m.group("y")), int(m.group("mo")), int(m.group("d")),
-                    h, int(m.group("mi")), tzinfo=KST)
+    return h + 12 if m.group("ampm") == "오후" else h
+
+
+def _ts(m: re.Match, day: tuple[int, int, int] | None = None) -> datetime:
+    y, mo, d = day if day else (int(m.group("y")), int(m.group("mo")), int(m.group("d")))
+    return datetime(y, mo, d, _hour(m), int(m.group("mi")), tzinfo=KST)
 
 
 def parse(raw: str) -> dict:
@@ -47,7 +57,22 @@ def parse(raw: str) -> dict:
         room = (m.group(1) or m.group(2) or "").strip() or None
 
     messages: list[tuple[datetime, str, str]] = []
+    day: tuple[int, int, int] | None = None      # PC 형식의 현재 날짜
+
     for line in lines:
+        if (ds := _PC_DATE.match(line)):
+            day = (int(ds.group("y")), int(ds.group("mo")), int(ds.group("d")))
+            continue
+
+        if (pc := _PC.match(line)):
+            if day is None:
+                logger.warning("날짜 구분선 없이 메시지가 먼저 나왔다 — 건너뛴다")
+                continue
+            text = pc.group("msg").strip()
+            if text and not _NOISE.match(text):
+                messages.append((_ts(pc, day), pc.group("who").strip(), text))
+            continue
+
         m = _ANDROID.match(line) or _IOS.match(line)
         if not m:
             # 여러 줄 메시지의 이어지는 줄은 직전 메시지에 붙인다.

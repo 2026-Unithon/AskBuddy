@@ -244,7 +244,7 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | M1 목 데이터 관통 | **입력 완료** | `/ingest/*` 전 구간 통과(업로드→처리→폴링→카드 3건). 출력·DB 는 진행중 |
 | M2 음성 관통 | **관통 확인** | 전사(whisper-1) → Gemini 추출 → 카드 적재 → 승인 → 임베딩 → `/reg/retrieve` hit 까지 실측 통과 |
 | M3 미답변 순환 | 미착수 | 도영 |
-| M4 채널 확장 | **VIDEO·KAKAO·SCAN 관통** | 준혁. 실측 25/26 통과 |
+| M4 채널 확장 | **VIDEO·KAKAO·SCAN 관통** | 준혁. 실측 25/26 통과. 실자료 17건 적재 후 채점 18 PASS / 0 FAIL / 7 스키마 미지원 |
 
 ### 다음 할 일
 
@@ -412,6 +412,7 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
 | ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
+| N11 | **`testdata/expected.json` 14케이스 중 7개가 현 스키마로 표현 불가.** `provenance`(observed/transcribed/inferred), `supersedes`·`is_current`(충돌 시 최신 우선), `knowledge_gaps`, 화자별 승격, 교차소스 병합이 없다. 값은 전부 포착되지만 어느 쪽이 최신인지 DB 가 모른다 | 전원 | M3 |
 | N10 | **임계 0.6 에서는 추출 카드가 miss 로 빠진다.** 실측 0.591 < 0.6. 점주가 승인한 카드로 답하는 장면을 데모에 넣으려면 0.4~0.5 가 필요하다 (N9 와 같은 뿌리) | 관호·PM | M3 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
 | N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
