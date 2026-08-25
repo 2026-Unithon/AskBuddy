@@ -100,34 +100,36 @@ export default function CategoryPage() {
           })}
         </div>
 
-        <div>
-          <h2 className="text-base font-bold text-brand-700">업무 카테고리</h2>
-          <p className="text-xs text-muted/80 mt-0.5">우리 매장에서 안 하는 항목은 꺼주세요</p>
-        </div>
+        {state.businessType && (
+          <div className="animate-[fadeIn_0.25s_ease-out]">
+            <h2 className="text-base font-bold text-brand-700">업무 카테고리</h2>
+            <p className="text-xs text-muted/80 mt-0.5">우리 매장에서 안 하는 항목은 꺼주세요</p>
 
-        <div className="flex flex-col gap-2.5 pt-3">
-          {state.categories.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => dispatch({ type: "TOGGLE_CATEGORY", key: c.key })}
-              className="w-full flex items-center gap-3 rounded-2xl bg-surface px-4 py-4 text-left shadow-[0_1px_2px_-1px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.10)]"
-            >
-              <span className="text-xl">{c.icon}</span>
-              <span className="flex-1 text-sm font-semibold">{c.label}</span>
-              <span
-                className={`w-12 h-6 rounded-full relative transition-colors ${
-                  c.enabled ? "bg-brand-500" : "bg-surface-muted"
-                }`}
-              >
-                <span
-                  className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                    c.enabled ? "translate-x-[26px]" : "translate-x-1"
-                  }`}
-                />
-              </span>
-            </button>
-          ))}
-        </div>
+            <div className="flex flex-col gap-2.5 pt-3">
+              {state.categories.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={() => dispatch({ type: "TOGGLE_CATEGORY", key: c.key })}
+                  className="w-full flex items-center gap-3 rounded-2xl bg-surface px-4 py-4 text-left shadow-[0_1px_2px_-1px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.10)]"
+                >
+                  <span className="text-xl">{c.icon}</span>
+                  <span className="flex-1 text-sm font-semibold">{c.label}</span>
+                  <span
+                    className={`w-12 h-6 rounded-full relative transition-colors ${
+                      c.enabled ? "bg-brand-500" : "bg-surface-muted"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                        c.enabled ? "translate-x-[26px]" : "translate-x-1"
+                      }`}
+                    />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <BottomCta>
         <Button

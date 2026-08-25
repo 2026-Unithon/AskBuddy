@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Badge, BottomCta, Button, Card, Shell, TopBar } from "@/components/ui";
+import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { listReviewCards, type ReviewCard } from "@/lib/api";
 import type { KnowledgeSection } from "@/lib/types";
@@ -29,7 +29,7 @@ function groupByCategory(cards: ReviewCard[]): KnowledgeSection[] {
     categoryKey: label,
     label,
     icon: CATEGORY_ICON[label] ?? "📋",
-    // 카테고리 신뢰도는 그 안 카드들의 평균이다. 낮은 카드가 하나라도 있으면 눈에 띈다.
+    // 카테고리 신뢰도는 그 안 카드들의 평균이다
     confidence: Math.round(
       group.reduce((sum, c) => sum + Number(c.confidence), 0) / group.length
     ),
@@ -44,7 +44,7 @@ export default function PreviewPage() {
   const [loaded, setLoaded] = useState(false);
 
   // 이번에 올린 자료에서 나온 카드만 보여준다.
-  // /reg/cards 는 승인된 카드만 주므로 방금 등록한 건(미승인) 이 거기엔 없다.
+  // /reg/cards 는 승인된 카드만 주므로 방금 등록한 건(미승인) 거기엔 없다.
   useEffect(() => {
     if (!state.token) return;
     let cancelled = false;
@@ -62,7 +62,7 @@ export default function PreviewPage() {
         );
         return groups.flat();
       }
-      // 이번 세션에 올린 게 없으면(대시보드에서 바로 들어온 경우) 검수 대기 전부를 보여준다
+      // 대시보드에서 바로 들어온 경우엔 검수 대기 전부를 보여준다
       const res = await listReviewCards(token, { verified: false, limit: 100 });
       return res.cards;
     }
@@ -83,8 +83,8 @@ export default function PreviewPage() {
     };
   }, [state.token, state.uploadSources, dispatch]);
 
-  // D3 — 신뢰도 0.6(60) 미만은 검수 화면 상단에 우선 노출한다.
-  const sorted = useMemo(
+  // D3 — 신뢰도 낮은 것부터 확인하게 한다
+  const sections = useMemo(
     () => [...state.knowledgeSections].sort((a, b) => a.confidence - b.confidence),
     [state.knowledgeSections]
   );
@@ -92,53 +92,73 @@ export default function PreviewPage() {
   return (
     <Shell>
       <TopBar title="학습 미리보기" />
-      <div className="flex-1 overflow-y-auto px-6 pt-2 pb-4 flex flex-col gap-4">
-        <p className="text-sm text-muted">
-          Buddy가 파악한 내용이에요. 신뢰도가 낮은 항목부터 확인해주세요.
-          {loaded && !live && " (이번에 등록한 자료에서 새로 만들어진 카드가 없어요)"}
-          {!loaded && !live && " (예시 데이터 — 백엔드에 연결되면 실제 카드로 바뀝니다)"}
-        </p>
-
-        {sorted.map((section) => {
-          const low = section.confidence < 60;
+      <div className="px-5 pt-1 pb-3">
+        <BuddyBubble
+          text={
+            loaded && !live
+              ? "이번에 등록한 자료에서 새로 만들어진 카드가 없어요. 소스를 더 올려주세요 😊"
+              : "Buddy가 이렇게 이해했어요! 틀리거나 빠진 부분이 있으면 소스를 추가해주세요 😊"
+          }
+        />
+      </div>
+      <div className="px-5 flex-1 overflow-y-auto pb-4 space-y-4">
+        {sections.map((s) => {
+          const low = s.confidence < 60;
           return (
-            <Card key={section.id} className={`p-4 ${low ? "border-warn-500/60" : ""}`}>
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-xl">{section.icon}</span>
-                <span className="flex-1 font-semibold text-sm">{section.label}</span>
-                <Badge tone={low ? "warn" : "brand"}>
-                  {low ? "⚠️ " : ""}신뢰도 {section.confidence}%
-                </Badge>
+            <div key={s.id} className="bg-surface rounded-3xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{s.icon}</span>
+                  <h3 className="font-bold text-brand-700">{s.label}</h3>
+                </div>
+                <span
+                  className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    low ? "text-warn-700 bg-warn-50" : "text-brand-500 bg-brand-50"
+                  }`}
+                >
+                  {low && "⚠️ "}
+                  {s.confidence}%
+                </span>
+              </div>
+              <div className="h-1.5 bg-surface-muted rounded-full mb-4 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${low ? "bg-warn-500" : "bg-brand-500"}`}
+                  style={{ width: `${s.confidence}%` }}
+                />
               </div>
               <ul className="space-y-1.5">
-                {section.items.map((item) => (
-                  <li key={item.id} className="text-sm text-foreground/90 pl-3 relative">
-                    <span className="absolute left-0 text-brand-500">·</span>
-                    {item.text}
+                {s.items.map((item) => (
+                  <li key={item.id} className="flex items-start gap-2 text-sm">
+                    <span className="text-brand-500 font-bold mt-0.5 shrink-0">✓</span>
+                    <span className="text-foreground font-medium">{item.text}</span>
                   </li>
                 ))}
               </ul>
               {low && (
-                <p className="text-xs text-warn-700 mt-2">
-                  확인이 필요해요. 사장님이 직접 검수한 뒤 승인해주세요.
+                <p className="text-xs text-warn-700 mt-3 font-medium">
+                  확인이 필요해요. 검수 후 승인해주세요.
                 </p>
               )}
-            </Card>
+            </div>
           );
         })}
 
         <button
           onClick={() => router.push("/owner/upload")}
-          className="text-sm text-brand-700 font-medium py-3 text-center"
+          className="w-full py-3 rounded-2xl border-2 border-border font-semibold text-sm bg-surface active:scale-[0.98] transition-all"
         >
-          + 자료 추가로 등록하기
+          ＋ 소스 추가하기
         </button>
       </div>
-      <BottomCta>
-        <Button size="lg" className="w-full" onClick={() => router.push("/owner/complete")}>
-          검수 완료, 학습 마치기
-        </Button>
-      </BottomCta>
+      <div className="px-5 pb-8 pt-4 bg-gradient-to-t from-background via-background to-transparent">
+        <button
+          onClick={() => router.push("/owner/complete")}
+          className="w-full py-4 bg-brand-700 text-white rounded-2xl font-bold text-lg active:scale-95 transition-all shadow-[0_6px_22px_rgba(46,107,60,0.4)]"
+        >
+          🎉 학습 완료!
+        </button>
+        <p className="text-xs text-center text-muted mt-2 font-medium">완료 후 사장님께 알림이 전송돼요</p>
+      </div>
     </Shell>
   );
 }

@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Badge, Button, Input, Shell, TopBar } from "@/components/ui";
-import { StaffTabBar } from "@/components/StaffTabBar";
+import { useRouter } from "next/navigation";
+import { Badge, Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { retrieve } from "@/lib/api";
 import { MOCK_KNOWLEDGE_SECTIONS } from "@/lib/mock";
-import type { ChatMessage } from "@/lib/types";
 
 // 백엔드가 연결되지 않았을 때만 쓰는 로컬 대체 판정 — 실제 판정은 전부 /reg/retrieve 가 한다 (개발가이드 6-3).
 function simulateRetrieve(question: string) {
@@ -30,32 +29,34 @@ function simulateRetrieve(question: string) {
 }
 
 export default function ChatPage() {
+  const router = useRouter();
   const { state, dispatch } = useApp();
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [typing, setTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [state.chatMessages, loading]);
+  }, [state.chatMessages, typing]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const question = input.trim();
-    if (!question || loading) return;
+    if (!question || typing) return;
     setInput("");
 
-    const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      from: "USER",
-      text: question,
-      createdAt: new Date().toISOString(),
-    };
-    dispatch({ type: "ADD_CHAT_MESSAGE", message: userMsg });
-    setLoading(true);
+    dispatch({
+      type: "ADD_CHAT_MESSAGE",
+      message: { id: `msg-${Date.now()}`, from: "USER", text: question, createdAt: new Date().toISOString() },
+    });
+    setTyping(true);
 
     // kind: "miss" 면 LLM을 호출하지 않는다 — 이 판정은 반드시 /reg/retrieve 를 거친다 (CLAUDE.md 불변식 5).
-    const result = await retrieve(state.storeSlug, question).catch(() => simulateRetrieve(question));
+    const [result] = await Promise.all([
+      retrieve(state.storeSlug, question).catch(() => simulateRetrieve(question)),
+      new Promise((r) => setTimeout(r, 900)), // Buddy가 "생각하는" 최소 시간 — 즉답이 어색해 보이지 않게
+    ]);
+    setTyping(false);
 
     if (result.kind === "hit") {
       const top = result.candidates[0];
@@ -75,7 +76,7 @@ export default function ChatPage() {
         message: {
           id: `msg-${Date.now()}-a`,
           from: "BUDDY",
-          text: "아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏",
+          text: "이 질문은 아직 등록된 내용이 없어요. 사장님께 확인 중이에요! 잠시만 기다려주세요 😊",
           pending: true,
           createdAt: new Date().toISOString(),
         },
@@ -90,63 +91,103 @@ export default function ChatPage() {
         },
       });
     }
-    setLoading(false);
   }
 
   return (
-    <Shell>
-      <TopBar title="Buddy 채팅" />
-      <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-3">
-        {state.chatMessages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex ${m.from === "USER" ? "justify-end" : "justify-start"}`}
+    <div className="min-h-dvh w-full flex justify-center bg-background">
+      <div className="w-full max-w-[480px] min-h-dvh flex flex-col bg-[#EEF4EF]">
+        {/* 헤더 */}
+        <div className="shrink-0 bg-surface border-b border-border px-4 py-3 flex items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-muted transition-colors"
           >
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                m.from === "USER"
-                  ? "bg-brand-600 text-white rounded-br-sm"
-                  : "bg-accent-100 text-foreground rounded-bl-sm"
-              }`}
-            >
-              <p>{m.text}</p>
-              {m.citations && m.citations.length > 0 && (
-                <div className="flex gap-1.5 mt-2 flex-wrap">
-                  {m.citations.map((c) => (
-                    <Badge key={c.cardId} tone="brand">
-                      📎 {c.title}
-                    </Badge>
+            ←
+          </button>
+          <Buddy size={36} />
+          <div>
+            <p className="text-sm font-bold text-brand-700">Buddy</p>
+            <p className="text-xs text-muted">AI 인수인계 도우미</p>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+            <span className="text-xs font-medium text-brand-500">온라인</span>
+          </div>
+        </div>
+
+        {/* 메시지 */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3.5">
+          {state.chatMessages.map((m) => (
+            <div key={m.id} className={`flex items-end gap-2 ${m.from === "USER" ? "justify-end" : "justify-start"}`}>
+              {m.from === "BUDDY" && <Buddy size={32} />}
+              <div className="space-y-1.5 max-w-[74%]">
+                <div
+                  className={`px-4 py-2.5 shadow-[0_1px_4px_rgba(0,0,0,0.08)] ${
+                    m.from === "USER"
+                      ? "bg-brand-500 text-white rounded-[20px_20px_4px_20px]"
+                      : "bg-accent-100 text-foreground rounded-[4px_20px_20px_20px]"
+                  }`}
+                >
+                  <p className="text-sm font-medium leading-snug">{m.text}</p>
+                </div>
+                {m.citations && m.citations.length > 0 && (
+                  <div className="flex gap-1.5 flex-wrap">
+                    {m.citations.map((c) => (
+                      <Badge key={c.cardId} tone="brand">
+                        📎 {c.title}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {m.pending && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />
+                    <span className="text-xs font-semibold text-brand-700">사장님께 확인 중이에요</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {typing && (
+            <div className="flex items-end gap-2">
+              <Buddy size={32} />
+              <div className="rounded-[4px_20px_20px_20px] px-4 py-3 bg-accent-100 shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+                <div className="flex gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="w-2 h-2 rounded-full bg-border inline-block animate-bounce"
+                      style={{ animationDelay: `${i * 0.15}s` }}
+                    />
                   ))}
                 </div>
-              )}
-              {m.pending && (
-                <div className="mt-2">
-                  <Badge tone="warn">🕐 사장님께 확인 중</Badge>
-                </div>
-              )}
+              </div>
             </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-accent-100 rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-muted">
-              Buddy가 찾아보는 중…
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* 입력창 */}
+        <form onSubmit={handleSubmit} className="shrink-0 bg-surface border-t border-border px-4 py-3 flex items-center gap-2.5">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="업무에 대해 질문해보세요..."
+            className="flex-1 bg-background rounded-full px-4 py-2.5 text-sm font-medium text-foreground outline-none"
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || typing}
+            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 ${
+              input.trim() ? "bg-brand-500" : "bg-surface-muted"
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" />
+            </svg>
+          </button>
+        </form>
       </div>
-      <form onSubmit={handleSubmit} className="flex gap-2 px-4 py-3 border-t border-border">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="궁금한 걸 물어보세요"
-        />
-        <Button type="submit" disabled={loading || !input.trim()}>
-          전송
-        </Button>
-      </form>
-      <StaffTabBar />
-    </Shell>
+    </div>
   );
 }
