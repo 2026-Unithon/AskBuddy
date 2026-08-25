@@ -62,6 +62,23 @@ async def _member_id(db: Db, store_id: int, user_id: int) -> int:
     return int(row["member_id"])
 
 
+async def _waiting_same_question(db: Db, store_id: int, question: str):
+    """매장 + 같은 문장 + WAITING 이면 기존 쪽지. B: 중복 INSERT 금지."""
+    return await db.fetchrow(
+        """
+        select question_id, status, miss_reason, created_at, member_id
+        from pending_questions
+        where store_id = $1
+          and status = 'WAITING'
+          and trim(question_text) = $2
+        order by created_at asc
+        limit 1
+        """,
+        store_id,
+        question,
+    )
+
+
 @router.post("/pending")
 async def create_pending(
     req: CreatePendingRequest,
@@ -89,6 +106,16 @@ async def create_pending(
         )
         if not msg:
             raise HTTPException(404, "message not found in this store")
+
+    existing = await _waiting_same_question(db, store_id, question)
+    if existing:
+        return {
+            "question_id": int(existing["question_id"]),
+            "status": existing["status"],
+            "miss_reason": existing["miss_reason"],
+            "question_text": question,
+            "created_at": existing["created_at"].isoformat(),
+        }
 
     row = await db.fetchrow(
         """
@@ -122,7 +149,7 @@ async def list_pending(
     """점주 대시보드 폴링용. JWT store_id 의 pending 만 반환한다."""
     rows = await db.fetch(
         """
-        select
+        select distinct on (q.question_text)
           q.question_id,
           q.question_text,
           q.miss_reason,
@@ -135,7 +162,7 @@ async def list_pending(
         join users u on u.user_id = m.user_id
         where q.store_id = $1
           and q.status = $2
-        order by q.created_at asc
+        order by q.question_text, q.created_at asc, q.question_id asc
         """,
         store_id,
         status,
@@ -156,6 +183,116 @@ async def list_pending(
             for r in rows
         ],
     }
+
+
+@router.get("/questions")
+async def list_questions(
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    """점주용 매장 전체 질문. 알바가 물은 USER 메시지 + 그에 대한 답, 최신순.
+
+    대기(miss)만 보지 않는다. 지식 hit · 점주 답 · 아직 대기 중을 한 목록에 둔다.
+    문장이 다르면 별도 행이다. DISTINCT 로 묶지 않는다.
+    """
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+
+    rows = await db.fetch(
+        """
+        select
+          um.message_id,
+          um.content as question_text,
+          um.created_at,
+          u.name as asked_by,
+          sm.member_id,
+          bm.content as buddy_content,
+          bm.answer_type as buddy_answer_type,
+          case
+            when pq.status = 'WAITING' then pq.question_id
+            else waiting.question_id
+          end as waiting_question_id,
+          coalesce(oa_direct.answer_text, oa_match.answer_text) as owner_answer,
+          coalesce(oa_direct.answered_at, oa_match.answered_at) as answered_at
+        from chat_messages um
+        join chat_sessions s
+          on s.session_id = um.session_id
+         and s.store_id = $1
+        join store_members sm
+          on sm.member_id = s.member_id
+         and sm.store_id = s.store_id
+        join users u on u.user_id = sm.user_id
+        left join lateral (
+          select content, answer_type
+          from chat_messages
+          where session_id = um.session_id
+            and sender_type = 'BUDDY'
+            and message_id > um.message_id
+          order by message_id asc
+          limit 1
+        ) bm on true
+        left join pending_questions pq
+          on pq.store_id = $1
+         and pq.message_id = um.message_id
+        left join owner_answers oa_direct
+          on oa_direct.question_id = pq.question_id
+        left join lateral (
+          select a.answer_text, a.answered_at
+          from pending_questions q
+          join owner_answers a on a.question_id = q.question_id
+          where q.store_id = $1
+            and trim(q.question_text) = trim(um.content)
+          order by a.answered_at desc
+          limit 1
+        ) oa_match on oa_direct.answer_text is null
+        left join lateral (
+          select question_id
+          from pending_questions
+          where store_id = $1
+            and status = 'WAITING'
+            and trim(question_text) = trim(um.content)
+          order by created_at desc, question_id desc
+          limit 1
+        ) waiting on true
+        where um.sender_type = 'USER'
+        order by um.created_at desc, um.message_id desc
+        limit $2
+        """,
+        store_id,
+        limit,
+    )
+
+    items: list[dict] = []
+    for r in rows:
+        owner_answer = r["owner_answer"]
+        buddy_type = r["buddy_answer_type"]
+        waiting_id = r["waiting_question_id"]
+        if owner_answer:
+            status = "OWNER_ANSWERED"
+            answer_text = owner_answer
+        elif buddy_type == "ANSWERED":
+            status = "HIT"
+            answer_text = r["buddy_content"]
+        else:
+            status = "WAITING"
+            answer_text = None
+        items.append(
+            {
+                "message_id": int(r["message_id"]),
+                "question_text": r["question_text"],
+                "asked_by": r["asked_by"],
+                "member_id": int(r["member_id"]),
+                "status": status,
+                "answer_text": answer_text,
+                "waiting_question_id": int(waiting_id) if waiting_id is not None else None,
+                "answered_at": _iso(r["answered_at"]) or None,
+                "created_at": _iso(r["created_at"]),
+            }
+        )
+
+    return {"store_id": store_id, "items": items}
 
 
 @router.post("/pending/{question_id}/answer")
@@ -180,7 +317,7 @@ async def answer_pending(
 
     pending = await db.fetchrow(
         """
-        select question_id, question_text, status, category_id
+        select question_id, question_text, status, category_id, member_id
         from pending_questions
         where question_id = $1
           and store_id = $2
@@ -229,17 +366,55 @@ async def answer_pending(
             # 승인된 카드만 embed_card 가 받는다. 같은 커넥션·트랜잭션에서 적재.
             await embed_card(db, store_id, card_id)
 
+            askers = await db.fetch(
+                """
+                select distinct member_id
+                from pending_questions
+                where store_id = $1
+                  and status = 'WAITING'
+                  and trim(question_text) = $2
+                """,
+                store_id,
+                pending["question_text"].strip(),
+            )
+
             await db.execute(
                 """
                 update pending_questions
                 set status = 'ANSWERED'
-                where question_id = $1
-                  and store_id = $2
+                where store_id = $1
                   and status = 'WAITING'
+                  and trim(question_text) = $2
                 """,
-                question_id,
                 store_id,
+                pending["question_text"].strip(),
             )
+
+            # 옛 「확인 중」은 남기고, 같은 질문을 한 알바 채팅에 답을 한 줄 보낸다 (A′).
+            buddy_content = f"사장님이 답해주셨어요.\n\n{answer}"
+            for asker in askers:
+                session_id = await _open_session(db, store_id, int(asker["member_id"]))
+                buddy_id = int(
+                    await db.fetchval(
+                        """
+                        insert into chat_messages (
+                          session_id, sender_type, content, answer_type
+                        )
+                        values ($1, 'BUDDY', $2, 'ANSWERED')
+                        returning message_id
+                        """,
+                        session_id,
+                        buddy_content,
+                    )
+                )
+                await db.execute(
+                    """
+                    insert into message_citations (message_id, card_id, relevance)
+                    values ($1, $2, 100.00)
+                    """,
+                    buddy_id,
+                    card_id,
+                )
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except ValueError as e:
@@ -551,23 +726,27 @@ async def ask_chat(
                     buddy_content,
                 )
             )
-            pending_question_id = int(
-                await db.fetchval(
-                    """
-                    insert into pending_questions (
-                      store_id, member_id, message_id,
-                      question_text, miss_reason, status
+            pending_row = await _waiting_same_question(db, store_id, question[:500])
+            if pending_row:
+                pending_question_id = int(pending_row["question_id"])
+            else:
+                pending_question_id = int(
+                    await db.fetchval(
+                        """
+                        insert into pending_questions (
+                          store_id, member_id, message_id,
+                          question_text, miss_reason, status
+                        )
+                        values ($1, $2, $3, $4, $5, 'WAITING')
+                        returning question_id
+                        """,
+                        store_id,
+                        member_id,
+                        user_message_id,
+                        question[:500],
+                        result["reason"],
                     )
-                    values ($1, $2, $3, $4, $5, 'WAITING')
-                    returning question_id
-                    """,
-                    store_id,
-                    member_id,
-                    user_message_id,
-                    question[:500],
-                    result["reason"],
                 )
-            )
             answer_type = "NO_ANSWER"
 
     return {

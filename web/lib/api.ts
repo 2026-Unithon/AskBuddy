@@ -4,10 +4,13 @@
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const TIMEOUT_MS = 6000;
+const CHAT_TIMEOUT_MS = 20000;
 
 function authHeader(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+type FetchJsonInit = RequestInit & { timeoutMs?: number };
 
 // 상태 코드를 실어 던진다 — 화면단이 401(로그인 필요)과 네트워크 단절을 구분해야 한다.
 export class ApiError extends Error {
@@ -21,15 +24,16 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
+  const { timeoutMs = TIMEOUT_MS, ...fetchInit } = init ?? {};
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${BASE}${path}`, {
-      ...init,
+      ...fetchInit,
       headers: {
         "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
+        ...(fetchInit.headers ?? {}),
       },
       signal: controller.signal,
     });
@@ -307,5 +311,104 @@ export type IngestStatus = {
 export async function getIngestStatus(sourceId: number, token?: string) {
   return fetchJson<IngestStatus>(`/ingest/status?source_id=${sourceId}`, {
     headers: authHeader(token),
+  });
+}
+
+// ---- /learn/chat — 신입 질문 한 방 (검색·저장·miss면 pending) ----
+// store_id 는 JWT 에만 있다. 본문으로 매장을 보내지 않는다.
+
+export type LearnChatCitation = {
+  card_id: number;
+  title: string;
+  relevance: number;
+};
+
+export type LearnChatMessage = {
+  message_id: number;
+  sender_type: "USER" | "BUDDY";
+  content: string;
+  answer_type: "ANSWERED" | "NO_ANSWER" | null;
+  created_at: string;
+  citations: LearnChatCitation[];
+};
+
+export type LearnChatAskResponse = {
+  session_id: number;
+  user_message_id: number;
+  buddy: {
+    message_id: number;
+    answer_type: "ANSWERED" | "NO_ANSWER";
+    content: string;
+    citations: LearnChatCitation[];
+  };
+  pending_question_id: number | null;
+};
+
+export async function askChat(question: string, token: string) {
+  return fetchJson<LearnChatAskResponse>("/learn/chat", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ question }),
+    timeoutMs: CHAT_TIMEOUT_MS,
+  });
+}
+
+export async function listChat(token: string) {
+  return fetchJson<{ session_id: number | null; messages: LearnChatMessage[] }>("/learn/chat", {
+    headers: authHeader(token),
+    timeoutMs: CHAT_TIMEOUT_MS,
+  });
+}
+
+// ---- /learn/pending — 점주 대시보드 폴링 · 답변 (D6, 2초) ----
+
+export type LearnPendingItem = {
+  question_id: number;
+  question_text: string;
+  miss_reason: string;
+  status: "WAITING" | "ANSWERED";
+  member_id: number;
+  asked_by: string;
+  created_at: string;
+};
+
+export async function listPending(token: string, status: "WAITING" | "ANSWERED" = "WAITING") {
+  return fetchJson<{ store_id: number; status: string; items: LearnPendingItem[] }>(
+    `/learn/pending?status=${status}`,
+    { headers: authHeader(token) }
+  );
+}
+
+// ---- /learn/questions — 점주 전체 질문 최신순 (hit·점주답·대기) ----
+
+export type LearnQuestionItem = {
+  message_id: number;
+  question_text: string;
+  asked_by: string;
+  member_id: number;
+  status: "WAITING" | "HIT" | "OWNER_ANSWERED";
+  answer_text: string | null;
+  waiting_question_id: number | null;
+  answered_at: string | null;
+  created_at: string;
+};
+
+export async function listQuestions(token: string) {
+  return fetchJson<{ store_id: number; items: LearnQuestionItem[] }>("/learn/questions", {
+    headers: authHeader(token),
+  });
+}
+
+export async function answerPending(questionId: number, answerText: string, token: string) {
+  return fetchJson<{
+    question_id: number;
+    status: "ANSWERED";
+    card_id: number;
+    answer_text: string;
+  }>(`/learn/pending/${questionId}/answer`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ answer_text: answerText }),
+    timeoutMs: CHAT_TIMEOUT_MS,
   });
 }

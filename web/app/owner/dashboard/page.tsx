@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Buddy, BuddyBubble, Button, Card, Input } from "@/components/ui";
 import { useApp } from "@/lib/store";
-import type { StaffLevel } from "@/lib/types";
+import { ApiError, answerPending, listPending, type LearnPendingItem } from "@/lib/api";
+import type { PendingQuestion, StaffLevel } from "@/lib/types";
 
 const LEVEL_TONE: Record<StaffLevel, "brand" | "warn" | "danger"> = {
   great: "brand",
@@ -17,9 +18,22 @@ const LEVEL_LABEL: Record<StaffLevel, string> = {
   warn: "확인이 필요해요",
 };
 
+const POLL_MS = 2000;
+
+function toPending(item: LearnPendingItem): PendingQuestion {
+  return {
+    id: String(item.question_id),
+    askedBy: item.asked_by,
+    questionText: item.question_text,
+    createdAt: item.created_at,
+  };
+}
+
 export default function DashboardPage() {
   const { state, dispatch } = useApp();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [answeringId, setAnsweringId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const avgProgress = useMemo(() => {
     if (state.staff.length === 0) return 0;
@@ -28,11 +42,51 @@ export default function DashboardPage() {
     );
   }, [state.staff]);
 
-  function submitAnswer(id: string) {
+  useEffect(() => {
+    if (!state.token) return;
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        const res = await listPending(state.token!);
+        if (cancelled) return;
+        dispatch({ type: "SET_PENDING_QUESTIONS", questions: (res.items ?? []).map(toPending) });
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof ApiError ? e.detail || "대기 질문을 불러오지 못했어요" : "서버에 연결할 수 없습니다");
+      }
+    }
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [state.token, dispatch]);
+
+  async function submitAnswer(id: string) {
     const text = drafts[id]?.trim();
-    if (!text) return;
-    dispatch({ type: "ANSWER_PENDING_QUESTION", id, answerText: text });
-    setDrafts((d) => ({ ...d, [id]: "" }));
+    if (!text || !state.token || answeringId) return;
+    setAnsweringId(id);
+    setError(null);
+    try {
+      const target = state.pendingQuestions.find((q) => q.id === id);
+      await answerPending(Number(id), text, state.token);
+      const same = (target?.questionText ?? "").trim();
+      dispatch({
+        type: "SET_PENDING_QUESTIONS",
+        questions: state.pendingQuestions.filter(
+          (q) => q.id !== id && q.questionText.trim() !== same
+        ),
+      });
+      setDrafts((d) => ({ ...d, [id]: "" }));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail || "답변 저장에 실패했어요" : "서버에 연결할 수 없습니다");
+    } finally {
+      setAnsweringId(null);
+    }
   }
 
   return (
@@ -79,6 +133,12 @@ export default function DashboardPage() {
           className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
         >
           학습 미리보기
+        </Link>
+        <Link
+          href="/owner/questions"
+          className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+        >
+          전체 질문
         </Link>
         <Link href="/role" className="text-sm text-muted hover:text-foreground px-2 ml-auto">
           나가기
@@ -129,6 +189,7 @@ export default function DashboardPage() {
             text="답변하면 Buddy 지식에 자동 반영되고 신입 화면의 배지가 사라져요"
             size={32}
           />
+          {error && <p className="text-xs font-medium text-[#E57373] px-1">{error}</p>}
           <div className="flex flex-col gap-3">
             {state.pendingQuestions.map((q) => (
               <Card key={q.id} className="p-4 space-y-3">
@@ -142,8 +203,11 @@ export default function DashboardPage() {
                     value={drafts[q.id] ?? ""}
                     onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
                     onKeyDown={(e) => e.key === "Enter" && submitAnswer(q.id)}
+                    disabled={answeringId === q.id}
                   />
-                  <Button onClick={() => submitAnswer(q.id)}>답변</Button>
+                  <Button onClick={() => submitAnswer(q.id)} disabled={answeringId === q.id}>
+                    {answeringId === q.id ? "저장 중" : "답변"}
+                  </Button>
                 </div>
               </Card>
             ))}
