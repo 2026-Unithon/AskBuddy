@@ -1,6 +1,15 @@
 """경계 확인 — 업로드 등록 → 처리 → 폴링 → 카드 확인.
 
     uvicorn app.main:app --reload --port 8000        # 다른 터미널
+
+권장 (실 JWT):
+    curl -X POST localhost:8000/auth/login -H "Content-Type: application/json" \\
+      -d '{"email":"owner@demo.cafe","password":"demo1234","role":"OWNER"}'
+    export ASKBUDDY_TOKEN=<응답 token>
+    python scripts/ingest_smoke.py
+
+하위 호환 (dev_token 비활성 — 명시적 force만):
+    export ASKBUDDY_TOKEN=$(ALLOW_DEV_TOKEN=1 python scripts/dev_token.py --force)
     python scripts/ingest_smoke.py
 
 INGEST_MODE=mock  LLM 을 호출하지 않는다. 키 없이 돈다.
@@ -86,14 +95,19 @@ async def _prepare_object(client: httpx.AsyncClient, token: str) -> tuple[str, b
 async def main() -> int:
     token = TOKEN
     if not token:
-        # export 는 셸 단위라 터미널을 옮기면 사라진다. 없으면 직접 발급한다
+        # 권장: ASKBUDDY_TOKEN 을 /auth/login 으로 넣어라.
+        # 없으면 로컬 하위 호환으로만 force mint (dev_token 기본 경로는 비활성).
         from dev_token import mint
         try:
-            token = await mint()
+            token = await mint(force=True)
         except Exception as e:
             print(f"토큰 발급 실패: {e}", file=sys.stderr)
+            print(
+                "힌트: POST /auth/login 후 ASKBUDDY_TOKEN 을 export 하라.",
+                file=sys.stderr,
+            )
             return 2
-        print("[token] ASKBUDDY_TOKEN 이 없어 직접 발급했다")
+        print("[token] ASKBUDDY_TOKEN 없음 — deprecated force mint 사용 (login 권장)")
 
     from app.config import get_settings
     mode = get_settings().ingest_mode
