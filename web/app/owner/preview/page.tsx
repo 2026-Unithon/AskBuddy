@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
-import { listReviewCards, type ReviewCard } from "@/lib/api";
+import { approveCards, listReviewCards, type ReviewCard } from "@/lib/api";
 import type { KnowledgeSection } from "@/lib/types";
 
 const CATEGORY_ICON: Record<string, string> = {
@@ -56,6 +56,40 @@ export default function PreviewPage() {
   const { state, dispatch } = useApp();
   const [live, setLive] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // 승인 대상 card_id. 화면은 카테고리로 묶여 있어 따로 들고 있어야 한다
+  const [pendingIds, setPendingIds] = useState<number[]>([]);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  // "학습 완료" = 점주 승인이다. 이 순간 카드가 검색 대상이 되고 임베딩이 만들어진다.
+  // 백엔드가 승인과 임베딩을 한 트랜잭션에 묶으므로, 성공했다면 벡터까지 들어간 것이다.
+  async function handleFinish() {
+    if (!state.token || pendingIds.length === 0) {
+      router.push("/owner/complete");
+      return;
+    }
+    setApproving(true);
+    setApproveError(null);
+    try {
+      const results = await approveCards(pendingIds, state.token);
+      const failed = results.filter((r) => !r.is_verified);
+      if (failed.length > 0) {
+        // 일부만 실패해도 그냥 넘어가면 검색에 안 잡히는 카드가 생긴다
+        setApproveError(
+          `${failed.length}건 저장 실패 — ${failed[0].error ?? "알 수 없는 오류"}`
+        );
+        return;
+      }
+      setPendingIds([]);
+      router.push("/owner/complete");
+    } catch (e) {
+      setApproveError(
+        e instanceof Error ? e.message : "지식 저장에 실패했어요. 다시 눌러주세요"
+      );
+    } finally {
+      setApproving(false);
+    }
+  }
 
   // D3 — 신뢰도 0.6(60) 미만은 검수 화면 상단에 우선 노출한다.
   const sorted = useMemo(
@@ -91,6 +125,7 @@ export default function PreviewPage() {
       .then((cards) => {
         if (cancelled) return;
         setLoaded(true);
+        setPendingIds(cards.filter((x) => !x.is_verified).map((x) => x.card_id));
         if (cards.length === 0) return;
         dispatch({ type: "SET_KNOWLEDGE_SECTIONS", sections: groupByCategory(cards) });
         setLive(true);
@@ -153,10 +188,17 @@ export default function PreviewPage() {
                   </li>
                 ))}
               </ul>
-              {low && (
-                <p className="text-xs text-warn-700 mt-3 font-medium">
-                  확인이 필요해요. 검수 후 승인해주세요.
+              {/* 승인 전에는 "확인 필요", 승인 뒤에는 "검증 완료" 로 바뀐다 */}
+              {pendingIds.length === 0 ? (
+                <p className="text-xs text-brand-600 mt-3 font-semibold flex items-center gap-1">
+                  <span aria-hidden>✅</span> 검증 완료 · 신입이 물어보면 답할 수 있어요
                 </p>
+              ) : (
+                low && (
+                  <p className="text-xs text-warn-700 mt-3 font-medium">
+                    확인이 필요해요. 검수 후 승인해주세요.
+                  </p>
+                )
               )}
             </div>
           );
@@ -170,13 +212,20 @@ export default function PreviewPage() {
         </button>
       </div>
       <div className="px-5 pb-8 pt-4 bg-gradient-to-t from-background via-background to-transparent">
+        {approveError && (
+          <div role="alert" className="mb-3 flex items-start gap-2 rounded-2xl bg-danger-50 px-4 py-3 text-danger-700">
+            <span className="text-base leading-5">⚠️</span>
+            <p className="flex-1 text-sm font-medium leading-5">{approveError}</p>
+          </div>
+        )}
         <button
-          onClick={() => router.push("/owner/complete")}
+          disabled={approving}
+          onClick={handleFinish}
           className="w-full py-4 bg-brand-700 text-white rounded-2xl font-bold text-lg active:scale-95 transition-all shadow-[0_6px_22px_rgba(46,107,60,0.4)]"
         >
-          🎉 학습 완료!
+          {approving ? "지식으로 저장하는 중…" : "🎉 학습 완료!"}
         </button>
-        <p className="text-xs text-center text-muted mt-2 font-medium">완료 후 사장님께 알림이 전송돼요</p>
+        <p className="text-xs text-center text-muted mt-2 font-medium">{pendingIds.length > 0 ? `${pendingIds.length}건을 매장 지식으로 저장해요` : "저장 완료 · 이제 신입이 물어볼 수 있어요"}</p>
       </div>
     </Shell>
   );

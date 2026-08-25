@@ -191,6 +191,25 @@ export async function listReviewCards(
   return res;
 }
 
+// 승인 = 검색 노출. 백엔드가 승인과 임베딩을 한 트랜잭션에 묶으므로,
+// 200 이 오면 벡터까지 들어간 것이다. 실패한 카드만 error 를 달고 돌아온다.
+export type ApproveResult = {
+  card_id: number;
+  is_verified: boolean;
+  chunks?: number;
+  error?: string | null;
+};
+
+export async function approveCards(cardIds: number[], token: string) {
+  // 카드마다 임베딩 호출이 붙는다. 기본 6초로는 못 끝난다.
+  return fetchJson<ApproveResult[]>("/ingest/cards/approve", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ card_ids: cardIds }),
+    timeoutMs: 90000,
+  });
+}
+
 // ---- /reg/cards — 매장 지식카드 목록 ----
 
 export type KnowledgeCard = {
