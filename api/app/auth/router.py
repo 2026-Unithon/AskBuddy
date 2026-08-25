@@ -223,6 +223,19 @@ async def join(req: JoinRequest, db: Db):
     }
 
 
+# 업종별 기본 업무 카테고리. db/002_seed_demo.sql 의 demo-cafe 와 같은 값이다.
+# 이번 릴리스는 카페만 구현한다 — 나머지 업종은 매장 생성 후 점주가 직접 켠다.
+DEFAULT_CATEGORIES: dict[str, list[tuple[str, bool, int]]] = {
+    "CAFE": [
+        ("오픈업무", True, 1),
+        ("재고정리", True, 2),
+        ("음료제작", True, 3),
+        ("마감업무", True, 4),
+        ("베이킹", False, 5),
+    ],
+}
+
+
 @router.post("/stores")
 async def create_store(req: CreateStoreRequest, db: Db, claims: Claims):
     """OWNER 온보딩: stores + store_members(OWNER). JWT 에 store_id 넣어 재발급.
@@ -274,6 +287,21 @@ async def create_store(req: CreateStoreRequest, db: Db, claims: Claims):
                 store_id,
                 user_id,
             )
+            # 업무 카테고리 기본값. 없으면 추출기가 고를 카테고리가 없어
+            # 자료를 올려도 카드가 0건이 된다 (자유 생성 금지 규칙).
+            # 이번 릴리스는 카페만 구현한다. 다른 업종은 빈 목록으로 시작한다.
+            defaults = DEFAULT_CATEGORIES.get(req.business_type, [])
+            if defaults:
+                await db.executemany(
+                    """
+                    insert into task_categories
+                      (store_id, category_name, is_enabled, sort_order)
+                    values ($1, $2, $3, $4)
+                    on conflict (store_id, category_name) do nothing
+                    """,
+                    [(store_id, name, enabled, order)
+                     for name, enabled, order in defaults],
+                )
     except asyncpg.UniqueViolationError as e:
         raise HTTPException(409, "store_slug already taken") from e
 

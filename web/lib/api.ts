@@ -129,6 +129,31 @@ export async function createInvite(token: string) {
   });
 }
 
+// ---- /ingest/categories — 업무 카테고리 (점주 설정) ----
+// 추출기는 여기 켜진 카테고리 안에서만 카드를 만든다. 목록이 비면 카드가 0건이 된다.
+
+export type TaskCategoryDto = {
+  category_id: number;
+  category_name: string;
+  is_enabled: boolean;
+  sort_order: number;
+};
+
+export async function listCategories(token: string) {
+  return fetchJson<TaskCategoryDto[]>("/ingest/categories", { headers: authHeader(token) });
+}
+
+export async function updateCategories(
+  categories: { category_name: string; is_enabled: boolean }[],
+  token: string
+) {
+  return fetchJson<TaskCategoryDto[]>("/ingest/categories", {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify({ categories }),
+  });
+}
+
 // ---- /reg/cards — 매장 지식카드 목록 ----
 
 export type KnowledgeCard = {

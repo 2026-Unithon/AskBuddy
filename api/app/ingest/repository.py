@@ -337,3 +337,37 @@ async def update_scan_result(
         "where source_id = $1",
         source_id, page_count, ocr_text, ocr_engine,
     )
+
+
+# ── 업무 카테고리 (점주 설정) ───────────────────────────────────────────────
+
+async def list_categories(
+    conn: asyncpg.Connection, store_id: int
+) -> list[asyncpg.Record]:
+    """켜짐·꺼짐 전부. 화면에서 토글해야 하므로 꺼진 것도 내려준다."""
+    return await conn.fetch(
+        "select category_id, category_name, is_enabled, sort_order "
+        "from task_categories where store_id = $1 order by sort_order, category_id",
+        store_id,
+    )
+
+
+async def set_categories_enabled(
+    conn: asyncpg.Connection, store_id: int, enabled_by_name: dict[str, bool]
+) -> int:
+    """이름으로 켜짐 여부만 바꾼다. 카테고리를 새로 만들지도, 지우지도 않는다.
+
+    추출기가 이 목록 안에서만 카테고리를 고르므로(자유 생성 금지),
+    화면에서 임의로 늘리면 프롬프트와 DB 가 갈라진다.
+    """
+    if not enabled_by_name:
+        return 0
+    rows = await conn.fetch(
+        "update task_categories set is_enabled = data.enabled "
+        "from (select unnest($2::text[]) as name, unnest($3::boolean[]) as enabled) as data "
+        "where task_categories.store_id = $1 "
+        "  and task_categories.category_name = data.name "
+        "returning task_categories.category_id",
+        store_id, list(enabled_by_name), list(enabled_by_name.values()),
+    )
+    return len(rows)

@@ -100,6 +100,7 @@ type Action =
     }
   | { type: "SET_STORE"; storeId: number; storeSlug: string; storeName: string; token: string }
   | { type: "SET_INVITE_CODE"; code: string }
+  | { type: "SET_CATEGORIES"; categories: TaskCategory[] }
   | { type: "SET_KNOWLEDGE_SECTIONS"; sections: KnowledgeSection[] }
   | { type: "SET_BUSINESS_TYPE"; value: BusinessType }
   | { type: "TOGGLE_CATEGORY"; key: string }
@@ -167,6 +168,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_INVITE_CODE":
       return { ...state, inviteCode: action.code };
+    case "SET_CATEGORIES":
+      return { ...state, categories: action.categories };
     case "SET_KNOWLEDGE_SECTIONS":
       return { ...state, knowledgeSections: action.sections };
     case "SET_BUSINESS_TYPE":

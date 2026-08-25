@@ -19,12 +19,14 @@ from app.ingest.preprocess import storage
 from app.ingest import repository as repo
 from app.ingest.embed import embed_card
 from app.ingest.schemas import (
+    CategoryOut,
     CreateSourceRequest,
     KakaoMeta,
     ProcessRequest,
     ScanMeta,
     SourceCreated,
     StatusResponse,
+    UpdateCategoriesRequest,
     UploadUrlRequest,
     UploadUrlResponse,
     VideoMeta,
@@ -40,6 +42,28 @@ _EXPECTED_META = {
     "KAKAO": KakaoMeta,
     "SCAN": ScanMeta,
 }
+
+
+@router.get("/categories", response_model=list[CategoryOut])
+async def list_categories(db: Db, store_id: CurrentStoreId) -> list[CategoryOut]:
+    """점주가 켜둔 업무 카테고리. 추출기는 이 목록 안에서만 고른다."""
+    rows = await repo.list_categories(db, store_id)
+    return [CategoryOut(**dict(r)) for r in rows]
+
+
+@router.patch("/categories", response_model=list[CategoryOut])
+async def update_categories(
+    req: UpdateCategoriesRequest,
+    db: Db,
+    store_id: CurrentStoreId,
+) -> list[CategoryOut]:
+    """"베이킹 안 해요" 같은 토글을 저장한다. 카테고리를 새로 만들지 않는다."""
+    async with db.transaction():
+        await repo.set_categories_enabled(
+            db, store_id, {c.category_name: c.is_enabled for c in req.categories}
+        )
+        rows = await repo.list_categories(db, store_id)
+    return [CategoryOut(**dict(r)) for r in rows]
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
