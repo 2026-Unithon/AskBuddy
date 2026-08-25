@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -8,6 +8,7 @@ import { Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { ROADMAP_BG_SIZE } from "@/lib/mock";
 import type { RoadmapNode } from "@/lib/types";
+import { getRoadmap, patchRoadmapItem, type RoadmapStageDto } from "@/lib/api";
 
 export default function RoadmapPage() {
   const router = useRouter();
@@ -18,6 +19,51 @@ export default function RoadmapPage() {
   const openIndex = openNode ? state.roadmap.findIndex((n) => n.id === openNode.id) : -1;
 
   const hearts = useMemo(() => Array.from({ length: 3 }, (_, i) => i < state.hearts), [state.hearts]);
+
+  // 화면의 노드는 그림 위 좌표를 가진 연출용이고, 진도율의 근거는 DB 의 roadmap_items 다.
+  // 노드 순서와 단계 순서를 맞춰 두고, 노드를 끝내면 그 단계의 항목을 전부 DONE 으로 보낸다.
+  const [stages, setStages] = useState<RoadmapStageDto[]>([]);
+  const syncing = useRef(false);
+
+  useEffect(() => {
+    if (!state.token) return;
+    let cancelled = false;
+    getRoadmap(state.token)
+      .then((r) => {
+        if (!cancelled) setStages(r.stages);
+      })
+      .catch(() => {
+        // 백엔드 미연결 — 화면은 로컬 상태로 계속 돈다
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.token]);
+
+  // 점주 대시보드는 store_members.progress_rate 를 2초 폴링한다.
+  // 항목을 DONE 으로 보내면 백엔드가 그 값을 다시 계산하므로 곧바로 반영된다.
+  const syncStage = useCallback(
+    async (nodeIndex: number) => {
+      const token = state.token;
+      const stage = stages[nodeIndex];
+      if (!token || !stage || syncing.current) return;
+      syncing.current = true;
+      try {
+        for (const item of stage.items) {
+          if (item.status !== "DONE") {
+            await patchRoadmapItem(item.item_id, "DONE", token);
+          }
+        }
+        const fresh = await getRoadmap(token);
+        setStages(fresh.stages);
+      } catch {
+        // 실패해도 화면 진행은 막지 않는다. 다음 노드에서 다시 시도된다
+      } finally {
+        syncing.current = false;
+      }
+    },
+    [state.token, stages]
+  );
 
   return (
     <div className="min-h-dvh w-full flex justify-center bg-brand-500">
@@ -96,6 +142,7 @@ export default function RoadmapPage() {
             onClose={() => setOpenNodeId(null)}
             onComplete={() => {
               dispatch({ type: "COMPLETE_ROADMAP_NODE", nodeId: openNode.id });
+              void syncStage(openIndex);
               setOpenNodeId(null);
             }}
           />

@@ -210,6 +210,50 @@ export async function approveCards(cardIds: number[], token: string) {
   });
 }
 
+// ---- /learn/roadmap — 신입 로드맵 + 진도율 ----
+// progress_rate = DONE 항목 / 전체 항목 × 100 (가이드 확정 식).
+// 항목을 DONE 으로 바꾸면 백엔드가 store_members.progress_rate 를 다시 계산하고,
+// 점주 대시보드가 2초 폴링으로 그걸 읽는다.
+
+export type RoadmapItemDto = {
+  item_id: number;
+  item_name: string;
+  item_order: number;
+  status: "LOCKED" | "IN_PROGRESS" | "DONE";
+  card_id: number | null;
+  card_title: string | null;
+};
+
+export type RoadmapStageDto = {
+  stage_id: number;
+  stage_name: string;
+  stage_order: number;
+  status: "LOCKED" | "IN_PROGRESS" | "DONE";
+  items: RoadmapItemDto[];
+};
+
+export type RoadmapDto = {
+  store_id: number;
+  member_id: number;
+  progress_rate: number;
+  stages: RoadmapStageDto[];
+};
+
+export async function getRoadmap(token: string) {
+  return fetchJson<RoadmapDto>("/learn/roadmap", { headers: authHeader(token) });
+}
+
+export async function patchRoadmapItem(
+  itemId: number,
+  status: "LOCKED" | "IN_PROGRESS" | "DONE",
+  token: string
+) {
+  return fetchJson<{ item_id: number; status: string; progress_rate: number }>(
+    `/learn/roadmap/items/${itemId}`,
+    { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ status }) }
+  );
+}
+
 // ---- /reg/cards — 매장 지식카드 목록 ----
 
 export type KnowledgeCard = {
