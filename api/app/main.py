@@ -3,6 +3,7 @@
 셋 다 손대는 유일한 파일이라 충돌이 제일 잦다.
 라우터 세 줄이 이미 등록돼 있으므로, 각자 자기 폴더의 router.py 만 채우면 된다.
 """
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,6 +16,15 @@ from app.ingest.router import router as ingest_router
 from app.reg.router import router as reg_router
 
 settings = get_settings()
+
+# uvicorn 기본 설정은 app.* 로거를 흘려보내지 않는다.
+# 가이드 8장 "LLM 호출마다 소요 시간·토큰 로깅" 이 화면에 보이려면 이게 필요하다
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("app").setLevel(logging.INFO)
 
 
 @asynccontextmanager

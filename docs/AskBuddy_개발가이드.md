@@ -242,17 +242,30 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 |---|---|---|
 | M0 스키마 정합 | 진행중 | `db/001`·`002` 는 로컬 적용·검증 완료. `/reg/*` 의 `store_slug` 해석은 관호 |
 | M1 목 데이터 관통 | **입력 완료** | `/ingest/*` 전 구간 통과(업로드→처리→폴링→카드 3건). 출력·DB 는 진행중 |
-| M2 음성 관통 | 미착수 | 준혁 |
+| M2 음성 관통 | **관통 확인** | 전사(whisper-1) → Gemini 추출 → 카드 적재 → 승인 → 임베딩 → `/reg/retrieve` hit 까지 실측 통과 |
 | M3 미답변 순환 | 미착수 | 도영 |
-| M4 채널 확장 | 미착수 | 준혁 |
+| M4 채널 확장 | **VIDEO·KAKAO·SCAN 관통** | 준혁. 실측 25/26 통과. 실자료 17건 적재 후 채점 18 PASS / 0 FAIL / 7 스키마 미지원 |
 
 ### 다음 할 일
 
-**준혁 (입력)**
-1. 샘플 음성으로 `audio.probe()` → `audio.transcribe()` 단독 확인 (`OPENAI_API_KEY` 최초 사용)
-2. `INGEST_MODE=real` 로 Gemini 1회 호출. 볼 것은 셋 — 카테고리를 지어내는가 / 위치를 랜드마크로 쓰는가 / `confidence` 가 전부 0.9 로 몰리는가
-3. 프롬프트 튜닝은 `api/prompts/extract_cards.ko.txt` 만 고친다. 코드는 안 건드린다
-4. M4 는 VIDEO → KAKAO → SCAN 순. 영상은 프레임 인덱스를 0-base 로 맞춰 `timestamp_sec = index * 3` 이 성립해야 한다
+**준혁 (입력)** — M2·M4 관통 확인됨. 남은 것은 아래
+1. **실제 자료로 재검증.** 지금까지는 전부 합성 자료다 — 사람이 쓴 전사문, 직접 만든 카톡 txt, PIL 로 그린 영상. 실제 녹음은 잡음·말끊김·사투리가, 실제 카톡은 예상 못 한 형식이 섞인다
+2. N9 — 추출 카드의 검색 점수를 관호님과 맞춘다
+3. `store_glossary` (N7) — 매장 용어가 전사에서 깨지면 그때 채운다
+4. 영상 처리가 느리다. 12초 영상에 Gemini 18.6초. 실제 매장 영상(수 분)은 폴링이 오래 돈다 — 진행률 표시를 도영님과 상의할 것
+
+**프롬프트 튜닝 루프 (준혁)**
+
+```bash
+# 1) 전사문만 있으면 STT 없이 추출을 돌려볼 수 있다
+INGEST_MODE=real python scripts/extract_preview.py --file data/sample_transcript.ko.txt
+
+# 2) api/prompts/extract_cards.ko.txt 만 고친다. 코드는 안 건드린다
+# 3) DB 까지 넣어보려면
+python scripts/set_transcript.py --file data/sample_transcript.ko.txt
+curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"source_id":<위 출력>}'
+```
 
 **관호 (DB)**
 1. `/reg/*`·`/auth/*` 를 `api/app/reg/`·`api/app/auth/` 로 이식. 라우터는 `main.py` 에 이미 등록돼 있다
@@ -360,6 +373,19 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | 2026-08-25 | 입력 | `ingest/embed/service.py` 가 `reg.embeddings.embed_texts` 를 호출하도록 교체 (N6 해소) | 동기 함수라 `asyncio.to_thread` 로 감쌈 |
 | 2026-08-25 | 공통 | `supabase/config.toml` 의 `project_id` 를 **`AskBuddy`** 로 통일 | 폴더명이 달라 각자 다른 값이 생성됐다. 컨테이너 이름(`supabase_db_AskBuddy`)이 갈라진다 |
 | 2026-08-25 | 공통 | `.env.example` 인라인 주석 제거 | dotenv 가 값에 주석을 붙여 읽을 수 있다 |
+| 2026-08-26 | 공통 | **CLAUDE.md 를 사업계획서 v5·목업 기준으로 갱신** | 디자인 시스템·제품 규칙이 개발 문서에 전혀 없었다. 등록이 먼저라는 흐름(게이지 80% → 미리보기 → 초대코드)은 그대로 두고, 등록 이후 질문으로 지식이 자라는 순환을 함께 명시 |
+| 2026-08-26 | 공통 | **"게임화 요소 추가" 금지 항목 삭제** | 기획서·목업 모두 듀오링고형 스킬트리와 스트릭·젬·하트를 핵심으로 둔다. 금지가 설계와 정면충돌 |
+| 2026-08-26 | 공통 | 디자인 시스템(색상 7토큰·Buddy 톤) 을 CLAUDE.md 에 명시 | 어디에도 적혀 있지 않아 화면마다 색이 갈라질 수 있었다 |
+| 2026-08-26 | 공통 | 제품 규칙 4건 추가 — 영상 단독 등록 불가 · 촬영 체크리스트 · 사진 블러 · 게이지 가중치 | 기획서 1-2 의 인터뷰 반영 사항이 개발 문서에 전혀 없었다 |
+| 2026-08-26 | 공통 | **'신뢰도 %' 사용자 노출 금지** 를 명문화 | 기획서가 폐기한 지표다. `confidence` 는 검수 정렬용 내부 값으로만 쓴다 |
+| 2026-08-25 | 입력 | **`GEMINI_MODEL` 을 `gemini-3.6-flash` 로 변경** | `gemini-2.5-flash` 가 신규 사용자에게 막혔다. 404 응답이 대체 모델을 지정한다 |
+| 2026-08-25 | 입력 | 전사문이 있으면 STT 를 건너뛴다 | 가이드 8장 `--skip-stt`. 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다 |
+| 2026-08-25 | 입력 | `scripts/set_transcript.py`·`scripts/extract_preview.py` 추가 | STT 없이 추출부터 개발·튜닝하기 위한 반복 루프 |
+| 2026-08-25 | 입력 | 추출 프롬프트 튜닝 — 한 카드 한 대상, confidence 구간 기준 명시 | 우유·원두·시럽이 한 카드로 합쳐져 "우유 어디 있어요?" 에 대응이 안 됐다. 4건 → 8건으로 분리됨 |
+| 2026-08-25 | 공통 | 검색 게이트 임계를 `RETRIEVAL_THRESHOLD` 로 분리, 값 0 | D3 와 한 값을 공유하고 있었다. `app/reg/router.py` 한 줄 변경 (관호님 파일) |
+| 2026-08-25 | 입력 | M4 — VIDEO·KAKAO·SCAN 전처리 구현 | 영상은 프레임+오디오, 카톡은 정규식 파서, 문서는 pypdf→깨지면 Gemini 판독 |
+| 2026-08-25 | 입력 | 추출기가 이미지·PDF 를 함께 받도록 확장 | 영상 프레임과 스캔본은 텍스트로 담을 수 없다 |
+| 2026-08-25 | 공통 | `main.py` 에 로깅 설정 추가 | uvicorn 기본 설정이 `app.*` 로거를 막아 LLM 호출 로그가 안 보였다 (가이드 8장) |
 
 ---
 
@@ -377,6 +403,7 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | D8 | Storage 버킷 `sources`(비공개). 오브젝트 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 API 가 발급한 **서명 URL** 로만 | 2026-08-25 | 브라우저에 Supabase 키를 주지 않으면서 파일 바이너리가 API 를 거치지 않게 하는 유일한 방법. 원본 파일명을 경로에 쓰지 않는 것은 한글·공백 인코딩 사고와 덮어쓰기 방지 |
 | D9 | `content_hash` 는 프론트가 SHA-256 계산해 전달. 누락 시 서버가 처리 중 backfill | 2026-08-25 | `crypto.subtle` 은 https·localhost 에서만 동작한다. 프론트가 실패해도 중복 방지가 죽지 않게 |
 | D10 | `INGEST_MODE` 기본값 `mock` | 2026-08-25 | 통합 실패는 항상 M1 구간에서 난다. 목 경로를 기본값으로 두어 키 없이도 전 구간이 돌게 |
+| D11 | 검색 게이트 임계를 `CONFIDENCE_THRESHOLD`(D3) 에서 분리해 `RETRIEVAL_THRESHOLD` 로 둔다. **값은 0.6** | 2026-08-26 | 한 값이 카드 검수 기준과 검색 하한을 동시에 제어하고 있었다. 분리 후 0 으로 내렸다가 0.6 으로 확정 |
 
 ---
 
@@ -390,7 +417,12 @@ miss → `pending_questions` → 대시보드 답변 → 카드 갱신 → 배�
 | N4 | 답변 생성 모델 — OpenAI vs Claude vs Gemini (호출 위치는 FastAPI로 확정) | 관호 | M3 |
 | N5 | ver2(Vite) → Next 16 이식 범위 — 전면 재작성 vs 컴포넌트 이식 | 도영 | M1 |
 | ~~N6~~ | ~~관호님 기존 임베딩 함수 통합~~ → **해소.** `app.reg.embeddings.embed_texts` 를 ingest 가 호출한다 | 관호·준혁 | 완료 |
+| N12 | **게임화 지표를 담을 컬럼이 없다.** 목업에 스트릭🔥·젬💎·하트❤️ 가 상단 고정으로 들어가는데 `store_members` 에는 `day_count`·`progress_rate`·`is_deployable` 뿐이다. 데모용 프론트 상수로 갈지, 컬럼을 팔지 정해야 한다 | 관호·도영 | M3 |
+| N13 | **사진 검토·제외·블러 단계가 스키마에 없다.** 기획서 1-2 의 인터뷰 반영 필수 항목인데 `sources`·`source_scan` 어디에도 노출 여부 플래그가 없다 | 관호·준혁 | M3 |
+| N11 | **`testdata/expected.json` 14케이스 중 7개가 현 스키마로 표현 불가.** `provenance`(observed/transcribed/inferred), `supersedes`·`is_current`(충돌 시 최신 우선), `knowledge_gaps`, 화자별 승격, 교차소스 병합이 없다. 값은 전부 포착되지만 어느 쪽이 최신인지 DB 가 모른다 | 전원 | M3 |
+| N10 | **임계 0.6 에서는 추출 카드가 miss 로 빠진다.** 실측 0.591 < 0.6. 점주가 승인한 카드로 답하는 장면을 데모에 넣으려면 0.4~0.5 가 필요하다 (N9 와 같은 뿌리) | 관호·PM | M3 |
 | N7 | `store_glossary` 를 채우는 경로가 없다. 현재 추출 프롬프트에 "(등록된 용어 없음)" 이 들어간다 | 준혁·도영 | M4 |
 | N8 | 배포 시 `JWT_SECRET` 교체 절차 — 로컬 기본값이 리포에 있다 | PM | M3 |
+| N9 | **추출 카드가 시드 카드보다 검색 점수가 낮다.** 같은 질문에 시드 0.640 / 추출 0.591. 게이트 임계(≈0.6)가 시드 기준으로 잡혀 있어, 점주가 승인한 카드가 miss 로 빠질 수 있다 | 관호·준혁 | M3 |
 
 > **해소됨:** 도영님이 물은 Storage 경로 규약과 `content_hash` 계산 주체는 D8·D9 로 확정했다. 상세는 `docs/ingest-contract.md`.

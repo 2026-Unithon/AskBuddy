@@ -115,12 +115,15 @@ const id = setInterval(async () => {
 
 허용 확장자 — 다른 값은 422.
 
-| source_type | 확장자 |
-|---|---|
-| `VOICE` | `mp3` `m4a` `wav` |
-| `VIDEO` | `mp4` `mov` |
-| `KAKAO` | `txt` `zip` |
-| `SCAN` | `pdf` `jpg` `jpeg` `png` |
+| source_type | 확장자 | 처리 |
+|---|---|---|
+| `VOICE` | `mp3` `m4a` `wav` | ffprobe → whisper 전사 → 추출 |
+| `VIDEO` | `mp4` `mov` | 오디오 전사 + 3초 간격 프레임 → 화면과 말을 함께 판독 |
+| `KAKAO` | `txt` `zip` | 정규식 파서 (LLM 미사용). 안드로이드·iOS 두 형식 |
+| `SCAN` | `pdf` `jpg` `jpeg` `png` | PDF 는 텍스트 레이어 우선, 없거나 깨졌으면 그림째 판독 |
+
+**영상은 오래 걸립니다.** 12초짜리도 추출에 20초 가까이 걸립니다. 실제 매장 영상이면 몇 분입니다.
+`PROCESSING` 이 길어지므로 폴링 화면에 진행 중임을 계속 보여주셔야 합니다.
 
 ### POST /ingest/sources → 201
 

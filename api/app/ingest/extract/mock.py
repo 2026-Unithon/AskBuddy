@@ -40,6 +40,7 @@ _TEMPLATES: list[dict] = [
 async def extract(
     *, source_id: int, source_type: str, text: str,
     category_names: list[str], glossary: list[dict[str, str]],
+    media: list = (),
 ) -> ExtractionResult:
     if not category_names:
         return ExtractionResult(
