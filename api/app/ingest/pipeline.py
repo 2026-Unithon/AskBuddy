@@ -10,13 +10,14 @@
 import logging
 import shutil
 import time
+from pathlib import Path
 
 import asyncpg
 
 from app.deps import get_pool
 from app.ingest import repository as repo
 from app.ingest.extract import extract_cards
-from app.ingest.preprocess import audio, storage
+from app.ingest.preprocess import audio, document, kakao, storage, video
 from app.ingest.schemas import ExtractionResult
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ async def process_source(store_id: int, source_id: int) -> None:
 
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
-            text = await _preprocess(conn, store_id, src)
+            text, media = await _preprocess(conn, store_id, src)
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
 
@@ -47,6 +48,7 @@ async def process_source(store_id: int, source_id: int) -> None:
                 text=text,
                 category_names=list(categories),
                 glossary=glossary,
+                media=media,
             )
 
             async with conn.transaction():
@@ -85,45 +87,160 @@ async def _mark_failed(
 
 async def _preprocess(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> str:
-    """자료 유형별 전처리. 반환값은 추출기에 넣을 텍스트."""
+) -> tuple[str, list[Path]]:
+    """자료 유형별 전처리.
+
+    반환값은 (추출기에 넣을 텍스트, 모델에 함께 보낼 파일들).
+    두 번째 값은 영상 프레임이나 스캔 이미지처럼 텍스트로 못 담는 근거다.
+    """
+    from app.config import get_settings
     source_type = src["source_type"]
     source_id = src["source_id"]
 
-    if source_type == "VOICE":
-        return await _preprocess_voice(conn, store_id, src)
+    handler = {
+        "VOICE": _preprocess_voice,
+        "VIDEO": _preprocess_video,
+        "KAKAO": _preprocess_kakao,
+        "SCAN": _preprocess_scan,
+    }[source_type]
 
-    # VIDEO · KAKAO · SCAN 은 M4 범위다. 목 모드에서는 경계 확인용으로 통과시킨다.
-    from app.config import get_settings
-    if get_settings().ingest_mode == "mock":
+    # 목 모드는 원본을 내려받지 않는다. VOICE 는 전사문 재사용 분기가 있어 그쪽에서 처리한다
+    if get_settings().ingest_mode == "mock" and source_type != "VOICE":
         logger.info("preprocess skipped (mock) source=%s type=%s", source_id, source_type)
-        return MOCK_PLACEHOLDER
-    raise NotImplementedError(f"{source_type} 전처리는 아직 구현되지 않았다 (M4 범위)")
+        return MOCK_PLACEHOLDER, []
+
+    return await handler(conn, store_id, src)
 
 
-async def _preprocess_voice(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> str:
-    from app.config import get_settings
+async def _download(conn: asyncpg.Connection, store_id: int,
+                    src: asyncpg.Record) -> Path:
+    """원본을 받고, 프론트가 안 보낸 content_hash 를 채운다."""
     source_id = src["source_id"]
-
-    if get_settings().ingest_mode == "mock":
-        row = await repo.get_voice(conn, source_id)
-        # 이미 전사문이 있으면 재사용한다 (--skip-stt 와 같은 효과)
-        return (row["transcript"] if row and row["transcript"] else MOCK_PLACEHOLDER)
-
     if not src["file_url"]:
         raise RuntimeError("file_url 이 비어 있다. Storage 업로드가 끝난 뒤 호출하라")
 
     path = await storage.download(source_id, src["file_url"])
-
-    # 프론트가 content_hash 를 안 보냈으면 여기서 채운다.
-    # 다음번 같은 파일 업로드는 /ingest/sources 에서 걸린다
     if src["content_hash"] is None:
         if not await repo.set_content_hash(conn, store_id, source_id,
                                            storage.sha256_of(path)):
             logger.warning("동일 해시의 자료가 이미 있다 source=%s", source_id)
+    return path
 
+
+async def _preprocess_video(
+    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+) -> tuple[str, list[Path]]:
+    """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
+    source_id = src["source_id"]
+    row = await repo.get_video(conn, source_id)
+    if row is None:
+        raise RuntimeError("source_video 행이 없다. /ingest/sources 로 등록했는지 확인하라")
+
+    path = await _download(conn, store_id, src)
+    work = storage.workdir(source_id)
+    meta = await video.probe(path)
+
+    transcript = row["transcript"]
+    if transcript:
+        logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s", source_id)
+    elif meta["has_audio"]:
+        audio_path = await video.extract_audio(path, work)
+        transcript, _ = await audio.transcribe(audio_path)
+    else:
+        logger.info("오디오 트랙 없음 source=%s — 화면만으로 추출한다", source_id)
+        transcript = ""
+
+    frames = await video.extract_frames(path, work)
+    rows = await video.upload_frames(store_id, source_id, frames)
+    await repo.insert_frames(conn, row["video_id"], rows)
+    await repo.update_video_result(
+        conn, source_id,
+        duration_sec=meta["duration_sec"], resolution=meta["resolution"],
+        fps=meta["fps"], frame_count=len(frames), transcript=transcript or None,
+    )
+
+    text = transcript or "(오디오 없음. 화면 이미지만으로 판단할 것)"
+    return text, video.sample_for_model(frames)
+
+
+async def _preprocess_kakao(
+    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+) -> tuple[str, list[Path]]:
+    """카톡: txt 를 파싱한다. LLM 을 쓰지 않는다."""
+    source_id = src["source_id"]
+    if await repo.get_kakao(conn, source_id) is None:
+        raise RuntimeError("source_kakao 행이 없다. /ingest/sources 로 등록했는지 확인하라")
+
+    path = await _download(conn, store_id, src)
+
+    # 캡처 이미지는 파싱할 텍스트가 없다. 모델이 그림째 읽는다 (import_type SCREENSHOT)
+    if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+        await repo.update_kakao_result(
+            conn, source_id, room_name=None, message_count=0, participant_cnt=0,
+            period_start=None, period_end=None, parsed_text="",
+        )
+        return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path]
+
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    parsed = kakao.parse(raw)
+
+    await repo.update_kakao_result(
+        conn, source_id,
+        room_name=parsed["room_name"],
+        message_count=parsed["message_count"],
+        participant_cnt=len(parsed["participants"]),
+        period_start=parsed["period_start"], period_end=parsed["period_end"],
+        parsed_text=parsed["parsed_text"],
+    )
+    return parsed["parsed_text"], []
+
+
+async def _preprocess_scan(
+    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+) -> tuple[str, list[Path]]:
+    """문서·이미지: PDF 는 텍스트 레이어를 먼저 읽고, 없으면 모델에 그림째 넘긴다."""
+    source_id = src["source_id"]
+    row = await repo.get_scan(conn, source_id)
+    if row is None:
+        raise RuntimeError("source_scan 행이 없다. /ingest/sources 로 등록했는지 확인하라")
+
+    path = await _download(conn, store_id, src)
+
+    if path.suffix.lower() == ".pdf":
+        text, pages = document.read_pdf(path)
+        if text:
+            await repo.update_scan_result(conn, source_id, page_count=pages,
+                                          ocr_text=text, ocr_engine="pypdf")
+            return text, []
+        # 텍스트 레이어가 없는 스캔본 — PDF 를 그대로 모델에 넘긴다
+        await repo.update_scan_result(conn, source_id, page_count=pages,
+                                      ocr_text=None, ocr_engine=None)
+        return "(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)", [path]
+
+    await repo.update_scan_result(conn, source_id, page_count=1,
+                                  ocr_text=None, ocr_engine=None)
+    return "(이미지 자료. 첨부한 그림을 읽고 판단할 것)", [path]
+
+
+async def _preprocess_voice(
+    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+) -> tuple[str, list[Path]]:
+    from app.config import get_settings
+    source_id = src["source_id"]
+
+    # 전사문이 이미 있으면 STT 를 건너뛴다 (가이드 8장 --skip-stt).
+    # 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다.
+    # 다시 전사하려면 source_voice.transcript 를 비우고 재실행한다.
+    row = await repo.get_voice(conn, source_id)
+    if row and row["transcript"]:
+        logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s chars=%d",
+                    source_id, len(row["transcript"]))
+        return row["transcript"], []
+
+    if get_settings().ingest_mode == "mock":
+        return MOCK_PLACEHOLDER, []
+
+    path = await _download(conn, store_id, src)
     meta = await audio.probe(path)
     text, model = await audio.transcribe(path)
 
@@ -133,7 +250,7 @@ async def _preprocess_voice(
         transcript=text,
         stt_model=model,
     )
-    return text
+    return text, []
 
 
 async def _persist(

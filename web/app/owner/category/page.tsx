@@ -1,13 +1,71 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BottomCta, Button, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { BUSINESS_TYPES } from "@/lib/types";
+import { listCategories, updateCategories } from "@/lib/api";
+
+// 이번 릴리스는 카페만 구현한다. 나머지 업종은 기본 카테고리가 없어
+// 자료를 올려도 카드가 만들어지지 않는다 — 고를 수 없게 막는다.
+const IMPLEMENTED: string[] = ["CAFE"];
+
+const CATEGORY_ICON: Record<string, string> = {
+  오픈업무: "🌅",
+  재고정리: "📦",
+  음료제작: "☕",
+  마감업무: "🌙",
+  베이킹: "🥐",
+};
 
 export default function CategoryPage() {
   const router = useRouter();
   const { state, dispatch } = useApp();
+  const [saving, setSaving] = useState(false);
+
+  // 매장 생성 시 백엔드가 카페 기본 카테고리를 넣어둔다. 그걸 그대로 받아 쓴다.
+  useEffect(() => {
+    if (!state.token) return;
+    let cancelled = false;
+    listCategories(state.token)
+      .then((rows) => {
+        if (cancelled || rows.length === 0) return;
+        dispatch({
+          type: "SET_CATEGORIES",
+          categories: rows.map((r) => ({
+            key: r.category_name,
+            label: r.category_name,
+            icon: CATEGORY_ICON[r.category_name] ?? "📋",
+            enabled: r.is_enabled,
+          })),
+        });
+      })
+      .catch(() => {
+        // 백엔드 미연결 — mock 카테고리 유지
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.token, dispatch]);
+
+  async function handleNext() {
+    // 토글은 화면에서 즉시 반영하고, 넘어갈 때 한 번만 저장한다.
+    if (state.token) {
+      setSaving(true);
+      try {
+        await updateCategories(
+          state.categories.map((c) => ({ category_name: c.key, is_enabled: c.enabled })),
+          state.token
+        );
+      } catch {
+        // 저장 실패해도 흐름은 막지 않는다 — 켜짐 여부는 추출 품질에만 영향
+      } finally {
+        setSaving(false);
+      }
+    }
+    router.push("/owner/upload");
+  }
 
   const canContinue = state.businessType !== null;
 
@@ -20,18 +78,23 @@ export default function CategoryPage() {
         <div className="grid grid-cols-3 gap-2.5 pt-4 pb-8">
           {BUSINESS_TYPES.map((b) => {
             const selected = state.businessType === b.key;
+            const ready = IMPLEMENTED.includes(b.key);
             return (
               <button
                 key={b.key}
+                disabled={!ready}
                 onClick={() => dispatch({ type: "SET_BUSINESS_TYPE", value: b.key })}
                 className={`flex flex-col items-center gap-1.5 rounded-2xl py-4 border transition-colors ${
                   selected
                     ? "border-brand-500 bg-brand-50 text-brand-700"
-                    : "border-border bg-surface text-foreground"
+                    : ready
+                      ? "border-border bg-surface text-foreground"
+                      : "border-border bg-surface-muted text-muted/60 cursor-not-allowed"
                 }`}
               >
                 <span className="text-2xl">{b.emoji}</span>
                 <span className="text-xs font-bold">{b.label}</span>
+                {!ready && <span className="text-[10px] text-muted/70">준비 중</span>}
               </button>
             );
           })}
@@ -72,10 +135,10 @@ export default function CategoryPage() {
         <Button
           size="lg"
           className="w-full"
-          disabled={!canContinue}
-          onClick={() => router.push("/owner/upload")}
+          disabled={!canContinue || saving}
+          onClick={handleNext}
         >
-          다음으로 →
+          {saving ? "저장 중…" : "다음으로 →"}
         </Button>
       </BottomCta>
     </Shell>

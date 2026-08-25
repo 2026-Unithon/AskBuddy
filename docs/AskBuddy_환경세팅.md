@@ -18,7 +18,7 @@
 | 백엔드 | FastAPI, Python 3.12 | `/reg/*`·`/auth/*` 기구현 + `/ingest/*` 신규 |
 | DB | PostgreSQL 15 + pgvector | 로컬 Supabase CLI(도커), 배포 Supabase |
 | 임베딩 | OpenAI `text-embedding-3-small` (1536) | **D4 고정.** 교체 시 임계값 전면 재측정 |
-| 멀티모달 추출 | Gemini Flash | 워커 전용 |
+| 멀티모달 추출 | Gemini `gemini-3.6-flash` | 워커 전용. `2.5-flash` 는 신규 사용자에게 막혔다 |
 | STT | OpenAI `whisper-1` | **D7 확정.** `STT_MODEL` 로 교체 가능 |
 | 파일 저장 | Supabase Storage | 버킷 `sources`(비공개). **API 가 발급한 서명 URL 로 업로드** (D8) |
 | 배포 | web → Vercel, api → Railway | Root Directory: `web` / `api` |
@@ -176,7 +176,7 @@ FRAME_INTERVAL_SEC=3
 
 # ingest (준혁)
 INGEST_MODE=mock             # D10. mock: LLM 미호출 / real: Gemini 호출
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 STT_MODEL=whisper-1          # D7
 STORAGE_BUCKET=sources       # D8. scripts/init_storage.py 로 생성
 
@@ -333,9 +333,12 @@ ffmpeg -i input.mp4 -vf "fps=1/3,scale=640:-1" tmp/frame_%04d.jpg
 
 - [x] `python scripts/ingest_smoke.py` 통과 (M1 관통)
 - [x] `python scripts/init_storage.py` → 버킷 `sources` 생성
-- [ ] `ffmpeg -version` 동작
-- [ ] 샘플 음성 → `INGEST_MODE=real` → 전사 → 카드 적재 (M2)
-- [ ] Gemini 호출 1회 성공(JSON 파싱까지)
+- [x] `ffmpeg -version` 동작 (ffprobe 로 duration·sample_rate 추출 확인)
+- [x] STT(whisper-1) 실호출 성공
+- [x] Gemini 호출 1회 성공(JSON 파싱까지) — `gemini-3.6-flash`
+- [x] `INGEST_MODE=real` → 전사문 → 카드 7건 적재 → 승인 → 임베딩 → `/reg/retrieve` hit
+- [x] M4 — KAKAO(txt 파서) · SCAN(pypdf→Gemini 판독) · VIDEO(프레임+화면 판독) 관통
+- [ ] **실제 자료로 재검증** (지금까지는 합성 자료 — 전사문·직접 만든 카톡 txt·PIL 로 그린 영상)
 - [ ] 샘플 mp4 → 프레임 N장 → `source_frames` N행 (M4)
 - [ ] 카드 INSERT 후 `select * from knowledge_cards where is_verified=false` 확인
 

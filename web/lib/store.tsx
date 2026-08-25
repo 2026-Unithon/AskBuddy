@@ -41,6 +41,11 @@ type AppState = {
   hydrated: boolean;
   role: Role | null;
   displayName: string | null;
+  // 백엔드 JWT. store_id 가 이 안에만 있으므로 /ingest/* 호출에 반드시 필요하다.
+  // 없으면 화면은 mock 으로 동작한다 — 데모가 끊기지 않게.
+  token: string | null;
+  userId: number | null;
+  storeId: number | null;
   storeSlug: string;
   storeName: string;
   businessType: BusinessType | null;
@@ -61,6 +66,9 @@ const initialState: AppState = {
   hydrated: false,
   role: null,
   displayName: null,
+  token: null,
+  userId: null,
+  storeId: null,
   storeSlug: "demo-cafe",
   storeName: MOCK_STORE_NAME,
   businessType: null,
@@ -82,6 +90,21 @@ type Action =
   | { type: "LOGIN_OWNER"; name: string; storeName: string }
   | { type: "LOGIN_STAFF"; name: string; inviteCode: string }
   | { type: "LOGOUT" }
+  | {
+      type: "SET_AUTH";
+      token: string;
+      role: Role;
+      displayName: string;
+      userId: number;
+      storeId: number | null;
+      storeSlug?: string;
+      storeName?: string;
+      inviteCode?: string;
+    }
+  | { type: "SET_STORE"; storeId: number; storeSlug: string; storeName: string; token: string }
+  | { type: "SET_INVITE_CODE"; code: string }
+  | { type: "SET_CATEGORIES"; categories: TaskCategory[] }
+  | { type: "SET_KNOWLEDGE_SECTIONS"; sections: KnowledgeSection[] }
   | { type: "SET_BUSINESS_TYPE"; value: BusinessType }
   | { type: "TOGGLE_CATEGORY"; key: string }
   | { type: "ADD_UPLOAD_SOURCE"; source: UploadSource }
@@ -124,6 +147,33 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "LOGOUT":
       return { ...initialState, hydrated: true };
+    case "SET_AUTH":
+      return {
+        ...state,
+        token: action.token,
+        role: action.role,
+        displayName: action.displayName,
+        userId: action.userId,
+        storeId: action.storeId,
+        storeSlug: action.storeSlug ?? state.storeSlug,
+        storeName: action.storeName ?? state.storeName,
+        inviteCode: action.inviteCode ?? state.inviteCode,
+      };
+    case "SET_STORE":
+      // 매장 생성 응답의 토큰에는 store_id 가 들어 있다. 옛 토큰을 반드시 버린다.
+      return {
+        ...state,
+        token: action.token,
+        storeId: action.storeId,
+        storeSlug: action.storeSlug,
+        storeName: action.storeName,
+      };
+    case "SET_INVITE_CODE":
+      return { ...state, inviteCode: action.code };
+    case "SET_CATEGORIES":
+      return { ...state, categories: action.categories };
+    case "SET_KNOWLEDGE_SECTIONS":
+      return { ...state, knowledgeSections: action.sections };
     case "SET_BUSINESS_TYPE":
       return { ...state, businessType: action.value };
     case "TOGGLE_CATEGORY":

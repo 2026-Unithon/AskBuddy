@@ -65,7 +65,8 @@ async def retrieve(req: RetrieveRequest, db: Db):
         req.top_k,
     )
 
-    threshold = settings.confidence_threshold
+    # D11: 검색 hit/miss 는 retrieval_threshold. confidence_threshold(D3)는 검수용
+    threshold = settings.retrieval_threshold
     candidates = [
         {
             "id": int(r["id"]),

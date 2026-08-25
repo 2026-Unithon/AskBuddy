@@ -24,8 +24,13 @@ out/
 db/data/
 supabase/.branches/
 supabase/.temp/
+testdata/
+UI/
 
 # os / editor
 .DS_Store
 .idea/
 .vscode/
+
+# next 생성 산출물
+web/next-env.d.ts

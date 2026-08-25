@@ -67,6 +67,24 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div className="max-w-5xl mx-auto px-5 sm:px-8 pt-5 flex items-center gap-2">
+        <Link
+          href="/owner/upload"
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-4 h-10 text-sm font-semibold text-white hover:bg-brand-700"
+        >
+          <span aria-hidden>＋</span> 자료 추가
+        </Link>
+        <Link
+          href="/owner/preview"
+          className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+        >
+          학습 미리보기
+        </Link>
+        <Link href="/role" className="text-sm text-muted hover:text-foreground px-2 ml-auto">
+          나가기
+        </Link>
+      </div>
+
       <div className="max-w-5xl mx-auto px-5 sm:px-8 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="space-y-3">
           <h2 className="text-base font-bold text-brand-700">직원 이해도</h2>

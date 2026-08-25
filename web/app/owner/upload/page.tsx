@@ -1,10 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { UPLOAD_METHODS, type UploadSourceType } from "@/lib/types";
+import {
+  ApiError,
+  computeContentHash,
+  getIngestStatus,
+  putToStorage,
+  registerSource,
+  requestUploadUrl,
+  startProcessing,
+} from "@/lib/api";
 
 const SHEET_COPY: Record<UploadSourceType, string> = {
   VOICE: "이전에 녹음해둔 파일이 있다면 올려주세요. 지금 바로 녹음할 수도 있어요.",
@@ -13,40 +22,149 @@ const SHEET_COPY: Record<UploadSourceType, string> = {
   SCAN: "메뉴판, 매뉴얼 사진, PDF 파일을 올려주세요. AI가 텍스트를 읽어 분석해요.",
 };
 
+const ACCEPT: Record<UploadSourceType, string> = {
+  VOICE: "audio/*",
+  VIDEO: "video/*",
+  KAKAO: ".txt,image/*",
+  SCAN: ".pdf,image/*",
+};
+
+// 백엔드 enum 과 정확히 맞춰야 한다. 어긋나면 /ingest/sources 가 422 를 준다.
+//   audio_format  mp3 | m4a | wav        (소문자)
+//   video_format  mp4 | mov              (소문자)
+//   import_type   TXT_EXPORT | SCREENSHOT
+//   doc_type      PDF | JPG | PNG        (대문자)
+function extOf(file: File): string {
+  return file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+}
+
+const DOC_TYPE: Record<string, "PDF" | "JPG" | "PNG"> = {
+  pdf: "PDF",
+  jpg: "JPG",
+  jpeg: "JPG",
+  png: "PNG",
+};
+
+function metaFor(type: UploadSourceType, file: File): Record<string, unknown> {
+  const ext = extOf(file);
+  switch (type) {
+    case "VOICE":
+      return { audio_format: ext, record_method: "UPLOAD" };
+    case "VIDEO":
+      return { video_format: ext };
+    case "KAKAO":
+      // 대화 캡처 이미지도 카톡 소스다 (source_kakao.import_type)
+      return { import_type: ["png", "jpg", "jpeg"].includes(ext) ? "SCREENSHOT" : "TXT_EXPORT" };
+    case "SCAN":
+      return { doc_type: DOC_TYPE[ext] ?? "PDF", doc_category: "ETC" };
+  }
+}
+
 export default function UploadPage() {
   const router = useRouter();
-  const { dispatch } = useApp();
-  const [pct, setPct] = useState(0);
-  const [uploaded, setUploaded] = useState<Record<UploadSourceType, boolean>>({
-    VOICE: false,
-    VIDEO: false,
-    KAKAO: false,
-    SCAN: false,
-  });
-  const [loading, setLoading] = useState<UploadSourceType | null>(null);
+  const { state, dispatch } = useApp();
+  const [busy, setBusy] = useState<UploadSourceType | null>(null);
   const [activeSheet, setActiveSheet] = useState<UploadSourceType | null>(null);
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  // 업로드마다 고유 id 를 붙이는 카운터. Date.now()는 렌더 순수성 규칙에 걸려 쓰지 않는다.
+  const uploadSeq = useRef(0);
 
-  const uploadCount = Object.values(uploaded).filter(Boolean).length;
-  const hasAny = uploadCount > 0;
-  const sufficient = pct >= 50;
+  // uploadSources(전역)가 유일한 출처다 — 로컬 상태를 따로 두면 둘이 어긋난다.
+  // state.uploadSources 만 의존성으로 둔다 — state 전체를 넣으면 관련 없는 변경에도 재계산된다.
+  const latestByType = useMemo(() => {
+    const map: Partial<Record<UploadSourceType, (typeof state.uploadSources)[number]>> = {};
+    for (const s of state.uploadSources) map[s.type] = s;
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.uploadSources]);
 
-  function doUpload(id: UploadSourceType) {
-    if (uploaded[id] || loading) return;
-    setLoading(id);
-    setTimeout(() => {
-      setUploaded((p) => ({ ...p, [id]: true }));
-      setPct((p) => Math.min(100, p + UPLOAD_METHODS.find((m) => m.type === id)!.weight));
-      dispatch({
-        type: "ADD_UPLOAD_SOURCE",
-        source: {
-          id: `${id}-${Date.now()}`,
-          type: id,
-          title: UPLOAD_METHODS.find((m) => m.type === id)!.label,
-          status: "DONE",
+  const gaugePct = UPLOAD_METHODS.reduce(
+    (sum, m) => sum + (latestByType[m.type]?.status === "DONE" ? m.weight : 0),
+    0
+  );
+  const hasAny = Object.values(latestByType).some((s) => s?.status === "DONE");
+  const sufficient = gaugePct >= 50;
+
+  async function handleFile(type: UploadSourceType, file: File) {
+    uploadSeq.current += 1;
+    const id = `${type}-${uploadSeq.current}`;
+    dispatch({
+      type: "ADD_UPLOAD_SOURCE",
+      source: { id, type, title: file.name, status: "UPLOADED" },
+    });
+    setBusy(type);
+    dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "PROCESSING" } });
+
+    try {
+      // 실제 백엔드 연동 경로 (docs/ingest-contract.md 3단계). 토큰이 없으면 401로 실패하고
+      // catch 블록에서 로컬 시뮬레이션으로 대체한다 — 배포된 프론트만으로도 데모가 끊기지 않게.
+      const token = state.token ?? undefined;
+      const { upload_url, file_url } = await requestUploadUrl(type, file.name, token);
+      await putToStorage(upload_url, file);
+      const contentHash = await computeContentHash(file);
+      const { source_id, duplicate } = await registerSource(
+        {
+          sourceType: type,
+          fileUrl: file_url,
+          title: file.name,
+          fileSize: file.size,
+          contentHash,
+          meta: metaFor(type, file),
         },
-      });
-      setLoading(null);
-    }, 1500);
+        token
+      );
+      if (duplicate) {
+        // 같은 파일을 이미 올렸다. 새로 처리하지 않고 완료로 표시한다 (D9).
+        dispatch({
+          type: "UPDATE_UPLOAD_SOURCE",
+          id,
+          patch: { status: "DONE", title: `${file.name} (이미 올린 파일)` },
+        });
+        return;
+      }
+      dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { sourceId: source_id } });
+      await startProcessing(source_id, token);
+
+      // 영상은 프레임 추출 + 멀티모달 판독이라 분 단위로 걸린다. 60회 × 2초 = 2분까지 기다린다.
+      const maxPolls = type === "VIDEO" ? 60 : 30;
+      let done = false;
+      for (let i = 0; i < maxPolls && !done; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const s = await getIngestStatus(source_id, token);
+        if (s.status === "DONE") {
+          dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "DONE" } });
+          done = true;
+        } else if (s.status === "FAILED") {
+          dispatch({
+            type: "UPDATE_UPLOAD_SOURCE",
+            id,
+            patch: { status: "FAILED", errorMessage: s.error_message ?? "처리 실패" },
+          });
+          done = true;
+        }
+      }
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // 서버가 내린 판정이다. 조용히 완료로 만들면 등록되지 않은 걸 등록됐다고 속인다.
+        dispatch({
+          type: "UPDATE_UPLOAD_SOURCE",
+          id,
+          patch: {
+            status: "FAILED",
+            errorMessage:
+              err.status === 422
+                ? "이 파일 형식은 아직 지원하지 않아요"
+                : err.detail || `등록 실패 (${err.status})`,
+          },
+        });
+      } else {
+        // 백엔드 미연결 — 로컬에서 완료로 표시해 데모 흐름을 이어간다
+        await new Promise((r) => setTimeout(r, 1200));
+        dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "DONE" } });
+      }
+    } finally {
+      setBusy(null);
+    }
   }
 
   const buddyMsg = sufficient
@@ -62,12 +180,12 @@ export default function UploadPage() {
       <div className="px-4 pt-1 pb-3 shrink-0">
         <div className="flex justify-between mb-1.5">
           <span className="text-xs font-bold text-brand-700">학습 진전도</span>
-          <span className="text-xs font-bold text-brand-500">{pct}%</span>
+          <span className="text-xs font-bold text-brand-500">{gaugePct}%</span>
         </div>
         <div className="h-3 bg-surface-muted rounded-full overflow-hidden mb-3">
           <div
             className="h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r from-brand-500 to-brand-600"
-            style={{ width: `${pct}%` }}
+            style={{ width: `${gaugePct}%` }}
           />
         </div>
         <div className={`rounded-2xl px-3 py-2.5 ${sufficient ? "bg-brand-50" : "bg-accent-50"}`}>
@@ -79,7 +197,8 @@ export default function UploadPage() {
         <p className="text-xs text-muted mb-3">원하는 방법으로 자료를 올려주세요. 여러 개 조합도 가능해요.</p>
         <div className="space-y-2.5">
           {UPLOAD_METHODS.map((m) => {
-            const isDone = uploaded[m.type];
+            const status = latestByType[m.type]?.status;
+            const isDone = status === "DONE";
             return (
               <button
                 key={m.type}
@@ -98,16 +217,25 @@ export default function UploadPage() {
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-sm font-bold leading-tight">{m.label}</p>
                   <p className="text-xs text-muted mt-0.5 truncate">
-                    {m.type === "VOICE" && "녹음 파일 업로드 또는 바로 녹음"}
-                    {m.type === "VIDEO" && "촬영하면서 업무를 설명해주세요"}
-                    {m.type === "KAKAO" && "대화 파일(.txt) 또는 캡처 이미지 업로드"}
-                    {m.type === "SCAN" && "PDF, 메뉴판 사진, 문서 이미지 업로드"}
+                    {status === "FAILED"
+                      ? (latestByType[m.type]?.errorMessage ?? "처리 실패")
+                      : m.type === "VOICE"
+                        ? "녹음 파일 업로드 또는 바로 녹음"
+                        : m.type === "VIDEO"
+                          ? "촬영하면서 업무를 설명해주세요"
+                          : m.type === "KAKAO"
+                            ? "대화 파일(.txt) 또는 캡처 이미지 업로드"
+                            : "PDF, 메뉴판 사진, 문서 이미지 업로드"}
                   </p>
                 </div>
                 {isDone ? (
                   <span className="w-6 h-6 rounded-full bg-brand-500 flex items-center justify-center text-white text-xs shrink-0">
                     ✓
                   </span>
+                ) : status === "FAILED" ? (
+                  <span className="text-danger-500 text-xs font-bold shrink-0">재시도</span>
+                ) : status === "PROCESSING" || busy === m.type ? (
+                  <span className="text-muted text-xs shrink-0">처리 중…</span>
                 ) : (
                   <span className="text-muted shrink-0">→</span>
                 )}
@@ -116,11 +244,11 @@ export default function UploadPage() {
           })}
         </div>
 
-        {uploadCount > 0 && (
+        {hasAny && (
           <div className="mt-5 bg-surface rounded-2xl px-4 py-3 shadow-sm">
             <p className="text-xs font-bold text-brand-700 mb-2">등록된 자료</p>
             <div className="flex flex-wrap gap-2">
-              {UPLOAD_METHODS.filter((c) => uploaded[c.type]).map((c) => (
+              {UPLOAD_METHODS.filter((c) => latestByType[c.type]?.status === "DONE").map((c) => (
                 <div key={c.type} className="flex items-center gap-1 bg-brand-50 rounded-full px-2.5 py-1">
                   <span className="text-xs">{c.icon}</span>
                   <span className="text-xs font-semibold text-brand-700">{c.label}</span>
@@ -146,12 +274,31 @@ export default function UploadPage() {
         </button>
       </div>
 
+      {/* 숨겨진 파일 입력 — 방식별로 하나씩, 바텀시트 버튼이 이걸 클릭시킨다 */}
+      {UPLOAD_METHODS.map((m) => (
+        <input
+          key={m.type}
+          ref={(el) => {
+            inputRefs.current[m.type] = el;
+          }}
+          type="file"
+          accept={ACCEPT[m.type]}
+          {...(m.type === "VIDEO" ? { capture: "environment" as const } : {})}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) handleFile(m.type, file);
+          }}
+        />
+      ))}
+
       {activeSheet && (
         <UploadSheet
           type={activeSheet}
-          done={uploaded[activeSheet]}
-          loading={loading === activeSheet}
-          onUpload={() => doUpload(activeSheet)}
+          status={latestByType[activeSheet]?.status}
+          loading={busy === activeSheet}
+          onTriggerFile={() => inputRefs.current[activeSheet]?.click()}
           onClose={() => setActiveSheet(null)}
         />
       )}
@@ -169,18 +316,19 @@ function Spinner({ className = "" }: { className?: string }) {
 
 function UploadSheet({
   type,
-  done,
+  status,
   loading,
-  onUpload,
+  onTriggerFile,
   onClose,
 }: {
   type: UploadSourceType;
-  done: boolean;
+  status: "UPLOADED" | "PROCESSING" | "DONE" | "FAILED" | undefined;
   loading: boolean;
-  onUpload: () => void;
+  onTriggerFile: () => void;
   onClose: () => void;
 }) {
   const method = UPLOAD_METHODS.find((m) => m.type === type)!;
+  const done = status === "DONE";
   const [recording, setRecording] = useState(false);
   const [attachDoc, setAttachDoc] = useState(false);
 
@@ -199,6 +347,7 @@ function UploadSheet({
               <div>
                 <h3 className="font-bold text-brand-700">{method.label}</h3>
                 {done && <p className="text-xs font-semibold text-brand-500">✓ 등록됨</p>}
+                {status === "FAILED" && <p className="text-xs font-semibold text-danger-500">등록 실패 — 다시 시도해주세요</p>}
               </div>
             </div>
             <button
@@ -215,8 +364,8 @@ function UploadSheet({
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={onUpload}
-                  disabled={done || loading}
+                  onClick={onTriggerFile}
+                  disabled={loading}
                   className="flex flex-col items-center gap-2 py-5 rounded-2xl border-2 bg-surface active:scale-95 transition-all"
                   style={{ borderColor: done ? "var(--brand-500)" : "var(--border)" }}
                 >
@@ -270,8 +419,8 @@ function UploadSheet({
                 </span>
               </button>
               <button
-                onClick={onUpload}
-                disabled={done || loading}
+                onClick={onTriggerFile}
+                disabled={loading}
                 className="w-full flex items-center justify-center gap-3 rounded-2xl py-5 border-2 transition-all active:scale-95"
                 style={{
                   background: done ? "var(--brand-50)" : "var(--brand-700)",
@@ -303,8 +452,8 @@ function UploadSheet({
               ].map((btn) => (
                 <button
                   key={btn.label}
-                  onClick={onUpload}
-                  disabled={done || loading}
+                  onClick={onTriggerFile}
+                  disabled={loading}
                   className="flex flex-col items-center gap-2 py-5 rounded-2xl border-2 bg-surface active:scale-95 transition-all"
                   style={{ borderColor: done ? "var(--brand-500)" : "var(--border)" }}
                 >
@@ -318,8 +467,8 @@ function UploadSheet({
 
           {type === "SCAN" && (
             <button
-              onClick={onUpload}
-              disabled={done || loading}
+              onClick={onTriggerFile}
+              disabled={loading}
               className="w-full flex flex-col items-center gap-3 py-8 rounded-2xl border-2 bg-surface active:scale-95 transition-all"
               style={{ borderColor: done ? "var(--brand-500)" : "var(--border)", borderStyle: done ? "solid" : "dashed" }}
             >

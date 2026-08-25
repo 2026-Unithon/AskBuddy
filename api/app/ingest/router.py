@@ -10,21 +10,32 @@
 store_id 는 JWT 에서만 꺼낸다. 요청 본문의 매장 정보를 신뢰하지 않는다 (D1).
 """
 import logging
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from app.deps import CurrentStoreId, CurrentUserId, Db
+from app.config import get_settings
+from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
 from app.ingest import pipeline
 from app.ingest.preprocess import storage
 from app.ingest import repository as repo
 from app.ingest.embed import embed_card
 from app.ingest.schemas import (
+    CategoryOut,
+
+
+    ApproveResult,
+    BulkApproveRequest,
     CreateSourceRequest,
     KakaoMeta,
     ProcessRequest,
+    ReviewCard,
+    ReviewFact,
+    ReviewList,
     ScanMeta,
     SourceCreated,
     StatusResponse,
+    UpdateCategoriesRequest,
     UploadUrlRequest,
     UploadUrlResponse,
     VideoMeta,
@@ -40,6 +51,28 @@ _EXPECTED_META = {
     "KAKAO": KakaoMeta,
     "SCAN": ScanMeta,
 }
+
+
+@router.get("/categories", response_model=list[CategoryOut])
+async def list_categories(db: Db, store_id: CurrentStoreId) -> list[CategoryOut]:
+    """점주가 켜둔 업무 카테고리. 추출기는 이 목록 안에서만 고른다."""
+    rows = await repo.list_categories(db, store_id)
+    return [CategoryOut(**dict(r)) for r in rows]
+
+
+@router.patch("/categories", response_model=list[CategoryOut])
+async def update_categories(
+    req: UpdateCategoriesRequest,
+    db: Db,
+    store_id: CurrentStoreId,
+) -> list[CategoryOut]:
+    """"베이킹 안 해요" 같은 토글을 저장한다. 카테고리를 새로 만들지 않는다."""
+    async with db.transaction():
+        await repo.set_categories_enabled(
+            db, store_id, {c.category_name: c.is_enabled for c in req.categories}
+        )
+        rows = await repo.list_categories(db, store_id)
+    return [CategoryOut(**dict(r)) for r in rows]
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
@@ -187,3 +220,144 @@ async def embed(
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
     return {"card_id": card_id, "chunks": chunks}
+
+
+# ── 검수 (점주 승인) ───────────────────────────────────────────────────────
+#
+# 추출된 카드는 항상 is_verified=false 로 쌓인다. 점주가 여기서 확인하고
+# 승인해야 검색(match_cards)에 노출된다. 승인 즉시 임베딩까지 끝낸다.
+
+async def require_owner(claims: Claims) -> int:
+    """승인은 점주만. 신입(STAFF)은 미승인 카드를 보지도 못한다."""
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "카드 검수·승인은 점주만 할 수 있다")
+    store_id = claims.get("store_id")
+    if store_id is None:
+        raise HTTPException(403, "token has no store_id")
+    return int(store_id)
+
+
+OwnerStoreId = Annotated[int, Depends(require_owner)]
+
+_VERIFIED_FILTER: dict[str, bool | None] = {
+    "pending": False,     # 기본값 — 점주가 아직 안 본 카드
+    "approved": True,
+    "all": None,
+}
+
+
+@router.get("/review", response_model=ReviewList)
+async def review(
+    db: Db,
+    store_id: OwnerStoreId,
+    status: Literal["pending", "approved", "all"] = "pending",
+    source_id: int | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ReviewList:
+    """점주 검수 목록. 기본은 미승인 카드만.
+
+    needs_attention=true 는 신뢰도가 D3 임계 미만이라는 뜻이다. 프론트는
+    이걸 배지로 띄우고, 점주가 근거(source)를 열어볼 수 있게 한다.
+    """
+    verified = _VERIFIED_FILTER[status]
+    rows = await repo.list_review_cards(
+        db, store_id, verified=verified, source_id=source_id,
+        limit=limit, offset=offset,
+    )
+    facts = await repo.facts_for_cards(db, [r["card_id"] for r in rows])
+    total = await repo.count_review_cards(
+        db, store_id, verified=verified, source_id=source_id
+    )
+
+    # DB 는 0~100 으로 저장한다. 임계값도 같은 축으로 올려서 내려준다
+    threshold = round(get_settings().confidence_threshold * 100, 2)
+
+    return ReviewList(
+        total=total, limit=limit, offset=offset, threshold=threshold,
+        cards=[
+            ReviewCard(
+                card_id=r["card_id"],
+                title=r["title"],
+                content=r["content"],
+                category_id=r["category_id"],
+                category_name=r["category_name"],
+                source_id=r["source_id"],
+                source_type=r["source_type"],
+                source_title=r["source_title"],
+                confidence=float(r["confidence"]),
+                is_verified=r["is_verified"],
+                needs_attention=float(r["confidence"]) < threshold,
+                created_at=r["created_at"].isoformat(),
+                facts=[
+                    ReviewFact(
+                        fact_id=f["fact_id"],
+                        object_name=f["object_name"],
+                        attribute=f["attribute"],
+                        value=f["value"],
+                        confidence=float(f["confidence"]),
+                    )
+                    for f in facts.get(r["card_id"], [])
+                ],
+            )
+            for r in rows
+        ],
+    )
+
+
+async def _approve_one(db, store_id: int, card_id: int) -> ApproveResult:
+    """승인과 임베딩을 한 트랜잭션에 묶는다.
+
+    임베딩이 실패했는데 승인만 남으면 검색에 안 잡히는 유령 카드가 된다.
+    그래서 실패하면 승인까지 되돌리고 점주에게 다시 누르게 한다.
+    """
+    async with db.transaction():
+        if not await repo.set_card_verified(db, store_id, card_id, True):
+            raise LookupError(f"card {card_id} not found in store {store_id}")
+        chunks = await embed_card(db, store_id, card_id)
+    logger.info("승인 card=%s store=%s chunks=%d", card_id, store_id, chunks)
+    return ApproveResult(card_id=card_id, is_verified=True, chunks=chunks)
+
+
+@router.post("/cards/{card_id}/approve", response_model=ApproveResult)
+async def approve_card(card_id: int, db: Db, store_id: OwnerStoreId) -> ApproveResult:
+    """점주가 '승인' 을 누른다. 이 순간부터 검색에 노출된다."""
+    try:
+        return await _approve_one(db, store_id, card_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except Exception as e:
+        logger.exception("승인 실패 card=%s", card_id)
+        raise HTTPException(502, f"승인은 됐으나 임베딩에 실패해 되돌렸다: {e}") from e
+
+
+@router.post("/cards/{card_id}/unapprove", response_model=ApproveResult)
+async def unapprove_card(card_id: int, db: Db, store_id: OwnerStoreId) -> ApproveResult:
+    """승인 취소. 임베딩은 남기고 검색에서만 뺀다 (match_cards 가 승인분만 본다).
+
+    다시 승인하면 임베딩을 새로 만들지 않고 그대로 살아난다.
+    """
+    if not await repo.set_card_verified(db, store_id, card_id, False):
+        raise HTTPException(404, f"card {card_id} not found in store {store_id}")
+    logger.info("승인 취소 card=%s store=%s", card_id, store_id)
+    return ApproveResult(card_id=card_id, is_verified=False)
+
+
+@router.post("/cards/approve", response_model=list[ApproveResult])
+async def approve_cards(
+    req: BulkApproveRequest, db: Db, store_id: OwnerStoreId
+) -> list[ApproveResult]:
+    """일괄 승인. 한 건이 실패해도 나머지는 진행하고 실패분만 error 로 돌려준다.
+
+    자료 하나에서 카드가 열 장 넘게 나오므로 '이 자료 전부 승인' 이 필요하다.
+    """
+    results: list[ApproveResult] = []
+    for card_id in req.card_ids:
+        try:
+            results.append(await _approve_one(db, store_id, card_id))
+        except Exception as e:
+            logger.warning("일괄 승인 중 실패 card=%s: %s", card_id, e)
+            results.append(ApproveResult(
+                card_id=card_id, is_verified=False, error=f"{type(e).__name__}: {e}"
+            ))
+    return results

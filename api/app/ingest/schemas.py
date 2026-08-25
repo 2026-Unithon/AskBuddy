@@ -87,6 +87,23 @@ class CreateSourceRequest(BaseModel):
     meta: VoiceMeta | VideoMeta | KakaoMeta | ScanMeta | None = None
 
 
+class CategoryToggle(BaseModel):
+    category_name: str = Field(max_length=50)
+    is_enabled: bool
+
+
+class UpdateCategoriesRequest(BaseModel):
+    """켜짐 여부만 바꾼다. 새 카테고리를 만들지 않는다."""
+    categories: list[CategoryToggle]
+
+
+class CategoryOut(BaseModel):
+    category_id: int
+    category_name: str
+    is_enabled: bool
+    sort_order: int
+
+
 class ProcessRequest(BaseModel):
     source_id: int
     force: bool = False     # DONE 인 자료를 다시 돌린다
@@ -106,3 +123,49 @@ class StatusResponse(BaseModel):
     error_message: str | None = None
     processed_at: str | None = None
     card_count: int = 0
+
+
+# ── 검수 (점주 승인) ───────────────────────────────────────────────────────
+
+class ReviewFact(BaseModel):
+    fact_id: int
+    object_name: str
+    attribute: str
+    value: str
+    confidence: float          # 0~100 (DB 저장값 그대로)
+
+
+class ReviewCard(BaseModel):
+    """점주 검수 화면 1행. confidence 는 DB 와 같은 0~100 이다."""
+    card_id: int
+    title: str
+    content: str
+    category_id: int | None = None
+    category_name: str = ""
+    source_id: int | None = None
+    source_type: SourceType | None = None
+    source_title: str | None = None
+    confidence: float
+    is_verified: bool
+    needs_attention: bool      # 신뢰도가 D3 임계 미만 — 점주가 특히 봐야 할 카드
+    created_at: str
+    facts: list[ReviewFact] = []
+
+
+class ReviewList(BaseModel):
+    total: int                 # 필터에 걸린 전체 건수 (limit 이전)
+    limit: int
+    offset: int
+    threshold: float           # D3 임계값을 0~100 으로 환산한 값
+    cards: list[ReviewCard] = []
+
+
+class ApproveResult(BaseModel):
+    card_id: int
+    is_verified: bool
+    chunks: int = 0            # 임베딩된 청크 수. 승인 취소면 0
+    error: str | None = None   # 일괄 승인에서 이 카드만 실패한 경우
+
+
+class BulkApproveRequest(BaseModel):
+    card_ids: list[int] = Field(min_length=1, max_length=200)
