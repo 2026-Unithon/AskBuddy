@@ -65,7 +65,7 @@ async def retrieve(req: RetrieveRequest, db: Db):
         req.top_k,
     )
 
-    threshold = settings.confidence_threshold
+    threshold = settings.retrieval_threshold
     candidates = [
         {
             "id": int(r["id"]),

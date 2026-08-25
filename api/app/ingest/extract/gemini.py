@@ -40,13 +40,30 @@ def _render_prompt(*, source_type: str, text: str,
             .replace("{transcript}", text))
 
 
+_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+         ".pdf": "application/pdf"}
+
+
+def _parts(prompt: str, media: list[Path]):
+    from google.genai import types
+
+    parts = [types.Part.from_text(text=prompt)]
+    for m in media:
+        mime = _MIME.get(m.suffix.lower())
+        if mime is None:
+            logger.warning("지원하지 않는 첨부 형식 무시: %s", m.name)
+            continue
+        parts.append(types.Part.from_bytes(data=m.read_bytes(), mime_type=mime))
+    return parts
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
-async def _call(prompt: str) -> str:
+async def _call(prompt: str, media: list[Path]) -> str:
     from google import genai
     from google.genai import types
 
@@ -54,7 +71,7 @@ async def _call(prompt: str) -> str:
     client = genai.Client(api_key=s.gemini_api_key)
     res = await client.aio.models.generate_content(
         model=s.gemini_model,
-        contents=prompt,
+        contents=_parts(prompt, media),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=ExtractionResult,
@@ -67,6 +84,7 @@ async def _call(prompt: str) -> str:
 async def extract(
     *, source_id: int, source_type: str, text: str,
     category_names: list[str], glossary: list[dict[str, str]],
+    media: list[Path] = (),
 ) -> ExtractionResult:
     s = get_settings()
     if not s.gemini_api_key:
@@ -78,11 +96,12 @@ async def extract(
     prompt = _render_prompt(source_type=source_type, text=text,
                             category_names=category_names, glossary=glossary)
 
+    media = list(media)
     started = time.perf_counter()
-    raw = await _call(prompt)
+    raw = await _call(prompt, media)
     elapsed = time.perf_counter() - started
-    logger.info("gemini model=%s elapsed=%.1fs in=%dchars out=%dchars",
-                s.gemini_model, elapsed, len(prompt), len(raw))
+    logger.info("gemini model=%s elapsed=%.1fs in=%dchars media=%d out=%dchars",
+                s.gemini_model, elapsed, len(prompt), len(media), len(raw))
 
     try:
         result = ExtractionResult.model_validate_json(raw)

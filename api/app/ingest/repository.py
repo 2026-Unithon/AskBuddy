@@ -267,3 +267,73 @@ async def upsert_embedding(
         card_id, store_id, chunk_index, chunk_text, literal, dimension,
         model_name, content_hash,
     )
+
+
+async def update_video_result(
+    conn: asyncpg.Connection, source_id: int, *,
+    duration_sec: int, resolution: str | None, fps: int | None,
+    frame_count: int, transcript: str | None,
+) -> None:
+    await conn.execute(
+        "update source_video set duration_sec = $2, resolution = $3, fps = $4, "
+        "       frame_count = $5, transcript = $6 where source_id = $1",
+        source_id, duration_sec, resolution, fps, frame_count, transcript,
+    )
+
+
+async def get_video(conn: asyncpg.Connection, source_id: int) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        "select video_id, duration_sec, transcript, frame_count from source_video "
+        "where source_id = $1", source_id)
+
+
+async def insert_frames(
+    conn: asyncpg.Connection, video_id: int, rows: list[dict]
+) -> None:
+    """frame_index 는 0-base. timestamp_sec = frame_index * FRAME_INTERVAL_SEC."""
+    if not rows:
+        return
+    await conn.executemany(
+        "insert into source_frames (video_id, frame_index, timestamp_sec, image_url) "
+        "values ($1, $2, $3, $4) "
+        "on conflict (video_id, frame_index) do update set "
+        "  timestamp_sec = excluded.timestamp_sec, image_url = excluded.image_url",
+        [(video_id, r["frame_index"], r["timestamp_sec"], r["image_url"]) for r in rows],
+    )
+
+
+async def get_kakao(conn: asyncpg.Connection, source_id: int) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        "select kakao_id, parsed_text from source_kakao where source_id = $1", source_id)
+
+
+async def update_kakao_result(
+    conn: asyncpg.Connection, source_id: int, *,
+    room_name: str | None, message_count: int, participant_cnt: int,
+    period_start, period_end, parsed_text: str,
+) -> None:
+    await conn.execute(
+        "update source_kakao set room_name = coalesce($2, room_name), "
+        "       message_count = $3, participant_cnt = $4, "
+        "       period_start = $5, period_end = $6, parsed_text = $7 "
+        "where source_id = $1",
+        source_id, (room_name or None) and room_name[:100],
+        message_count, participant_cnt, period_start, period_end, parsed_text,
+    )
+
+
+async def get_scan(conn: asyncpg.Connection, source_id: int) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        "select scan_id, doc_type, ocr_text from source_scan where source_id = $1",
+        source_id)
+
+
+async def update_scan_result(
+    conn: asyncpg.Connection, source_id: int, *,
+    page_count: int, ocr_text: str | None, ocr_engine: str | None,
+) -> None:
+    await conn.execute(
+        "update source_scan set page_count = $2, ocr_text = $3, ocr_engine = $4 "
+        "where source_id = $1",
+        source_id, page_count, ocr_text, ocr_engine,
+    )

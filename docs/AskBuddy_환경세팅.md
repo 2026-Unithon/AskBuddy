@@ -337,7 +337,8 @@ ffmpeg -i input.mp4 -vf "fps=1/3,scale=640:-1" tmp/frame_%04d.jpg
 - [x] STT(whisper-1) 실호출 성공
 - [x] Gemini 호출 1회 성공(JSON 파싱까지) — `gemini-3.6-flash`
 - [x] `INGEST_MODE=real` → 전사문 → 카드 7건 적재 → 승인 → 임베딩 → `/reg/retrieve` hit
-- [ ] **실제 매장 녹음으로 재검증** (지금까지는 사람이 쓴 전사문 기준)
+- [x] M4 — KAKAO(txt 파서) · SCAN(pypdf→Gemini 판독) · VIDEO(프레임+화면 판독) 관통
+- [ ] **실제 자료로 재검증** (지금까지는 합성 자료 — 전사문·직접 만든 카톡 txt·PIL 로 그린 영상)
 - [ ] 샘플 mp4 → 프레임 N장 → `source_frames` N행 (M4)
 - [ ] 카드 INSERT 후 `select * from knowledge_cards where is_verified=false` 확인
 
