@@ -1,22 +1,30 @@
 """관호 (feat/db) — 미답변 순환 진입점.
 
 miss 판정은 POST /reg/retrieve 가 하고, 기록은 여기 POST /pending 이 한다 (선택 B).
-store_id·member_id 는 JWT 에서만 해석한다 (불변식 4).
+점주 답변은 POST /pending/{id}/answer — 카드(승인) + 임베딩 + ANSWERED (가이드 6-4).
+store_id 는 JWT 에서만 해석한다 (불변식 4).
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.deps import CurrentStoreId, CurrentUserId, Db
+from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
+from app.ingest.embed import embed_card
 
 router = APIRouter()
+
+_TITLE_MAX = 200
 
 
 class CreatePendingRequest(BaseModel):
     question_text: str = Field(min_length=1, max_length=500)
     miss_reason: str = Field(pattern="^(no_match|intent_mismatch|no_anchor)$")
     message_id: int | None = None
+
+
+class AnswerPendingRequest(BaseModel):
+    answer_text: str = Field(min_length=1, max_length=4000)
 
 
 async def _member_id(db: Db, store_id: int, user_id: int) -> int:
@@ -127,4 +135,99 @@ async def list_pending(
             }
             for r in rows
         ],
+    }
+
+
+@router.post("/pending/{question_id}/answer")
+async def answer_pending(
+    question_id: int,
+    req: AnswerPendingRequest,
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+):
+    """점주 답변 → 지식 카드(is_verified=true) + 임베딩 + WAITING→ANSWERED.
+
+    점주 답은 검수 없이 바로 검색 노출 (가이드 6-4).
+    """
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+
+    answer = req.answer_text.strip()
+    if not answer:
+        raise HTTPException(400, "answer_text is empty")
+
+    pending = await db.fetchrow(
+        """
+        select question_id, question_text, status, category_id
+        from pending_questions
+        where question_id = $1
+          and store_id = $2
+        """,
+        question_id,
+        store_id,
+    )
+    if not pending:
+        raise HTTPException(404, "pending question not found")
+    if pending["status"] != "WAITING":
+        raise HTTPException(409, "already answered")
+
+    title = pending["question_text"][:_TITLE_MAX]
+
+    try:
+        async with db.transaction():
+            card_id = await db.fetchval(
+                """
+                insert into knowledge_cards (
+                  store_id, category_id, source_id, title, content,
+                  confidence, is_verified
+                )
+                values ($1, $2, null, $3, $4, 100.00, true)
+                returning card_id
+                """,
+                store_id,
+                pending["category_id"],
+                title,
+                answer,
+            )
+            card_id = int(card_id)
+
+            await db.execute(
+                """
+                insert into owner_answers (
+                  question_id, answered_by, answer_text, card_id
+                )
+                values ($1, $2, $3, $4)
+                """,
+                question_id,
+                user_id,
+                answer,
+                card_id,
+            )
+
+            # 승인된 카드만 embed_card 가 받는다. 같은 커넥션·트랜잭션에서 적재.
+            await embed_card(db, store_id, card_id)
+
+            await db.execute(
+                """
+                update pending_questions
+                set status = 'ANSWERED'
+                where question_id = $1
+                  and store_id = $2
+                  and status = 'WAITING'
+                """,
+                question_id,
+                store_id,
+            )
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+    return {
+        "question_id": question_id,
+        "status": "ANSWERED",
+        "card_id": card_id,
+        "answer_text": answer,
     }
