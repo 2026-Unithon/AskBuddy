@@ -1,0 +1,29 @@
+# env — 이름만 리포에 남기고 값은 남기지 않는다
+.env
+.env.*
+!.env.example
+
+# python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+api/tmp/
+
+# node / next
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# db / supabase
+db/data/
+supabase/.branches/
+supabase/.temp/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

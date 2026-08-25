@@ -1,0 +1,39 @@
+"""공용 — 환경변수 로딩. 수정 전 팀 합의."""
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_name: str = "askbuddy"
+    env: str = "local"
+    allowed_origins: str = "http://localhost:3000"
+
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+
+    # D3·D4 고정값. 코드에서 리터럴로 쓰지 말고 여기를 참조한다
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1536
+    confidence_threshold: float = 0.6
+    frame_interval_sec: int = 3
+
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_db_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
+    jwt_secret: str = "dev-only-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440
+
+    @property
+    def origins(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
