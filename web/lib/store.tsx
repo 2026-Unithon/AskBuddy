@@ -9,13 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import {
-  MOCK_CHAT_HISTORY,
   MOCK_EMPTY_KNOWLEDGE,
   MOCK_INVITE_CODE,
   MOCK_KNOWLEDGE_SECTIONS,
-  MOCK_PENDING_QUESTIONS,
   MOCK_ROADMAP,
-  MOCK_STAFF,
   MOCK_STORE_NAME,
   MOCK_TASK_CATEGORIES,
 } from "./mock";
@@ -35,7 +32,7 @@ import type {
 const STORAGE_KEY = "askbuddy_state";
 // 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
 // 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
-const STATE_VERSION = 3;
+const STATE_VERSION = 7;
 
 type AppState = {
   hydrated: boolean;
@@ -77,9 +74,9 @@ const initialState: AppState = {
   uploadSources: [],
   knowledgeSections: MOCK_KNOWLEDGE_SECTIONS,
   roadmap: MOCK_ROADMAP,
-  chatMessages: MOCK_CHAT_HISTORY,
-  staff: MOCK_STAFF,
-  pendingQuestions: MOCK_PENDING_QUESTIONS,
+  chatMessages: [],
+  staff: [],
+  pendingQuestions: [],
   emptyKnowledge: MOCK_EMPTY_KNOWLEDGE,
   streakDays: 3,
   hearts: 3,
@@ -111,7 +108,10 @@ type Action =
   | { type: "UPDATE_UPLOAD_SOURCE"; id: string; patch: Partial<UploadSource> }
   | { type: "COMPLETE_ROADMAP_NODE"; nodeId: string }
   | { type: "ADD_CHAT_MESSAGE"; message: ChatMessage }
+  | { type: "SET_CHAT_MESSAGES"; messages: ChatMessage[] }
   | { type: "ADD_PENDING_QUESTION"; question: PendingQuestion }
+  | { type: "SET_PENDING_QUESTIONS"; questions: PendingQuestion[] }
+  | { type: "SET_STAFF"; staff: StaffMember[] }
   | { type: "ANSWER_PENDING_QUESTION"; id: string; answerText: string };
 
 function recomputeNodeStatus(nodes: RoadmapNode[]): RoadmapNode[] {
@@ -202,8 +202,14 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "ADD_CHAT_MESSAGE":
       return { ...state, chatMessages: [...state.chatMessages, action.message] };
+    case "SET_CHAT_MESSAGES":
+      return { ...state, chatMessages: action.messages };
     case "ADD_PENDING_QUESTION":
       return { ...state, pendingQuestions: [...state.pendingQuestions, action.question] };
+    case "SET_PENDING_QUESTIONS":
+      return { ...state, pendingQuestions: action.questions };
+    case "SET_STAFF":
+      return { ...state, staff: action.staff };
     case "ANSWER_PENDING_QUESTION":
       return {
         ...state,

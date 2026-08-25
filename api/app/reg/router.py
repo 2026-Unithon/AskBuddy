@@ -12,13 +12,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.config import get_settings
 from app.deps import Db, resolve_store_id
-from app.reg.embeddings import embed_text, vector_literal
+from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
-
-MISS_MESSAGE = "사장님께 확인 중"
 
 
 class RetrieveRequest(BaseModel):
@@ -36,56 +33,27 @@ async def retrieve(req: RetrieveRequest, db: Db):
 
     # 골든셋·프론트 계약: 본문의 store_id(문자열 slug)를 진입점에서 한 번만 BIGINT 로 변환
     store_id = await resolve_store_id(db, req.store_id)
-    settings = get_settings()
+    result = await retrieve_question(db, store_id, question, req.top_k)
 
-    # 질문 앵커가 너무 짧으면 no_anchor
-    if len(question) < 2:
+    if result["kind"] == "miss":
         return {
             "kind": "miss",
-            "reason": "no_anchor",
-            "message": MISS_MESSAGE,
+            "reason": result["reason"],
+            "message": result["message"],
         }
 
-    query_vec = embed_text(question)
-    rows = await db.fetch(
-        """
-        select
-          m.card_id as id,
-          m.content,
-          coalesce(tc.category_name, '') as category,
-          m.score
-        from match_cards($1, $2::vector, $3) m
-        join knowledge_cards c on c.card_id = m.card_id
-        left join task_categories tc on tc.category_id = c.category_id
-        where c.store_id = $1
-        order by m.score desc
-        """,
-        store_id,
-        vector_literal(query_vec),
-        req.top_k,
-    )
-
-    # D11: 검색 hit/miss 는 retrieval_threshold. confidence_threshold(D3)는 검수용
-    threshold = settings.retrieval_threshold
-    candidates = [
-        {
-            "id": int(r["id"]),
-            "content": r["content"],
-            "category": r["category"],
-            "score": float(r["score"]),
-        }
-        for r in rows
-        if float(r["score"]) >= threshold
-    ]
-
-    if not candidates:
-        return {
-            "kind": "miss",
-            "reason": "no_match",
-            "message": MISS_MESSAGE,
-        }
-
-    return {"kind": "hit", "candidates": candidates}
+    return {
+        "kind": "hit",
+        "candidates": [
+            {
+                "id": c["id"],
+                "content": c["content"],
+                "category": c["category"],
+                "score": c["score"],
+            }
+            for c in result["candidates"]
+        ],
+    }
 
 
 @router.get("/cards")

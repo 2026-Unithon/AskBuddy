@@ -13,6 +13,7 @@ from app.auth.router import router as auth_router
 from app.config import get_settings
 from app.deps import close_pool, init_pool
 from app.ingest.router import router as ingest_router
+from app.learn.router import router as learn_router
 from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
 
@@ -49,6 +50,7 @@ app.include_router(preflight_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(reg_router, prefix="/reg", tags=["reg"])
 app.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
+app.include_router(learn_router, prefix="/learn", tags=["learn"])
 
 
 @app.get("/health")
