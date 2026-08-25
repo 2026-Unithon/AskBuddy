@@ -6,6 +6,7 @@ import { Badge, BottomCta, Button, Card, ProgressBar, Shell, TopBar } from "@/co
 import { useApp } from "@/lib/store";
 import { UPLOAD_METHODS, type UploadSourceType } from "@/lib/types";
 import {
+  ApiError,
   computeContentHash,
   getIngestStatus,
   putToStorage,
@@ -14,16 +15,34 @@ import {
   startProcessing,
 } from "@/lib/api";
 
+// 백엔드 enum 과 정확히 맞춰야 한다. 어긋나면 /ingest/sources 가 422 를 준다.
+//   audio_format  mp3 | m4a | wav        (소문자)
+//   video_format  mp4 | mov              (소문자)
+//   import_type   TXT_EXPORT | SCREENSHOT
+//   doc_type      PDF | JPG | PNG        (대문자)
+function extOf(file: File): string {
+  return file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+}
+
+const DOC_TYPE: Record<string, "PDF" | "JPG" | "PNG"> = {
+  pdf: "PDF",
+  jpg: "JPG",
+  jpeg: "JPG",
+  png: "PNG",
+};
+
 function metaFor(type: UploadSourceType, file: File): Record<string, unknown> {
+  const ext = extOf(file);
   switch (type) {
     case "VOICE":
-      return { audio_format: file.name.split(".").pop(), record_method: "UPLOAD" };
+      return { audio_format: ext, record_method: "UPLOAD" };
     case "VIDEO":
-      return { video_format: file.name.split(".").pop() };
+      return { video_format: ext };
     case "KAKAO":
-      return { import_type: "FILE" };
+      // 대화 캡처 이미지도 카톡 소스다 (source_kakao.import_type)
+      return { import_type: ["png", "jpg", "jpeg"].includes(ext) ? "SCREENSHOT" : "TXT_EXPORT" };
     case "SCAN":
-      return { doc_type: file.name.split(".").pop() };
+      return { doc_type: DOC_TYPE[ext] ?? "PDF", doc_category: "ETC" };
   }
 }
 
@@ -42,10 +61,6 @@ export default function UploadPage() {
   const gaugePct = UPLOAD_METHODS.reduce(
     (sum, m) => sum + (latestByType[m.type]?.status === "DONE" ? m.weight : 0),
     0
-  );
-
-  const hasAnyOtherDone = UPLOAD_METHODS.filter((m) => m.type !== "VIDEO").some(
-    (m) => latestByType[m.type]?.status === "DONE"
   );
 
   async function handleFile(type: UploadSourceType, file: File) {
@@ -84,6 +99,7 @@ export default function UploadPage() {
         });
         return;
       }
+      dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { sourceId: source_id } });
       await startProcessing(source_id, token);
 
       // 영상은 프레임 추출 + 멀티모달 판독이라 분 단위로 걸린다. 60회 × 2초 = 2분까지 기다린다.
@@ -104,10 +120,25 @@ export default function UploadPage() {
           done = true;
         }
       }
-    } catch {
-      // 백엔드 미연결 상태 — 로컬에서 처리 완료로 표시해 데모 흐름을 이어간다.
-      await new Promise((r) => setTimeout(r, 1200));
-      dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "DONE" } });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // 서버가 내린 판정이다. 조용히 완료로 만들면 등록되지 않은 걸 등록됐다고 속인다.
+        dispatch({
+          type: "UPDATE_UPLOAD_SOURCE",
+          id,
+          patch: {
+            status: "FAILED",
+            errorMessage:
+              err.status === 422
+                ? "이 파일 형식은 아직 지원하지 않아요"
+                : err.detail || `등록 실패 (${err.status})`,
+          },
+        });
+      } else {
+        // 백엔드 미연결 — 로컬에서 완료로 표시해 데모 흐름을 이어간다
+        await new Promise((r) => setTimeout(r, 1200));
+        dispatch({ type: "UPDATE_UPLOAD_SOURCE", id, patch: { status: "DONE" } });
+      }
     } finally {
       setBusy(null);
     }
@@ -128,7 +159,6 @@ export default function UploadPage() {
         <div className="flex flex-col gap-3">
           {UPLOAD_METHODS.map((m) => {
             const source = latestByType[m.type];
-            const locked = Boolean(m.requiresOther) && !hasAnyOtherDone;
             const status = source?.status;
             return (
               <Card key={m.type} className="p-4 flex items-center gap-3.5">
@@ -138,7 +168,7 @@ export default function UploadPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold">{m.label}</p>
                   <p className="text-xs text-muted mt-0.5">
-                    {locked ? "다른 자료를 먼저 등록하면 열려요" : `${m.formats} · 가중치 ${m.weight}%`}
+                    {`${m.formats} · 가중치 ${m.weight}%`}
                   </p>
                   {status === "FAILED" && source?.errorMessage && (
                     <p className="text-xs text-danger-500 mt-1">{source.errorMessage}</p>
@@ -172,7 +202,7 @@ export default function UploadPage() {
                   <Button
                     variant="secondary"
                     className="h-9 px-3 text-xs"
-                    disabled={locked || busy !== null}
+                    disabled={busy !== null}
                     onClick={() => inputRefs.current[m.type]?.click()}
                   >
                     업로드

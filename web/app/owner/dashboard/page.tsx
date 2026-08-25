@@ -42,9 +42,23 @@ export default function DashboardPage() {
           <h1 className="text-xl font-bold">{state.storeName} 대시보드</h1>
           <p className="text-sm text-muted mt-0.5">직원 진행 상황과 대기 질문을 한눈에 봐요.</p>
         </div>
-        <Link href="/role" className="text-sm text-muted hover:text-foreground">
-          나가기
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/owner/upload"
+            className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-4 h-10 text-sm font-semibold text-white hover:bg-brand-700"
+          >
+            <span aria-hidden>＋</span> 자료 추가
+          </Link>
+          <Link
+            href="/owner/preview"
+            className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+          >
+            학습 미리보기
+          </Link>
+          <Link href="/role" className="text-sm text-muted hover:text-foreground px-2">
+            나가기
+          </Link>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

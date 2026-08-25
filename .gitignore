@@ -24,6 +24,8 @@ out/
 db/data/
 supabase/.branches/
 supabase/.temp/
+testdata/
+UI/
 
 # os / editor
 .DS_Store

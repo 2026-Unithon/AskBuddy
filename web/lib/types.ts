@@ -36,7 +36,7 @@ export const UPLOAD_METHODS: {
   requiresOther?: boolean;
 }[] = [
   { type: "VOICE", label: "음성", icon: "🎙️", weight: 25, formats: "mp3, m4a, wav" },
-  { type: "VIDEO", label: "영상", icon: "🎥", weight: 35, formats: "mp4, mov", requiresOther: true },
+  { type: "VIDEO", label: "영상", icon: "🎥", weight: 35, formats: "mp4, mov" },
   { type: "KAKAO", label: "카카오톡 대화", icon: "💬", weight: 25, formats: "txt" },
   { type: "SCAN", label: "파일 스캔", icon: "📄", weight: 15, formats: "pdf, jpg, png" },
 ];
@@ -49,6 +49,8 @@ export type UploadSource = {
   title: string;
   status: SourceStatus;
   errorMessage?: string;
+  // 백엔드가 매긴 sources.source_id. 미리보기가 "이번에 올린 것" 만 뽑을 때 쓴다.
+  sourceId?: number;
 };
 
 export type KnowledgeItem = {

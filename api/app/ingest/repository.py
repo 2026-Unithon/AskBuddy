@@ -371,3 +371,86 @@ async def set_categories_enabled(
         store_id, list(enabled_by_name), list(enabled_by_name.values()),
     )
     return len(rows)
+
+
+# ── 검수 (점주 승인) ───────────────────────────────────────────────────────
+
+async def list_review_cards(
+    conn: asyncpg.Connection,
+    store_id: int,
+    *,
+    verified: bool | None,
+    source_id: int | None,
+    limit: int,
+    offset: int,
+) -> list[asyncpg.Record]:
+    """검수 목록. verified=None 이면 승인·미승인 전부.
+
+    정렬은 미승인 먼저, 그 안에서 신뢰도 높은 순이다. 점주가 확실한 것부터
+    빠르게 넘기고 애매한 것에 시간을 쓰게 한다.
+    """
+    return await conn.fetch(
+        "select c.card_id, c.title, c.content, c.confidence, c.is_verified, "
+        "       c.created_at, c.category_id, coalesce(tc.category_name, '') as category_name, "
+        "       c.source_id, s.source_type, s.title as source_title "
+        "from knowledge_cards c "
+        "left join task_categories tc on tc.category_id = c.category_id "
+        "left join sources s on s.source_id = c.source_id and s.store_id = c.store_id "
+        "where c.store_id = $1 "
+        "  and ($2::boolean is null or c.is_verified = $2::boolean) "
+        "  and ($3::bigint is null or c.source_id = $3::bigint) "
+        "order by c.is_verified, c.confidence desc, c.card_id "
+        "limit $4 offset $5",
+        store_id, verified, source_id, limit, offset,
+    )
+
+
+async def count_review_cards(
+    conn: asyncpg.Connection, store_id: int, *,
+    verified: bool | None, source_id: int | None,
+) -> int:
+    return await conn.fetchval(
+        "select count(*) from knowledge_cards "
+        "where store_id = $1 "
+        "  and ($2::boolean is null or is_verified = $2::boolean) "
+        "  and ($3::bigint is null or source_id = $3::bigint)",
+        store_id, verified, source_id,
+    ) or 0
+
+
+async def facts_for_cards(
+    conn: asyncpg.Connection, card_ids: list[int]
+) -> dict[int, list[asyncpg.Record]]:
+    """facts 에는 store_id 가 없다. 반드시 store 로 걸러낸 card_id 만 넘길 것."""
+    if not card_ids:
+        return {}
+    rows = await conn.fetch(
+        "select fact_id, card_id, object_name, attribute, value, confidence, is_verified "
+        "from facts where card_id = any($1::bigint[]) order by fact_id",
+        card_ids,
+    )
+    grouped: dict[int, list[asyncpg.Record]] = {}
+    for r in rows:
+        grouped.setdefault(r["card_id"], []).append(r)
+    return grouped
+
+
+async def set_card_verified(
+    conn: asyncpg.Connection, store_id: int, card_id: int, verified: bool
+) -> bool:
+    """점주 승인 토글. 카드에 딸린 facts 도 같이 뒤집는다.
+
+    승인 취소는 임베딩을 지우지 않는다. match_cards 가 is_verified=true 만
+    보므로 검색에서는 즉시 빠지고, 다시 승인하면 그대로 살아난다.
+    """
+    row = await conn.fetchrow(
+        "update knowledge_cards set is_verified = $3, updated_at = now() "
+        "where store_id = $1 and card_id = $2 returning card_id",
+        store_id, card_id, verified,
+    )
+    if row is None:
+        return False
+    await conn.execute(
+        "update facts set is_verified = $2 where card_id = $1", card_id, verified
+    )
+    return True

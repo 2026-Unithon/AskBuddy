@@ -51,7 +51,8 @@ export default function OwnerAuthPage() {
         userId: user.user_id,
         storeId: user.store_id ?? null,
       });
-      router.push("/owner/intent");
+      // 이미 매장이 있으면 등록 흐름을 다시 태우지 않는다. 바로 대시보드로.
+      router.push(user.store_id ? "/owner/dashboard" : "/owner/intent");
     } catch (err) {
       setError(describe(err));
     } finally {
