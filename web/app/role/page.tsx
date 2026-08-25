@@ -1,21 +1,14 @@
 import Link from "next/link";
-import { Shell, TopBar } from "@/components/ui";
+import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 
 export default function RoleSelectPage() {
   return (
     <Shell>
       <TopBar />
-      <div className="flex-1 flex flex-col px-6 pt-2 pb-10 gap-6">
-        <div className="flex items-end gap-2">
-          <div className="w-10 h-10 rounded-full bg-accent-100 flex items-center justify-center text-lg shrink-0">
-            🐻
-          </div>
-          <div className="rounded-tr-2xl rounded-br-2xl rounded-tl-2xl bg-accent-100 px-4 py-2.5">
-            <p className="text-sm font-medium text-foreground">안녕하세요! 저는 Buddy예요 😊</p>
-          </div>
-        </div>
+      <div className="flex-1 flex flex-col px-6 pt-1 pb-10 gap-5">
+        <BuddyBubble text="안녕하세요! 저는 Buddy예요 😊" />
 
-        <div className="space-y-1 pt-2">
+        <div className="space-y-1">
           <h1 className="text-2xl font-bold text-brand-700">어떤 분이세요?</h1>
           <p className="text-sm text-muted">역할에 맞는 화면으로 안내해드릴게요</p>
         </div>
@@ -36,7 +29,7 @@ export default function RoleSelectPage() {
             </div>
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-bold text-brand-700">
               <span className="w-2 h-2 rounded-full bg-brand-500" />
-              사장님
+              사장님 · 퇴사자
             </span>
           </Link>
 

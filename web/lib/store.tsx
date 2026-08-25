@@ -32,7 +32,10 @@ import type {
   UploadSource,
 } from "./types";
 
-const STORAGE_KEY = "askbuddy_state_v1";
+const STORAGE_KEY = "askbuddy_state";
+// 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
+// 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
+const STATE_VERSION = 2;
 
 type AppState = {
   hydrated: boolean;
@@ -106,7 +109,7 @@ type Action =
   | { type: "TOGGLE_CATEGORY"; key: string }
   | { type: "ADD_UPLOAD_SOURCE"; source: UploadSource }
   | { type: "UPDATE_UPLOAD_SOURCE"; id: string; patch: Partial<UploadSource> }
-  | { type: "TOGGLE_ROADMAP_ITEM"; nodeId: string; itemId: string }
+  | { type: "COMPLETE_ROADMAP_NODE"; nodeId: string }
   | { type: "ADD_CHAT_MESSAGE"; message: ChatMessage }
   | { type: "ADD_PENDING_QUESTION"; question: PendingQuestion }
   | { type: "ANSWER_PENDING_QUESTION"; id: string; answerText: string };
@@ -114,13 +117,12 @@ type Action =
 function recomputeNodeStatus(nodes: RoadmapNode[]): RoadmapNode[] {
   let previousDone = true;
   return nodes.map((node) => {
-    const allDone = node.items.every((i) => i.done);
-    const someDone = node.items.some((i) => i.done);
+    const done = node.status === "DONE";
     let status: RoadmapNode["status"];
-    if (allDone) status = "DONE";
-    else if (previousDone && (someDone || node.status !== "LOCKED")) status = "IN_PROGRESS";
+    if (done) status = "DONE";
+    else if (previousDone) status = "IN_PROGRESS";
     else status = "LOCKED";
-    previousDone = allDone;
+    previousDone = done;
     return { ...node, status };
   });
 }
@@ -190,17 +192,12 @@ function reducer(state: AppState, action: Action): AppState {
           s.id === action.id ? { ...s, ...action.patch } : s
         ),
       };
-    case "TOGGLE_ROADMAP_ITEM": {
-      const nodes = state.roadmap.map((node) => {
-        if (node.id !== action.nodeId) return node;
-        if (node.status === "LOCKED") return node;
-        return {
-          ...node,
-          items: node.items.map((item) =>
-            item.id === action.itemId ? { ...item, done: !item.done } : item
-          ),
-        };
-      });
+    case "COMPLETE_ROADMAP_NODE": {
+      const nodes = state.roadmap.map((node) =>
+        node.id === action.nodeId && node.status !== "LOCKED"
+          ? { ...node, status: "DONE" as const }
+          : node
+      );
       return { ...state, roadmap: recomputeNodeStatus(nodes) };
     }
     case "ADD_CHAT_MESSAGE":
@@ -231,31 +228,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        dispatch({ type: "HYDRATE", payload: JSON.parse(raw) });
+      const parsed = raw ? JSON.parse(raw) : null;
+      // 버전이 다르면(스키마가 바뀌었으면) 옛 캐시를 신뢰하지 않고 그냥 버린다.
+      if (parsed && parsed.v === STATE_VERSION && parsed.data) {
+        dispatch({ type: "HYDRATE", payload: parsed.data });
       } else {
+        window.localStorage.removeItem(STORAGE_KEY);
         dispatch({ type: "HYDRATE", payload: {} });
       }
     } catch {
       dispatch({ type: "HYDRATE", payload: {} });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!state.hydrated) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: STATE_VERSION, data: state }));
     } catch {
       // 저장 공간이 없어도 화면 동작에는 영향 없음
     }
   }, [state]);
 
   const progressPct = useMemo(() => {
-    const allItems = state.roadmap.flatMap((n) => n.items);
-    if (allItems.length === 0) return 0;
-    const done = allItems.filter((i) => i.done).length;
-    return Math.round((done / allItems.length) * 100);
+    if (state.roadmap.length === 0) return 0;
+    const done = state.roadmap.filter((n) => n.status === "DONE").length;
+    return Math.round((done / state.roadmap.length) * 100);
   }, [state.roadmap]);
 
   const value = useMemo(() => ({ state, dispatch, progressPct }), [state, progressPct]);

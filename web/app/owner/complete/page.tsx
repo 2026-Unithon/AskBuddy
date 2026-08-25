@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BottomCta, Card, LinkButton, Shell } from "@/components/ui";
+import { Buddy, LinkButton, Shell } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { createInvite } from "@/lib/api";
 
@@ -40,35 +40,40 @@ export default function CompletePage() {
 
   return (
     <Shell>
-      <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-6">
-        <div className="w-20 h-20 rounded-full bg-brand-500 flex items-center justify-center text-4xl">
-          🎉
+      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+        <div className="relative mb-6">
+          <Buddy size={130} />
+          <span className="absolute -top-5 -right-4 text-4xl animate-bounce">🎉</span>
+          <span className="absolute top-0 -left-5 text-2xl">✨</span>
         </div>
-        <div className="space-y-2">
-          <h1 className="text-xl font-bold">학습이 끝났어요!</h1>
-          <p className="text-sm text-muted leading-relaxed">
-            아래 초대코드를 신입 직원에게 알려주세요.
-            <br />
-            코드로 들어오면 바로 로드맵을 시작할 수 있어요.
-          </p>
-        </div>
+        <h1 className="text-3xl font-bold text-brand-700 mb-2">학습 완료!</h1>
+        <p className="text-sm font-medium text-muted leading-relaxed mb-8">
+          Buddy가 업무를 잘 익혔어요.
+          <br />
+          이제 신입 직원이 학습을 시작할 수 있어요!
+          <br />
+          <span className="text-brand-500 font-semibold">사장님께 완료 알림을 보냈어요 ✓</span>
+        </p>
 
-        <Card className="w-full py-6 px-4">
-          <p className="text-xs text-muted mb-2">초대코드</p>
+        <div className="w-full space-y-3">
           <button
             onClick={copyCode}
-            className="text-2xl font-bold tracking-widest text-brand-700 w-full"
+            className="w-full bg-surface rounded-2xl px-4 py-3.5 shadow-sm flex items-center gap-3 text-left"
           >
-            {state.inviteCode}
+            <span className="text-xl">📱</span>
+            <div>
+              <p className="text-sm font-bold text-brand-700">신입 초대 코드</p>
+              <p className="text-xs text-muted">{copied ? "복사했어요 ✓" : "탭해서 복사"}</p>
+            </div>
+            <div className="ml-auto bg-accent-500 rounded-xl px-3 py-1.5 shrink-0">
+              <span className="text-xs font-bold text-brand-900">{state.inviteCode}</span>
+            </div>
           </button>
-          <p className="text-xs text-brand-600 mt-2">{copied ? "복사했어요 ✓" : "탭해서 복사"}</p>
-        </Card>
+          <LinkButton href="/owner/dashboard" className="w-full h-13 text-base">
+            대시보드 보기 →
+          </LinkButton>
+        </div>
       </div>
-      <BottomCta>
-        <LinkButton href="/owner/dashboard" className="w-full h-13 text-base">
-          대시보드로 가기
-        </LinkButton>
-      </BottomCta>
     </Shell>
   );
 }
