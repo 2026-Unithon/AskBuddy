@@ -14,6 +14,7 @@
 | [`CLAUDE.md`](./CLAUDE.md) | Claude Code 세션 컨텍스트. 자동으로 읽힘 |
 | [`docs/AskBuddy_개발가이드.md`](./docs/AskBuddy_개발가이드.md) | **정본.** 아키텍처·계약·결정사항·개발 순서 |
 | [`docs/AskBuddy_환경세팅.md`](./docs/AskBuddy_환경세팅.md) | 파트별 환경 구성 |
+| [`docs/ingest-contract.md`](./docs/ingest-contract.md) | `/ingest/*` 계약. 업로드 3단계·에러 코드·프론트 예시 |
 | [`db/001_init_schema.sql`](./db/001_init_schema.sql) | 스키마 원천 |
 
 ---
@@ -26,7 +27,7 @@ askbuddy/
 ├─ README.md                    # 공용
 ├─ .gitignore                   # 공용 — .env, .venv, node_modules, api/tmp, db/data
 ├─ db/                          # 관호
-│  ├─ 001_init_schema.sql       # 21 테이블 + pgvector. 스키마 원천
+│  ├─ 001_init_schema.sql       # 24 테이블 + pgvector. 스키마 원천
 │  └─ 002_seed_demo.sql         # demo-cafe 시드
 ├─ api/                         # FastAPI (Python 3.12)
 │  ├─ app/
@@ -41,7 +42,7 @@ askbuddy/
 │  │     ├─ extract/            #   Gemini 호출
 │  │     └─ embed/              #   임베딩 적재 (생성은 관호님 코드 호출)
 │  ├─ prompts/                  # 준혁 — 프롬프트 파일. 코드 하드코딩 금지
-│  ├─ scripts/                  # 관호 — 회귀 · 골든셋 (check_grounding.py)
+│  ├─ scripts/                  # dev_token · init_storage · ingest_smoke · 회귀
 │  ├─ data/                     # 시드 · 골든셋 데이터
 │  ├─ tmp/                      # 처리 중 임시파일. git 제외
 │  ├─ requirements.txt          # 공용 — 추가는 append 만
@@ -88,9 +89,12 @@ main
 ### 1. DB
 
 ```bash
-supabase start
-psql "$SUPABASE_DB_URL" -f db/001_init_schema.sql
-psql "$SUPABASE_DB_URL" -f db/002_seed_demo.sql
+supabase init         # 최초 1회
+supabase start        # 첫 실행 5~10분
+
+DB=$(docker ps --format '{{.Names}}' | grep supabase_db)
+docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/001_init_schema.sql
+docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/002_seed_demo.sql
 ```
 
 ### 2. API
@@ -99,11 +103,18 @@ psql "$SUPABASE_DB_URL" -f db/002_seed_demo.sql
 cd api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # 키 채우기
+cp .env.example .env             # SUPABASE_SERVICE_KEY 만 채우면 M1 은 돈다
+python scripts/init_storage.py   # 버킷 sources 생성. 최초 1회
 uvicorn app.main:app --reload --port 8000
 ```
 
 → http://localhost:8000/docs
+
+M1 은 LLM 키 없이 전 구간이 돈다 (`INGEST_MODE=mock`).
+
+```bash
+python scripts/ingest_smoke.py   # 업로드 → 처리 → 폴링 → 카드 3건
+```
 
 ### 3. WEB
 

@@ -27,6 +27,13 @@ async def close_pool() -> None:
         _pool = None
 
 
+def get_pool() -> asyncpg.Pool:
+    """백그라운드 작업용. 요청 커넥션이 닫힌 뒤에도 풀에서 직접 얻는다."""
+    if _pool is None:
+        raise RuntimeError("db pool not initialized")
+    return _pool
+
+
 async def get_db() -> AsyncIterator[asyncpg.Connection]:
     if _pool is None:
         raise HTTPException(503, "db pool not initialized")

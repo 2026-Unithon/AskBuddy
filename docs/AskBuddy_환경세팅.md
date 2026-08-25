@@ -1,9 +1,10 @@
 # AskBuddy 개발 환경 세팅
 
-> 최종 수정: 2026-08-25 · **v0.3**
+> 최종 수정: 2026-08-25 · **v0.4**
 > 대상: 준혁(입력) · 관호(DB) · 도영(출력)
 > v0.2: 기존 리포(`hackathon-test`) 구조 반영 · 임베딩 OpenAI 확정 · Gemini는 워커 전용
 > v0.3: **RLS 제거.** `002_rls.sql` 폐기, 시드는 `002_seed_demo.sql`. 매장 격리는 API 코드 단독
+> v0.4: 리포 구조를 실제 구조로 교체 · Storage 버킷 생성 절차 추가 · STT 확정 · 테이블 수 21→24 정정
 
 ---
 
@@ -18,7 +19,8 @@
 | DB | PostgreSQL 15 + pgvector | 로컬 Supabase CLI(도커), 배포 Supabase |
 | 임베딩 | OpenAI `text-embedding-3-small` (1536) | **D4 고정.** 교체 시 임계값 전면 재측정 |
 | 멀티모달 추출 | Gemini Flash | 워커 전용 |
-| 파일 저장 | Supabase Storage | 프론트 직접 업로드 |
+| STT | OpenAI `whisper-1` | **D7 확정.** `STT_MODEL` 로 교체 가능 |
+| 파일 저장 | Supabase Storage | 버킷 `sources`(비공개). **API 가 발급한 서명 URL 로 업로드** (D8) |
 | 배포 | web → Vercel, api → Railway | Root Directory: `web` / `api` |
 | 로컬 포트 | web `3000`, api `8000`, DB `54322`, Studio `54323` | |
 
@@ -55,32 +57,48 @@ services:
 
 ## 2. 리포 구조 (기존 `hackathon-test` 기준)
 
+**v0.4에서 실제 구조로 교체했다.** SQL 은 `api/sql/` 이 아니라 리포 루트의 `db/` 에 있다.
+
 ```
-hackathon-test/
-├─ web/                      # 도영 — Next.js 16
-│  ├─ app/
-│  └─ lib/api.ts             # FastAPI 호출 래퍼 (Supabase 직접 호출 금지)
+AskBuddy/
+├─ CLAUDE.md                 # 공용 — 에이전트가 세션 시작 시 자동으로 읽음
+├─ db/                       # 관호
+│  ├─ 001_init_schema.sql    #   24 테이블 + pgvector
+│  └─ 002_seed_demo.sql      #   demo-cafe 시드
 ├─ api/                      # 관호 + 준혁 — FastAPI
 │  ├─ app/
-│  │  ├─ reg/                # 관호 — 등록·검색 게이트 (기구현)
-│  │  ├─ auth/               # 관호 — 인증 (기구현)
-│  │  └─ ingest/             # 준혁 — 신규
-│  │     ├─ preprocess/      # ffmpeg · pypdf · kakao 파서
-│  │     ├─ extract/         # Gemini 호출
-│  │     └─ embed/           # OpenAI 임베딩 + 적재
+│  │  ├─ main.py             # 공용 — 라우터 등록만
+│  │  ├─ deps.py             # 공용 — DB 풀, JWT, CurrentStoreId
+│  │  ├─ config.py           # 공용 — 환경변수. D3·D4·D7 고정값의 단일 출처
+│  │  ├─ auth/               # 관호
+│  │  ├─ reg/                # 관호 — 등록·검색 게이트
+│  │  └─ ingest/             # 준혁
+│  │     ├─ router.py        #   /ingest/*
+│  │     ├─ schemas.py       #   요청·응답 + 추출 결과 계약
+│  │     ├─ repository.py    #   DB 접근. 전 함수 store_id 필수
+│  │     ├─ pipeline.py      #   상태머신 오케스트레이션
+│  │     ├─ preprocess/      #   storage(다운로드·서명URL) · audio(ffprobe·STT)
+│  │     ├─ extract/         #   mock(M1) · gemini(M2~)
+│  │     └─ embed/           #   임베딩 적재
 │  ├─ prompts/               # 프롬프트 파일 (코드 하드코딩 금지)
-│  ├─ sql/
-│  │  ├─ 001_init_schema.sql
-│  │  └─ 002_seed_demo.sql
+│  ├─ scripts/               # dev_token · init_storage · ingest_smoke · 회귀
 │  ├─ data/                  # 시드·골든셋
-│  ├─ scripts/               # check_grounding 등 회귀
-│  └─ requirements.txt
+│  ├─ tmp/                   # 처리 중 임시파일. git 제외
+│  ├─ requirements.txt       # 공용 — 추가는 append 만
+│  ├─ Dockerfile             # Railway 배포 전용 (ffmpeg 포함)
+│  └─ .env.example
+├─ web/                      # 도영 — Next.js 16
+│  ├─ app/
+│  ├─ lib/api.ts             #   FastAPI 호출 래퍼 (Supabase 직접 호출 금지)
+│  └─ .env.example           #   NEXT_PUBLIC_API_URL 하나뿐
+├─ supabase/                 # 공용 — supabase init 산출물. config.toml 커밋함
 └─ docs/
    ├─ AskBuddy_환경세팅.md
-   └─ AskBuddy_개발가이드.md
+   ├─ AskBuddy_개발가이드.md
+   └─ ingest-contract.md     # /ingest/* 상세 계약 (도영·관호용)
 ```
 
-기존 `api/sql/identity.sql`·`knowledge.sql`은 `001~003`으로 흡수한다. 두 벌을 남겨두면 스키마가 갈라진다.
+기존 `api/sql/identity.sql`·`knowledge.sql`은 `db/001`·`002`로 흡수한다. 두 벌을 남겨두면 스키마가 갈라진다.
 
 ---
 
@@ -114,15 +132,28 @@ winget install Gyan.FFmpeg
 ### 3-2. DB 기동
 
 ```bash
-git clone https://github.com/kim-kwanho/hackathon-test && cd hackathon-test
+git clone https://github.com/2026-Unithon/AskBuddy && cd AskBuddy
+supabase init         # 최초 1회. supabase/ 가 이미 있으면 건너뛴다
 supabase start        # 첫 실행 5~10분
 
-# 스키마 적용
-psql "$SUPABASE_DB_URL" -f api/sql/001_init_schema.sql
-psql "$SUPABASE_DB_URL" -f api/sql/002_seed_demo.sql
+# 스키마 적용 — psql 이 없으면 컨테이너 안의 psql 을 쓴다
+DB=$(docker ps --format '{{.Names}}' | grep supabase_db)
+docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/001_init_schema.sql
+docker exec -i $DB psql -v ON_ERROR_STOP=1 -U postgres -d postgres < db/002_seed_demo.sql
+
+# 검증 — items=16 cards=3 이면 정상
+docker exec $DB psql -U postgres -d postgres -c \
+  "select (select count(*) from roadmap_items) items, (select count(*) from knowledge_cards) cards;"
 ```
 
-`supabase start` 출력의 URL·키를 `.env`에 채운다.
+`supabase status` 출력의 URL·키를 `api/.env`에 채운다. 넣을 것은 **`SECRET_KEY`(=service_role) 하나뿐**이다.
+`Publishable` 키와 Storage S3 키는 쓰지 않는다 — 브라우저가 Supabase 를 직접 치지 않기 때문이다.
+
+> **로컬 Supabase 는 각자 컨테이너다.** 남의 DB 에 영향을 주지 않으니 마음껏 깨도 된다.
+> 다만 스키마를 손으로 고치면 셋의 스키마가 조용히 갈라진다. 반드시 `db/001_init_schema.sql` 을 고쳐 커밋하고 셋 다 재적용한다.
+>
+> `supabase start` 는 모든 서비스를 `0.0.0.0` 에 바인딩하고 Studio 에는 인증이 없다.
+> **행사장 공용 와이파이에서는 안 쓸 때 `supabase stop` 한다.**
 
 ### 3-3. 환경변수
 
@@ -142,6 +173,15 @@ EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_DIM=1536
 CONFIDENCE_THRESHOLD=0.6     # D3
 FRAME_INTERVAL_SEC=3
+
+# ingest (준혁)
+INGEST_MODE=mock             # D10. mock: LLM 미호출 / real: Gemini 호출
+GEMINI_MODEL=gemini-2.5-flash
+STT_MODEL=whisper-1          # D7
+STORAGE_BUCKET=sources       # D8. scripts/init_storage.py 로 생성
+
+# JWT — 배포 시 반드시 교체한다 (N8)
+JWT_SECRET=dev-only-change-me-32bytes-minimum
 
 # Supabase
 SUPABASE_URL=http://127.0.0.1:54321
@@ -233,11 +273,17 @@ python api/scripts/check_grounding.py                                   # 통과
 cd api
 python3 -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -U pip
-pip install -r requirements.txt
-# ingest 신규 의존성
-pip install google-genai pypdf pillow tenacity
-pip freeze > requirements.txt
+pip install -r requirements.txt      # ingest 의존성까지 전부 포함돼 있다
+
+cp .env.example .env                  # SUPABASE_SERVICE_KEY 만 채우면 M1 은 돈다
+python scripts/init_storage.py        # 버킷 sources 생성. 최초 1회
 ```
+
+> **`pip freeze > requirements.txt` 를 하지 않는다.** 공용 파일이라 통째로 덮어쓰면 셋이 충돌한다.
+> 패키지를 추가할 땐 슬랙에 알리고 **한 줄씩 append** 한다.
+>
+> `source .venv/bin/activate` 를 잊으면 `ModuleNotFoundError: No module named 'asyncpg'` 가 난다.
+> 활성화가 귀찮으면 `./.venv/bin/python` 으로 직접 부른다.
 
 | 패키지 | 용도 |
 |---|---|
@@ -255,12 +301,20 @@ ffmpeg는 시스템 설치다. 시작 시 `shutil.which("ffmpeg")`로 확인하�
 uvicorn app.main:app --reload --port 8000
 curl localhost:8000/health
 open http://localhost:8000/docs
+
+# 다른 터미널 — M1 전 구간 관통 확인. LLM 키 없이 돈다
+python scripts/ingest_smoke.py        # → "통과 — 카드가 적재됐다"
 ```
+
+`/auth` 가 붙기 전까지 토큰은 `python scripts/dev_token.py` 로 만든다.
+`export` 는 셸 단위라 터미널을 옮기면 사라진다. 스모크 스크립트는 없으면 알아서 발급한다.
 
 ### 5-3. `/ingest/*` 규칙
 
 - 모든 DB 함수는 `store_id` 필수 인자
-- 원본 파일은 프론트가 Storage에 올린다. 워커는 경로만 받아 서명 URL로 내려받는다
+- 업로드는 3단계다 (D8). `POST /ingest/upload-url` → 브라우저가 서명 URL 로 PUT → `POST /ingest/sources`
+- 원본 파일은 브라우저가 Storage 에 직접 올린다. 워커는 경로만 받아 service key 로 내려받는다
+- `INGEST_MODE=mock` 이 기본값이다. **M1 을 통과하기 전에는 `real` 로 바꾸지 않는다** (D10)
 - 상태 보고는 `sources.status`로만: `UPLOADED → PROCESSING → DONE | FAILED`. 실패 시 `error_message` 필수
 - 같은 파일 재업로드는 `content_hash`로 무시 (멱등)
 - 추출 카드는 `is_verified=false`로 저장. 점주 승인 후에만 임베딩·검색 대상
@@ -277,14 +331,20 @@ ffmpeg -i input.mp4 -vf "fps=1/3,scale=640:-1" tmp/frame_%04d.jpg
 
 ### 5-5. 검증
 
+- [x] `python scripts/ingest_smoke.py` 통과 (M1 관통)
+- [x] `python scripts/init_storage.py` → 버킷 `sources` 생성
 - [ ] `ffmpeg -version` 동작
-- [ ] 샘플 mp4 → 프레임 N장 → `source_frames` N행
+- [ ] 샘플 음성 → `INGEST_MODE=real` → 전사 → 카드 적재 (M2)
 - [ ] Gemini 호출 1회 성공(JSON 파싱까지)
+- [ ] 샘플 mp4 → 프레임 N장 → `source_frames` N행 (M4)
 - [ ] 카드 INSERT 후 `select * from knowledge_cards where is_verified=false` 확인
 
 ---
 
 ## 6. 도영 — 출력 파트
+
+> **업로드·폴링 연동은 `docs/ingest-contract.md` 를 본다.** 서명 URL 3단계, `meta` 유형별 필드,
+> 에러 코드, TypeScript 예시가 전부 그쪽에 있다.
 
 ### 6-1. 세팅
 
@@ -353,8 +413,9 @@ const id = setInterval(async () => {
 
 **공통**
 - [ ] `supabase status` 전 서비스 running
-- [ ] Studio(`:54323`)에서 21개 테이블 확인
+- [ ] Studio(`:54323`)에서 **24개** 테이블 확인 (문서에 21로 적혀 있었으나 실제 24개다)
 - [ ] `select store_id, store_slug from stores;` → 1행, `demo-cafe`
+- [ ] Storage 버킷 `sources` 존재 (`python api/scripts/init_storage.py`)
 
 **관호**
 - [ ] `001`·`002` 무오류 적용
@@ -363,9 +424,10 @@ const id = setInterval(async () => {
 - [ ] `select embedding from card_embeddings limit 1;` 실행 가능
 
 **준혁**
-- [ ] `ffmpeg -version`
 - [ ] `/health` 200, `/docs` 접근
-- [ ] Gemini 호출 1회 성공
+- [ ] `python scripts/ingest_smoke.py` 통과 — 업로드→처리→폴링→카드 3건
+- [ ] `ffmpeg -version` (M2 부터 필요)
+- [ ] Gemini 호출 1회 성공 (M2)
 - [ ] 샘플 처리 후 `sources.status='DONE'`
 
 **도영**
@@ -396,6 +458,10 @@ const id = setInterval(async () => {
 | 증상 | 원인 | 해결 |
 |---|---|---|
 | `supabase start` 실패 | 도커 미기동·포트 충돌 | Docker Desktop 실행, `supabase stop --no-backup` 후 재시도 |
+| `ModuleNotFoundError: asyncpg` | venv 미활성화 또는 미설치 | `source .venv/bin/activate && pip install -r requirements.txt` |
+| `ASKBUDDY_TOKEN 이 비어 있다` | `export` 는 그 터미널에만 남는다 | 같은 터미널에서 export 하거나, 스모크는 그냥 실행(자동 발급) |
+| `docker ps` 가 비어 있음 | 아직 `supabase start` 를 안 함 | 헤더만 나오면 데몬은 정상이다. `supabase start` 실행 |
+| 버킷 생성 시 `BucketAlreadyExists` | 이미 만들어져 있음 | 정상이다. `init_storage.py` 가 알아서 넘어간다 |
 | `ffmpeg: command not found` | PATH 미등록(Windows) | 재설치 후 터미널 재시작. WSL2 권장 |
 | Gemini 키가 `.env`와 다름 | 셸 export 우선 | `unset` + `load_dotenv(override=True)` |
 | Next에서 `params` undefined | Next 16은 async | `const { id } = await params` |
