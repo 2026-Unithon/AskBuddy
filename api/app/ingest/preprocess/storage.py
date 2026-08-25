@@ -74,7 +74,7 @@ import uuid as _uuid
 _EXT = {
     "VOICE": {"mp3", "m4a", "wav"},
     "VIDEO": {"mp4", "mov"},
-    "KAKAO": {"txt", "zip"},
+    "KAKAO": {"txt", "zip", "png", "jpg", "jpeg"},  # SCREENSHOT 지원
     "SCAN": {"pdf", "jpg", "jpeg", "png"},
 }
 
@@ -118,3 +118,25 @@ def sha256_of(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+async def upload(object_path: str, data: bytes, content_type: str) -> str:
+    """서버가 만든 산출물(영상 프레임 등)을 Storage 에 올린다.
+
+    브라우저 업로드와 달리 여기는 service key 를 쓴다. 이 경로는 API 안에서만 돈다.
+    """
+    s = get_settings()
+    if not s.supabase_service_key:
+        raise RuntimeError("SUPABASE_SERVICE_KEY 가 없다. api/.env 를 확인하라")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        res = await client.post(
+            f"{s.supabase_url}/storage/v1/object/{object_path}",
+            headers={"Authorization": f"Bearer {s.supabase_service_key}",
+                     "content-type": content_type,
+                     "x-upsert": "true"},
+            content=data,
+        )
+    if res.status_code not in (200, 201):
+        raise RuntimeError(f"업로드 실패 {res.status_code}: {res.text[:200]}")
+    return object_path
