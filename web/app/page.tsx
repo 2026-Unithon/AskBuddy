@@ -1,41 +1,43 @@
-import { Buddy, LinkButton, Shell } from "@/components/ui";
-
-const FEATURES = [
-  { icon: "🎙️", text: "음성·영상·텍스트로 업무를 알려주면" },
-  { icon: "🤖", text: "AI Buddy가 학습해서 신입에게 가르쳐요" },
-  { icon: "🎮", text: "듀오링고처럼 게임하며 업무를 배워요" },
-];
+import Link from "next/link";
+import Image from "next/image";
+import { Shell } from "@/components/ui";
 
 export default function WelcomePage() {
   return (
     <Shell>
-      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-6">
-        <div className="relative">
-          <Buddy size={148} />
-          <span className="absolute -top-2 -right-2 text-3xl animate-bounce">🌟</span>
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-6 text-center"
+        aria-labelledby="welcome-title"
+      >
+        <div className="w-[233px] h-[233px] relative" role="img" aria-label="AskBuddy 마스코트">
+          <Image src="/images/buddy.png" alt="" fill className="object-cover" priority />
         </div>
-        <div className="space-y-2">
-          <h1 className="text-4xl font-bold text-brand-700 tracking-tight">AskBuddy</h1>
-          <p className="text-xl font-semibold text-foreground leading-snug">
-            간편한 인수인계,
-            <br />
-            <span className="text-brand-500">AskBuddy</span>입니다 👋
+        <div className="w-full max-w-[232px] mt-6">
+          <h1
+            id="welcome-title"
+            className="text-4xl font-bold text-brand-700 tracking-[-0.9px] leading-10"
+          >
+            AskBuddy
+          </h1>
+          <p className="mt-2 text-xl font-semibold tracking-normal leading-[27.5px]">
+            <span className="text-foreground">
+              간편한 인수인계,
+              <br />
+            </span>
+            <span className="text-brand-500">AskBuddy</span>
+            <span className="text-foreground">입니다 👋</span>
           </p>
-          <p className="text-muted text-sm font-medium">처음에는 Buddy와 함께, 익숙해지면 혼자.</p>
-        </div>
-        <div className="w-full space-y-2.5">
-          {FEATURES.map((f) => (
-            <div key={f.text} className="flex items-center gap-3 bg-surface rounded-2xl px-4 py-3 shadow-sm">
-              <span className="text-xl">{f.icon}</span>
-              <span className="text-sm font-semibold text-foreground">{f.text}</span>
-            </div>
-          ))}
+          <p className="mt-2 text-sm font-medium text-muted">처음에는 Buddy와 함께, 익숙해지면 혼자.</p>
         </div>
       </div>
       <div className="px-6 pb-10">
-        <LinkButton href="/role" variant="primary" className="w-full h-13 text-base shadow-lg shadow-brand-200">
+        <Link
+          href="/role"
+          aria-label="AskBuddy 시작하기"
+          className="flex w-full items-center justify-center py-4 rounded-2xl bg-brand-500 shadow-[0px_6px_20px_#5bbf6a61] font-bold text-lg text-white transition-transform active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700"
+        >
           시작하기 →
-        </LinkButton>
+        </Link>
       </div>
     </Shell>
   );
