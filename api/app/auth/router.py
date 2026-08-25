@@ -4,16 +4,21 @@ main.py 는 이 파일의 router 만 import 한다. 엔드포인트는 여기 �
 """
 from __future__ import annotations
 
+import re
+import secrets
 from datetime import datetime, timedelta, timezone
 
+import asyncpg
 import bcrypt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 
 from app.config import get_settings
-from app.deps import Db, create_token
+from app.deps import Claims, CurrentStoreId, CurrentUserId, Db, create_token
 
 router = APIRouter()
+
+_INVITE_TTL_DAYS = 365
 
 
 def _hash_password(password: str) -> str:
@@ -49,6 +54,28 @@ class JoinRequest(BaseModel):
     name: str = Field(min_length=1, max_length=50)
     invite_code: str = Field(min_length=1, max_length=50)
     phone: str | None = None
+
+
+class CreateStoreRequest(BaseModel):
+    """점주 온보딩 — 매장 생성. store_id 는 JWT 재발급으로만 전달한다."""
+    store_name: str = Field(min_length=1, max_length=100)
+    business_type: str = Field(
+        pattern="^(CAFE|RESTAURANT|BAKERY|BAR|CVS|SALON)$"
+    )
+    store_slug: str | None = Field(default=None, min_length=2, max_length=50)
+
+
+def _slugify(store_name: str, user_id: int) -> str:
+    """store_slug 가 없으면 이름 기반. 비면 store-{user_id}."""
+    raw = re.sub(r"[^a-z0-9]+", "-", store_name.lower()).strip("-")
+    if not raw:
+        raw = f"store-{user_id}"
+    return raw[:50]
+
+
+def _make_invite_code(business_type: str) -> str:
+    """예: CAFE-A3F2. invite_codes.code unique (varchar 30)."""
+    return f"{business_type}-{secrets.token_hex(2).upper()}"
 
 
 def _token_for(user_id: int, store_id: int | None, role: str) -> str:
@@ -194,3 +221,127 @@ async def join(req: JoinRequest, db: Db):
             "store_id": store_id,
         },
     }
+
+
+@router.post("/stores")
+async def create_store(req: CreateStoreRequest, db: Db, claims: Claims):
+    """OWNER 온보딩: stores + store_members(OWNER). JWT 에 store_id 넣어 재발급.
+
+    signup 직후 토큰에는 store_id 가 없다. CurrentStoreId 를 쓰지 않는다.
+    """
+    user_id = claims.get("user_id")
+    if user_id is None:
+        raise HTTPException(403, "token has no user_id")
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "OWNER only")
+    user_id = int(user_id)
+
+    already = await db.fetchrow(
+        """
+        select store_id from store_members
+        where user_id = $1 and member_role = 'OWNER'
+        limit 1
+        """,
+        user_id,
+    )
+    if already:
+        raise HTTPException(409, "owner already has a store")
+
+    slug = (req.store_slug or _slugify(req.store_name, user_id)).strip().lower()
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+        raise HTTPException(400, "store_slug must be lowercase letters, digits, hyphens")
+
+    try:
+        async with db.transaction():
+            store = await db.fetchrow(
+                """
+                insert into stores (owner_id, store_slug, store_name, business_type)
+                values ($1, $2, $3, $4)
+                returning store_id, store_slug, store_name, business_type
+                """,
+                user_id,
+                slug,
+                req.store_name,
+                req.business_type,
+            )
+            store_id = int(store["store_id"])
+            await db.execute(
+                """
+                insert into store_members
+                  (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
+                values ($1, $2, 'OWNER', 0, 0, false)
+                """,
+                store_id,
+                user_id,
+            )
+    except asyncpg.UniqueViolationError as e:
+        raise HTTPException(409, "store_slug already taken") from e
+
+    token = _token_for(user_id, store_id, "OWNER")
+    return {
+        "token": token,
+        "store": {
+            "store_id": store_id,
+            "store_slug": store["store_slug"],
+            "store_name": store["store_name"],
+            "business_type": store["business_type"],
+        },
+    }
+
+
+@router.post("/invites")
+async def create_invite(
+    db: Db,
+    user_id: CurrentUserId,
+    store_id: CurrentStoreId,
+    claims: Claims,
+):
+    """점주가 알바용 초대코드 발급. store_id 는 JWT 만 신뢰 (body 없음)."""
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "OWNER only")
+
+    # JWT store_id 가 이 OWNER 의 매장인지 확인
+    member = await db.fetchrow(
+        """
+        select member_id from store_members
+        where store_id = $1 and user_id = $2 and member_role = 'OWNER'
+        """,
+        store_id,
+        user_id,
+    )
+    if not member:
+        raise HTTPException(403, "not owner of this store")
+
+    biz = await db.fetchrow(
+        "select business_type from stores where store_id = $1",
+        store_id,
+    )
+    if not biz:
+        raise HTTPException(404, "store not found")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_TTL_DAYS)
+
+    # unique 충돌 시 몇 번 재시도
+    for _ in range(5):
+        code = _make_invite_code(biz["business_type"])
+        try:
+            row = await db.fetchrow(
+                """
+                insert into invite_codes (store_id, code, expires_at)
+                values ($1, $2, $3)
+                returning invite_id, code, expires_at, store_id
+                """,
+                store_id,
+                code,
+                expires_at,
+            )
+            return {
+                "invite_id": int(row["invite_id"]),
+                "code": row["code"],
+                "store_id": int(row["store_id"]),
+                "expires_at": row["expires_at"].isoformat(),
+            }
+        except asyncpg.UniqueViolationError:
+            continue
+
+    raise HTTPException(500, "failed to allocate invite code")
