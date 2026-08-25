@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f8f5;
+  --surface: #ffffff;
+  --surface-muted: #f0f3ee;
+  --foreground: #182019;
+  --muted: #67766c;
+  --border: #e3e9e0;
+
+  --brand-50: #eefbf3;
+  --brand-100: #d7f4e2;
+  --brand-200: #b0e8c8;
+  --brand-300: #7ed6a8;
+  --brand-400: #4abd85;
+  --brand-500: #2aa06a;
+  --brand-600: #1f8456;
+  --brand-700: #1a6a46;
+  --brand-800: #164f37;
+  --brand-900: #0f3d29;
+
+  --warn-50: #fff7ed;
+  --warn-500: #f0a53d;
+  --warn-700: #b3690f;
+
+  --danger-50: #fef2f2;
+  --danger-500: #e6604f;
+  --danger-700: #b0341f;
+
+  --radius-lg: 1.5rem;
+  --radius-md: 1rem;
+  --radius-sm: 0.65rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+
+  --color-warn-50: var(--warn-50);
+  --color-warn-500: var(--warn-500);
+  --color-warn-700: var(--warn-700);
+
+  --color-danger-50: var(--danger-50);
+  --color-danger-500: var(--danger-500);
+  --color-danger-700: var(--danger-700);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+::selection {
+  background: var(--brand-200);
+}
+
+input, textarea {
+  font-family: inherit;
+}
