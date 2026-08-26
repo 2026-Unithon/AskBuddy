@@ -142,7 +142,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 | D8 | Storage 버킷 `sources`(비공개). 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 서명 URL |
 | D9 | `content_hash` 는 프론트가 SHA-256 계산. 누락 시 서버가 backfill |
 | D10 | `INGEST_MODE` 기본값 `mock`. M1 통과 전에는 Gemini 를 붙이지 않는다 |
-| D11 | 검색 게이트 임계는 `RETRIEVAL_THRESHOLD`(현재 **0.3**). D3 와 **별개 값**이다. 0.6 은 시드 카드 기준이라 실제 추출 카드가 전부 miss 였다 |
+| D11 | 검색 게이트 임계는 `RETRIEVAL_THRESHOLD`(현재 **0.45**). D3 와 **별개 값**이다. 오답 0 을 우선한 값 — 무대에서 틀린 답은 miss 보다 나쁘다 |
 
 이 결정들을 "개선"하려 들지 말 것. 각각 이유가 있고 개발가이드 12장에 근거가 적혀 있다.
 

@@ -150,16 +150,22 @@ function reducer(state: AppState, action: Action): AppState {
     case "LOGOUT":
       return { ...initialState, hydrated: true };
     case "SET_AUTH":
+      // 로그인은 항상 빈 상태에서 시작한다.
+      // ...state 로 이어받으면 같은 브라우저에서 다른 계정으로 들어왔을 때
+      // 앞사람의 업로드 기록·카드·로드맵이 그대로 보인다 — 새로 가입했는데
+      // 영상이 이미 올라간 것처럼 보이던 게 이것 때문이다.
+      // 화면에 필요한 값은 로그인 뒤 서버에서 다시 받아온다.
       return {
-        ...state,
+        ...initialState,
+        hydrated: true,
         token: action.token,
         role: action.role,
         displayName: action.displayName,
         userId: action.userId,
         storeId: action.storeId,
-        storeSlug: action.storeSlug ?? state.storeSlug,
-        storeName: action.storeName ?? state.storeName,
-        inviteCode: action.inviteCode ?? state.inviteCode,
+        storeSlug: action.storeSlug ?? initialState.storeSlug,
+        storeName: action.storeName ?? initialState.storeName,
+        inviteCode: action.inviteCode ?? initialState.inviteCode,
       };
     case "SET_STORE":
       // 매장 생성 응답의 토큰에는 store_id 가 들어 있다. 옛 토큰을 반드시 버린다.
