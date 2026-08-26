@@ -9,8 +9,9 @@ export default function WelcomePage() {
           src="/images/roadmap-bg.png"
           alt=""
           fill
-          className="object-cover"
+          className="object-cover opacity-25 pointer-events-none"
           style={{ objectPosition: "top" }}
+          sizes="480px"
           priority
         />
 
@@ -20,11 +21,12 @@ export default function WelcomePage() {
         >
           <div className="w-[190px] h-[190px] relative drop-shadow-[0_12px_24px_rgba(0,0,0,0.18)]">
             <Image
-              src="/images/buddy.png"
+              src="/images/buddy-hero.png"
               alt="AskBuddy 마스코트"
               fill
               unoptimized
               className="object-contain"
+              sizes="190px"
               priority
             />
           </div>
