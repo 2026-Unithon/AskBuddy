@@ -261,20 +261,35 @@ async def main() -> int:
                 cards[title] = cid
 
             # ── 로드맵 ────────────────────────────────────────────────
-            stages = [("가게 투어", ["매장 전체 둘러보기", "주요 장비 위치 파악", "비상구·소화기 위치"]),
-                      ("식자재 위치", ["냉장고 위치", "냉동고 위치", "식자재 보관 위치", "소모품 위치"]),
-                      ("레시피 숙지", ["아이스 아메리카노", "카페라떼", "밀크티·콜드브루"]),
-                      ("오픈 업무", ["온수기 예열", "그라인더 원두 채우기", "첫 샷 버리기"]),
-                      ("마감 업무", ["기기 세척", "그라인더 정리", "정산 및 시건"])]
-            items = []
-            for order, (sname, its) in enumerate(stages, 1):
-                stg = await c.fetchval(
+            # 항목은 승인 카드 하나에 하나씩 만들고 card_id 를 걸어둔다.
+            # 안 걸면 learn/_sync_verified_cards 가 "칸 없는 카드" 로 보고
+            # 같은 내용을 한 번 더 만들어 로드맵이 두 배로 불어난다.
+            STAGE_ORDER = ["가게 투어", "식자재 위치", "레시피 숙지", "오픈 업무", "마감 업무"]
+            CAT_TO_STAGE = {"재고정리": "식자재 위치", "음료제작": "레시피 숙지",
+                            "오픈업무": "오픈 업무", "마감업무": "마감 업무"}
+            stage_id = {}
+            for order, sname in enumerate(STAGE_ORDER, 1):
+                stage_id[sname] = await c.fetchval(
                     "insert into roadmap_stages (store_id,stage_name,stage_order) values ($1,$2,$3) "
                     "returning stage_id", store_id, sname, order)
-                for io_, iname in enumerate(its, 1):
+
+            # 카드 순서가 아니라 단계 순서대로 배운다
+            buckets: dict[str, list[tuple[str, int]]] = {n: [] for n in STAGE_ORDER}
+            for cname, title, _body, _conf, skey, verified in CARDS:
+                if not verified:
+                    continue
+                # 매장 한 바퀴 영상에서 나온 건 '가게 투어' 로 묶는다.
+                # 안 그러면 이 단계가 비어서 로드맵 노드 하나가 빈칸이 된다.
+                stage = "가게 투어" if skey == "narr" else CAT_TO_STAGE.get(cname, "가게 투어")
+                buckets[stage].append((title, cards[title]))
+
+            items = []
+            for sname in STAGE_ORDER:
+                for order, (title, card_id) in enumerate(buckets[sname], 1):
                     items.append(await c.fetchval(
-                        "insert into roadmap_items (stage_id,item_name,item_order) values ($1,$2,$3) "
-                        "returning item_id", stg, iname, io_))
+                        "insert into roadmap_items (stage_id,card_id,item_name,item_order) "
+                        "values ($1,$2,$3,$4) returning item_id",
+                        stage_id[sname], card_id, title, order))
 
             # 김지현: 3단계까지(10/18) · 이준호: 1단계(3/18)
             for name, upto in (("김지현", 10), ("이준호", 3)):
