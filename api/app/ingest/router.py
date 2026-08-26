@@ -21,11 +21,10 @@ from app.ingest.preprocess import storage
 from app.ingest import repository as repo
 from app.ingest.embed import embed_card
 from app.ingest.schemas import (
-    CategoryOut,
-
-
     ApproveResult,
     BulkApproveRequest,
+    CardUpdateRequest,
+    CategoryOut,
     CreateSourceRequest,
     KakaoMeta,
     ProcessRequest,
@@ -341,6 +340,40 @@ async def unapprove_card(card_id: int, db: Db, store_id: OwnerStoreId) -> Approv
         raise HTTPException(404, f"card {card_id} not found in store {store_id}")
     logger.info("승인 취소 card=%s store=%s", card_id, store_id)
     return ApproveResult(card_id=card_id, is_verified=False)
+
+
+@router.patch("/cards/{card_id}", response_model=ApproveResult)
+async def update_card(
+    card_id: int, req: CardUpdateRequest, db: Db, store_id: OwnerStoreId
+) -> ApproveResult:
+    """점주가 카드 글을 고친다.
+
+    이미 승인된 카드라면 임베딩이 옛 글로 남아 있다. 그대로 두면 고친 내용이
+    검색에 반영되지 않으므로 같은 트랜잭션에서 다시 만든다.
+    """
+    title = req.title.strip()
+    content = req.content.strip()
+    if not title or not content:
+        raise HTTPException(422, "제목과 내용은 비울 수 없다")
+    try:
+        async with db.transaction():
+            if not await repo.update_card(db, store_id, card_id, title, content):
+                raise LookupError(f"card {card_id} not found in store {store_id}")
+            card = await repo.get_card(db, store_id, card_id)
+            chunks = 0
+            if card and card["is_verified"]:
+                chunks = await embed_card(db, store_id, card_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("카드 수정 실패 card=%s", card_id)
+        raise HTTPException(502, f"수정한 내용을 검색에 반영하지 못해 되돌렸다: {e}") from e
+    logger.info("카드 수정 card=%s store=%s chunks=%d", card_id, store_id, chunks)
+    return ApproveResult(
+        card_id=card_id, is_verified=bool(card and card["is_verified"]), chunks=chunks
+    )
 
 
 @router.post("/cards/approve", response_model=list[ApproveResult])

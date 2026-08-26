@@ -178,10 +178,11 @@ export type ReviewCard = {
 
 export async function listReviewCards(
   token: string,
-  opts: { verified?: boolean; sourceId?: number; limit?: number } = {}
+  opts: { status?: "pending" | "approved" | "all"; sourceId?: number; limit?: number } = {}
 ) {
   const q = new URLSearchParams();
-  if (opts.verified !== undefined) q.set("verified", String(opts.verified));
+  // 백엔드가 받는 건 status 다. verified 로 보내면 무시되고 pending 으로 떨어진다
+  if (opts.status !== undefined) q.set("status", opts.status);
   if (opts.sourceId !== undefined) q.set("source_id", String(opts.sourceId));
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   const res = await fetchJson<{ total: number; threshold: number; cards: ReviewCard[] }>(
@@ -207,6 +208,38 @@ export async function approveCards(cardIds: number[], token: string) {
     headers: authHeader(token),
     body: JSON.stringify({ card_ids: cardIds }),
     timeoutMs: 90000,
+  });
+}
+
+// 카드 한 장씩. 점주가 카드별로 넣고 뺀다.
+export async function approveCard(cardId: number, token: string) {
+  // 승인 한 건마다 임베딩 호출이 붙는다. 기본 타임아웃으로는 못 끝난다
+  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}/approve`, {
+    method: "POST",
+    headers: authHeader(token),
+    timeoutMs: 30000,
+  });
+}
+
+export async function unapproveCard(cardId: number, token: string) {
+  // 임베딩은 남기고 검색에서만 뺀다. 다시 넣으면 그대로 살아난다
+  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}/unapprove`, {
+    method: "POST",
+    headers: authHeader(token),
+  });
+}
+
+export async function updateCard(
+  cardId: number,
+  body: { title: string; content: string },
+  token: string
+) {
+  // 승인된 카드를 고치면 백엔드가 임베딩까지 다시 만든다
+  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}`, {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+    timeoutMs: 30000,
   });
 }
 

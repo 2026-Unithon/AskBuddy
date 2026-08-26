@@ -167,5 +167,11 @@ class ApproveResult(BaseModel):
     error: str | None = None   # 일괄 승인에서 이 카드만 실패한 경우
 
 
+class CardUpdateRequest(BaseModel):
+    """점주가 고친 카드 글."""
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class BulkApproveRequest(BaseModel):
     card_ids: list[int] = Field(min_length=1, max_length=200)
