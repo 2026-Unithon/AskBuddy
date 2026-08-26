@@ -146,7 +146,7 @@ export default function StaffAuthPage() {
             <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
               로그인
             </Button>
-            <p className="mt-2 text-center text-xs font-semibold text-brand-700">
+            <p className="mt-3 text-center text-base font-bold text-brand-700">
               로그인 버튼만 누르시면 이용 가능 하십니다~!
             </p>
           </form>

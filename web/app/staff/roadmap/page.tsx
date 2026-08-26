@@ -25,7 +25,6 @@ function nodeStatuses(stages: RoadmapStageDto[]): NodeStatus[] {
 export default function RoadmapPage() {
   const router = useRouter();
   const { state, dispatch } = useApp();
-  const currentNode = state.roadmap.find((n) => n.status === "IN_PROGRESS") ?? null;
   const [openNodeId, setOpenNodeId] = useState<string | null>(null);
   const openNode = state.roadmap.find((n) => n.id === openNodeId) ?? null;
   const openIndex = openNode ? state.roadmap.findIndex((n) => n.id === openNode.id) : -1;
@@ -106,6 +105,22 @@ export default function RoadmapPage() {
           </div>
         </div>
 
+        {/* Buddy AI — 로드맵 위에 상시로 둔다. 모르는 게 생겼을 때
+            미션을 진행하던 중이든 아니든 바로 물어볼 수 있어야 한다 */}
+        <div className="px-4 pt-3 pb-1">
+          <button
+            onClick={() => router.push("/staff/chat")}
+            className="w-full bg-white rounded-[20px] px-4 py-3.5 flex items-center gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.12)] active:scale-[0.99] transition-transform"
+          >
+            <Buddy size={44} />
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-[15px] font-bold text-foreground">Buddy AI</p>
+              <p className="text-[13px] text-muted mt-0.5">편하게 질문 하세요~</p>
+            </div>
+            <span className="text-muted">→</span>
+          </button>
+        </div>
+
         {/* 경로 캔버스 */}
         <div className="flex-1 flex flex-col justify-center py-4">
           <div
@@ -130,25 +145,6 @@ export default function RoadmapPage() {
             ))}
           </div>
         </div>
-
-        {/* 현재 미션 토스트 — 탭하면 Buddy 채팅으로 이동 */}
-        {currentNode && (
-          <div className="px-4 pb-4">
-            <button
-              onClick={() => router.push("/staff/chat")}
-              className="w-full bg-white rounded-[20px] px-4 py-3.5 flex items-center gap-3 shadow-[0_6px_24px_rgba(0,0,0,0.12),0_-2px_24px_rgba(0,0,0,0.10)]"
-            >
-              <Buddy size={44} />
-              <div className="flex-1 text-left min-w-0">
-                <p className="text-[13px] font-bold text-foreground truncate">
-                  {currentNode.label} 미션 시작! {currentNode.emoji}
-                </p>
-                <p className="text-xs text-muted mt-0.5 truncate">{currentNode.introMessage}</p>
-              </div>
-              <span className="text-muted">→</span>
-            </button>
-          </div>
-        )}
 
         {openNode && (
           <NodeDetailOverlay
