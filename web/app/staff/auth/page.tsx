@@ -13,9 +13,11 @@ export default function StaffAuthPage() {
   const { dispatch } = useApp();
   const [tab, setTab] = useState<Tab>("login");
 
-  const [loginId, setLoginId] = useState("");
-  const [loginPw, setLoginPw] = useState("");
-  const [loginCode, setLoginCode] = useState("");
+  // 심사·체험용 데모 계정을 미리 채워둔다. 처음 오는 사람이 가입부터 하지 않고
+  // 바로 눌러서 볼 수 있어야 한다. 지우고 자기 계정으로 로그인해도 된다.
+  const [loginId, setLoginId] = useState("jihyun@demo.cafe");
+  const [loginPw, setLoginPw] = useState("demo1234");
+  const [loginCode, setLoginCode] = useState("CAFE-DEMO");
 
   const [name, setName] = useState("");
   const [signupId, setSignupId] = useState("");
@@ -144,6 +146,9 @@ export default function StaffAuthPage() {
             <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
               로그인
             </Button>
+            <p className="mt-2 text-center text-xs font-semibold text-brand-700">
+              로그인 버튼만 누르시면 이용 가능 하십니다~!
+            </p>
           </form>
         ) : (
           <form onSubmit={handleSignup} className="flex flex-col gap-3">

@@ -4,14 +4,18 @@
 자료가 올라가 있고, 지식이 구축돼 있고, 질문이 오갔고, 못 답한 것과 점주가 답해준 것이
 섞여 있다. 내용은 전부 testdata/ 의 실제 자료에 근거한다.
 
-    cd api && python scripts/demo_seed.py
+    cd api && python scripts/demo_seed.py --yes
 
-로컬 DB 만 건드린다. 배포 DB 를 가리키고 있으면 그냥 거부한다.
+기본은 로컬 DB 만 건드린다. 배포 DB 로 심으려면 주소를 직접 주고
+--remote 까지 붙여야 한다. 실수로 배포판을 갈아엎지 않기 위해서다.
+
+    DEMO_SEED_DB_URL='postgresql://...pooler.supabase.com:5432/postgres' \
+      python scripts/demo_seed.py --yes --remote
 """
 import argparse
 import asyncio
 import hashlib
-import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -136,22 +140,31 @@ def sha(path: Path) -> str:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--yes", action="store_true", help="확인 없이 진행")
+    ap.add_argument("--remote", action="store_true",
+                    help="배포 DB 에 심는다. DEMO_SEED_DB_URL 이 있어야 한다")
     args = ap.parse_args()
 
     s = get_settings()
-    url = s.supabase_db_url
+    url = os.environ.get("DEMO_SEED_DB_URL") or s.supabase_db_url
     host = url.split("@")[-1].split("/")[0] if "@" in url else url
-    if not host.startswith(("127.0.0.1", "localhost")):
+    is_local = host.startswith(("127.0.0.1", "localhost"))
+
+    if not is_local and not args.remote:
         print(f"거부: 로컬 DB 가 아니다 ({host}).\n"
-              "이 스크립트는 발표용 로컬 데모만 만든다. 배포 DB 는 건드리지 않는다.",
-              file=sys.stderr)
+              "배포 DB 에 심으려면 --remote 를 붙여라.", file=sys.stderr)
+        return 2
+    if args.remote and is_local:
+        print(f"거부: --remote 인데 주소가 로컬이다 ({host}).\n"
+              "DEMO_SEED_DB_URL 로 배포 DB 주소를 줘라.", file=sys.stderr)
         return 2
     if not s.openai_api_key:
         print("OPENAI_API_KEY 가 없다. 임베딩을 못 만들어 검색이 동작하지 않는다.", file=sys.stderr)
         return 2
+    where = "배포 DB" if args.remote else "로컬 DB"
     if not args.yes:
-        print(f"로컬 DB({host})의 '{SLUG}' 매장 데이터를 지우고 다시 만든다. 계속하려면 --yes")
+        print(f"{where}({host})의 '{SLUG}' 매장 데이터를 지우고 다시 만든다. 계속하려면 --yes")
         return 1
+    print(f"  대상: {where} {host}")
 
     now = datetime.now(KST)
     c = await asyncpg.connect(url)
