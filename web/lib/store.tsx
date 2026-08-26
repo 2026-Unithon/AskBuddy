@@ -21,6 +21,7 @@ import type {
   ChatMessage,
   EmptyKnowledgeAlert,
   KnowledgeSection,
+  NodeStatus,
   PendingQuestion,
   Role,
   RoadmapNode,
@@ -107,6 +108,7 @@ type Action =
   | { type: "ADD_UPLOAD_SOURCE"; source: UploadSource }
   | { type: "UPDATE_UPLOAD_SOURCE"; id: string; patch: Partial<UploadSource> }
   | { type: "COMPLETE_ROADMAP_NODE"; nodeId: string }
+  | { type: "SET_ROADMAP_STATUS"; statuses: NodeStatus[] }
   | { type: "ADD_CHAT_MESSAGE"; message: ChatMessage }
   | { type: "SET_CHAT_MESSAGES"; messages: ChatMessage[] }
   | { type: "ADD_PENDING_QUESTION"; question: PendingQuestion }
@@ -192,6 +194,15 @@ function reducer(state: AppState, action: Action): AppState {
           s.id === action.id ? { ...s, ...action.patch } : s
         ),
       };
+    case "SET_ROADMAP_STATUS": {
+      // DB 의 learning_progress 가 유일한 사실이다.
+      // mock 은 첫 3칸을 DONE 으로 박아뒀는데, 갓 합류한 신입에게는 거짓이다.
+      const nodes = state.roadmap.map((n, i) => ({
+        ...n,
+        status: action.statuses[i] ?? n.status,
+      }));
+      return { ...state, roadmap: nodes };
+    }
     case "COMPLETE_ROADMAP_NODE": {
       const nodes = state.roadmap.map((node) =>
         node.id === action.nodeId && node.status !== "LOCKED"

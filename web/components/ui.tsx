@@ -93,7 +93,13 @@ export function TopBar({
           ←
         </button>
       )}
-      {title && <h1 className="text-base font-semibold flex-1 text-center -ml-9">{title}</h1>}
+      {/* -ml-9 로 화살표 위까지 겹쳐 가운데 정렬을 맞춘다. 그대로 두면 제목이 클릭을
+          가로채 뒤로가기가 눌리지 않는다 — 제목은 누를 일이 없으니 통과시킨다. */}
+      {title && (
+        <h1 className="text-base font-semibold flex-1 text-center -ml-9 pointer-events-none">
+          {title}
+        </h1>
+      )}
       <div className="min-w-9 flex justify-end">{right}</div>
     </div>
   );

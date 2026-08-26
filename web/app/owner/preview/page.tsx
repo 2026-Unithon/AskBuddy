@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { approveCards, listReviewCards, type ReviewCard } from "@/lib/api";
@@ -53,6 +53,8 @@ function groupByCategory(cards: ReviewCard[]): KnowledgeSection[] {
 
 export default function PreviewPage() {
   const router = useRouter();
+  const fromDashboard = useSearchParams().get("from") === "dashboard";
+  const backHref = fromDashboard ? "/owner/dashboard" : "/owner/upload";
   const { state, dispatch } = useApp();
   const [live, setLive] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -140,7 +142,7 @@ export default function PreviewPage() {
 
   return (
     <Shell>
-      <TopBar title="학습 미리보기" backHref="/owner/upload" />
+      <TopBar title="학습 미리보기" backHref={backHref} />
       <div className="px-5 pt-1 pb-3">
         <BuddyBubble text="Buddy가 이렇게 이해했어요! 틀리거나 빠진 부분이 있으면 소스를 추가해주세요 😊" />
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BuddyBubble, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { UPLOAD_METHODS, type UploadSourceType } from "@/lib/types";
@@ -71,6 +71,10 @@ function metaFor(type: UploadSourceType, file: File): Record<string, unknown> {
 
 export default function UploadPage() {
   const router = useRouter();
+  // 등록 흐름 중이면 업종 선택으로, 대시보드에서 들어왔으면 대시보드로.
+  // router.back() 은 직접 열거나 새로고침하면 갈 곳이 없어 아무 반응이 없다.
+  const fromDashboard = useSearchParams().get("from") === "dashboard";
+  const backHref = fromDashboard ? "/owner/dashboard" : "/owner/category";
   const { state, dispatch } = useApp();
   const [busy, setBusy] = useState<UploadSourceType | null>(null);
   const [activeSheet, setActiveSheet] = useState<UploadSourceType | null>(null);
@@ -204,7 +208,7 @@ export default function UploadPage() {
 
   return (
     <Shell>
-      <TopBar title="자료 업로드" backHref="/owner/category" />
+      <TopBar title="자료 업로드" backHref={backHref} />
 
       <div className="px-4 pt-1 pb-3 shrink-0">
         <div className="flex justify-between mb-1.5">

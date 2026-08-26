@@ -9,6 +9,18 @@ import { useApp } from "@/lib/store";
 import { ROADMAP_BG_SIZE } from "@/lib/mock";
 import type { RoadmapNode } from "@/lib/types";
 import { getRoadmap, patchRoadmapItem, type RoadmapStageDto } from "@/lib/api";
+import type { NodeStatus } from "@/lib/types";
+
+// 단계의 항목이 전부 DONE 이면 그 칸도 DONE. 앞이 끝나야 다음이 열린다.
+function nodeStatuses(stages: RoadmapStageDto[]): NodeStatus[] {
+  let prevDone = true;
+  return stages.map((st) => {
+    const done = st.items.length > 0 && st.items.every((i) => i.status === "DONE");
+    const status: NodeStatus = done ? "DONE" : prevDone ? "IN_PROGRESS" : "LOCKED";
+    prevDone = done;
+    return status;
+  });
+}
 
 export default function RoadmapPage() {
   const router = useRouter();
@@ -30,7 +42,9 @@ export default function RoadmapPage() {
     let cancelled = false;
     getRoadmap(state.token)
       .then((r) => {
-        if (!cancelled) setStages(r.stages);
+        if (cancelled) return;
+        setStages(r.stages);
+        dispatch({ type: "SET_ROADMAP_STATUS", statuses: nodeStatuses(r.stages) });
       })
       .catch(() => {
         // 백엔드 미연결 — 화면은 로컬 상태로 계속 돈다
@@ -38,7 +52,7 @@ export default function RoadmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [state.token]);
+  }, [state.token, dispatch]);
 
   // 점주 대시보드는 store_members.progress_rate 를 2초 폴링한다.
   // 항목을 DONE 으로 보내면 백엔드가 그 값을 다시 계산하므로 곧바로 반영된다.
@@ -56,13 +70,14 @@ export default function RoadmapPage() {
         }
         const fresh = await getRoadmap(token);
         setStages(fresh.stages);
+        dispatch({ type: "SET_ROADMAP_STATUS", statuses: nodeStatuses(fresh.stages) });
       } catch {
         // 실패해도 화면 진행은 막지 않는다. 다음 노드에서 다시 시도된다
       } finally {
         syncing.current = false;
       }
     },
-    [state.token, stages]
+    [state.token, stages, dispatch]
   );
 
   return (

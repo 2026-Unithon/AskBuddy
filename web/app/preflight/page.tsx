@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 // 배선 점검. 기능을 짜기 전에, 배포한 뒤에 여기 줄들이 전부 초록이어야 한다.
 // 이 화면은 매장 데이터를 다루지 않으므로 인증 가드 밖(app/preflight)에 둔다.
@@ -67,6 +68,13 @@ export default function PreflightPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <header className="mb-8">
+        <Link
+          href="/"
+          aria-label="뒤로가기"
+          className="inline-flex items-center gap-1.5 mb-4 text-sm font-semibold text-muted hover:text-foreground transition-colors"
+        >
+          ← 처음으로
+        </Link>
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">preflight</p>
         <h1 className="mt-2 text-2xl font-bold text-brand-700">배선 점검</h1>
         <p className="mt-2 text-sm text-muted">

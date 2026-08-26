@@ -88,7 +88,7 @@ export default function QuestionsPage() {
 
   return (
     <Shell>
-      <TopBar title="전체 질문" />
+      <TopBar title="전체 질문" backHref="/owner/dashboard" />
       <div className="px-5 pt-1 pb-3">
         <BuddyBubble text="알바가 물은 질문을 최신순으로 보여 드려요. 바로 답한 것과 아직 대기 중인 것이 함께 보여요." />
       </div>
