@@ -18,7 +18,7 @@
 <img src="https://img.shields.io/badge/Gemini-8E75B2?style=flat-square&logo=googlegemini&logoColor=white"/>
 <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=openai&logoColor=white"/>
 
-<sub>2026 유니톤(Unithon) 해커톤 · 3인 팀 프로젝트</sub>
+<sub>2026 유니톤(Unithon) 해커톤 · 5인 팀 프로젝트</sub>
 
 </div>
 
