@@ -55,23 +55,23 @@ AskBuddy는 그 인수인계를 매장의 자산으로 바꾼다.
 flowchart TD
     subgraph IN [" 입력 — 점주·퇴사자가 올린다 "]
         direction LR
-        A1["음성<br/><sub>whisper-1</sub>"]
-        A2["영상<br/><sub>ffmpeg 프레임 추출</sub>"]
-        A3["카톡 대화<br/><sub>txt 파서</sub>"]
-        A4["문서·스캔<br/><sub>pypdf · 이미지</sub>"]
+        A1["음성<br/>whisper-1"]
+        A2["영상<br/>ffmpeg 프레임 추출"]
+        A3["카톡 대화<br/>txt 파서"]
+        A4["문서·스캔<br/>pypdf · 이미지"]
     end
 
-    IN --> EX["지식 추출<br/><sub>Gemini Flash · response_schema JSON</sub>"]
-    EX --> RV["점주 검수<br/><sub>confidence 낮은 카드부터 노출 · 사진 제외/블러</sub>"]
-    RV --> DB[("매장 지식<br/><b>PostgreSQL + pgvector</b><br/><sub>24 테이블 · store_id 격리</sub>")]
+    IN --> EX["지식 추출<br/>Gemini Flash · response_schema JSON"]
+    EX --> RV["점주 검수<br/>confidence 낮은 카드부터 노출 · 사진 제외/블러"]
+    RV --> DB[("매장 지식<br/>PostgreSQL + pgvector<br/>24 테이블 · store_id 격리")]
 
-    DB --> RM["온보딩 로드맵<br/><sub>스킬트리 · 진행도</sub>"]
-    DB --> GATE{"검색 게이트<br/><b>POST /reg/retrieve</b>"}
+    DB --> RM["온보딩 로드맵<br/>스킬트리 · 진행도"]
+    DB --> GATE{"검색 게이트<br/>POST /reg/retrieve"}
 
-    GATE -->|hit| ANS["Gemini 답변<br/><sub>citation 1건 이상 없으면 폐기</sub>"]
-    GATE -->|miss| PQ["pending_questions<br/><sub><b>LLM 호출하지 않음</b></sub>"]
+    GATE -->|hit| ANS["Gemini 답변<br/>citation 1건 이상 없으면 폐기"]
+    GATE -->|miss| PQ["pending_questions<br/>LLM 호출하지 않음"]
 
-    PQ --> OW["점주 대시보드<br/><sub>2초 폴링 알림</sub>"]
+    PQ --> OW["점주 대시보드<br/>2초 폴링 알림"]
     OW -->|"30초 답변"| DB
 
     style GATE fill:#FFD166,stroke:#245B48,stroke-width:2px,color:#26332E
