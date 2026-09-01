@@ -32,5 +32,8 @@ UI/
 .idea/
 .vscode/
 
+# 로컬 심사·숙지 노트. 리포에 올리지 않는다
+notes/
+
 # next 생성 산출물
 web/next-env.d.ts
