@@ -12,11 +12,16 @@ store_id 는 JWT 에서만 꺼낸다. 요청 본문의 매장 정보를 신뢰�
 import logging
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 
+from app.categories import repository as category_repo
+from app.categories.worker import process_reclassification_job
 from app.config import get_settings
 from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
 from app.ingest import pipeline
+from app.ingest import job_repository as job_repo
+from app.ingest.capabilities import get_capabilities
+from app.ingest.job_worker import process_ingest_job
 from app.ingest.preprocess import storage
 from app.ingest import repository as repo
 from app.ingest.embed import embed_card
@@ -26,6 +31,14 @@ from app.ingest.schemas import (
     CardUpdateRequest,
     CategoryOut,
     CreateSourceRequest,
+    CreateIngestJobRequest,
+    IngestJobAccepted,
+    IngestJobCounts,
+    IngestJobDetail,
+    IngestJobList,
+    IngestJobListItem,
+    IngestJobSource,
+    IngestJobStatus,
     KakaoMeta,
     ProcessRequest,
     ReviewCard,
@@ -40,6 +53,7 @@ from app.ingest.schemas import (
     VideoMeta,
     VoiceMeta,
 )
+from app.errors import ApiClaims, ApiError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,6 +66,22 @@ _EXPECTED_META = {
 }
 
 
+def _job_identity(claims: dict, *, owner_only: bool = True) -> tuple[int, int]:
+    if owner_only and claims.get("role") != "OWNER":
+        raise ApiError(403, "OWNER_ONLY", "자료 작업은 사장님만 시작할 수 있습니다.")
+    user_id = claims.get("user_id")
+    store_id = claims.get("store_id")
+    if user_id is None or store_id is None:
+        raise ApiError(403, "STORE_REQUIRED", "먼저 매장에 연결해 주세요.")
+    return int(user_id), int(store_id)
+
+
+@router.get("/capabilities")
+async def capabilities(claims: ApiClaims) -> dict:
+    _job_identity(claims, owner_only=False)
+    return get_capabilities()
+
+
 @router.get("/categories", response_model=list[CategoryOut])
 async def list_categories(db: Db, store_id: CurrentStoreId) -> list[CategoryOut]:
     """점주가 켜둔 업무 카테고리. 추출기는 이 목록 안에서만 고른다."""
@@ -62,22 +92,70 @@ async def list_categories(db: Db, store_id: CurrentStoreId) -> list[CategoryOut]
 @router.patch("/categories", response_model=list[CategoryOut])
 async def update_categories(
     req: UpdateCategoriesRequest,
+    background: BackgroundTasks,
     db: Db,
     store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+    claims: Claims,
 ) -> list[CategoryOut]:
-    """"베이킹 안 해요" 같은 토글을 저장한다. 카테고리를 새로 만들지 않는다."""
+    """구 토글 계약을 새 카테고리 버전·재분류 흐름에 연결한다."""
+    if claims.get("role") != "OWNER":
+        raise ApiError(403, "OWNER_ONLY", "카테고리는 사장님만 변경할 수 있습니다.")
+
+    job_id: int | None = None
     async with db.transaction():
-        await repo.set_categories_enabled(
-            db, store_id, {c.category_name: c.is_enabled for c in req.categories}
-        )
+        store = await category_repo.get_store_for_update(db, store_id)
+        if store is None:
+            raise ApiError(404, "STORE_NOT_FOUND", "접근할 수 있는 매장이 없습니다.")
+        version = int(store["category_version"]) + 1
+        changed = False
+        for requested in req.categories:
+            category = await category_repo.get_category_by_name_for_update(
+                db, store_id, requested.category_name
+            )
+            if category is None:
+                continue
+            active = category["deleted_at"] is None and category["is_enabled"]
+            if requested.is_enabled == active:
+                continue
+            if category["is_system"] and not requested.is_enabled:
+                raise ApiError(
+                    409,
+                    "SYSTEM_CATEGORY_IMMUTABLE",
+                    "기타 카테고리는 비활성화할 수 없습니다.",
+                )
+            if requested.is_enabled:
+                await category_repo.create_category(
+                    db,
+                    store_id,
+                    name=category["category_name"],
+                    sort_order=int(category["sort_order"]),
+                    version=version,
+                )
+            else:
+                category_id = int(category["category_id"])
+                await category_repo.soft_delete_category(
+                    db, store_id, category_id, version=version
+                )
+                await category_repo.move_deleted_manual_cards_to_other(
+                    db, store_id, category_id, version
+                )
+            changed = True
+
+        if changed:
+            await category_repo.set_store_version(db, store_id, version)
+            job_id = await category_repo.create_job(db, store_id, user_id, version)
         rows = await repo.list_categories(db, store_id)
+
+    if job_id is not None:
+        background.add_task(process_reclassification_job, store_id, job_id)
     return [CategoryOut(**dict(r)) for r in rows]
 
 
 @router.post("/upload-url", response_model=UploadUrlResponse)
 async def upload_url(
     req: UploadUrlRequest,
-    store_id: CurrentStoreId,
+    claims: ApiClaims,
 ) -> UploadUrlResponse:
     """1) 여기서 서명 URL 을 받고 2) 브라우저가 그 URL 로 파일을 PUT 한 뒤
     3) file_url 을 그대로 POST /ingest/sources 에 넘긴다.
@@ -85,15 +163,23 @@ async def upload_url(
     브라우저에 Supabase 키를 주지 않으면서도 파일 바이너리가 API 를 거치지 않는다.
     경로에 store_id 가 들어가므로 남의 매장 경로로는 발급되지 않는다.
     """
+    _, store_id = _job_identity(claims)
+    limits = get_capabilities()[req.source_type]
+    if (
+        req.file_size is not None
+        and limits["max_bytes"] is not None
+        and req.file_size > limits["max_bytes"]
+    ):
+        raise ApiError(413, "FILE_TOO_LARGE", "설정된 최대 파일 크기를 초과했습니다.")
     try:
         object_path = storage.build_object_path(store_id, req.source_type, req.filename)
     except ValueError as e:
-        raise HTTPException(422, str(e)) from e
+        raise ApiError(415, "UNSUPPORTED_FILE_TYPE", str(e)) from e
 
     try:
         signed = await storage.create_signed_upload_url(object_path)
     except RuntimeError as e:
-        raise HTTPException(502, str(e)) from e
+        raise ApiError(502, "UPLOAD_URL_FAILED", str(e), retryable=True) from e
 
     return UploadUrlResponse(upload_url=signed, file_url=object_path)
 
@@ -102,9 +188,9 @@ async def upload_url(
 async def create_source(
     req: CreateSourceRequest,
     db: Db,
-    store_id: CurrentStoreId,
-    user_id: CurrentUserId,
+    claims: ApiClaims,
 ) -> SourceCreated:
+    user_id, store_id = _job_identity(claims)
     # 같은 파일 재업로드는 무시한다 (sources 의 (store_id, content_hash) unique)
     if req.content_hash:
         existing = await repo.find_by_hash(db, store_id, req.content_hash)
@@ -116,11 +202,18 @@ async def create_source(
 
     expected = _EXPECTED_META[req.source_type]
     if req.meta is not None and not isinstance(req.meta, expected):
-        raise HTTPException(
-            422, f"{req.source_type} 에는 {expected.__name__} 형태의 meta 가 필요하다"
+        raise ApiError(
+            422,
+            "INVALID_SOURCE_META",
+            f"{req.source_type}에는 {expected.__name__} 형태의 meta가 필요합니다.",
         )
     if req.meta is None and req.source_type in ("VOICE", "VIDEO", "SCAN"):
-        raise HTTPException(422, f"{req.source_type} 는 meta 가 필수다")
+        raise ApiError(
+            422,
+            "SOURCE_META_REQUIRED",
+            f"{req.source_type}에는 meta가 필요합니다.",
+        )
+    _validate_source_limits(req)
 
     async with db.transaction():
         source_id = await repo.create_source(
@@ -131,10 +224,210 @@ async def create_source(
             title=req.title,
             file_size=req.file_size,
             content_hash=req.content_hash,
+            mime_type=req.mime_type,
+            original_filename=req.original_filename,
         )
         await _create_sub_row(db, source_id, req)
 
     return SourceCreated(source_id=source_id, status="UPLOADED")
+
+
+def _validate_source_limits(req: CreateSourceRequest) -> None:
+    limits = get_capabilities()[req.source_type]
+    if (
+        req.file_size is not None
+        and limits["max_bytes"] is not None
+        and req.file_size > limits["max_bytes"]
+    ):
+        raise ApiError(413, "FILE_TOO_LARGE", "설정된 최대 파일 크기를 초과했습니다.")
+    if isinstance(req.meta, (VoiceMeta, VideoMeta)):
+        max_duration = limits["max_duration_sec"]
+        if max_duration is not None and req.meta.duration_sec > max_duration:
+            raise ApiError(413, "MEDIA_TOO_LONG", "설정된 최대 재생 시간을 초과했습니다.")
+    if isinstance(req.meta, ScanMeta):
+        max_pages = limits["max_pages"]
+        if max_pages is not None and req.meta.page_count > max_pages:
+            raise ApiError(413, "TOO_MANY_PAGES", "설정된 최대 페이지 수를 초과했습니다.")
+
+
+def _accepted(row) -> IngestJobAccepted:
+    return IngestJobAccepted(
+        job_id=int(row["job_id"]),
+        status=row["status"],
+        category_version=int(row["category_version"]),
+        source_count=int(row["total_source_count"]),
+    )
+
+
+@router.post("/jobs", response_model=IngestJobAccepted, status_code=202)
+async def create_ingest_job(
+    req: CreateIngestJobRequest,
+    background: BackgroundTasks,
+    db: Db,
+    claims: ApiClaims,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> IngestJobAccepted:
+    user_id, store_id = _job_identity(claims)
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key or len(idempotency_key) > 200:
+            raise ApiError(422, "INVALID_IDEMPOTENCY_KEY", "멱등 키를 확인해 주세요.")
+
+    async with db.transaction():
+        if idempotency_key:
+            await db.execute(
+                "select pg_advisory_xact_lock(hashtext($1))",
+                f"askbuddy:ingest:{store_id}:{idempotency_key}",
+            )
+            existing = await job_repo.find_by_idempotency(
+                db, store_id, idempotency_key
+            )
+            if existing is not None:
+                if existing["status"] == "QUEUED":
+                    background.add_task(
+                        process_ingest_job, store_id, int(existing["job_id"])
+                    )
+                return _accepted(existing)
+
+        sources = await job_repo.source_rows(db, store_id, req.source_ids)
+        if len(sources) != len(req.source_ids):
+            raise ApiError(404, "SOURCE_NOT_FOUND", "접근할 수 없는 자료가 포함되어 있습니다.")
+        unavailable = [
+            int(row["source_id"])
+            for row in sources
+            if row["status"] not in ("UPLOADED", "FAILED")
+        ]
+        if unavailable:
+            raise ApiError(
+                409,
+                "SOURCE_NOT_READY",
+                "이미 처리 중이거나 완료된 자료가 포함되어 있습니다.",
+                details={"source_ids": unavailable},
+            )
+        category_version = await db.fetchval(
+            "select category_version from stores where store_id = $1", store_id
+        )
+        if category_version is None:
+            raise ApiError(404, "STORE_NOT_FOUND", "접근할 수 있는 매장이 없습니다.")
+        row = await job_repo.create_job(
+            db,
+            store_id,
+            user_id,
+            title=req.title,
+            source_ids=req.source_ids,
+            category_version=int(category_version),
+            prompt_version="extract-cards-v1",
+            settings={"ingest_mode": get_settings().ingest_mode},
+            idempotency_key=idempotency_key,
+        )
+
+    background.add_task(process_ingest_job, store_id, int(row["job_id"]))
+    return _accepted(row)
+
+
+@router.get("/jobs", response_model=IngestJobList)
+async def list_ingest_jobs(
+    db: Db,
+    claims: ApiClaims,
+    status_filter: IngestJobStatus | None = Query(default=None, alias="status"),
+    cursor: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> IngestJobList:
+    _, store_id = _job_identity(claims)
+    rows = await job_repo.list_jobs(
+        db, store_id, job_status=status_filter, cursor=cursor, limit=limit + 1
+    )
+    total = await job_repo.count_jobs(db, store_id, status_filter)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return IngestJobList(
+        items=[
+            IngestJobListItem(
+                job_id=int(row["job_id"]),
+                title=row["title"],
+                status=row["status"],
+                category_version=int(row["category_version"]),
+                source_count=int(row["total_source_count"]),
+                card_count=int(row["card_count"]),
+                created_at=row["created_at"].isoformat(),
+                completed_at=(
+                    row["completed_at"].isoformat() if row["completed_at"] else None
+                ),
+            )
+            for row in rows
+        ],
+        next_cursor=int(rows[-1]["job_id"]) if has_more else None,
+        total=total,
+    )
+
+
+async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
+    job = await job_repo.get_job(db, store_id, job_id)
+    if job is None:
+        raise ApiError(404, "INGEST_JOB_NOT_FOUND", "자료 작업을 찾을 수 없습니다.")
+    sources = await job_repo.get_job_sources(db, store_id, job_id)
+    return IngestJobDetail(
+        job_id=int(job["job_id"]),
+        title=job["title"],
+        status=job["status"],
+        category_version=int(job["category_version"]),
+        counts=IngestJobCounts(
+            sources=int(job["total_source_count"]),
+            succeeded=int(job["success_source_count"]),
+            failed=int(job["failed_source_count"]),
+            cards=int(job["card_count"]),
+        ),
+        sources=[
+            IngestJobSource(
+                source_id=int(row["source_id"]),
+                filename=row["filename"],
+                status=row["status"],
+                card_count=int(row["card_count"]),
+                error=(
+                    {"code": row["error_code"], "message": row["error_message"] or ""}
+                    if row["error_code"]
+                    else None
+                ),
+            )
+            for row in sources
+        ],
+        review_destination=f"/owner/cards/review?job_id={job_id}",
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=IngestJobDetail)
+async def get_ingest_job(job_id: int, db: Db, claims: ApiClaims) -> IngestJobDetail:
+    _, store_id = _job_identity(claims)
+    return await _job_detail(db, store_id, job_id)
+
+
+@router.post("/jobs/{job_id}/retry", response_model=IngestJobAccepted, status_code=202)
+async def retry_ingest_job(
+    job_id: int,
+    background: BackgroundTasks,
+    db: Db,
+    claims: ApiClaims,
+    include_no_result: bool = Query(default=False),
+) -> IngestJobAccepted:
+    _, store_id = _job_identity(claims)
+    async with db.transaction():
+        job = await job_repo.get_job(db, store_id, job_id)
+        if job is None:
+            raise ApiError(404, "INGEST_JOB_NOT_FOUND", "자료 작업을 찾을 수 없습니다.")
+        retry_count = await job_repo.reset_retryable_sources(
+            db, store_id, job_id, include_no_result=include_no_result
+        )
+        if retry_count == 0:
+            raise ApiError(409, "NO_RETRYABLE_SOURCES", "재시도할 자료가 없습니다.")
+        row = await job_repo.get_job(db, store_id, job_id)
+
+    background.add_task(process_ingest_job, store_id, job_id)
+    return IngestJobAccepted(
+        job_id=job_id,
+        status=row["status"],
+        category_version=int(row["category_version"]),
+        source_count=retry_count,
+    )
 
 
 async def _create_sub_row(db, source_id: int, req: CreateSourceRequest) -> None:

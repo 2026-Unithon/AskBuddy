@@ -71,12 +71,7 @@ async def download(source_id: int, file_url: str) -> Path:
 import hashlib
 import uuid as _uuid
 
-_EXT = {
-    "VOICE": {"mp3", "m4a", "wav"},
-    "VIDEO": {"mp4", "mov"},
-    "KAKAO": {"txt", "zip", "png", "jpg", "jpeg"},  # SCREENSHOT 지원
-    "SCAN": {"pdf", "jpg", "jpeg", "png"},
-}
+from app.ingest.capabilities import SUPPORTED_EXTENSIONS, extension_of
 
 
 def build_object_path(store_id: int, source_type: str, filename: str) -> str:
@@ -85,8 +80,8 @@ def build_object_path(store_id: int, source_type: str, filename: str) -> str:
     한글·공백 파일명이 URL 인코딩에서 깨지는 사고를 원천 차단하고,
     같은 이름 재업로드가 서로 덮어쓰는 것도 막는다.
     """
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    allowed = _EXT.get(source_type, set())
+    ext = extension_of(filename)
+    allowed = SUPPORTED_EXTENSIONS.get(source_type, ())
     if ext not in allowed:
         raise ValueError(
             f"{source_type} 는 {'/'.join(sorted(allowed))} 확장자만 받는다 (받은 값: {ext or '없음'})"

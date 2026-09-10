@@ -5,7 +5,7 @@
 """
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SourceType = Literal["VOICE", "VIDEO", "KAKAO", "SCAN"]
 SourceStatus = Literal["UPLOADED", "PROCESSING", "DONE", "FAILED"]
@@ -70,6 +70,7 @@ class UploadUrlRequest(BaseModel):
     """브라우저가 Storage 에 직접 올리기 위한 1회용 서명 URL 요청."""
     source_type: SourceType
     filename: str = Field(max_length=200)      # 확장자 판별에만 쓴다
+    file_size: int | None = Field(default=None, ge=0)
 
 
 class UploadUrlResponse(BaseModel):
@@ -82,9 +83,21 @@ class CreateSourceRequest(BaseModel):
     source_type: SourceType
     file_url: str = Field(max_length=500)   # Storage 경로 또는 서명 URL
     title: str | None = Field(default=None, max_length=200)
-    file_size: int | None = None
+    file_size: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, max_length=64)
+    mime_type: str | None = Field(default=None, max_length=100)
+    original_filename: str | None = Field(default=None, max_length=200)
     meta: VoiceMeta | VideoMeta | KakaoMeta | ScanMeta | None = None
+
+    @field_validator("content_hash")
+    @classmethod
+    def valid_sha256(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower()
+        if len(normalized) != 64 or any(c not in "0123456789abcdef" for c in normalized):
+            raise ValueError("content_hash는 SHA-256 64자리여야 합니다.")
+        return normalized
 
 
 class CategoryToggle(BaseModel):
@@ -123,6 +136,80 @@ class StatusResponse(BaseModel):
     error_message: str | None = None
     processed_at: str | None = None
     card_count: int = 0
+
+
+# ── 정식 다중 자료 작업 ───────────────────────────────────────────────────
+
+IngestJobStatus = Literal[
+    "QUEUED", "EXTRACTING", "CLASSIFYING",
+    "SUCCEEDED", "PARTIAL", "NO_RESULT", "FAILED",
+]
+IngestJobSourceStatus = Literal[
+    "QUEUED", "EXTRACTING", "CLASSIFYING", "SUCCEEDED", "NO_RESULT", "FAILED",
+]
+
+
+class CreateIngestJobRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    source_ids: list[int] = Field(min_length=1, max_length=20)
+
+    @field_validator("source_ids")
+    @classmethod
+    def unique_source_ids(cls, value: list[int]) -> list[int]:
+        if any(source_id <= 0 for source_id in value):
+            raise ValueError("source_id는 양수여야 합니다.")
+        if len(value) != len(set(value)):
+            raise ValueError("source_id를 중복해서 보낼 수 없습니다.")
+        return value
+
+
+class IngestJobAccepted(BaseModel):
+    job_id: int
+    status: IngestJobStatus
+    category_version: int
+    source_count: int
+
+
+class IngestJobListItem(BaseModel):
+    job_id: int
+    title: str | None
+    status: IngestJobStatus
+    category_version: int
+    source_count: int
+    card_count: int
+    created_at: str
+    completed_at: str | None = None
+
+
+class IngestJobList(BaseModel):
+    items: list[IngestJobListItem]
+    next_cursor: int | None = None
+    total: int
+
+
+class IngestJobCounts(BaseModel):
+    sources: int
+    succeeded: int
+    failed: int
+    cards: int
+
+
+class IngestJobSource(BaseModel):
+    source_id: int
+    filename: str | None
+    status: IngestJobSourceStatus
+    card_count: int
+    error: dict[str, str] | None = None
+
+
+class IngestJobDetail(BaseModel):
+    job_id: int
+    title: str | None
+    status: IngestJobStatus
+    category_version: int
+    counts: IngestJobCounts
+    sources: list[IngestJobSource]
+    review_destination: str
 
 
 # ── 검수 (점주 승인) ───────────────────────────────────────────────────────

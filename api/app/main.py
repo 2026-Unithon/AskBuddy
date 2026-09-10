@@ -10,8 +10,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.bootstrap.router import router as bootstrap_router
+from app.categories.router import (
+    reclassification_router,
+    router as categories_router,
+)
 from app.config import get_settings
 from app.deps import close_pool, init_pool
+from app.errors import install_error_handlers
 from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
 from app.preflight import router as preflight_router
@@ -37,6 +43,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AskBuddy", lifespan=lifespan)
+install_error_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +55,13 @@ app.add_middleware(
 
 app.include_router(preflight_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(bootstrap_router, prefix="/app", tags=["app"])
+app.include_router(categories_router, prefix="/categories", tags=["categories"])
+app.include_router(
+    reclassification_router,
+    prefix="/reclassification-jobs",
+    tags=["reclassification"],
+)
 app.include_router(reg_router, prefix="/reg", tags=["reg"])
 app.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
 app.include_router(learn_router, prefix="/learn", tags=["learn"])

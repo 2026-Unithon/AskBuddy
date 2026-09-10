@@ -34,15 +34,18 @@ async def create_source(
     title: str | None,
     file_size: int | None,
     content_hash: str | None,
+    mime_type: str | None,
+    original_filename: str | None,
 ) -> int:
     return await conn.fetchval(
         "insert into sources "
-        "  (store_id, uploaded_by, source_type, title, file_url, file_size, content_hash, status) "
-        "values ($1, $2, $3, $4, $5, $6, $7, 'UPLOADED') "
+        "  (store_id, uploaded_by, source_type, title, file_url, file_size, content_hash, "
+        "   mime_type, original_filename, status) "
+        "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'UPLOADED') "
         "returning source_id",
         store_id, uploaded_by, source_type,
         (title or "")[:MAX_TITLE_LEN] or None,
-        file_url, file_size, content_hash,
+        file_url, file_size, content_hash, mime_type, original_filename,
     )
 
 
@@ -196,14 +199,17 @@ async def insert_card(
     title: str,
     content: str,
     confidence: float,
+    origin_job_id: int | None = None,
+    category_version: int = 1,
 ) -> int:
     """추출 카드는 항상 is_verified=false. 점주 승인 전에는 검색에 노출되지 않는다."""
     return await conn.fetchval(
         "insert into knowledge_cards "
-        "  (store_id, category_id, source_id, title, content, confidence, is_verified) "
-        "values ($1, $2, $3, $4, $5, $6, false) returning card_id",
+        "  (store_id, category_id, source_id, title, content, confidence, is_verified, "
+        "   origin_job_id, category_version) "
+        "values ($1, $2, $3, $4, $5, $6, false, $7, $8) returning card_id",
         store_id, category_id, source_id,
-        title[:MAX_TITLE_LEN], content, confidence,
+        title[:MAX_TITLE_LEN], content, confidence, origin_job_id, category_version,
     )
 
 

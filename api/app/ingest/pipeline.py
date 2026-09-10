@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 MOCK_PLACEHOLDER = "(목 모드 — 전처리를 건너뛰었다)"
 
 
-async def process_source(store_id: int, source_id: int) -> None:
+async def process_source(
+    store_id: int, source_id: int, *, job_id: int | None = None
+) -> None:
     pool = get_pool()
     started = time.perf_counter()
 
@@ -42,6 +44,26 @@ async def process_source(store_id: int, source_id: int) -> None:
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
 
+            if job_id is not None:
+                await conn.execute(
+                    """
+                    update ingest_job_sources
+                    set status = 'CLASSIFYING', updated_at = now()
+                    where store_id = $1 and job_id = $2 and source_id = $3
+                    """,
+                    store_id,
+                    job_id,
+                    source_id,
+                )
+                await conn.execute(
+                    """
+                    update ingest_jobs set status = 'CLASSIFYING', updated_at = now()
+                    where store_id = $1 and job_id = $2
+                    """,
+                    store_id,
+                    job_id,
+                )
+
             result = await extract_cards(
                 source_id=source_id,
                 source_type=src["source_type"],
@@ -51,8 +73,33 @@ async def process_source(store_id: int, source_id: int) -> None:
                 media=media,
             )
 
+            # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
+            categories = await repo.enabled_categories(conn, store_id)
+            category_version = int(
+                await conn.fetchval(
+                    "select category_version from stores where store_id = $1", store_id
+                )
+            )
+            origin_job_id = job_id
+            if origin_job_id is None:
+                origin_job_id = await conn.fetchval(
+                    """
+                    select job_id from ingest_jobs
+                    where store_id = $1 and idempotency_key = $2
+                    """,
+                    store_id,
+                    f"legacy-source-{source_id}",
+                )
             async with conn.transaction():
-                saved = await _persist(conn, store_id, source_id, categories, result)
+                saved = await _persist(
+                    conn,
+                    store_id,
+                    source_id,
+                    categories,
+                    result,
+                    job_id=int(origin_job_id) if origin_job_id is not None else None,
+                    category_version=category_version,
+                )
 
             await repo.set_status(conn, store_id, source_id, "DONE")
             logger.info("ingest DONE source=%s cards=%d unresolved=%d %.1fs",
@@ -259,16 +306,22 @@ async def _persist(
     source_id: int,
     categories: dict[str, int],
     result: ExtractionResult,
+    *,
+    job_id: int | None,
+    category_version: int,
 ) -> int:
     """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다."""
     saved = 0
     for card in result.cards:
-        category_id = categories.get(card.category_name)
+        category_id = categories.get(card.category_name) or categories.get("기타")
         if category_id is None:
-            # 프롬프트에서 자유 생성을 금지했지만 모델이 어길 수 있다.
-            # 카드를 버리지는 않되 미분류로 남기고 로그를 남긴다
-            logger.warning("허용 목록에 없는 카테고리 '%s' — 미분류로 저장 source=%s",
-                           card.category_name, source_id)
+            raise RuntimeError("시스템 카테고리 '기타'가 없습니다.")
+        if card.category_name not in categories:
+            logger.info(
+                "허용 목록에 없는 카테고리 '%s' — 기타로 저장 source=%s",
+                card.category_name,
+                source_id,
+            )
 
         card_id = await repo.insert_card(
             conn, store_id,
@@ -277,6 +330,8 @@ async def _persist(
             title=card.title,
             content=card.content,
             confidence=_to_percent(card.confidence),
+            origin_job_id=job_id,
+            category_version=category_version,
         )
         await repo.insert_facts(conn, card_id, [
             (f.object_name, f.attribute, f.value, _to_percent(f.confidence))

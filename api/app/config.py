@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     retrieval_strong_score: float = 0.62
     frame_interval_sec: int = 3
 
+    # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.
+    ingest_voice_max_bytes: int | None = None
+    ingest_voice_max_duration_sec: int | None = None
+    ingest_video_max_bytes: int | None = None
+    ingest_video_max_duration_sec: int | None = None
+    ingest_kakao_max_bytes: int | None = None
+    ingest_scan_max_bytes: int | None = None
+    ingest_scan_max_pages: int | None = None
+
     # ingest (준혁) — mock: LLM 미호출(M1 기본값) / real: Gemini 호출
     ingest_mode: Literal["mock", "real"] = "mock"
     gemini_model: str = "gemini-3.6-flash"
