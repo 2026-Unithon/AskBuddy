@@ -10,8 +10,21 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.cards.router import _evidence_items
 from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
+from app.errors import ApiError
 from app.ingest.embed import embed_card
+from app.learn import roadmap as roadmap_repo
+from app.learn.schemas import (
+    CompletionRequest,
+    CompletionResult,
+    LearnItemDetail,
+    RoadmapCounts,
+    RoadmapItem,
+    RoadmapResponse,
+    RoadmapStage,
+    RoadmapStore,
+)
 from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
@@ -35,16 +48,6 @@ class ChatAskRequest(BaseModel):
 
 class PatchRoadmapItemRequest(BaseModel):
     status: str = Field(pattern="^(LOCKED|IN_PROGRESS|DONE)$")
-
-
-# 시드 단계명과 맞춘다. 분류 이름은 공백을 지우고 비교한다.
-_CATEGORY_TO_STAGE = {
-    "재고정리": "식자재 위치",
-    "음료제작": "레시피 숙지",
-    "오픈업무": "오픈 업무",
-    "마감업무": "마감 업무",
-}
-_DEFAULT_STAGE = "가게 투어"
 
 
 async def _member_id(db: Db, store_id: int, user_id: int) -> int:
@@ -516,187 +519,6 @@ def _iso(value) -> str:
     return value.isoformat() if value is not None else ""
 
 
-def _norm_name(value: str | None) -> str:
-    """띄어쓰기 차이를 무시하고 분류명을 맞춘다."""
-    if not value:
-        return ""
-    return "".join(value.split())
-
-
-def _stage_status(item_statuses: list[str]) -> str:
-    if not item_statuses:
-        return "LOCKED"
-    if all(s == "DONE" for s in item_statuses):
-        return "DONE"
-    if all(s == "LOCKED" for s in item_statuses):
-        return "LOCKED"
-    return "IN_PROGRESS"
-
-
-async def _sync_verified_cards(db: Db, store_id: int) -> None:
-    """승인 카드 중 칸이 없는 것만 로드맵 항으로 만든다. 시드 16칸은 유지."""
-    stages = await db.fetch(
-        """
-        select stage_id, stage_name
-        from roadmap_stages
-        where store_id = $1
-        """,
-        store_id,
-    )
-    if not stages:
-        return
-
-    by_name = {r["stage_name"]: int(r["stage_id"]) for r in stages}
-    default_id = by_name.get(_DEFAULT_STAGE, int(stages[0]["stage_id"]))
-
-    cards = await db.fetch(
-        """
-        select
-          c.card_id,
-          c.title,
-          coalesce(tc.category_name, '') as category_name
-        from knowledge_cards c
-        left join task_categories tc
-          on tc.category_id = c.category_id
-         and tc.store_id = c.store_id
-        where c.store_id = $1
-          and c.is_verified = true
-          and not exists (
-            select 1
-            from roadmap_items i
-            join roadmap_stages g on g.stage_id = i.stage_id
-            where i.card_id = c.card_id
-              and g.store_id = $1
-          )
-        order by c.card_id
-        """,
-        store_id,
-    )
-    if not cards:
-        return
-
-    orders = await db.fetch(
-        """
-        select i.stage_id, coalesce(max(i.item_order), 0) as max_ord
-        from roadmap_items i
-        join roadmap_stages g on g.stage_id = i.stage_id
-        where g.store_id = $1
-        group by i.stage_id
-        """,
-        store_id,
-    )
-    next_ord = {int(r["stage_id"]): int(r["max_ord"]) for r in orders}
-
-    for card in cards:
-        stage_name = _CATEGORY_TO_STAGE.get(
-            _norm_name(card["category_name"]), _DEFAULT_STAGE
-        )
-        stage_id = by_name.get(stage_name, default_id)
-        nxt = next_ord.get(stage_id, 0) + 1
-        next_ord[stage_id] = nxt
-        await db.execute(
-            """
-            insert into roadmap_items (stage_id, card_id, item_name, item_order)
-            values ($1, $2, $3, $4)
-            """,
-            stage_id,
-            int(card["card_id"]),
-            card["title"][:_TITLE_MAX],
-            nxt,
-        )
-
-
-async def _backfill_progress(db: Db, store_id: int, member_id: int) -> None:
-    """진행 행이 없으면 1단계는 하는 중, 나머지는 잠금. 이미 있으면 새 칸만 잠금."""
-    has_any = await db.fetchval(
-        """
-        select exists (
-          select 1
-          from learning_progress p
-          join roadmap_items i on i.item_id = p.item_id
-          join roadmap_stages g on g.stage_id = i.stage_id
-          where p.member_id = $1
-            and g.store_id = $2
-        )
-        """,
-        member_id,
-        store_id,
-    )
-    await db.execute(
-        """
-        insert into learning_progress (member_id, item_id, status)
-        select $1, i.item_id,
-               case
-                 when $3::boolean then 'LOCKED'
-                 when g.stage_order = 1 then 'IN_PROGRESS'
-                 else 'LOCKED'
-               end
-        from roadmap_items i
-        join roadmap_stages g on g.stage_id = i.stage_id
-        where g.store_id = $2
-          and not exists (
-            select 1
-            from learning_progress p
-            where p.member_id = $1
-              and p.item_id = i.item_id
-          )
-        """,
-        member_id,
-        store_id,
-        bool(has_any),
-    )
-
-
-async def _set_progress_rate(db: Db, store_id: int, member_id: int) -> float:
-    """progress_rate = DONE / 전체 칸 × 100. 가이드 확정 식."""
-    counts = await db.fetchrow(
-        """
-        select
-          count(*)::int as total,
-          count(*) filter (where p.status = 'DONE')::int as done
-        from roadmap_items i
-        join roadmap_stages g on g.stage_id = i.stage_id
-        left join learning_progress p
-          on p.item_id = i.item_id
-         and p.member_id = $2
-        where g.store_id = $1
-        """,
-        store_id,
-        member_id,
-    )
-    total = int(counts["total"]) if counts else 0
-    done = int(counts["done"]) if counts else 0
-    rate = round((done / total) * 100, 2) if total else 0.0
-    await db.execute(
-        """
-        update store_members
-        set progress_rate = $3
-        where member_id = $1
-          and store_id = $2
-        """,
-        member_id,
-        store_id,
-        rate,
-    )
-    return rate
-
-
-async def _progress_rate(db: Db, store_id: int, member_id: int) -> float:
-    row = await db.fetchrow(
-        """
-        select progress_rate
-        from store_members
-        where member_id = $1
-          and store_id = $2
-        """,
-        member_id,
-        store_id,
-    )
-    if not row or row["progress_rate"] is None:
-        return 0.0
-    return float(row["progress_rate"])
-
-
 @router.post("/chat")
 async def ask_chat(
     req: ChatAskRequest,
@@ -896,81 +718,135 @@ async def list_chat(
     }
 
 
-@router.get("/roadmap")
+@router.get("/roadmap", response_model=RoadmapResponse)
 async def get_roadmap(
     db: Db,
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
-):
-    """단계·칸·내 진행. 열 때 승인 카드→칸 동기화 + 빈 진행 채우기."""
+) -> RoadmapResponse:
+    """현재 승인 카드만 카테고리별로 묶고, 강제 잠금 없이 실제 완료를 계산한다."""
     member_id = await _member_id(db, store_id, user_id)
+    store = await db.fetchrow(
+        "select store_id, store_name from stores where store_id = $1", store_id
+    )
+    if store is None:
+        raise ApiError(404, "STORE_NOT_FOUND", "접근할 수 있는 매장이 없습니다.")
+    rows = await roadmap_repo.roadmap_rows(db, store_id, member_id)
+    stages: list[RoadmapStage] = []
+    by_category: dict[int, RoadmapStage] = {}
+    done = 0
+    reconfirm = 0
+    continue_reconfirm: int | None = None
+    continue_new: int | None = None
+    for r in rows:
+        category_id = int(r["category_id"])
+        stage = by_category.get(category_id)
+        if stage is None:
+            stage = RoadmapStage(
+                category_id=category_id,
+                name=r["category_name"],
+                order=int(r["sort_order"]),
+                items=[],
+            )
+            by_category[category_id] = stage
+            stages.append(stage)
+        item_status = roadmap_repo.learning_status(
+            r["progress_status"], r["completed_version_id"], r["published_version_id"]
+        )
+        item_id = int(r["item_id"])
+        stage.items.append(
+            RoadmapItem(
+                item_id=item_id,
+                card_id=int(r["card_id"]),
+                published_version_id=int(r["published_version_id"]),
+                title=r["title"],
+                status=item_status,
+            )
+        )
+        if item_status == "DONE":
+            done += 1
+        elif item_status == "RECONFIRM_REQUIRED":
+            reconfirm += 1
+            continue_reconfirm = continue_reconfirm or item_id
+        else:
+            continue_new = continue_new or item_id
 
-    async with db.transaction():
-        await _sync_verified_cards(db, store_id)
-        await _backfill_progress(db, store_id, member_id)
-
-    rows = await db.fetch(
-        """
-        select
-          g.stage_id,
-          g.stage_name,
-          g.stage_order,
-          i.item_id,
-          i.item_name,
-          i.item_order,
-          i.card_id,
-          kc.title as card_title,
-          coalesce(p.status, 'LOCKED') as status
-        from roadmap_stages g
-        join roadmap_items i on i.stage_id = g.stage_id
-        left join knowledge_cards kc
-          on kc.card_id = i.card_id
-         and kc.store_id = g.store_id
-        left join learning_progress p
-          on p.item_id = i.item_id
-         and p.member_id = $2
-        where g.store_id = $1
-        order by g.stage_order, i.item_order, i.item_id
-        """,
-        store_id,
-        member_id,
+    summary = {"total": len(rows), "done": done, "reconfirm_required": reconfirm}
+    return RoadmapResponse(
+        store=RoadmapStore(store_id=store_id, name=store["store_name"]),
+        counts=RoadmapCounts(**summary),
+        continue_item_id=continue_reconfirm or continue_new,
+        stages=stages,
     )
 
-    stages: list[dict] = []
-    by_stage: dict[int, dict] = {}
-    for r in rows:
-        sid = int(r["stage_id"])
-        stage = by_stage.get(sid)
-        if stage is None:
-            stage = {
-                "stage_id": sid,
-                "stage_name": r["stage_name"],
-                "stage_order": int(r["stage_order"]),
-                "status": "LOCKED",
-                "items": [],
-            }
-            by_stage[sid] = stage
-            stages.append(stage)
-        stage["items"].append(
-            {
-                "item_id": int(r["item_id"]),
-                "item_name": r["item_name"],
-                "item_order": int(r["item_order"]),
-                "status": r["status"],
-                "card_id": int(r["card_id"]) if r["card_id"] is not None else None,
-                "card_title": r["card_title"],
-            }
+
+@router.get("/items/{item_id}", response_model=LearnItemDetail)
+async def get_roadmap_item(
+    item_id: int,
+    db: Db,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+) -> LearnItemDetail:
+    member_id = await _member_id(db, store_id, user_id)
+    row = await roadmap_repo.item_row(db, store_id, member_id, item_id)
+    if row is None:
+        raise ApiError(404, "LEARN_ITEM_NOT_FOUND", "학습 항목을 찾을 수 없습니다.")
+    version_id = int(row["published_version_id"])
+    return LearnItemDetail(
+        item_id=item_id,
+        card_id=int(row["card_id"]),
+        published_version_id=version_id,
+        title=row["title"],
+        content=row["content"],
+        status=roadmap_repo.learning_status(
+            row["progress_status"], row["completed_version_id"], version_id
+        ),
+        category={
+            "category_id": int(row["category_id"]),
+            "name": row["category_name"],
+        },
+        evidence=await _evidence_items(db, store_id, version_id),
+        return_to={"path": "/staff/roadmap", "item_id": item_id},
+    )
+
+
+@router.put("/items/{item_id}/completion", response_model=CompletionResult)
+async def put_roadmap_completion(
+    item_id: int,
+    req: CompletionRequest,
+    db: Db,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+) -> CompletionResult:
+    member_id = await _member_id(db, store_id, user_id)
+    async with db.transaction():
+        item = await roadmap_repo.set_completion(
+            db,
+            store_id,
+            member_id,
+            item_id,
+            published_version_id=req.published_version_id,
+            completed=req.completed,
         )
-
-    for stage in stages:
-        stage["status"] = _stage_status([it["status"] for it in stage["items"]])
-
-    return {
-        "store_id": store_id,
-        "member_id": member_id,
-        "progress_rate": await _progress_rate(db, store_id, member_id),
-        "stages": stages,
-    }
+        if item is None:
+            raise ApiError(404, "LEARN_ITEM_NOT_FOUND", "학습 항목을 찾을 수 없습니다.")
+        current_version_id = int(item["published_version_id"])
+        if current_version_id != req.published_version_id:
+            raise ApiError(
+                409,
+                "LEARN_VERSION_CONFLICT",
+                "학습 내용이 변경되었습니다. 최신 내용을 다시 확인해 주세요.",
+                details={"current_published_version_id": current_version_id},
+            )
+        summary = await roadmap_repo.counts(db, store_id, member_id)
+        await roadmap_repo.update_member_rate(db, store_id, member_id, summary)
+    return CompletionResult(
+        item_id=item_id,
+        card_id=int(item["card_id"]),
+        published_version_id=current_version_id,
+        status="DONE" if req.completed else "NOT_STARTED",
+        counts=RoadmapCounts(**summary),
+    )
 
 
 @router.patch("/roadmap/items/{item_id}")
@@ -981,44 +857,26 @@ async def patch_roadmap_item(
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
 ):
-    """칸 상태 저장 후 progress_rate = DONE / 전체 × 100."""
+    """기존 잠금형 요청을 새 완료 API로 연결하는 호환 어댑터."""
     member_id = await _member_id(db, store_id, user_id)
-    item = await db.fetchrow(
-        """
-        select i.item_id
-        from roadmap_items i
-        join roadmap_stages g on g.stage_id = i.stage_id
-        where i.item_id = $1
-          and g.store_id = $2
-        """,
-        item_id,
-        store_id,
-    )
+    item = await roadmap_repo.item_row(db, store_id, member_id, item_id)
     if not item:
         raise HTTPException(404, "roadmap item not found")
 
     async with db.transaction():
-        await db.execute(
-            """
-            insert into learning_progress (member_id, item_id, status, completed_at)
-            values (
-              $1, $2, $3::varchar,
-              case when $3::varchar = 'DONE' then now() else null end
-            )
-            on conflict (member_id, item_id)
-            do update set
-              status = excluded.status,
-              completed_at = excluded.completed_at
-            """,
+        await roadmap_repo.set_completion(
+            db,
+            store_id,
             member_id,
             item_id,
-            req.status,
+            published_version_id=int(item["published_version_id"]),
+            completed=req.status == "DONE",
         )
-        rate = await _set_progress_rate(db, store_id, member_id)
+        summary = await roadmap_repo.counts(db, store_id, member_id)
+        rate = await roadmap_repo.update_member_rate(db, store_id, member_id, summary)
 
     return {
         "item_id": item_id,
         "status": req.status,
         "progress_rate": rate,
     }
-

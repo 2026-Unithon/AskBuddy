@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.bootstrap.router import router as bootstrap_router
+from app.cards.router import router as cards_router
 from app.categories.router import (
     reclassification_router,
     router as categories_router,
@@ -56,6 +57,7 @@ app.add_middleware(
 app.include_router(preflight_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(bootstrap_router, prefix="/app", tags=["app"])
+app.include_router(cards_router, prefix="/cards", tags=["cards"])
 app.include_router(categories_router, prefix="/categories", tags=["categories"])
 app.include_router(
     reclassification_router,

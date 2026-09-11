@@ -225,6 +225,42 @@ async def insert_facts(
     )
 
 
+async def insert_card_evidence(
+    conn: asyncpg.Connection,
+    store_id: int,
+    card_id: int,
+    source_id: int,
+    *,
+    locator_type: str,
+    locator: dict,
+) -> None:
+    """최초 추출 버전에 원본 위치를 연결한다."""
+    import json
+
+    version_id = await conn.fetchval(
+        """
+        select draft_version_id from knowledge_cards
+        where store_id = $1 and card_id = $2
+        """,
+        store_id,
+        card_id,
+    )
+    if version_id is None:
+        raise RuntimeError(f"card {card_id}의 최초 버전이 생성되지 않았습니다.")
+    await conn.execute(
+        """
+        insert into card_evidence (
+          store_id, version_id, source_id, locator_type, locator
+        ) values ($1, $2, $3, $4, $5::jsonb)
+        """,
+        store_id,
+        version_id,
+        source_id,
+        locator_type,
+        json.dumps(locator, ensure_ascii=False),
+    )
+
+
 async def get_card(
     conn: asyncpg.Connection, store_id: int, card_id: int
 ) -> asyncpg.Record | None:

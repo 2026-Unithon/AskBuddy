@@ -312,6 +312,11 @@ async def _persist(
 ) -> int:
     """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다."""
     saved = 0
+    source_type = await conn.fetchval(
+        "select source_type from sources where store_id = $1 and source_id = $2",
+        store_id,
+        source_id,
+    )
     for card in result.cards:
         category_id = categories.get(card.category_name) or categories.get("기타")
         if category_id is None:
@@ -337,6 +342,20 @@ async def _persist(
             (f.object_name, f.attribute, f.value, _to_percent(f.confidence))
             for f in card.facts
         ])
+        if source_type in ("VOICE", "VIDEO"):
+            locator_type = "TIMESTAMP"
+            locator = {"timestamp_sec": max(0, card.evidence.timestamp_sec)}
+        else:
+            locator_type = "WHOLE_SOURCE"
+            locator = {}
+        await repo.insert_card_evidence(
+            conn,
+            store_id,
+            card_id,
+            source_id,
+            locator_type=locator_type,
+            locator=locator,
+        )
         saved += 1
 
     for item in result.unresolved:

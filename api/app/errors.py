@@ -73,8 +73,12 @@ def install_error_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        new_api = request.url.path == "/app/bootstrap" or request.url.path.startswith(
-            ("/categories", "/reclassification-jobs", "/ingest")
+        new_api = (
+            request.url.path == "/app/bootstrap"
+            or request.url.path.startswith(
+                ("/categories", "/reclassification-jobs", "/ingest", "/cards")
+            )
+            or request.url.path.startswith("/learn/items/")
         )
         if not new_api:
             return await request_validation_exception_handler(request, exc)

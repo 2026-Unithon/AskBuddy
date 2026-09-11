@@ -99,6 +99,13 @@ begin
     raise exception '미승인 카드 최초 초안 버전 생성 실패';
   end if;
 
+  if not exists (
+    select 1 from card_versions
+    where version_id = first_version_id and change_source = 'EXTRACTION'
+  ) then
+    raise exception '신규 카드 최초 버전의 출처가 EXTRACTION이 아님';
+  end if;
+
   update knowledge_cards
   set is_verified = true
   where store_id = test_store_id and card_id = test_card_id;
@@ -147,6 +154,32 @@ begin
 
   if second_version_id is null or second_version_id = first_version_id then
     raise exception '구 수정 API의 새 공개 버전 생성 실패';
+  end if;
+
+  -- 신규 API는 초안을 명시적으로 만든다. 승인 카드여도 공개 포인터는
+  -- approve 전까지 기존 버전에 머물러야 한다.
+  insert into card_versions (
+    store_id, card_id, version_no, title, content, change_source, created_by
+  )
+  select test_store_id, test_card_id, max(version_no) + 1,
+         '신규 초안', '아직 공개되지 않은 본문', 'OWNER_EDIT', test_owner_id
+  from card_versions
+  where card_id = test_card_id
+  returning version_id into embedding_version_id;
+
+  update knowledge_cards
+  set title = '신규 초안', content = '아직 공개되지 않은 본문',
+      draft_version_id = embedding_version_id
+  where store_id = test_store_id and card_id = test_card_id;
+
+  if (select published_version_id from knowledge_cards
+      where store_id = test_store_id and card_id = test_card_id) is distinct from second_version_id then
+    raise exception '신규 초안이 승인 전에 공개됨';
+  end if;
+
+  if (select count(*) from card_versions where card_id = test_card_id
+      and title = '신규 초안') <> 1 then
+    raise exception '신규 초안 쓰기에서 중복 버전 생성';
   end if;
 
   -- 현재 upsert가 version_id를 SET하지 않아도 BEFORE UPDATE 트리거가 교정해야 한다.

@@ -107,6 +107,31 @@ async def create_signed_upload_url(object_path: str) -> str:
     return f"{s.supabase_url}/storage/v1{res.json()['url']}"
 
 
+async def create_signed_read_url(file_url: str, expires_in: int = 300) -> str:
+    """비공개 원본을 잠깐만 읽을 수 있는 URL을 발급한다."""
+    s = get_settings()
+    if file_url.startswith(("http://", "https://")):
+        if not s.supabase_url or not file_url.startswith(s.supabase_url):
+            return file_url
+        marker = "/storage/v1/object/"
+        if marker not in file_url:
+            raise RuntimeError("Supabase Storage 원본 경로를 해석할 수 없습니다.")
+        object_path = file_url.split(marker, 1)[1].split("?", 1)[0]
+    else:
+        object_path = file_url.lstrip("/")
+    if not s.supabase_url or not s.supabase_service_key:
+        raise RuntimeError("Supabase Storage 설정이 없습니다.")
+    async with httpx.AsyncClient(timeout=30) as client:
+        res = await client.post(
+            f"{s.supabase_url}/storage/v1/object/sign/{object_path}",
+            headers={"Authorization": f"Bearer {s.supabase_service_key}"},
+            json={"expiresIn": expires_in},
+        )
+    if res.status_code != 200:
+        raise RuntimeError(f"읽기 URL 발급 실패 {res.status_code}: {res.text[:200]}")
+    return f"{s.supabase_url}/storage/v1{res.json()['signedURL']}"
+
+
 def sha256_of(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
