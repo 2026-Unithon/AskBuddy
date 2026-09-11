@@ -17,7 +17,8 @@ export function useAuthGuard(role: Role, authPath: string) {
   useEffect(() => {
     if (!state.hydrated) return;
     if (allowed) return;
-    router.replace(authPath);
+    const destination = `${window.location.pathname}${window.location.search}`;
+    router.replace(`${authPath}?next=${encodeURIComponent(destination)}`);
   }, [state.hydrated, allowed, router, authPath]);
 
   return { ready: state.hydrated && allowed };

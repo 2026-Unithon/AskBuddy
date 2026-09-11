@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Buddy, BuddyBubble, Button, Card, Input } from "@/components/ui";
 import { useApp } from "@/lib/store";
-import { ApiError, answerPending, listPending, listStaff, type LearnPendingItem, type LearnStaffItem } from "@/lib/api";
+import { ApiError, answerPending, listNotifications, listPending, listStaff, type LearnPendingItem, type LearnStaffItem } from "@/lib/api";
 import type { PendingQuestion, StaffLevel, StaffMember } from "@/lib/types";
 
 const LEVEL_TONE: Record<StaffLevel, "brand" | "warn" | "danger"> = {
@@ -51,6 +51,7 @@ export default function DashboardPage() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [answeringId, setAnsweringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const avgProgress = useMemo(() => {
     if (state.staff.length === 0) return 0;
@@ -90,9 +91,22 @@ export default function DashboardPage() {
       }
     }
 
+    async function refreshNotifications() {
+      try {
+        const res = await listNotifications(state.token!, { unreadOnly: true, limit: 1 });
+        if (!cancelled) setUnreadCount(res.unread_count);
+      } catch {
+        // 앱 내부 알림이 일시적으로 실패해도 대시보드의 핵심 정보는 계속 표시한다.
+      }
+    }
+
     void refreshPending();
     void refreshStaff();
-    const timer = window.setInterval(() => void refreshPending(), POLL_MS);
+    void refreshNotifications();
+    const timer = window.setInterval(() => {
+      void refreshPending();
+      void refreshNotifications();
+    }, POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -137,7 +151,21 @@ export default function DashboardPage() {
               <p className="text-white/55 text-xs font-semibold">사장님 대시보드</p>
               <h1 className="text-2xl font-bold text-white">{state.storeName}</h1>
             </div>
-            <Buddy size={44} />
+            <div className="flex items-center gap-2">
+              <Link
+                href="/owner/notifications"
+                aria-label={`알림${unreadCount ? ` ${unreadCount}개 읽지 않음` : ""}`}
+                className="relative w-10 h-10 rounded-full bg-white/12 text-white flex items-center justify-center"
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#E57373] text-[10px] font-bold flex items-center justify-center">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </Link>
+              <Buddy size={44} />
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-2.5 max-w-md">
             {[

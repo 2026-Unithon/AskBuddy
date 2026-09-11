@@ -21,6 +21,7 @@ from app.deps import close_pool, init_pool
 from app.errors import install_error_handlers
 from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
+from app.notifications.router import router as notifications_router
 from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
 
@@ -67,6 +68,7 @@ app.include_router(
 app.include_router(reg_router, prefix="/reg", tags=["reg"])
 app.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
 app.include_router(learn_router, prefix="/learn", tags=["learn"])
+app.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 
 
 @app.get("/health")

@@ -849,6 +849,7 @@ FAQ 횟수도 대기 행 수가 아니라 실제 질문 발생 수를 사용한�
 ### `GET /notifications/support`
 
 서버의 VAPID 공개키와 안내 버전을 반환한다. 브라우저 기능 지원 및 iOS 홈 화면 설치 여부는 프론트에서 추가 판정한다.
+VAPID 설정이 없으면 `push_configured=false`를 반환하되 앱 내부 알림 기능은 계속 동작한다.
 
 ### `POST /notifications/subscriptions`
 
@@ -861,6 +862,8 @@ PushSubscription을 현재 사용자에게 등록한다. 사용자 버튼 동작
 ### `GET /notifications`
 
 앱 내부 알림 목록이다. Push 권한 거절·미지원이어도 사용할 수 있다.
+`delivery_status`, `read_at`, `action_completed`는 각각 Push 요청, 앱 내 읽음,
+연결된 질문 답변·카드 검토 완료를 나타내며 서로 대신하지 않는다.
 
 ### `POST /notifications/{notification_id}/read`
 
@@ -877,6 +880,16 @@ PushSubscription을 현재 사용자에게 등록한다. 사용자 버튼 동작
 - 질문: `WAITING` 질문 저장 성공
 
 `NO_RESULT`, 전체 실패, 질문 저장 실패에는 성공 알림을 만들지 않는다.
+
+Web Push 운영 환경변수는 API에만 저장한다.
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT` (`mailto:` 또는 운영 HTTPS 주소)
+- `PUSH_GUIDE_VERSION`
+
+Push endpoint가 `404` 또는 `410`을 반환하면 해당 구독을 비활성화한다. 그 밖의
+전송 실패는 전달 기록에 남기되 원래 질문 저장이나 추출 완료 상태를 되돌리지 않는다.
 
 ## 16. 평가 API
 

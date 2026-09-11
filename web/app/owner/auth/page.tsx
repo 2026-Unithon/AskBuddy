@@ -26,6 +26,13 @@ export default function OwnerAuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function destinationAfterLogin(): string {
+    const requested = new URLSearchParams(window.location.search).get("next");
+    return requested?.startsWith("/owner/") && !requested.startsWith("//")
+      ? requested
+      : "/owner/dashboard";
+  }
+
   // 인증은 실패하면 절대 넘어가지 않는다. 회원이 아니면 들어올 수 없다.
   // 백엔드가 꺼져 있어도 마찬가지다 — 통과시키면 로그인이 없는 것과 같다.
   function describe(e: unknown): string {
@@ -54,7 +61,7 @@ export default function OwnerAuthPage() {
         storeId: user.store_id ?? null,
       });
       // 이미 매장이 있으면 등록 흐름을 다시 태우지 않는다. 바로 대시보드로.
-      router.push(user.store_id ? "/owner/dashboard" : "/owner/intent");
+      router.push(user.store_id ? destinationAfterLogin() : "/owner/intent");
     } catch (err) {
       setError(describe(err));
     } finally {

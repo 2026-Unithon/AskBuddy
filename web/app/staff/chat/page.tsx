@@ -29,8 +29,11 @@ export default function ChatPage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typingRef = useRef(false);
-  typingRef.current = typing;
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    typingRef.current = typing;
+  }, [typing]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

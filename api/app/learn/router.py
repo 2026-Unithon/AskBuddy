@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.cards.router import _evidence_items
@@ -24,6 +24,10 @@ from app.learn.knowledge_apply import (
 )
 from app.learn.knowledge_loop import build_knowledge_plan
 from app.learn import roadmap as roadmap_repo
+from app.notifications.service import (
+    create_pending_question_notification,
+    deliver_notification,
+)
 from app.learn.schemas import (
     CompletionRequest,
     CompletionResult,
@@ -148,6 +152,7 @@ async def _citations_are_current(
 @router.post("/pending")
 async def create_pending(
     req: CreatePendingRequest,
+    background: BackgroundTasks,
     db: Db,
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
@@ -174,6 +179,7 @@ async def create_pending(
             raise HTTPException(404, "message not found in this store")
 
     question_key = _question_key(question)
+    notification_id: int | None = None
     async with db.transaction():
         await _lock_pending_question_key(db, store_id, question_key)
         existing = await _waiting_same_question(db, store_id, question_key)
@@ -206,6 +212,11 @@ async def create_pending(
         await _record_pending_occurrence(
             db, int(row["question_id"]), member_id, req.message_id
         )
+        notification_id = await create_pending_question_notification(
+            db, store_id, int(row["question_id"]), question
+        )
+    if notification_id is not None:
+        background.add_task(deliver_notification, store_id, notification_id)
     return {
         "question_id": int(row["question_id"]),
         "status": row["status"],
@@ -271,6 +282,43 @@ async def list_pending(
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/pending/{question_id}")
+async def get_pending(
+    question_id: int,
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+):
+    """알림 딥링크가 가리키는 질문의 현재 상태를 매장 범위 안에서 확인한다."""
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+    row = await db.fetchrow(
+        """
+        select q.question_id, q.question_text, q.miss_reason, q.status, q.created_at,
+               u.name as asked_by, a.answer_text, a.answered_at
+        from pending_questions q
+        join store_members m on m.member_id = q.member_id and m.store_id = q.store_id
+        join users u on u.user_id = m.user_id
+        left join owner_answers a on a.question_id = q.question_id
+        where q.store_id = $1 and q.question_id = $2
+        """,
+        store_id,
+        question_id,
+    )
+    if row is None:
+        raise HTTPException(404, "pending question not found")
+    return {
+        "question_id": int(row["question_id"]),
+        "question_text": row["question_text"],
+        "miss_reason": row["miss_reason"],
+        "status": row["status"],
+        "asked_by": row["asked_by"],
+        "answer_text": row["answer_text"],
+        "answered_at": _iso(row["answered_at"]) or None,
+        "created_at": _iso(row["created_at"]),
     }
 
 
@@ -876,6 +924,7 @@ def _iso(value) -> str:
 @router.post("/chat")
 async def ask_chat(
     req: ChatAskRequest,
+    background: BackgroundTasks,
     db: Db,
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
@@ -893,6 +942,7 @@ async def ask_chat(
         else None
     )
 
+    notification_id: int | None = None
     async with db.transaction():
         session_id = await _open_session(db, store_id, member_id)
         user_message_id = int(
@@ -998,12 +1048,18 @@ async def ask_chat(
                         result.get("reason", "no_match"),
                         )
                     )
+                notification_id = await create_pending_question_notification(
+                    db, store_id, pending_question_id, question[:500]
+                )
             await _record_pending_occurrence(
                 db, pending_question_id, member_id, user_message_id
             )
             answer_type = "NO_ANSWER"
             answer_source = "MISS"
             grounding_status = "NOT_APPLICABLE"
+
+    if notification_id is not None:
+        background.add_task(deliver_notification, store_id, notification_id)
 
     return {
         "session_id": session_id,

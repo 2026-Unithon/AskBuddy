@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
 
+    # 앱 내부 알림은 키 없이도 동작한다. 세 값이 모두 있을 때만 Web Push를 추가 전송한다.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = ""
+    push_guide_version: str = "push-guide-v1"
+
     @property
     def origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

@@ -76,7 +76,13 @@ def install_error_handlers(app: FastAPI) -> None:
         new_api = (
             request.url.path == "/app/bootstrap"
             or request.url.path.startswith(
-                ("/categories", "/reclassification-jobs", "/ingest", "/cards")
+                (
+                    "/categories",
+                    "/reclassification-jobs",
+                    "/ingest",
+                    "/cards",
+                    "/notifications",
+                )
             )
             or request.url.path.startswith("/learn/items/")
         )

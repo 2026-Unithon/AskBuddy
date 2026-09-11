@@ -62,7 +62,8 @@ export default function PreflightPage() {
   }, []);
 
   useEffect(() => {
-    void probe(false);
+    const timer = window.setTimeout(() => void probe(false), 0);
+    return () => window.clearTimeout(timer);
   }, [probe]);
 
   return (

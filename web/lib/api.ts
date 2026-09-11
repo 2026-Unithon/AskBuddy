@@ -41,13 +41,18 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
       // FastAPI 는 오류를 { detail: ... } 로 준다. 사람이 읽을 문구를 살려서 올린다.
       let detail = "";
       try {
-        const body = (await res.json()) as { detail?: unknown };
-        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? "");
+        const body = (await res.json()) as {
+          detail?: unknown;
+          error?: { message?: unknown };
+        };
+        if (typeof body.error?.message === "string") detail = body.error.message;
+        else detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? "");
       } catch {
         // 본문이 JSON 이 아니면 상태 코드만으로 판단한다
       }
       throw new ApiError(res.status, detail, path);
     }
+    if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   } finally {
     clearTimeout(timer);
@@ -522,4 +527,78 @@ export async function answerPending(questionId: number, answerText: string, toke
     body: JSON.stringify({ answer_text: answerText }),
     timeoutMs: CHAT_TIMEOUT_MS,
   });
+}
+
+// ---- /notifications — 앱 내부 알림 정본 + 선택적 Web Push ----
+
+export type NotificationSupport = {
+  push_configured: boolean;
+  vapid_public_key: string | null;
+  guide_version: string;
+  guide_seen: boolean;
+};
+
+export type NotificationItem = {
+  notification_id: number;
+  event_type: "INGEST_COMPLETED" | "PENDING_QUESTION";
+  aggregate_type: "INGEST_JOB" | "PENDING_QUESTION";
+  aggregate_id: number;
+  title: string;
+  body: string;
+  destination: string;
+  delivery_status: "PENDING" | "REQUESTED" | "FAILED";
+  read_at: string | null;
+  action_completed: boolean;
+  created_at: string;
+};
+
+export async function getNotificationSupport(token: string) {
+  return fetchJson<NotificationSupport>("/notifications/support", {
+    headers: authHeader(token),
+  });
+}
+
+export async function savePushSubscription(
+  subscription: PushSubscriptionJSON,
+  token: string
+) {
+  return fetchJson<{ subscription_id: number; enabled: boolean }>(
+    "/notifications/subscriptions",
+    {
+      method: "POST",
+      headers: authHeader(token),
+      body: JSON.stringify(subscription),
+    }
+  );
+}
+
+export async function deletePushSubscription(subscriptionId: number, token: string) {
+  return fetchJson<void>(`/notifications/subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    headers: authHeader(token),
+  });
+}
+
+export async function listNotifications(
+  token: string,
+  opts: { unreadOnly?: boolean; cursor?: number; limit?: number } = {}
+) {
+  const query = new URLSearchParams();
+  if (opts.unreadOnly) query.set("unread_only", "true");
+  if (opts.cursor) query.set("cursor", String(opts.cursor));
+  if (opts.limit) query.set("limit", String(opts.limit));
+  return fetchJson<{
+    items: NotificationItem[];
+    unread_count: number;
+    next_cursor: number | null;
+  }>(`/notifications${query.toString() ? `?${query}` : ""}`, {
+    headers: authHeader(token),
+  });
+}
+
+export async function markNotificationRead(notificationId: number, token: string) {
+  return fetchJson<{ notification_id: number; read_at: string }>(
+    `/notifications/${notificationId}/read`,
+    { method: "POST", headers: authHeader(token) }
+  );
 }

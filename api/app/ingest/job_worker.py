@@ -5,6 +5,10 @@ import logging
 
 from app.deps import get_pool
 from app.ingest import pipeline
+from app.notifications.service import (
+    create_ingest_completed_notification,
+    deliver_notification,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +119,22 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                 )
                 await _refresh_job(conn, store_id, job_id, final=False)
 
+        notification_id: int | None = None
         async with pool.acquire() as conn:
-            await _refresh_job(conn, store_id, job_id, final=True)
+            status, card_count = await _refresh_job(conn, store_id, job_id, final=True)
+            if status in ("SUCCEEDED", "PARTIAL") and card_count > 0:
+                try:
+                    notification_id = await create_ingest_completed_notification(
+                        conn, store_id, job_id, card_count
+                    )
+                except Exception:
+                    logger.exception(
+                        "ingest notification create failed store=%s job=%s",
+                        store_id,
+                        job_id,
+                    )
+        if notification_id is not None:
+            await deliver_notification(store_id, notification_id)
     except Exception as exc:
         logger.exception("ingest job FAILED store=%s job=%s", store_id, job_id)
         async with pool.acquire() as conn:
@@ -133,7 +151,9 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
             )
 
 
-async def _refresh_job(conn, store_id: int, job_id: int, *, final: bool) -> None:
+async def _refresh_job(
+    conn, store_id: int, job_id: int, *, final: bool
+) -> tuple[str, int]:
     counts = await conn.fetchrow(
         """
         select count(*)::int as total,
@@ -173,3 +193,4 @@ async def _refresh_job(conn, store_id: int, job_id: int, *, final: bool) -> None
         int(counts["cards"]),
         final,
     )
+    return status, int(counts["cards"])

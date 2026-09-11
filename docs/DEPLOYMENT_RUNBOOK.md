@@ -102,6 +102,9 @@ DB migration이 하위 호환되며 검증까지 끝난 뒤 `main`에 반영한�
 - Vercel `NEXT_PUBLIC_API_URL=https://askbuddy-production.up.railway.app`
 - Railway `ALLOWED_ORIGINS=https://ask-buddy-iota.vercel.app`
 - Railway의 Supabase URL/key 및 DB 관련 환경변수는 기존 설정을 유지한다.
+- Web Push를 사용할 때 Railway에 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`(`mailto:` 또는 운영 HTTPS 주소)를 추가한다. 공개키는 API가 Web에 내려주므로 Vercel
+  환경변수로 중복 저장하지 않는다.
 
 환경변수의 실제 비밀값은 저장소에 넣지 않는다. 값 변경 시 각 플랫폼에서 저장한 뒤 해당 서비스를 재배포한다.
 
