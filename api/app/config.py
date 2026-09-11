@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     embedding_dim: int = 1536
     confidence_threshold: float = 0.6  # D3 — 카드 검수 우선노출. 검색과 무관
     retrieval_threshold: float = 0.35  # D11 — 검색 게이트 하한. D3와 별개
-    # 이 점수를 넘으면 낱말이 안 겹쳐도 통과 (D12)
+    # 구버전 호환 설정. 8단계부터는 점수가 높아도 질문 대상어 근거가 없으면 miss다.
     retrieval_strong_score: float = 0.62
+    # 직원 답변은 기본적으로 근거 제한 LLM을 사용하되, 호출/검증 실패 시 카드 원문으로 폴백한다.
+    answer_mode: Literal["extractive", "grounded_llm"] = "grounded_llm"
     frame_interval_sec: int = 3
 
     # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.

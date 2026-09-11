@@ -320,16 +320,21 @@ async def main() -> int:
                     card_id = cards[extra]
                     body = await c.fetchval("select content from knowledge_cards where card_id=$1", card_id)
                     bmsg = await c.fetchval(
-                        "insert into chat_messages (session_id,sender_type,content,answer_type,confidence,created_at) "
-                        "values ($1,'BUDDY',$2,'ANSWERED',$3,$4) returning message_id",
+                        "insert into chat_messages (session_id,sender_type,content,answer_type,confidence,"
+                        "answer_source,grounding_status,created_at) "
+                        "values ($1,'BUDDY',$2,'ANSWERED',$3,'CARD_ORIGINAL','FALLBACK',$4) "
+                        "returning message_id",
                         sess, body, 90, at + timedelta(seconds=3))
                     await c.execute(
-                        "insert into message_citations (message_id,card_id,relevance) values ($1,$2,$3)",
+                        "insert into message_citations (message_id,card_id,version_id,relevance) "
+                        "select $1,card_id,published_version_id,$3 from knowledge_cards where card_id=$2",
                         bmsg, card_id, 88)
                 else:
                     bmsg = await c.fetchval(
-                        "insert into chat_messages (session_id,sender_type,content,answer_type,created_at) "
-                        "values ($1,'BUDDY','아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏','NO_ANSWER',$2) "
+                        "insert into chat_messages (session_id,sender_type,content,answer_type,"
+                        "answer_source,grounding_status,created_at) "
+                        "values ($1,'BUDDY','아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏',"
+                        "'NO_ANSWER','MISS','NOT_APPLICABLE',$2) "
                         "returning message_id", sess, at + timedelta(seconds=3))
                     if kind == "miss":
                         await c.execute(
@@ -346,8 +351,9 @@ async def main() -> int:
                             "values ($1,$2,$3,$4,$5)",
                             qid, owner_id, extra, cards["컵 보관 위치"], at + timedelta(hours=2))
                         await c.execute(
-                            "insert into chat_messages (session_id,sender_type,content,answer_type,confidence,created_at) "
-                            "values ($1,'BUDDY',$2,'ANSWERED',95,$3)",
+                            "insert into chat_messages (session_id,sender_type,content,answer_type,confidence,"
+                            "answer_source,grounding_status,created_at) "
+                            "values ($1,'BUDDY',$2,'ANSWERED',95,'OWNER_ANSWER','NOT_APPLICABLE',$3)",
                             sess, extra, at + timedelta(hours=2, seconds=5))
 
         # ── 임베딩 (트랜잭션 밖 — 외부 호출) ──────────────────────────

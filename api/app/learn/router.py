@@ -7,13 +7,22 @@ store_id 는 JWT 에서만 해석한다 (불변식 4).
 """
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.cards.router import _evidence_items
 from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
 from app.errors import ApiError
-from app.ingest.embed import embed_card
+from app.learn.answering import AnswerComposition, compose_grounded_answer
+from app.learn.faq import list_faqs as list_faq_rows
+from app.learn.knowledge_apply import (
+    publish_existing_proposal,
+    publish_new_proposal,
+)
+from app.learn.knowledge_loop import build_knowledge_plan
 from app.learn import roadmap as roadmap_repo
 from app.learn.schemas import (
     CompletionRequest,
@@ -28,9 +37,6 @@ from app.learn.schemas import (
 from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
-
-_TITLE_MAX = 200
-
 
 class CreatePendingRequest(BaseModel):
     question_text: str = Field(min_length=1, max_length=500)
@@ -73,13 +79,70 @@ async def _waiting_same_question(db: Db, store_id: int, question: str):
         from pending_questions
         where store_id = $1
           and status = 'WAITING'
-          and trim(question_text) = $2
+          and lower(regexp_replace(trim(question_text), '\\s+', ' ', 'g')) = $2
         order by created_at asc
         limit 1
         """,
         store_id,
         question,
     )
+
+
+def _question_key(question: str) -> str:
+    return " ".join(question.strip().lower().split())
+
+
+async def _lock_pending_question_key(db: Db, store_id: int, question_key: str) -> None:
+    """동시 요청도 같은 WAITING 질문을 두 번 만들지 않는다."""
+    await db.execute(
+        "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"askbuddy:pending:{store_id}:{question_key}",
+    )
+
+
+async def _record_pending_occurrence(
+    db: Db,
+    question_id: int,
+    member_id: int,
+    message_id: int | None,
+) -> None:
+    await db.execute(
+        """
+        insert into pending_question_occurrences (question_id, member_id, message_id)
+        values ($1, $2, $3)
+        on conflict do nothing
+        """,
+        question_id,
+        member_id,
+        message_id,
+    )
+
+
+async def _citations_are_current(
+    db: Db,
+    store_id: int,
+    composition: AnswerComposition,
+) -> bool:
+    """검색 후 공개 상태가 바뀐 카드를 답변에 쓰지 않도록 행을 잠근다."""
+    expected = {
+        int(card["id"]): int(card["version_id"]) for card in composition.candidates
+    }
+    rows = await db.fetch(
+        """
+        select card_id, published_version_id
+        from knowledge_cards
+        where store_id = $1
+          and card_id = any($2::bigint[])
+          and review_status = 'APPROVED'
+          and is_verified = true
+          and published_version_id is not null
+        for share
+        """,
+        store_id,
+        list(expected),
+    )
+    actual = {int(row["card_id"]): int(row["published_version_id"]) for row in rows}
+    return actual == expected
 
 
 @router.post("/pending")
@@ -110,30 +173,39 @@ async def create_pending(
         if not msg:
             raise HTTPException(404, "message not found in this store")
 
-    existing = await _waiting_same_question(db, store_id, question)
-    if existing:
-        return {
-            "question_id": int(existing["question_id"]),
-            "status": existing["status"],
-            "miss_reason": existing["miss_reason"],
-            "question_text": question,
-            "created_at": existing["created_at"].isoformat(),
-        }
+    question_key = _question_key(question)
+    async with db.transaction():
+        await _lock_pending_question_key(db, store_id, question_key)
+        existing = await _waiting_same_question(db, store_id, question_key)
+        if existing:
+            await _record_pending_occurrence(
+                db, int(existing["question_id"]), member_id, req.message_id
+            )
+            return {
+                "question_id": int(existing["question_id"]),
+                "status": existing["status"],
+                "miss_reason": existing["miss_reason"],
+                "question_text": question,
+                "created_at": existing["created_at"].isoformat(),
+            }
 
-    row = await db.fetchrow(
-        """
-        insert into pending_questions (
-          store_id, member_id, message_id, question_text, miss_reason, status
+        row = await db.fetchrow(
+            """
+            insert into pending_questions (
+              store_id, member_id, message_id, question_text, miss_reason, status
+            )
+            values ($1, $2, $3, $4, $5, 'WAITING')
+            returning question_id, status, created_at, miss_reason
+            """,
+            store_id,
+            member_id,
+            req.message_id,
+            question,
+            req.miss_reason,
         )
-        values ($1, $2, $3, $4, $5, 'WAITING')
-        returning question_id, status, created_at, miss_reason
-        """,
-        store_id,
-        member_id,
-        req.message_id,
-        question,
-        req.miss_reason,
-    )
+        await _record_pending_occurrence(
+            db, int(row["question_id"]), member_id, req.message_id
+        )
     return {
         "question_id": int(row["question_id"]),
         "status": row["status"],
@@ -152,20 +224,32 @@ async def list_pending(
     """점주 대시보드 폴링용. JWT store_id 의 pending 만 반환한다."""
     rows = await db.fetch(
         """
-        select distinct on (q.question_text)
+        select distinct on (q.normalized_question)
           q.question_id,
           q.question_text,
           q.miss_reason,
           q.status,
           q.created_at,
           q.member_id,
-          u.name as asked_by
+          u.name as asked_by,
+          greatest(coalesce(occurrence.question_count, 0), 1) as question_count,
+          greatest(coalesce(occurrence.questioner_count, 0), 1) as questioner_count
         from pending_questions q
         join store_members m on m.member_id = q.member_id and m.store_id = q.store_id
         join users u on u.user_id = m.user_id
+        left join lateral (
+          select count(*) as question_count,
+                 count(distinct o.member_id) as questioner_count
+          from pending_questions same_q
+          join pending_question_occurrences o
+            on o.question_id = same_q.question_id
+          where same_q.store_id = q.store_id
+            and same_q.normalized_question = q.normalized_question
+            and same_q.status = q.status
+        ) occurrence on true
         where q.store_id = $1
           and q.status = $2
-        order by q.question_text, q.created_at asc, q.question_id asc
+        order by q.normalized_question, q.created_at asc, q.question_id asc
         """,
         store_id,
         status,
@@ -181,6 +265,8 @@ async def list_pending(
                 "status": r["status"],
                 "member_id": int(r["member_id"]),
                 "asked_by": r["asked_by"],
+                "question_count": int(r["question_count"]),
+                "questioner_count": int(r["questioner_count"]),
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows
@@ -364,10 +450,7 @@ async def answer_pending(
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
 ):
-    """점주 답변 → 지식 카드(is_verified=true) + 임베딩 + WAITING→ANSWERED.
-
-    점주 답은 검수 없이 바로 검색 노출 (가이드 6-4).
-    """
+    """점주 원문은 즉시 전달하고 카드 반영은 관계별 안전 정책으로 분리한다."""
     if claims.get("role") != "OWNER":
         raise HTTPException(403, "owner only")
 
@@ -390,101 +473,372 @@ async def answer_pending(
     if pending["status"] != "WAITING":
         raise HTTPException(409, "already answered")
 
-    title = pending["question_text"][:_TITLE_MAX]
+    plan = await build_knowledge_plan(
+        db, store_id, pending["question_text"].strip(), answer
+    )
+    question_key = _question_key(pending["question_text"])
 
-    try:
-        async with db.transaction():
-            card_id = await db.fetchval(
+    async with db.transaction():
+        await _lock_pending_question_key(db, store_id, question_key)
+        locked = await db.fetchrow(
+            """
+            select question_id, status
+            from pending_questions
+            where store_id = $1 and question_id = $2
+            for update
+            """,
+            store_id,
+            question_id,
+        )
+        if locked is None:
+            raise HTTPException(404, "pending question not found")
+        if locked["status"] != "WAITING":
+            raise HTTPException(409, "already answered")
+
+        target_is_current = True
+        if plan.target_card_id is not None:
+            target = await db.fetchrow(
                 """
-                insert into knowledge_cards (
-                  store_id, category_id, source_id, title, content,
-                  confidence, is_verified
-                )
-                values ($1, $2, null, $3, $4, 100.00, true)
-                returning card_id
+                select published_version_id, review_status, is_verified
+                from knowledge_cards
+                where store_id = $1 and card_id = $2
+                for share
                 """,
                 store_id,
-                pending["category_id"],
-                title,
-                answer,
+                plan.target_card_id,
             )
-            card_id = int(card_id)
-
-            await db.execute(
-                """
-                insert into owner_answers (
-                  question_id, answered_by, answer_text, card_id
+            target_is_current = bool(
+                target
+                and target["review_status"] == "APPROVED"
+                and target["is_verified"]
+                and target["published_version_id"] == plan.target_version_id
+            )
+            if not target_is_current:
+                plan = replace(
+                    plan,
+                    relation_type="CONFLICT",
+                    auto_publish=False,
+                    reason=f"{plan.reason}; 분석 이후 대상 카드 상태 또는 버전 변경",
                 )
-                values ($1, $2, $3, $4)
+
+        askers = await db.fetch(
+            """
+            select distinct occurrence.member_id
+            from pending_questions q
+            join pending_question_occurrences occurrence
+              on occurrence.question_id = q.question_id
+            where q.store_id = $1 and q.status = 'WAITING'
+              and q.normalized_question = $2
+            """,
+            store_id,
+            question_key,
+        )
+        answer_id = int(
+            await db.fetchval(
+                """
+                insert into owner_answers (question_id, answered_by, answer_text)
+                values ($1, $2, $3)
+                returning answer_id
                 """,
                 question_id,
                 user_id,
                 answer,
-                card_id,
             )
+        )
+        if plan.relation_type == "IDENTICAL" and target_is_current:
+            proposal_status = "LINKED"
+        elif plan.relation_type == "NEW" and plan.auto_publish:
+            proposal_status = "ANALYZED"
+        else:
+            proposal_status = "PENDING_REVIEW"
 
-            # 승인된 카드만 embed_card 가 받는다. 같은 커넥션·트랜잭션에서 적재.
-            await embed_card(db, store_id, card_id)
-
-            askers = await db.fetch(
+        proposal_id = int(
+            await db.fetchval(
                 """
-                select distinct member_id
-                from pending_questions
-                where store_id = $1
-                  and status = 'WAITING'
-                  and trim(question_text) = $2
+                insert into knowledge_change_proposals (
+                  store_id, answer_id, relation_type,
+                  target_card_id, target_version_id, category_id,
+                  proposed_title, proposed_content, reason, status, resolved_at
+                ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::varchar,
+                          case when $10::varchar = 'LINKED' then now() else null end)
+                returning proposal_id
                 """,
                 store_id,
-                pending["question_text"].strip(),
+                answer_id,
+                plan.relation_type,
+                plan.target_card_id,
+                plan.target_version_id,
+                plan.category_id,
+                plan.proposed_title,
+                plan.proposed_content,
+                plan.reason,
+                proposal_status,
             )
-
+        )
+        if proposal_status == "LINKED":
+            await db.execute(
+                "update owner_answers set card_id = $2 where answer_id = $1",
+                answer_id,
+                plan.target_card_id,
+            )
+        elif plan.target_card_id is not None:
             await db.execute(
                 """
-                update pending_questions
-                set status = 'ANSWERED'
-                where store_id = $1
-                  and status = 'WAITING'
-                  and trim(question_text) = $2
+                update knowledge_cards
+                set needs_review_reason = $3
+                where store_id = $1 and card_id = $2
+                  and review_status <> 'EXCLUDED'
                 """,
                 store_id,
-                pending["question_text"].strip(),
+                plan.target_card_id,
+                f"OWNER_ANSWER_{plan.relation_type}",
             )
 
-            # 옛 「확인 중」은 남기고, 같은 질문을 한 알바 채팅에 답을 한 줄 보낸다 (A′).
-            buddy_content = f"사장님이 답해주셨어요.\n\n{answer}"
-            for asker in askers:
-                session_id = await _open_session(db, store_id, int(asker["member_id"]))
-                buddy_id = int(
-                    await db.fetchval(
-                        """
-                        insert into chat_messages (
-                          session_id, sender_type, content, answer_type
-                        )
-                        values ($1, 'BUDDY', $2, 'ANSWERED')
-                        returning message_id
-                        """,
-                        session_id,
-                        buddy_content,
-                    )
+        await db.execute(
+            """
+            update pending_questions set status = 'ANSWERED'
+            where store_id = $1 and status = 'WAITING'
+              and normalized_question = $2
+            """,
+            store_id,
+            question_key,
+        )
+
+        buddy_content = f"사장님이 답해주셨어요.\n\n{answer}"
+        for asker in askers:
+            session_id = await _open_session(db, store_id, int(asker["member_id"]))
+            buddy_id = int(
+                await db.fetchval(
+                    """
+                    insert into chat_messages (
+                      session_id, sender_type, content, answer_type,
+                      answer_source, grounding_status, owner_answer_id
+                    ) values ($1, 'BUDDY', $2, 'ANSWERED',
+                              'OWNER_ANSWER', 'NOT_APPLICABLE', $3)
+                    returning message_id
+                    """,
+                    session_id,
+                    buddy_content,
+                    answer_id,
                 )
+            )
+            if proposal_status == "LINKED":
                 await db.execute(
                     """
-                    insert into message_citations (message_id, card_id, relevance)
-                    values ($1, $2, 100.00)
+                    insert into message_citations (
+                      message_id, card_id, version_id, relevance
+                    ) values ($1, $2, $3, 100.00)
                     """,
                     buddy_id,
-                    card_id,
+                    plan.target_card_id,
+                    plan.target_version_id,
                 )
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(409, str(e)) from e
+
+    card_id = plan.target_card_id if proposal_status == "LINKED" else None
+    version_id = plan.target_version_id if proposal_status == "LINKED" else None
+    knowledge_status = proposal_status
+    if proposal_status == "ANALYZED":
+        try:
+            async with db.transaction():
+                card_id, version_id = await publish_new_proposal(
+                    db, store_id, proposal_id, user_id
+                )
+            knowledge_status = "PUBLISHED"
+        except Exception as exc:
+            await db.execute(
+                """
+                update knowledge_change_proposals
+                set status = 'FAILED', error = $3::jsonb
+                where store_id = $1 and proposal_id = $2
+                """,
+                store_id,
+                proposal_id,
+                json.dumps({"message": str(exc)[:500]}, ensure_ascii=False),
+            )
+            knowledge_status = "FAILED"
 
     return {
         "question_id": question_id,
         "status": "ANSWERED",
         "card_id": card_id,
+        "version_id": version_id,
         "answer_text": answer,
+        "knowledge": {
+            "proposal_id": proposal_id,
+            "relation_type": plan.relation_type,
+            "status": knowledge_status,
+            "category_id": plan.category_id,
+            "category_name": plan.category_name,
+            "requires_review": knowledge_status in ("PENDING_REVIEW", "FAILED"),
+        },
+    }
+
+
+@router.get("/knowledge-proposals")
+async def list_knowledge_proposals(
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+    status: str = Query(
+        default="PENDING_REVIEW",
+        pattern="^(ANALYZED|LINKED|PENDING_REVIEW|PUBLISHED|FAILED|DISMISSED)$",
+    ),
+):
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+    rows = await db.fetch(
+        """
+        select p.*, q.question_text, a.answer_text,
+               current_v.title as current_title, current_v.content as current_content
+        from knowledge_change_proposals p
+        join owner_answers a on a.answer_id = p.answer_id
+        join pending_questions q on q.question_id = a.question_id
+        left join card_versions current_v on current_v.version_id = p.target_version_id
+        where p.store_id = $1 and p.status = $2
+        order by p.created_at desc, p.proposal_id desc
+        """,
+        store_id,
+        status,
+    )
+    return {
+        "store_id": store_id,
+        "status": status,
+        "items": [
+            {
+                "proposal_id": int(row["proposal_id"]),
+                "relation_type": row["relation_type"],
+                "status": row["status"],
+                "question_text": row["question_text"],
+                "answer_text": row["answer_text"],
+                "target_card_id": int(row["target_card_id"])
+                if row["target_card_id"] is not None
+                else None,
+                "target_version_id": int(row["target_version_id"])
+                if row["target_version_id"] is not None
+                else None,
+                "current_title": row["current_title"],
+                "current_content": row["current_content"],
+                "proposed_title": row["proposed_title"],
+                "proposed_content": row["proposed_content"],
+                "reason": row["reason"],
+                "category_id": int(row["category_id"]),
+                "created_at": _iso(row["created_at"]),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/knowledge-proposals/{proposal_id}/approve")
+async def approve_knowledge_proposal(
+    proposal_id: int,
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+    user_id: CurrentUserId,
+):
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+    relation = await db.fetchval(
+        """
+        select relation_type from knowledge_change_proposals
+        where store_id = $1 and proposal_id = $2
+        """,
+        store_id,
+        proposal_id,
+    )
+    if relation is None:
+        raise HTTPException(404, "knowledge proposal not found")
+    try:
+        async with db.transaction():
+            if relation == "NEW":
+                card_id, version_id = await publish_new_proposal(
+                    db, store_id, proposal_id, user_id
+                )
+            else:
+                card_id, version_id = await publish_existing_proposal(
+                    db, store_id, proposal_id, user_id
+                )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "proposal_id": proposal_id,
+        "status": "PUBLISHED",
+        "card_id": card_id,
+        "version_id": version_id,
+    }
+
+
+@router.post("/knowledge-proposals/{proposal_id}/dismiss")
+async def dismiss_knowledge_proposal(
+    proposal_id: int,
+    db: Db,
+    claims: Claims,
+    store_id: CurrentStoreId,
+):
+    if claims.get("role") != "OWNER":
+        raise HTTPException(403, "owner only")
+    async with db.transaction():
+        proposal = await db.fetchrow(
+            """
+            select target_card_id, status from knowledge_change_proposals
+            where store_id = $1 and proposal_id = $2 for update
+            """,
+            store_id,
+            proposal_id,
+        )
+        if proposal is None:
+            raise HTTPException(404, "knowledge proposal not found")
+        if proposal["status"] not in ("PENDING_REVIEW", "FAILED"):
+            raise HTTPException(409, "proposal cannot be dismissed")
+        await db.execute(
+            """
+            update knowledge_change_proposals
+            set status = 'DISMISSED', resolved_at = now()
+            where store_id = $1 and proposal_id = $2
+            """,
+            store_id,
+            proposal_id,
+        )
+        if proposal["target_card_id"] is not None:
+            await db.execute(
+                """
+                update knowledge_cards k set needs_review_reason = null
+                where k.store_id = $1 and k.card_id = $2
+                  and k.needs_review_reason like 'OWNER_ANSWER_%'
+                  and not exists (
+                    select 1 from knowledge_change_proposals p
+                    where p.store_id = $1 and p.target_card_id = $2
+                      and p.status = 'PENDING_REVIEW'
+                  )
+                """,
+                store_id,
+                int(proposal["target_card_id"]),
+            )
+    return {"proposal_id": proposal_id, "status": "DISMISSED"}
+
+
+@router.get("/faqs")
+async def get_faqs(
+    db: Db,
+    store_id: CurrentStoreId,
+    min_questions: int = Query(default=2, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    items = await list_faq_rows(
+        db, store_id, min_questions=min_questions, limit=limit
+    )
+    return {
+        "store_id": store_id,
+        "items": [
+            {
+                **item,
+                "last_asked_at": _iso(item["last_asked_at"]),
+            }
+            for item in items
+        ],
     }
 
 
@@ -526,17 +880,18 @@ async def ask_chat(
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
 ):
-    """신입 질문 한 방: 검색 → 대화 저장 → miss 면 pending 까지.
-
-    hit 1차: 상위 카드 content 를 Buddy 문장으로 쓰고 citation 을 남긴다 (LLM 없음).
-    miss: LLM 호출 없음. NO_ANSWER + pending WAITING.
-    """
+    """검색 게이트 → 근거 제한 생성/원문 폴백 → 대화·citation 원자 저장."""
     question = req.question.strip()
     if not question:
         raise HTTPException(400, "question is empty")
 
     member_id = await _member_id(db, store_id, user_id)
     result = await retrieve_question(db, store_id, question)
+    composition = (
+        await compose_grounded_answer(question, result["candidates"])
+        if result["kind"] == "hit"
+        else None
+    )
 
     async with db.transaction():
         session_id = await _open_session(db, store_id, member_id)
@@ -555,57 +910,74 @@ async def ask_chat(
         pending_question_id = None
         citations: list[dict] = []
 
-        if result["kind"] == "hit":
-            top = result["candidates"][0]
-            buddy_content = top["content"]
+        use_hit = (
+            composition is not None
+            and await _citations_are_current(db, store_id, composition)
+        )
+        if use_hit:
+            assert composition is not None
+            buddy_content = composition.content
             buddy_id = int(
                 await db.fetchval(
                     """
                     insert into chat_messages (
-                      session_id, sender_type, content, answer_type
+                      session_id, sender_type, content, answer_type,
+                      answer_source, grounding_status
                     )
-                    values ($1, 'BUDDY', $2, 'ANSWERED')
+                    values ($1, 'BUDDY', $2, 'ANSWERED', $3, $4)
                     returning message_id
                     """,
                     session_id,
                     buddy_content,
+                    composition.source,
+                    composition.grounding_status,
                 )
             )
-            # ANSWERED 인데 citation 0건이면 계약 위반. 상위 후보를 반드시 남긴다.
-            relevance = round(float(top["score"]) * 100, 2)
-            await db.execute(
-                """
-                insert into message_citations (message_id, card_id, relevance)
-                values ($1, $2, $3)
-                """,
-                buddy_id,
-                top["id"],
-                relevance,
-            )
-            citations = [
-                {
-                    "card_id": top["id"],
-                    "title": top["title"] or top["category"],
-                    "relevance": relevance,
-                }
-            ]
+            for card in composition.candidates:
+                relevance = round(float(card["score"]) * 100, 2)
+                await db.execute(
+                    """
+                    insert into message_citations (
+                      message_id, card_id, version_id, relevance
+                    )
+                    values ($1, $2, $3, $4)
+                    """,
+                    buddy_id,
+                    card["id"],
+                    card["version_id"],
+                    relevance,
+                )
+                citations.append(
+                    {
+                        "card_id": card["id"],
+                        "version_id": card["version_id"],
+                        "title": card["title"] or card["category"],
+                        "relevance": relevance,
+                    }
+                )
             answer_type = "ANSWERED"
+            answer_source = composition.source
+            grounding_status = composition.grounding_status
         else:
             buddy_content = "아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏"
             buddy_id = int(
                 await db.fetchval(
                     """
                     insert into chat_messages (
-                      session_id, sender_type, content, answer_type
+                      session_id, sender_type, content, answer_type,
+                      answer_source, grounding_status
                     )
-                    values ($1, 'BUDDY', $2, 'NO_ANSWER')
+                    values ($1, 'BUDDY', $2, 'NO_ANSWER',
+                            'MISS', 'NOT_APPLICABLE')
                     returning message_id
                     """,
                     session_id,
                     buddy_content,
                 )
             )
-            pending_row = await _waiting_same_question(db, store_id, question[:500])
+            question_key = _question_key(question[:500])
+            await _lock_pending_question_key(db, store_id, question_key)
+            pending_row = await _waiting_same_question(db, store_id, question_key)
             if pending_row:
                 pending_question_id = int(pending_row["question_id"])
             else:
@@ -623,10 +995,15 @@ async def ask_chat(
                         member_id,
                         user_message_id,
                         question[:500],
-                        result["reason"],
+                        result.get("reason", "no_match"),
+                        )
                     )
-                )
+            await _record_pending_occurrence(
+                db, pending_question_id, member_id, user_message_id
+            )
             answer_type = "NO_ANSWER"
+            answer_source = "MISS"
+            grounding_status = "NOT_APPLICABLE"
 
     return {
         "session_id": session_id,
@@ -635,6 +1012,8 @@ async def ask_chat(
             "message_id": buddy_id,
             "answer_type": answer_type,
             "content": buddy_content,
+            "answer_source": answer_source,
+            "grounding_status": grounding_status,
             "citations": citations,
         },
         "pending_question_id": pending_question_id,
@@ -671,14 +1050,24 @@ async def list_chat(
           m.sender_type,
           m.content,
           m.answer_type,
+          m.answer_source,
+          m.grounding_status,
           m.created_at,
           c.card_id,
+          c.version_id,
           c.relevance,
-          kc.title as card_title
+          coalesce(cv.title, kc.title) as card_title,
+          (
+            kc.review_status = 'APPROVED'
+            and kc.is_verified = true
+            and kc.published_version_id = c.version_id
+          ) as is_current
         from chat_messages m
         left join message_citations c on c.message_id = m.message_id
         left join knowledge_cards kc
           on kc.card_id = c.card_id and kc.store_id = $2
+        left join card_versions cv
+          on cv.version_id = c.version_id and cv.store_id = $2
         where m.session_id = $1
         order by m.created_at asc, m.message_id asc, c.citation_id asc
         """,
@@ -697,6 +1086,8 @@ async def list_chat(
                 "sender_type": r["sender_type"],
                 "content": r["content"],
                 "answer_type": r["answer_type"],
+                "answer_source": r["answer_source"],
+                "grounding_status": r["grounding_status"],
                 "created_at": _iso(r["created_at"]),
                 "citations": [],
             }
@@ -706,8 +1097,10 @@ async def list_chat(
             msg["citations"].append(
                 {
                     "card_id": int(r["card_id"]),
+                    "version_id": int(r["version_id"]) if r["version_id"] is not None else None,
                     "title": r["card_title"] or "",
                     "relevance": float(r["relevance"]) if r["relevance"] is not None else 0,
+                    "is_current": bool(r["is_current"]),
                 }
             )
 

@@ -747,7 +747,9 @@ hit 응답:
   "kind": "hit",
   "message_id": 900,
   "answer": "우유는 제빙기 아래 냉장고 두 번째 선반에 보관합니다.",
-  "citations": [{ "card_id": 81, "title": "우유 보관 위치" }]
+  "answer_source": "GROUNDED_LLM",
+  "grounding_status": "VERIFIED",
+  "citations": [{ "card_id": 81, "version_id": 102, "title": "우유 보관 위치" }]
 }
 ```
 
@@ -777,6 +779,13 @@ hit의 자연어 답변은 다음 게이트를 모두 통과할 때만 사용한
 프롬프트 지시만으로 환각률 0을 약속하지 않는다. 검색 게이트, 구조화 출력,
 서버 검증, 결정적 폴백을 함께 적용하고 골든셋과 실사용 질문으로 반복 측정한다.
 
+`message_citations.version_id`에는 8단계 이후 답변 생성 당시 사용한 공개 버전을 기록한다.
+이전 대화는 당시 버전을 소급해 확정할 수 없으므로 `LEGACY`와 `version_id=null`로 보존한다.
+`answer_source`는 `GROUNDED_LLM`, `CARD_ORIGINAL`, `MISS`, `OWNER_ANSWER` 중 하나다.
+LLM 호출 실패나 서버 검증 실패는 API 실패로 바꾸지 않고 `CARD_ORIGINAL`과
+`FALLBACK`으로 저장·반환한다. 검색 이후 카드가 제외되거나 새 버전이 공개되면
+그 결과를 답변으로 저장하지 않고 `miss` 흐름으로 전환한다.
+
 ### `GET /learn/pending`
 
 O03의 미답변 목록이다. 점주만 접근 가능하며 정확한 대기 건수를 함께 반환한다.
@@ -805,6 +814,25 @@ O03의 미답변 목록이다. 점주만 접근 가능하며 정확한 대기 �
 시점은 분리한다. 직원에게는 사장님 원문을 안전하게 전달할 수 있지만, LLM이 만든
 병합 결과는 검증을 통과하기 전 기존 카드에 덮어쓰지 않는다.
 
+반영 관계와 공개 규칙:
+
+| 관계 | 처리 |
+|---|---|
+| `IDENTICAL` | 기존 현재 카드에 연결하고 중복 카드나 버전을 만들지 않는다. 서버의 엄격한 동일성 검사도 통과해야 한다. |
+| `NEW` | 관계·카테고리 분석이 정상 완료된 경우 점주 원문 그대로 `OWNER_ANSWER` 승인 카드를 만들고 공개한다. 분석 실패 시 검토 대기한다. |
+| `SUPPLEMENT` | 기존 공개 버전을 유지하고 보완 제안만 `PENDING_REVIEW`로 저장한다. 점주 승인 시 새 공개 버전이 된다. |
+| `CONFLICT` | 기존 공개 버전을 유지하며 반드시 `PENDING_REVIEW`로 저장한다. 숫자와 부정 표현 차이는 서버가 충돌로 승격한다. |
+
+같은 질문은 대기 항목 하나를 공유하지만 `pending_question_occurrences`에 모든 질문자와
+채팅 메시지를 남긴다. 따라서 점주 답변은 같은 질문을 한 모든 직원에게 전달되며
+FAQ 횟수도 대기 행 수가 아니라 실제 질문 발생 수를 사용한다.
+
+점주 검토 API:
+
+- `GET /learn/knowledge-proposals?status=PENDING_REVIEW`
+- `POST /learn/knowledge-proposals/{proposal_id}/approve`
+- `POST /learn/knowledge-proposals/{proposal_id}/dismiss`
+
 ### `GET /learn/faqs`
 
 직원 화면의 `자주 묻는 질문` 목록이다. 새 지식 카드를 복제하지 않고 질문 기록을
@@ -812,7 +840,7 @@ O03의 미답변 목록이다. 점주만 접근 가능하며 정확한 대기 �
 
 - 정렬 신호: 질문 횟수, 서로 다른 질문자 수, 최근 질문 시점
 - 노출 조건: 현재 승인 카드로 답할 수 있는 질문
-- 제외 조건: 미답변, 민감·위험 질문, 비활성·제외 카드
+- 제외 조건: 미답변, 검토 중 제안, 비활성·제외 카드
 - 개인정보: 질문자 이름과 개인별 횟수는 직원에게 노출하지 않는다.
 - 카드의 공개 버전이 바뀌면 FAQ도 같은 현재 버전을 가리킨다.
 

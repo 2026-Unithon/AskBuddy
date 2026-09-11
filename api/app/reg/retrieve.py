@@ -87,6 +87,15 @@ async def retrieve_question(
             "candidates": [],
         }
 
+    anchors = _anchors(question)
+    if not anchors:
+        return {
+            "kind": "miss",
+            "reason": "no_anchor",
+            "message": MISS_MESSAGE,
+            "candidates": [],
+        }
+
     query_vec = await asyncio.to_thread(embed_text, question)
     rows = await db.fetch(
         """
@@ -94,12 +103,16 @@ async def retrieve_question(
           m.card_id as id,
           m.content,
           m.title,
+          c.published_version_id as version_id,
           coalesce(tc.category_name, '') as category,
           m.score
         from match_cards($1, $2::vector, $3) m
         join knowledge_cards c on c.card_id = m.card_id
         left join task_categories tc on tc.category_id = c.category_id
         where c.store_id = $1
+          and c.review_status = 'APPROVED'
+          and c.is_verified = true
+          and c.published_version_id is not null
         order by m.score desc
         """,
         store_id,
@@ -109,23 +122,22 @@ async def retrieve_question(
 
     settings = get_settings()
     threshold = settings.retrieval_threshold
-    strong = settings.retrieval_strong_score
-    anchors = _anchors(question)
 
     candidates = []
+    rejected_for_intent = False
     for r in rows:
         score = float(r["score"])
         if score < threshold:
             continue
-        # 점수가 아주 높으면 낱말이 안 겹쳐도 통과시킨다.
-        # 같은 말을 다르게 부르는 경우(아아/아이스 아메리카노)를 막지 않기 위해서다.
-        if score < strong and anchors and not _grounded(
-            anchors, f"{r['title'] or ''} {r['content']}"
-        ):
+        # 임베딩 점수가 높아도 질문의 대상어가 카드에 없으면 답하지 않는다.
+        # 동의어는 추후 매장 용어집/골든셋으로 명시적으로 보완한다.
+        if not _grounded(anchors, f"{r['title'] or ''} {r['content']}"):
+            rejected_for_intent = True
             continue
         candidates.append(
             {
                 "id": int(r["id"]),
+                "version_id": int(r["version_id"]),
                 "content": r["content"],
                 "title": r["title"] or "",
                 "category": r["category"],
@@ -136,7 +148,7 @@ async def retrieve_question(
     if not candidates:
         return {
             "kind": "miss",
-            "reason": "no_match",
+            "reason": "intent_mismatch" if rejected_for_intent else "no_match",
             "message": MISS_MESSAGE,
             "candidates": [],
         }
