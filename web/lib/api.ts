@@ -559,7 +559,7 @@ export type RetrieveResponse =
   | { kind: "hit"; candidates: RetrieveCandidate[] }
   | { kind: "miss"; reason: string; message: string };
 
-// POST /reg/retrieve — 지식 진입점 하나 (개발가이드 6-3). 채팅·검색 어디서든 이걸 통과한다.
+// POST /reg/retrieve — 현재 지식 진입점. 채팅·검색 어디서든 이 계약을 통과한다.
 export async function retrieve(storeSlug: string, question: string, topK = 5) {
   return fetchJson<RetrieveResponse>("/reg/retrieve", {
     method: "POST",
@@ -567,7 +567,7 @@ export async function retrieve(storeSlug: string, question: string, topK = 5) {
   });
 }
 
-// ---- /ingest/* — docs/ingest-contract.md 3단계 업로드 ----
+// ---- /ingest/* — docs/ASKBUDDY_MVP_CURRENT.md 업로드 계약 ----
 // 실 배포 전까지는 로그인이 없어 Bearer 토큰이 비어 있을 수 있다.
 // 그 경우 백엔드가 401을 돌려주고, 업로드 화면은 이를 잡아 로컬 진행률로 대체한다.
 

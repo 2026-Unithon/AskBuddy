@@ -209,12 +209,8 @@ curl -X POST localhost:8000/reg/retrieve -H 'Content-Type: application/json' \
 
 | 파일 | 내용 |
 |---|---|
-| [`docs/ASKBUDDY_MVP_CONTRACT_V1.md`](./docs/ASKBUDDY_MVP_CONTRACT_V1.md) | 데이터·API 계약. **현재 정본** |
-| [`docs/AskBuddy_설계최종본_v5.md`](./docs/AskBuddy_설계최종본_v5.md) | 제품 설계 최종본 |
-| [`docs/AskBuddy_개발가이드.md`](./docs/AskBuddy_개발가이드.md) | 아키텍처·결정 근거. 계약 v1 이전 배경 자료 |
-| [`docs/ingest-contract.md`](./docs/ingest-contract.md) | `/ingest/*` 계약. 업로드 3단계·에러 코드 |
-| [`docs/team-workflow.md`](./docs/team-workflow.md) | 브랜치 전략·폴더 소유권·충돌 대응 |
-| [`docs/AskBuddy_환경세팅.md`](./docs/AskBuddy_환경세팅.md) | 파트별 환경 구성 |
+| [`docs/ASKBUDDY_MVP_CURRENT.md`](./docs/ASKBUDDY_MVP_CURRENT.md) | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
+| [`docs/DEV_TODO_CURRENT.md`](./docs/DEV_TODO_CURRENT.md) | 남은 12.5~15단계의 실행 순서와 완료 기준 |
 | [`db/001_init_schema.sql`](./db/001_init_schema.sql) | 스키마 원천 |
 | [`CLAUDE.md`](./CLAUDE.md) | AI 코딩 에이전트용 세션 컨텍스트 |
 

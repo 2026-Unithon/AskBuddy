@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 > 이 파일은 Claude Code가 세션 시작 시 자동으로 읽는다.
-> **작업 전 반드시 `docs/ASKBUDDY_MVP_CONTRACT_V1.md`를 읽을 것.** 이 파일은 요약이고, 그쪽이 현재 정본이다.
-> 개발가이드·ingest-contract 는 계약 v1 이전 배경 자료다. 충돌하면 계약 v1 을 따른다.
+> **작업 전 반드시 `docs/ASKBUDDY_MVP_CURRENT.md`를 읽을 것.** 제품·데이터·API·운영 계약의 단일 정본이다.
+> 남은 작업과 실행 순서는 `docs/DEV_TODO_CURRENT.md`를 따른다.
 
 ---
 
@@ -35,15 +35,11 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 
 | 파일 | 내용 |
 |---|---|
-| `docs/ASKBUDDY_MVP_CONTRACT_V1.md` | 데이터·API 계약, 상태 정의, 폐기·호환 규칙. **현재 정본** |
-| `docs/AskBuddy_설계최종본_v5.md` | 제품 설계 최종본 |
-| `docs/AskBuddy_개발가이드.md` | 아키텍처·결정 근거. 계약 v1 이전 배경 자료 |
-| `docs/AskBuddy_사업계획서_v5.pdf` | 제품 정의·가격·시장. 제품 판단이 필요하면 여기 **(아직 리포에 없음 — 넣을 것)** |
-| `docs/AskBuddy_환경세팅.md` | 파트별 환경 구성, 실행 방법 |
-| `docs/ingest-contract.md` | `/ingest/*` 상세 계약. 업로드 3단계·에러 코드·프론트 예시 |
+| `docs/ASKBUDDY_MVP_CURRENT.md` | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
+| `docs/DEV_TODO_CURRENT.md` | 남은 12.5~15단계의 실행 순서와 완료 기준 |
 | `UI/` | 화면 목업 24장. 프론트 작업 전 반드시 볼 것 |
 | `db/001_init_schema.sql` | 초기 스키마(24 테이블). `users` 에 `email`·`password_hash` 포함 |
-| `supabase/migrations/` | 계약 v1 이후 증분 8건. **현재 스키마는 38 테이블**이고, 신규 컬럼·테이블은 이쪽이 기준 |
+| `supabase/migrations/` | 적용 가능한 스키마 변경 이력. 신규 컬럼·테이블의 실행 기준 |
 | `db/002_seed_demo.sql` | 데모 매장 시드. `demo-cafe`, 초대코드 `CAFE-DEMO` |
 
 ---
@@ -149,13 +145,13 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 | D8 | Storage 버킷 `sources`(비공개). 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 서명 URL |
 | D9 | `content_hash` 는 프론트가 SHA-256 계산. 누락 시 서버가 backfill |
 | D10 | `INGEST_MODE` 기본값 `mock`. M1 통과 전에는 Gemini 를 붙이지 않는다 |
-| D11 | 검색 게이트는 2단. `RETRIEVAL_THRESHOLD` **0.35** 하한 + `RETRIEVAL_STRONG_SCORE` **0.62** + 낱말 앵커 검사. D3 와 **별개 값**이다. 단일 임계로는 "주차 자리"류 오답이 안 걸러졌다 |
+| D11 | 현재 검색 게이트는 `RETRIEVAL_THRESHOLD` **0.35** 하한 + `RETRIEVAL_STRONG_SCORE` **0.62** + 낱말 앵커 검사다. 14단계에서 앵커를 기능 플래그 기반 소프트 감점으로 바꾸고 평가 하네스로 임계값을 재결정한다. D3와는 별개 값이다. |
 | D12 | 답변 생성은 하되 **서버가 검증한다.** 승인 카드 상위 3장만 입력, `response_schema` 강제, temperature 0.0. 인용 화이트리스트·숫자 부분집합·낱말 부분집합 3종 중 하나라도 실패하면 생성문을 버리고 카드 원문(`CARD_ORIGINAL`)으로 폴백. `ANSWER_MODE=extractive` 로 생성을 끌 수 있다 |
 | D13 | 카드 본문은 `card_versions` 가 갖는다. `draft_version_id`(초안) 와 `published_version_id`(공개) 를 분리하고, 승인 = 임베딩 생성 + 공개 포인터 이동을 한 성공 단위로 처리한다 |
 | D14 | 로드맵은 고정 게임판이 아니라 카테고리 + 승인 카드로 동적 구성한다. 승인 카드가 없으면 `stages=[]`, 샘플 카드를 넣지 않는다 |
 | D15 | 알림은 앱 내부 알림(`notification_events`)이 정본, Web Push 는 추가 전달. `REQUESTED` 는 전달 요청 성공일 뿐 수신·읽음이 아니다 |
 
-이 결정들을 "개선"하려 들지 말 것. 각각 이유가 있고 개발가이드 12장에 근거가 적혀 있다.
+확정 결정의 변경은 `docs/ASKBUDDY_MVP_CURRENT.md`와 `docs/DEV_TODO_CURRENT.md`에 먼저 반영하고, 평가 결과와 migration 호환성을 함께 검토한다.
 
 ---
 
