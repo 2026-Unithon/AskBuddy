@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Buddy } from "@/components/ui";
 import { useApp } from "@/lib/store";
-import { ApiError, askChat, listChat, type LearnChatCitation, type LearnChatMessage } from "@/lib/api";
+import { ApiError, askChat, type LearnChatCitation, type LearnChatMessage } from "@/lib/api";
+import { chatQuery, queryKeys } from "@/lib/query";
 import type { ChatMessage } from "@/lib/types";
 
 function mapCitations(citations: LearnChatCitation[] | undefined) {
@@ -23,74 +25,39 @@ function fromHistory(m: LearnChatMessage): ChatMessage {
 }
 
 export default function ChatPage() {
-  const { state, dispatch } = useApp();
+  const { state } = useApp();
+  const queryClient = useQueryClient();
+  const chat = useQuery(chatQuery(state.token, state.storeId, state.userId));
   const [input, setInput] = useState("");
-  const [typing, setTyping] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const typingRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    typingRef.current = typing;
-  }, [typing]);
+  const ask = useMutation({
+    mutationFn: (question: string) => askChat(question, state.token!),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.chat(state.storeId, state.userId) });
+    },
+  });
+  const messages = (chat.data?.messages ?? []).map(fromHistory);
+  const typing = ask.isPending;
+  const error = chat.error ?? ask.error;
+  const errorText = error instanceof ApiError
+    ? error.detail || "답변을 가져오지 못했어요"
+    : error
+      ? "서버에 연결할 수 없습니다"
+      : null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [state.chatMessages, typing]);
-
-  useEffect(() => {
-    if (!state.token) return;
-    let cancelled = false;
-
-    async function refresh(isFirst = false) {
-      if (!isFirst && typingRef.current) return;
-      try {
-        const res = await listChat(state.token!);
-        if (cancelled) return;
-        dispatch({ type: "SET_CHAT_MESSAGES", messages: (res.messages ?? []).map(fromHistory) });
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof ApiError ? e.detail || "대화를 불러오지 못했어요" : "서버에 연결할 수 없습니다");
-      } finally {
-        if (!cancelled && isFirst) setLoaded(true);
-      }
-    }
-
-    void refresh(true);
-    const timer = window.setInterval(() => void refresh(false), 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [state.token, dispatch]);
+  }, [messages.length, typing]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const question = input.trim();
     if (!question || typing || !state.token) return;
     setInput("");
-    setError(null);
-
-    dispatch({
-      type: "ADD_CHAT_MESSAGE",
-      message: { id: `local-${Date.now()}`, from: "USER", text: question, createdAt: new Date().toISOString() },
-    });
-    setTyping(true);
-
-    try {
-      await askChat(question, state.token);
-      const hist = await listChat(state.token);
-      dispatch({ type: "SET_CHAT_MESSAGES", messages: (hist.messages ?? []).map(fromHistory) });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail || "답변을 가져오지 못했어요" : "서버에 연결할 수 없습니다");
-    } finally {
-      setTyping(false);
-    }
+    ask.mutate(question);
   }
 
-  const empty = loaded && state.chatMessages.length === 0;
+  const empty = !chat.isLoading && messages.length === 0;
 
   return (
     <div className="min-h-dvh w-full flex justify-center bg-background">
@@ -109,12 +76,15 @@ export default function ChatPage() {
             <p className="text-xs text-muted">AI 인수인계 도우미</p>
           </div>
           <div className="ml-auto flex items-center gap-1.5">
+            <Link href="/staff/faqs" className="flex min-h-9 items-center rounded-full bg-brand-50 px-3 text-xs font-bold text-brand-700">자주 묻는 질문</Link>
             <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
             <span className="text-xs font-medium text-brand-500">온라인</span>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3.5">
+          {chat.isLoading && <p className="py-6 text-center text-xs text-muted">대화를 불러오는 중…</p>}
+          {chat.isFetching && !chat.isLoading && !typing && <p className="text-center text-[11px] text-muted">새 답변 확인 중…</p>}
           {empty && (
             <div className="flex items-end gap-2 justify-start">
               <Buddy size={32} />
@@ -127,7 +97,7 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {state.chatMessages.map((m) => (
+          {messages.map((m) => (
             <div key={m.id} className={`flex items-end gap-2 ${m.from === "USER" ? "justify-end" : "justify-start"}`}>
               {m.from === "BUDDY" && <Buddy size={32} />}
               <div className="space-y-1.5 max-w-[74%]">
@@ -158,6 +128,13 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
+          {ask.isPending && ask.variables && (
+            <div className="flex items-end gap-2 justify-end">
+              <div className="max-w-[74%] rounded-[20px_20px_4px_20px] bg-brand-500 px-4 py-2.5 text-white shadow-[0_1px_4px_rgba(0,0,0,0.08)]">
+                <p className="text-sm font-medium leading-snug">{ask.variables}</p>
+              </div>
+            </div>
+          )}
           {typing && (
             <div className="flex items-end gap-2">
               <Buddy size={32} />
@@ -178,7 +155,7 @@ export default function ChatPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="shrink-0 bg-surface border-t border-border px-4 py-3 flex flex-col gap-2">
-          {error && <p className="text-xs font-medium text-[#E57373] px-1">{error}</p>}
+          {errorText && <p className="text-xs font-medium text-[#E57373] px-1">{errorText}</p>}
           <div className="flex items-center gap-2.5">
             <input
               value={input}
@@ -188,9 +165,9 @@ export default function ChatPage() {
             />
             <button
               type="submit"
-              disabled={!input.trim() || typing || !loaded || !state.token}
+              disabled={!input.trim() || typing || chat.isLoading || !state.token}
               className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 ${
-                input.trim() && loaded ? "bg-brand-500" : "bg-surface-muted"
+                input.trim() && !chat.isLoading ? "bg-brand-500" : "bg-surface-muted"
               }`}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

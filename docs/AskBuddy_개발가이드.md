@@ -403,7 +403,7 @@ curl -X POST localhost:8000/ingest/process -H "Authorization: Bearer $ASKBUDDY_T
 | D8 | Storage 버킷 `sources`(비공개). 오브젝트 경로 `{store_id}/{voice\|video\|kakao\|scan}/{uuid}.{ext}`. 업로드는 API 가 발급한 **서명 URL** 로만 | 2026-08-25 | 브라우저에 Supabase 키를 주지 않으면서 파일 바이너리가 API 를 거치지 않게 하는 유일한 방법. 원본 파일명을 경로에 쓰지 않는 것은 한글·공백 인코딩 사고와 덮어쓰기 방지 |
 | D9 | `content_hash` 는 프론트가 SHA-256 계산해 전달. 누락 시 서버가 처리 중 backfill | 2026-08-25 | `crypto.subtle` 은 https·localhost 에서만 동작한다. 프론트가 실패해도 중복 방지가 죽지 않게 |
 | D10 | `INGEST_MODE` 기본값 `mock` | 2026-08-25 | 통합 실패는 항상 M1 구간에서 난다. 목 경로를 기본값으로 두어 키 없이도 전 구간이 돌게 |
-| D11 | 검색 게이트 임계를 `CONFIDENCE_THRESHOLD`(D3) 에서 분리해 `RETRIEVAL_THRESHOLD` 로 둔다. **값은 0.6** | 2026-08-26 | 한 값이 카드 검수 기준과 검색 하한을 동시에 제어하고 있었다. 분리 후 0 으로 내렸다가 0.6 으로 확정 |
+| D11 | 검색 게이트 임계를 `CONFIDENCE_THRESHOLD`(D3) 에서 분리해 `RETRIEVAL_THRESHOLD` 로 둔다. ~~**값은 0.6**~~ → **현재 0.35 하한 + 0.62 강한점수 + 낱말 앵커 2단 게이트** (2026-09 갱신) | 2026-08-26 | 한 값이 카드 검수 기준과 검색 하한을 동시에 제어하고 있었다. 분리 후 0 으로 내렸다가 0.6 으로 확정 |
 
 ---
 

@@ -63,12 +63,12 @@ flowchart TD
 
     IN --> EX["지식 추출<br/>Gemini Flash · response_schema JSON"]
     EX --> RV["점주 검수<br/>confidence 낮은 카드부터 노출 · 사진 제외/블러"]
-    RV --> DB[("매장 지식<br/>PostgreSQL + pgvector<br/>24 테이블 · store_id 격리")]
+    RV --> DB[("매장 지식<br/>PostgreSQL + pgvector<br/>38 테이블 · 카드 버전 · store_id 격리")]
 
     DB --> RM["온보딩 로드맵<br/>스킬트리 · 진행도"]
     DB --> GATE{"검색 게이트<br/>POST /reg/retrieve"}
 
-    GATE -->|hit| ANS["Gemini 답변<br/>citation 1건 이상 없으면 폐기"]
+    GATE -->|hit| ANS["근거 기반 답변 생성<br/>서버 검증 실패 시 카드 원문으로 폴백"]
     GATE -->|miss| PQ["pending_questions<br/>LLM 호출하지 않음"]
 
     PQ --> OW["점주 대시보드<br/>2초 폴링 알림"]
@@ -104,11 +104,27 @@ if score < strong and anchors and not _grounded(anchors, card_text):
 
 검색 게이트가 `miss`를 반환하면 그 요청은 거기서 끝난다. "그래도 뭔가 답해보자"는 유혹을 코드 레벨에서 차단했다. 답변 메시지는 `message_citations`가 1건 이상일 때만 저장되고, 0건이면 이미 생성된 답변도 폐기한다.
 
-### 3. RLS를 쓰지 않고 매장 격리를 API 코드가 전담한다
+### 3. 답변은 생성하되, 문장을 서버가 검증한다
+
+카드 원문을 그대로 출력하면 말투가 어색하고, 그냥 생성시키면 없는 사실이 끼어든다.
+그래서 생성은 하되 **출력 문장을 서버가 근거 카드와 대조한다** — 승인 카드 상위 3장만 입력으로 주고,
+`response_schema` 로 `{answer, card_ids}` 를 강제하고, temperature 는 0.0.
+
+검증 세 가지 중 하나라도 걸리면 생성문을 버리고 카드 원문으로 돌아간다.
+
+1. `card_ids` 가 우리가 준 후보 밖이면 `unknown_citation`
+2. 답변의 숫자 집합이 근거 카드 숫자 집합의 부분집합이 아니면 `unsupported_number`
+3. 답변의 실질 낱말이 근거 카드 낱말의 부분집합이 아니면 `unsupported_terms`
+
+모델이 카드에 없는 숫자나 대상을 하나라도 끼워 넣으면 그 답변은 저장되지 않는다.
+`ANSWER_MODE=extractive` 로 생성을 통째로 끌 수 있고, 키가 없거나 호출이 실패해도 폴백 경로는 같다.
+환각을 막는 주체가 프롬프트가 아니라 **검증과 결정적 폴백**이라는 게 요점이다.
+
+### 4. RLS를 쓰지 않고 매장 격리를 API 코드가 전담한다
 
 Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 두 곳에 흩어지면 해커톤 일정에서 어느 쪽이 진짜인지 추적이 안 된다고 판단했다. 대신 규칙을 좁게 못 박았다 — 모든 DB 함수는 `store_id`를 **필수 인자**로 받고(기본값·`Optional` 금지), `store_id`는 요청 본문이 아니라 **JWT에서 꺼낸 값**만 쓴다.
 
-### 4. '신뢰도 %'를 사용자에게 보여주지 않는다
+### 5. '신뢰도 %'를 사용자에게 보여주지 않는다
 
 초기 기획에는 답변마다 신뢰도 퍼센트를 띄우는 화면이 있었다. 산출 근거를 사용자에게 설명할 수 없는 숫자여서 폐기했다. 대신 **'매장 지식 완성도'** — 등록된 카테고리 중 필수 항목이 채워진 비율 — 를 보여준다. 내부 `confidence` 값은 점주 검수 화면의 정렬에만 쓴다.
 
@@ -116,11 +132,11 @@ Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 �
 
 | 역할 | 흐름 |
 |---|---|
-| 점주 | 가입 → 업종·목표 선택 → 카테고리 선택 → **자료 업로드(게이지 80% 이상)** → 미리보기·검수 → 초대코드 발급 |
+| 점주 | 가입 → 매장·카테고리 설정 → **자료 업로드(작업 단위 접수)** → 추출 결과 검수 → 초대코드 발급 |
 | 점주 | 대시보드 — 직원 진행도 · 미답변 질문 알림 → 30초 답변 |
 | 신입 | 초대코드 합류 → 온보딩 로드맵(스킬트리) → Buddy 채팅 → 단계 완료 |
 
-업로드 게이지 가중치는 음성 +20 · 영상 +30 · 텍스트 +20 · OCR +10이고, **80% 이상**에서 미리보기가 열린다. 자료 커버리지가 곧 답변 정확도라서 게이트를 앞단에 뒀다.
+초기의 **업로드 게이지 80% 게이트는 폐기했다**(MVP 계약 v1). 커버리지를 퍼센트로 약속하는 대신, 올린 자료를 작업(job) 단위로 접수하고 결과가 나오면 검수 화면으로 알림을 보낸다. 화면을 닫아도 작업은 계속된다.
 
 ## 기술 스택
 
@@ -128,7 +144,7 @@ Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 �
 |---|---|
 | 백엔드 | FastAPI · Python 3.12 · asyncpg |
 | 프론트 | Next.js 16.3 (App Router) · React 19 · TypeScript · Tailwind 4 |
-| DB | PostgreSQL 15 + pgvector (Supabase) · 24 테이블 |
+| DB | PostgreSQL 15 + pgvector (Supabase) · 38 테이블 |
 | 임베딩 | OpenAI `text-embedding-3-small` (1536차원) |
 | STT | OpenAI `whisper-1` |
 | 멀티모달 추출 | Gemini Flash (`response_schema` 강제 JSON) |
@@ -147,7 +163,7 @@ Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 �
 
 **내가 맡은 부분**
 
-- **스키마 설계** — 24 테이블 + pgvector 인덱스, `match_cards` 검색 함수, 데모 시드
+- **스키마 설계** — 38 테이블 + pgvector 인덱스, `match_cards` 검색 함수, 카드 버전·검수 상태 체계, 데모 시드
 - **인증** — 이메일 가입·로그인(role DB 대조), 매장 생성, 초대코드 발급·합류
 - **검색 게이트** — `POST /reg/retrieve` 단일 진입점, 임계값 분리(`RETRIEVAL_THRESHOLD`), 위 앵커 낱말 그라운딩
 - **미답변 순환 백엔드** — `pending_questions` 적재 → 점주 답변 → 카드 갱신 → 로드맵 배지 해제까지의 `api/app/learn/` 전 구간
@@ -193,7 +209,9 @@ curl -X POST localhost:8000/reg/retrieve -H 'Content-Type: application/json' \
 
 | 파일 | 내용 |
 |---|---|
-| [`docs/AskBuddy_개발가이드.md`](./docs/AskBuddy_개발가이드.md) | 아키텍처·계약·결정 근거. 정본 |
+| [`docs/ASKBUDDY_MVP_CONTRACT_V1.md`](./docs/ASKBUDDY_MVP_CONTRACT_V1.md) | 데이터·API 계약. **현재 정본** |
+| [`docs/AskBuddy_설계최종본_v5.md`](./docs/AskBuddy_설계최종본_v5.md) | 제품 설계 최종본 |
+| [`docs/AskBuddy_개발가이드.md`](./docs/AskBuddy_개발가이드.md) | 아키텍처·결정 근거. 계약 v1 이전 배경 자료 |
 | [`docs/ingest-contract.md`](./docs/ingest-contract.md) | `/ingest/*` 계약. 업로드 3단계·에러 코드 |
 | [`docs/team-workflow.md`](./docs/team-workflow.md) | 브랜치 전략·폴더 소유권·충돌 대응 |
 | [`docs/AskBuddy_환경세팅.md`](./docs/AskBuddy_환경세팅.md) | 파트별 환경 구성 |

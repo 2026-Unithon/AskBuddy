@@ -28,6 +28,9 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
   const { timeoutMs = TIMEOUT_MS, ...fetchInit } = init ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = fetchInit.signal
+    ? AbortSignal.any([fetchInit.signal, controller.signal])
+    : controller.signal;
   try {
     const res = await fetch(`${BASE}${path}`, {
       ...fetchInit,
@@ -35,7 +38,7 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
         "Content-Type": "application/json",
         ...(fetchInit.headers ?? {}),
       },
-      signal: controller.signal,
+      signal,
     });
     if (!res.ok) {
       // FastAPI 는 오류를 { detail: ... } 로 준다. 사람이 읽을 문구를 살려서 올린다.
@@ -57,6 +60,29 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+export type PreflightReport = {
+  ok: boolean;
+  deep: boolean;
+  env: string;
+  blocking: string[];
+  settings: Record<string, string | number>;
+  checks: Array<{
+    name: string;
+    state: "live" | "warn" | "dead";
+    detail: string;
+    fix: string;
+    ms: number | null;
+  }>;
+};
+
+export async function getPreflight(deep: boolean, signal?: AbortSignal) {
+  return fetchJson<PreflightReport>(`/preflight${deep ? "?deep=1" : ""}`, {
+    cache: "no-store",
+    timeoutMs: deep ? 60_000 : TIMEOUT_MS,
+    signal,
+  });
 }
 
 // ---- /auth/* — 로그인·가입·초대코드 합류 ----
@@ -148,8 +174,8 @@ export type TaskCategoryDto = {
   sort_order: number;
 };
 
-export async function listCategories(token: string) {
-  return fetchJson<TaskCategoryDto[]>("/ingest/categories", { headers: authHeader(token) });
+export async function listCategories(token: string, signal?: AbortSignal) {
+  return fetchJson<TaskCategoryDto[]>("/ingest/categories", { headers: authHeader(token), signal });
 }
 
 export async function updateCategories(
@@ -183,7 +209,8 @@ export type ReviewCard = {
 
 export async function listReviewCards(
   token: string,
-  opts: { status?: "pending" | "approved" | "all"; sourceId?: number; limit?: number } = {}
+  opts: { status?: "pending" | "approved" | "all"; sourceId?: number; limit?: number } = {},
+  signal?: AbortSignal
 ) {
   const q = new URLSearchParams();
   // 백엔드가 받는 건 status 다. verified 로 보내면 무시되고 pending 으로 떨어진다
@@ -192,7 +219,7 @@ export async function listReviewCards(
   if (opts.limit !== undefined) q.set("limit", String(opts.limit));
   const res = await fetchJson<{ total: number; threshold: number; cards: ReviewCard[] }>(
     `/ingest/review${q.toString() ? `?${q}` : ""}`,
-    { headers: authHeader(token) }
+    { headers: authHeader(token), signal }
   );
   return res;
 }
@@ -248,37 +275,34 @@ export async function updateCard(
   });
 }
 
-// ---- /learn/roadmap — 신입 로드맵 + 진도율 ----
-// progress_rate = DONE 항목 / 전체 항목 × 100 (가이드 확정 식).
-// 항목을 DONE 으로 바꾸면 백엔드가 store_members.progress_rate 를 다시 계산하고,
-// 점주 대시보드가 2초 폴링으로 그걸 읽는다.
+// ---- /learn/roadmap — 승인된 공개 카드 기반 직원 학습 ----
+
+export type LearningStatus = "NOT_STARTED" | "DONE" | "RECONFIRM_REQUIRED";
 
 export type RoadmapItemDto = {
   item_id: number;
-  item_name: string;
-  item_order: number;
-  status: "LOCKED" | "IN_PROGRESS" | "DONE";
-  card_id: number | null;
-  card_title: string | null;
+  card_id: number;
+  published_version_id: number;
+  title: string;
+  status: LearningStatus;
 };
 
 export type RoadmapStageDto = {
-  stage_id: number;
-  stage_name: string;
-  stage_order: number;
-  status: "LOCKED" | "IN_PROGRESS" | "DONE";
+  category_id: number;
+  name: string;
+  order: number;
   items: RoadmapItemDto[];
 };
 
 export type RoadmapDto = {
-  store_id: number;
-  member_id: number;
-  progress_rate: number;
+  store: { store_id: number; name: string };
+  counts: { total: number; done: number; reconfirm_required: number };
+  continue_item_id: number | null;
   stages: RoadmapStageDto[];
 };
 
-export async function getRoadmap(token: string) {
-  return fetchJson<RoadmapDto>("/learn/roadmap", { headers: authHeader(token) });
+export async function getRoadmap(token: string, signal?: AbortSignal) {
+  return fetchJson<RoadmapDto>("/learn/roadmap", { headers: authHeader(token), signal });
 }
 
 export async function patchRoadmapItem(
@@ -290,6 +314,219 @@ export async function patchRoadmapItem(
     `/learn/roadmap/items/${itemId}`,
     { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ status }) }
   );
+}
+
+export type CardSourceDto = {
+  source_id: number;
+  title: string | null;
+  source_type: string | null;
+  read_url: string | null;
+};
+
+export type CardEvidenceDto = {
+  evidence_id: number;
+  locator_type: string;
+  locator: Record<string, unknown>;
+  excerpt: string | null;
+  source: CardSourceDto;
+};
+
+export type LearnItemDetail = {
+  item_id: number;
+  card_id: number;
+  published_version_id: number;
+  title: string;
+  content: string;
+  status: LearningStatus;
+  category: { category_id: number; name: string };
+  evidence: CardEvidenceDto[];
+  return_to: { path: string; item_id: number };
+};
+
+export async function getLearnItem(itemId: number, token: string, signal?: AbortSignal) {
+  return fetchJson<LearnItemDetail>(`/learn/items/${itemId}`, {
+    headers: authHeader(token),
+    signal,
+  });
+}
+
+export async function setLearnItemCompletion(
+  itemId: number,
+  publishedVersionId: number,
+  completed: boolean,
+  token: string
+) {
+  return fetchJson<{
+    item_id: number;
+    card_id: number;
+    published_version_id: number;
+    status: LearningStatus;
+    counts: RoadmapDto["counts"];
+  }>(`/learn/items/${itemId}/completion`, {
+    method: "PUT",
+    headers: authHeader(token),
+    body: JSON.stringify({ published_version_id: publishedVersionId, completed }),
+  });
+}
+
+// ---- /cards — 신규 카드 검토 계약 ----
+
+export type CardReviewStatus = "PENDING" | "NEEDS_REVIEW" | "APPROVED" | "EXCLUDED";
+export type CardListItem = {
+  card_id: number;
+  review_status: CardReviewStatus;
+  title: string;
+  content: string;
+  category: { category_id: number; name: string } | null;
+  assignment_type: "AUTOMATIC" | "MANUAL";
+  source: CardSourceDto | null;
+  job_id: number | null;
+  has_evidence: boolean;
+  needs_review_reason: string | null;
+  updated_at: string;
+};
+
+export type CardListResponse = {
+  items: CardListItem[];
+  next_cursor: number | null;
+  total: number;
+};
+
+export type CardVersionDto = {
+  version_id: number;
+  version_no: number;
+  title: string;
+  content: string;
+  change_source: string;
+  created_at: string;
+};
+
+export type CardDetailDto = {
+  card_id: number;
+  review_status: CardReviewStatus;
+  assignment_type: "AUTOMATIC" | "MANUAL";
+  category: CardListItem["category"];
+  source: CardSourceDto | null;
+  job_id: number | null;
+  needs_review_reason: string | null;
+  draft: CardVersionDto | null;
+  published: CardVersionDto | null;
+  evidence: CardEvidenceDto[];
+  events: Array<{
+    event_id: number;
+    action: string;
+    from_status: string | null;
+    to_status: string | null;
+    from_category_id: number | null;
+    to_category_id: number | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>;
+  updated_at: string;
+};
+
+export type CardFilters = {
+  status?: "pending" | "needs_review" | "approved" | "excluded" | "all";
+  jobId?: number;
+  categoryId?: number;
+  query?: string;
+  cursor?: number;
+  limit?: number;
+};
+
+export async function listProductCards(token: string, filters: CardFilters = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  if (filters.status) query.set("review_status", filters.status);
+  if (filters.jobId) query.set("job_id", String(filters.jobId));
+  if (filters.categoryId) query.set("category_id", String(filters.categoryId));
+  if (filters.query) query.set("query", filters.query);
+  if (filters.cursor) query.set("cursor", String(filters.cursor));
+  query.set("limit", String(filters.limit ?? 100));
+  return fetchJson<CardListResponse>(`/cards?${query}`, { headers: authHeader(token), signal });
+}
+
+export async function getProductCard(cardId: number, token: string, signal?: AbortSignal) {
+  return fetchJson<CardDetailDto>(`/cards/${cardId}`, { headers: authHeader(token), signal });
+}
+
+export type CardMutationResult = {
+  card_id: number;
+  review_status: CardReviewStatus;
+  draft_version_id: number | null;
+  published_version_id: number | null;
+  updated_at: string;
+  undo_until: string | null;
+};
+
+export async function updateProductCardDraft(cardId: number, title: string, content: string, expectedVersionId: number, token: string) {
+  return fetchJson<CardMutationResult>(`/cards/${cardId}/draft`, {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify({ title, content, expected_version_id: expectedVersionId }),
+  });
+}
+
+export async function mutateProductCard(cardId: number, action: "approve" | "exclude" | "restore", token: string) {
+  return fetchJson<CardMutationResult>(`/cards/${cardId}/${action}`, {
+    method: "POST",
+    headers: authHeader(token),
+    timeoutMs: action === "approve" ? 30_000 : TIMEOUT_MS,
+  });
+}
+
+export async function moveProductCard(cardId: number, categoryId: number, expectedUpdatedAt: string, token: string) {
+  return fetchJson<CardMutationResult>(`/cards/${cardId}/category`, {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify({ category_id: categoryId, expected_updated_at: expectedUpdatedAt }),
+  });
+}
+
+export type ProductCategory = { category_id: number; name: string; is_system: boolean; sort_order: number };
+export type ProductCategoryList = {
+  version: number;
+  items: ProductCategory[];
+  reclassification: { status: string; job_id: number } | null;
+};
+
+export async function listProductCategories(token: string, signal?: AbortSignal) {
+  return fetchJson<ProductCategoryList>("/categories", { headers: authHeader(token), signal });
+}
+
+export async function createProductCategory(name: string, sortOrder: number, token: string) {
+  return fetchJson<{ category: ProductCategory; version: number; reclass_job_id: number | null }>("/categories", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ name, sort_order: sortOrder }),
+  });
+}
+
+export async function deleteProductCategory(categoryId: number, token: string) {
+  return fetchJson<{ category_id: number; version: number; reclass_job_id: number | null }>(`/categories/${categoryId}`, {
+    method: "DELETE",
+    headers: authHeader(token),
+  });
+}
+
+export type ReclassificationJob = {
+  job_id: number;
+  target_category_version: number;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "STALE";
+  total_count: number;
+  applied_count: number;
+  skipped_count: number;
+  failed_count: number;
+  error: { code: string; message: string } | null;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export async function getReclassificationJob(jobId: number, token: string, signal?: AbortSignal) {
+  return fetchJson<ReclassificationJob>(`/reclassification-jobs/${jobId}`, { headers: authHeader(token), signal });
+}
+
+export async function retryReclassificationJob(jobId: number, token: string) {
+  return fetchJson<ReclassificationJob>(`/reclassification-jobs/${jobId}/retry`, { method: "POST", headers: authHeader(token) });
 }
 
 // ---- /reg/cards — 매장 지식카드 목록 ----
@@ -335,6 +572,93 @@ export async function retrieve(storeSlug: string, question: string, topK = 5) {
 // 그 경우 백엔드가 401을 돌려주고, 업로드 화면은 이를 잡아 로컬 진행률로 대체한다.
 
 export type IngestSourceType = "VOICE" | "VIDEO" | "KAKAO" | "SCAN";
+
+export type IngestJobStatus =
+  | "QUEUED"
+  | "EXTRACTING"
+  | "CLASSIFYING"
+  | "SUCCEEDED"
+  | "PARTIAL"
+  | "NO_RESULT"
+  | "FAILED";
+
+export type IngestJobListItem = {
+  job_id: number;
+  title: string | null;
+  status: IngestJobStatus;
+  category_version: number;
+  source_count: number;
+  card_count: number;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type IngestJobList = {
+  items: IngestJobListItem[];
+  next_cursor: number | null;
+  total: number;
+};
+
+export type IngestJobDetail = {
+  job_id: number;
+  title: string | null;
+  status: IngestJobStatus;
+  category_version: number;
+  counts: { sources: number; succeeded: number; failed: number; cards: number };
+  sources: Array<{
+    source_id: number;
+    filename: string;
+    status: string;
+    card_count: number;
+    error: { code: string; message: string } | null;
+  }>;
+  review_destination: string;
+};
+
+export function isIngestJobActive(status: IngestJobStatus) {
+  return status === "QUEUED" || status === "EXTRACTING" || status === "CLASSIFYING";
+}
+
+export async function createIngestJob(
+  sourceIds: number[],
+  token: string,
+  options: { title?: string; idempotencyKey?: string } = {}
+) {
+  return fetchJson<{
+    job_id: number;
+    status: IngestJobStatus;
+    category_version: number;
+    source_count: number;
+  }>("/ingest/jobs", {
+    method: "POST",
+    headers: {
+      ...authHeader(token),
+      ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
+    },
+    body: JSON.stringify({ source_ids: sourceIds, title: options.title }),
+  });
+}
+
+export async function listIngestJobs(token: string, signal?: AbortSignal) {
+  return fetchJson<IngestJobList>("/ingest/jobs?limit=50", {
+    headers: authHeader(token),
+    signal,
+  });
+}
+
+export async function getIngestJob(jobId: number, token: string, signal?: AbortSignal) {
+  return fetchJson<IngestJobDetail>(`/ingest/jobs/${jobId}`, {
+    headers: authHeader(token),
+    signal,
+  });
+}
+
+export async function retryIngestJob(jobId: number, token: string) {
+  return fetchJson<{ job_id: number; status: IngestJobStatus }>(
+    `/ingest/jobs/${jobId}/retry`,
+    { method: "POST", headers: authHeader(token) }
+  );
+}
 
 export async function requestUploadUrl(
   sourceType: IngestSourceType,
@@ -454,10 +778,11 @@ export async function askChat(question: string, token: string) {
   });
 }
 
-export async function listChat(token: string) {
+export async function listChat(token: string, signal?: AbortSignal) {
   return fetchJson<{ session_id: number | null; messages: LearnChatMessage[] }>("/learn/chat", {
     headers: authHeader(token),
     timeoutMs: CHAT_TIMEOUT_MS,
+    signal,
   });
 }
 
@@ -473,10 +798,10 @@ export type LearnPendingItem = {
   created_at: string;
 };
 
-export async function listPending(token: string, status: "WAITING" | "ANSWERED" = "WAITING") {
+export async function listPending(token: string, status: "WAITING" | "ANSWERED" = "WAITING", signal?: AbortSignal) {
   return fetchJson<{ store_id: number; status: string; items: LearnPendingItem[] }>(
     `/learn/pending?status=${status}`,
-    { headers: authHeader(token) }
+    { headers: authHeader(token), signal }
   );
 }
 
@@ -488,10 +813,10 @@ export type LearnStaffItem = {
   is_deployable: boolean;
 };
 
-export async function listStaff(token: string) {
+export async function listStaff(token: string, signal?: AbortSignal) {
   return fetchJson<{ store_id: number; deploy_threshold: number; items: LearnStaffItem[] }>(
     "/learn/staff",
-    { headers: authHeader(token) }
+    { headers: authHeader(token), signal }
   );
 }
 
@@ -509,9 +834,10 @@ export type LearnQuestionItem = {
   created_at: string;
 };
 
-export async function listQuestions(token: string) {
+export async function listQuestions(token: string, signal?: AbortSignal) {
   return fetchJson<{ store_id: number; items: LearnQuestionItem[] }>("/learn/questions", {
     headers: authHeader(token),
+    signal,
   });
 }
 
@@ -526,6 +852,57 @@ export async function answerPending(questionId: number, answerText: string, toke
     headers: authHeader(token),
     body: JSON.stringify({ answer_text: answerText }),
     timeoutMs: CHAT_TIMEOUT_MS,
+  });
+}
+
+export type KnowledgeProposal = {
+  proposal_id: number;
+  relation_type: "IDENTICAL" | "NEW" | "SUPPLEMENT" | "CONFLICT";
+  status: "ANALYZED" | "LINKED" | "PENDING_REVIEW" | "PUBLISHED" | "FAILED" | "DISMISSED";
+  question_text: string;
+  answer_text: string;
+  target_card_id: number | null;
+  target_version_id: number | null;
+  current_title: string | null;
+  current_content: string | null;
+  proposed_title: string | null;
+  proposed_content: string | null;
+  reason: string | null;
+  category_id: number;
+  created_at: string;
+};
+
+export async function listKnowledgeProposals(token: string, signal?: AbortSignal) {
+  return fetchJson<{ store_id: number; status: string; items: KnowledgeProposal[] }>(
+    "/learn/knowledge-proposals?status=PENDING_REVIEW",
+    { headers: authHeader(token), signal }
+  );
+}
+
+export async function resolveKnowledgeProposal(proposalId: number, action: "approve" | "dismiss", token: string) {
+  return fetchJson<{ proposal_id: number; status: string; card_id?: number; version_id?: number }>(
+    `/learn/knowledge-proposals/${proposalId}/${action}`,
+    { method: "POST", headers: authHeader(token), timeoutMs: action === "approve" ? 30_000 : TIMEOUT_MS }
+  );
+}
+
+export type FaqItem = {
+  question: string;
+  question_count: number;
+  distinct_questioners: number;
+  last_asked_at: string;
+  card_id: number;
+  published_version_id: number;
+  card_title: string;
+  card_content: string;
+  category_id: number;
+  category_name: string;
+};
+
+export async function listFaqs(token: string, signal?: AbortSignal) {
+  return fetchJson<{ store_id: number; items: FaqItem[] }>("/learn/faqs?min_questions=2&limit=50", {
+    headers: authHeader(token),
+    signal,
   });
 }
 
@@ -552,9 +929,10 @@ export type NotificationItem = {
   created_at: string;
 };
 
-export async function getNotificationSupport(token: string) {
+export async function getNotificationSupport(token: string, signal?: AbortSignal) {
   return fetchJson<NotificationSupport>("/notifications/support", {
     headers: authHeader(token),
+    signal,
   });
 }
 
@@ -581,7 +959,8 @@ export async function deletePushSubscription(subscriptionId: number, token: stri
 
 export async function listNotifications(
   token: string,
-  opts: { unreadOnly?: boolean; cursor?: number; limit?: number } = {}
+  opts: { unreadOnly?: boolean; cursor?: number; limit?: number } = {},
+  signal?: AbortSignal
 ) {
   const query = new URLSearchParams();
   if (opts.unreadOnly) query.set("unread_only", "true");
@@ -593,6 +972,7 @@ export async function listNotifications(
     next_cursor: number | null;
   }>(`/notifications${query.toString() ? `?${query}` : ""}`, {
     headers: authHeader(token),
+    signal,
   });
 }
 

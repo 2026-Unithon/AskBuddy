@@ -1,19 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import {
   ApiError,
   deletePushSubscription,
-  getNotificationSupport,
-  listNotifications,
   markNotificationRead,
   savePushSubscription,
   type NotificationItem,
-  type NotificationSupport,
 } from "@/lib/api";
+import { notificationPagesQuery, notificationSupportQuery, queryKeys } from "@/lib/query";
 
 function applicationServerKey(value: string): Uint8Array<ArrayBuffer> {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -42,38 +41,18 @@ function messageForError(error: unknown) {
 export default function NotificationsPage() {
   const router = useRouter();
   const { state } = useApp();
-  const [support, setSupport] = useState<NotificationSupport | null>(null);
-  const [items, setItems] = useState<NotificationItem[]>([]);
+  const queryClient = useQueryClient();
+  const supportQuery = useQuery(notificationSupportQuery(state.token, state.storeId));
+  const notifications = useInfiniteQuery(notificationPagesQuery(state.token, state.storeId));
+  const support = supportQuery.data;
+  const items = notifications.data?.pages.flatMap((page) => page.items) ?? [];
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
   const [subscriptionId, setSubscriptionId] = useState<number | null>(null);
   const [browserSupported, setBrowserSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!state.token) return;
-    try {
-      const [supportResult, notifications] = await Promise.all([
-        getNotificationSupport(state.token),
-        listNotifications(state.token),
-      ]);
-      setSupport(supportResult);
-      setItems(notifications.items);
-      setError(null);
-    } catch (requestError) {
-      setError(messageForError(requestError));
-    } finally {
-      setLoaded(true);
-    }
-  }, [state.token]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void refresh(), 0);
-    return () => window.clearTimeout(timer);
-  }, [refresh]);
 
   useEffect(() => {
     const supported = "serviceWorker" in navigator && "PushManager" in window;
@@ -125,7 +104,7 @@ export default function NotificationsPage() {
       const saved = await savePushSubscription(current.toJSON(), state.token);
       setSubscription(current);
       setSubscriptionId(saved.subscription_id);
-      setSupport((value) => (value ? { ...value, guide_seen: true } : value));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.notificationSupport(state.storeId) });
     } catch (requestError) {
       setError(messageForError(requestError));
     } finally {
@@ -154,13 +133,22 @@ export default function NotificationsPage() {
     if (!item.read_at) {
       try {
         const result = await markNotificationRead(item.notification_id, state.token);
-        setItems((current) =>
-          current.map((value) =>
-            value.notification_id === item.notification_id
-              ? { ...value, read_at: result.read_at }
-              : value
-          )
+        queryClient.setQueryData(
+          queryKeys.notificationPages(state.storeId),
+          (current: typeof notifications.data) => current
+            ? {
+                ...current,
+                pages: current.pages.map((page, index) => ({
+                  ...page,
+                  unread_count: index === 0 ? Math.max(0, page.unread_count - 1) : page.unread_count,
+                  items: page.items.map((value) => value.notification_id === item.notification_id
+                    ? { ...value, read_at: result.read_at }
+                    : value),
+                })),
+              }
+            : current
         );
+        await queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) });
       } catch (requestError) {
         setError(messageForError(requestError));
         return;
@@ -210,10 +198,12 @@ export default function NotificationsPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-brand-700">앱 알림</h2>
-            <button onClick={() => void refresh()} className="text-xs font-semibold text-brand-500">새로고침</button>
+            <button onClick={() => void notifications.refetch()} className="text-xs font-semibold text-brand-500">새로고침</button>
           </div>
-          {error && <p role="alert" className="text-xs font-medium text-[#E57373]">{error}</p>}
-          {loaded && items.length === 0 && !error && (
+          {(error || supportQuery.error || notifications.error) && <p role="alert" className="text-xs font-medium text-[#E57373]">{error ?? messageForError(supportQuery.error ?? notifications.error)}</p>}
+          {notifications.isLoading && <div className="space-y-3" aria-label="알림 불러오는 중">{[0, 1, 2].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-surface-muted" />)}</div>}
+          {notifications.isFetching && !notifications.isLoading && !notifications.isFetchingNextPage && <p className="text-[11px] text-muted">최신 알림 확인 중…</p>}
+          {!notifications.isLoading && items.length === 0 && !error && !notifications.error && (
             <Card className="p-6 text-center text-sm text-muted">아직 도착한 알림이 없어요.</Card>
           )}
           {items.map((item) => (
@@ -234,6 +224,11 @@ export default function NotificationsPage() {
               </Card>
             </button>
           ))}
+          {notifications.hasNextPage && (
+            <Button variant="secondary" className="w-full" disabled={notifications.isFetchingNextPage} onClick={() => void notifications.fetchNextPage()}>
+              {notifications.isFetchingNextPage ? "불러오는 중…" : "이전 알림 더 보기"}
+            </Button>
+          )}
         </section>
       </div>
     </Shell>

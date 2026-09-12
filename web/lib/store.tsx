@@ -11,29 +11,22 @@ import {
 import {
   MOCK_EMPTY_KNOWLEDGE,
   MOCK_INVITE_CODE,
-  MOCK_KNOWLEDGE_SECTIONS,
   MOCK_ROADMAP,
   MOCK_STORE_NAME,
   MOCK_TASK_CATEGORIES,
 } from "./mock";
 import type {
   BusinessType,
-  ChatMessage,
   EmptyKnowledgeAlert,
-  KnowledgeSection,
-  NodeStatus,
-  PendingQuestion,
   Role,
   RoadmapNode,
-  StaffMember,
   TaskCategory,
-  UploadSource,
 } from "./types";
 
 const STORAGE_KEY = "askbuddy_state";
 // 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
 // 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
-const STATE_VERSION = 7;
+const STATE_VERSION = 8;
 
 type AppState = {
   hydrated: boolean;
@@ -48,13 +41,10 @@ type AppState = {
   storeName: string;
   businessType: BusinessType | null;
   inviteCode: string;
+  // 카테고리/로드맵 배열은 화면 모양과 비로그인 fallback뿐이다.
+  // 로그인 뒤 서버 응답은 TanStack Query 캐시가 소유한다.
   categories: TaskCategory[];
-  uploadSources: UploadSource[];
-  knowledgeSections: KnowledgeSection[];
   roadmap: RoadmapNode[];
-  chatMessages: ChatMessage[];
-  staff: StaffMember[];
-  pendingQuestions: PendingQuestion[];
   emptyKnowledge: EmptyKnowledgeAlert[];
   streakDays: number;
   hearts: number;
@@ -72,12 +62,7 @@ const initialState: AppState = {
   businessType: null,
   inviteCode: MOCK_INVITE_CODE,
   categories: MOCK_TASK_CATEGORIES,
-  uploadSources: [],
-  knowledgeSections: MOCK_KNOWLEDGE_SECTIONS,
   roadmap: MOCK_ROADMAP,
-  chatMessages: [],
-  staff: [],
-  pendingQuestions: [],
   emptyKnowledge: MOCK_EMPTY_KNOWLEDGE,
   streakDays: 3,
   hearts: 3,
@@ -101,33 +86,7 @@ type Action =
     }
   | { type: "SET_STORE"; storeId: number; storeSlug: string; storeName: string; token: string }
   | { type: "SET_INVITE_CODE"; code: string }
-  | { type: "SET_CATEGORIES"; categories: TaskCategory[] }
-  | { type: "SET_KNOWLEDGE_SECTIONS"; sections: KnowledgeSection[] }
-  | { type: "SET_BUSINESS_TYPE"; value: BusinessType }
-  | { type: "TOGGLE_CATEGORY"; key: string }
-  | { type: "ADD_UPLOAD_SOURCE"; source: UploadSource }
-  | { type: "UPDATE_UPLOAD_SOURCE"; id: string; patch: Partial<UploadSource> }
-  | { type: "COMPLETE_ROADMAP_NODE"; nodeId: string }
-  | { type: "SET_ROADMAP_STATUS"; statuses: NodeStatus[] }
-  | { type: "ADD_CHAT_MESSAGE"; message: ChatMessage }
-  | { type: "SET_CHAT_MESSAGES"; messages: ChatMessage[] }
-  | { type: "ADD_PENDING_QUESTION"; question: PendingQuestion }
-  | { type: "SET_PENDING_QUESTIONS"; questions: PendingQuestion[] }
-  | { type: "SET_STAFF"; staff: StaffMember[] }
-  | { type: "ANSWER_PENDING_QUESTION"; id: string; answerText: string };
-
-function recomputeNodeStatus(nodes: RoadmapNode[]): RoadmapNode[] {
-  let previousDone = true;
-  return nodes.map((node) => {
-    const done = node.status === "DONE";
-    let status: RoadmapNode["status"];
-    if (done) status = "DONE";
-    else if (previousDone) status = "IN_PROGRESS";
-    else status = "LOCKED";
-    previousDone = done;
-    return { ...node, status };
-  });
-}
+  | { type: "SET_BUSINESS_TYPE"; value: BusinessType };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -178,60 +137,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_INVITE_CODE":
       return { ...state, inviteCode: action.code };
-    case "SET_CATEGORIES":
-      return { ...state, categories: action.categories };
-    case "SET_KNOWLEDGE_SECTIONS":
-      return { ...state, knowledgeSections: action.sections };
     case "SET_BUSINESS_TYPE":
       return { ...state, businessType: action.value };
-    case "TOGGLE_CATEGORY":
-      return {
-        ...state,
-        categories: state.categories.map((c) =>
-          c.key === action.key ? { ...c, enabled: !c.enabled } : c
-        ),
-      };
-    case "ADD_UPLOAD_SOURCE":
-      return { ...state, uploadSources: [...state.uploadSources, action.source] };
-    case "UPDATE_UPLOAD_SOURCE":
-      return {
-        ...state,
-        uploadSources: state.uploadSources.map((s) =>
-          s.id === action.id ? { ...s, ...action.patch } : s
-        ),
-      };
-    case "SET_ROADMAP_STATUS": {
-      // DB 의 learning_progress 가 유일한 사실이다.
-      // mock 은 첫 3칸을 DONE 으로 박아뒀는데, 갓 합류한 신입에게는 거짓이다.
-      const nodes = state.roadmap.map((n, i) => ({
-        ...n,
-        status: action.statuses[i] ?? n.status,
-      }));
-      return { ...state, roadmap: nodes };
-    }
-    case "COMPLETE_ROADMAP_NODE": {
-      const nodes = state.roadmap.map((node) =>
-        node.id === action.nodeId && node.status !== "LOCKED"
-          ? { ...node, status: "DONE" as const }
-          : node
-      );
-      return { ...state, roadmap: recomputeNodeStatus(nodes) };
-    }
-    case "ADD_CHAT_MESSAGE":
-      return { ...state, chatMessages: [...state.chatMessages, action.message] };
-    case "SET_CHAT_MESSAGES":
-      return { ...state, chatMessages: action.messages };
-    case "ADD_PENDING_QUESTION":
-      return { ...state, pendingQuestions: [...state.pendingQuestions, action.question] };
-    case "SET_PENDING_QUESTIONS":
-      return { ...state, pendingQuestions: action.questions };
-    case "SET_STAFF":
-      return { ...state, staff: action.staff };
-    case "ANSWER_PENDING_QUESTION":
-      return {
-        ...state,
-        pendingQuestions: state.pendingQuestions.filter((q) => q.id !== action.id),
-      };
     default:
       return state;
   }
@@ -240,46 +147,70 @@ function reducer(state: AppState, action: Action): AppState {
 type AppContextValue = {
   state: AppState;
   dispatch: React.Dispatch<Action>;
-  progressPct: number;
 };
 
-// 저장된 상태를 그대로 믿지 않는다.
-//
-// 버전을 올려도 사람 손으로 올리는 것이라 빠뜨릴 수 있고, 그러면 옛 모양이
-// 그대로 화면까지 올라가 렌더 중에 터진다 — 실제로 roadmap 노드에 pos 가 없어
-// node.pos.x 에서 "This page couldn't load" 가 났다.
-// 모양이 맞지 않는 항목은 통째로 버리고 기본값으로 되돌린다.
-function isRoadmapNode(n: unknown): n is RoadmapNode {
-  if (!n || typeof n !== "object") return false;
-  const v = n as Partial<RoadmapNode>;
-  return (
-    typeof v.id === "string" &&
-    typeof v.label === "string" &&
-    typeof v.status === "string" &&
-    typeof v.pos === "object" &&
-    v.pos !== null &&
-    typeof (v.pos as { x?: unknown }).x === "number" &&
-    typeof (v.pos as { y?: unknown }).y === "number" &&
-    Array.isArray(v.details)
-  );
+type PersistedAppState = Pick<
+  AppState,
+  | "role"
+  | "displayName"
+  | "token"
+  | "userId"
+  | "storeId"
+  | "storeSlug"
+  | "storeName"
+  | "businessType"
+  | "inviteCode"
+  | "streakDays"
+  | "hearts"
+>;
+
+function persistedState(state: AppState): PersistedAppState {
+  const {
+    role,
+    displayName,
+    token,
+    userId,
+    storeId,
+    storeSlug,
+    storeName,
+    businessType,
+    inviteCode,
+    streakDays,
+    hearts,
+  } = state;
+  return {
+    role,
+    displayName,
+    token,
+    userId,
+    storeId,
+    storeSlug,
+    storeName,
+    businessType,
+    inviteCode,
+    streakDays,
+    hearts,
+  };
 }
 
-function sanitize(data: Partial<AppState>): Partial<AppState> {
-  const clean: Partial<AppState> = { ...data };
+function isBusinessType(value: unknown): value is BusinessType {
+  return value === "CAFE" || value === "RESTAURANT" || value === "BAKERY" || value === "BAR" || value === "CVS" || value === "SALON";
+}
 
-  if (!Array.isArray(data.roadmap) || !data.roadmap.every(isRoadmapNode)) {
-    clean.roadmap = initialState.roadmap;
-  }
-  if (!Array.isArray(data.knowledgeSections)) {
-    clean.knowledgeSections = initialState.knowledgeSections;
-  }
-  if (!Array.isArray(data.categories)) clean.categories = initialState.categories;
-  if (!Array.isArray(data.uploadSources)) clean.uploadSources = [];
-  if (!Array.isArray(data.chatMessages)) clean.chatMessages = initialState.chatMessages;
-  if (!Array.isArray(data.staff)) clean.staff = initialState.staff;
-  if (!Array.isArray(data.pendingQuestions)) clean.pendingQuestions = initialState.pendingQuestions;
-
-  return clean;
+function restorePersistedState(data: object): Partial<AppState> {
+  const restored: Partial<AppState> = {};
+  if ("role" in data && (data.role === "OWNER" || data.role === "STAFF" || data.role === null)) restored.role = data.role;
+  if ("displayName" in data && (typeof data.displayName === "string" || data.displayName === null)) restored.displayName = data.displayName;
+  if ("token" in data && (typeof data.token === "string" || data.token === null)) restored.token = data.token;
+  if ("userId" in data && (typeof data.userId === "number" || data.userId === null)) restored.userId = data.userId;
+  if ("storeId" in data && (typeof data.storeId === "number" || data.storeId === null)) restored.storeId = data.storeId;
+  if ("storeSlug" in data && typeof data.storeSlug === "string") restored.storeSlug = data.storeSlug;
+  if ("storeName" in data && typeof data.storeName === "string") restored.storeName = data.storeName;
+  if ("businessType" in data && (isBusinessType(data.businessType) || data.businessType === null)) restored.businessType = data.businessType;
+  if ("inviteCode" in data && typeof data.inviteCode === "string") restored.inviteCode = data.inviteCode;
+  if ("streakDays" in data && typeof data.streakDays === "number") restored.streakDays = data.streakDays;
+  if ("hearts" in data && typeof data.hearts === "number") restored.hearts = data.hearts;
+  return restored;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -290,10 +221,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
       // 버전이 다르면(스키마가 바뀌었으면) 옛 캐시를 신뢰하지 않고 그냥 버린다.
-      if (parsed && parsed.v === STATE_VERSION && parsed.data) {
-        dispatch({ type: "HYDRATE", payload: sanitize(parsed.data) });
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "v" in parsed &&
+        (parsed.v === STATE_VERSION || parsed.v === 7) &&
+        "data" in parsed &&
+        parsed.data &&
+        typeof parsed.data === "object"
+      ) {
+        // v7의 API 응답 캐시는 버리고 인증/환경 값만 v8로 승격한다.
+        dispatch({ type: "HYDRATE", payload: restorePersistedState(parsed.data) });
       } else {
         window.localStorage.removeItem(STORAGE_KEY);
         dispatch({ type: "HYDRATE", payload: {} });
@@ -306,19 +246,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!state.hydrated) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: STATE_VERSION, data: state }));
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ v: STATE_VERSION, data: persistedState(state) })
+      );
     } catch {
       // 저장 공간이 없어도 화면 동작에는 영향 없음
     }
   }, [state]);
 
-  const progressPct = useMemo(() => {
-    if (state.roadmap.length === 0) return 0;
-    const done = state.roadmap.filter((n) => n.status === "DONE").length;
-    return Math.round((done / state.roadmap.length) * 100);
-  }, [state.roadmap]);
-
-  const value = useMemo(() => ({ state, dispatch, progressPct }), [state, progressPct]);
+  const value = useMemo(() => ({ state, dispatch }), [state]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

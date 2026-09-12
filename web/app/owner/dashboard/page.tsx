@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Buddy, BuddyBubble, Button, Card, Input } from "@/components/ui";
+import { OwnerPrimaryNav } from "@/components/owner-primary-nav";
 import { useApp } from "@/lib/store";
-import { ApiError, answerPending, listNotifications, listPending, listStaff, type LearnPendingItem, type LearnStaffItem } from "@/lib/api";
+import { ApiError, answerPending, type LearnPendingItem, type LearnStaffItem } from "@/lib/api";
+import { notificationsQuery, pendingQuery, queryKeys, staffQuery } from "@/lib/query";
 import type { PendingQuestion, StaffLevel, StaffMember } from "@/lib/types";
 
 const LEVEL_TONE: Record<StaffLevel, "brand" | "warn" | "danger"> = {
@@ -17,8 +20,6 @@ const LEVEL_LABEL: Record<StaffLevel, string> = {
   good: "괜찮아요",
   warn: "확인이 필요해요",
 };
-
-const POLL_MS = 2000;
 
 function staffLevel(progressRate: number, deployThreshold: number): StaffLevel {
   if (progressRate >= deployThreshold) return "great";
@@ -47,93 +48,46 @@ function toPending(item: LearnPendingItem): PendingQuestion {
 }
 
 export default function DashboardPage() {
-  const { state, dispatch } = useApp();
+  const { state } = useApp();
+  const queryClient = useQueryClient();
+  const pending = useQuery(pendingQuery(state.token, state.storeId));
+  const staffResult = useQuery(staffQuery(state.token, state.storeId));
+  const notifications = useQuery(notificationsQuery(state.token, state.storeId));
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [answeringId, setAnsweringId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const threshold = staffResult.data?.deploy_threshold ?? 80;
+  const staff = (staffResult.data?.items ?? []).map((item) => toStaff(item, threshold));
+  const pendingQuestions = (pending.data?.items ?? []).map(toPending);
+  const unreadCount = notifications.data?.unread_count ?? 0;
+  const answer = useMutation({
+    mutationFn: ({ id, text }: { id: string; text: string }) =>
+      answerPending(Number(id), text, state.token!),
+    onSuccess: async (_, variables) => {
+      setDrafts((d) => ({ ...d, [variables.id]: "" }));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.pending(state.storeId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.questions(state.storeId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) }),
+      ]);
+    },
+  });
+  const queryError = pending.error ?? staffResult.error;
+  const error = answer.error ?? queryError;
+  const errorText = error instanceof ApiError
+    ? error.detail || "정보를 불러오지 못했어요"
+    : error
+      ? "서버에 연결할 수 없습니다"
+      : null;
 
-  const avgProgress = useMemo(() => {
-    if (state.staff.length === 0) return 0;
-    return Math.round(
-      state.staff.reduce((sum, s) => sum + s.progressPct, 0) / state.staff.length
-    );
-  }, [state.staff]);
-
-  useEffect(() => {
-    if (!state.token) return;
-    let cancelled = false;
-
-    async function refreshPending() {
-      try {
-        const res = await listPending(state.token!);
-        if (cancelled) return;
-        dispatch({ type: "SET_PENDING_QUESTIONS", questions: (res.items ?? []).map(toPending) });
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof ApiError ? e.detail || "대기 질문을 불러오지 못했어요" : "서버에 연결할 수 없습니다");
-      }
-    }
-
-    async function refreshStaff() {
-      try {
-        const res = await listStaff(state.token!);
-        if (cancelled) return;
-        const threshold = res.deploy_threshold ?? 80;
-        dispatch({
-          type: "SET_STAFF",
-          staff: (res.items ?? []).map((item) => toStaff(item, threshold)),
-        });
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof ApiError ? e.detail || "직원 목록을 불러오지 못했어요" : "서버에 연결할 수 없습니다");
-      }
-    }
-
-    async function refreshNotifications() {
-      try {
-        const res = await listNotifications(state.token!, { unreadOnly: true, limit: 1 });
-        if (!cancelled) setUnreadCount(res.unread_count);
-      } catch {
-        // 앱 내부 알림이 일시적으로 실패해도 대시보드의 핵심 정보는 계속 표시한다.
-      }
-    }
-
-    void refreshPending();
-    void refreshStaff();
-    void refreshNotifications();
-    const timer = window.setInterval(() => {
-      void refreshPending();
-      void refreshNotifications();
-    }, POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [state.token, dispatch]);
+  const avgProgress = staff.length === 0
+    ? 0
+    : Math.round(staff.reduce((sum, s) => sum + s.progressPct, 0) / staff.length);
 
   async function submitAnswer(id: string) {
     const text = drafts[id]?.trim();
-    if (!text || !state.token || answeringId) return;
-    setAnsweringId(id);
-    setError(null);
-    try {
-      const target = state.pendingQuestions.find((q) => q.id === id);
-      await answerPending(Number(id), text, state.token);
-      const same = (target?.questionText ?? "").trim();
-      dispatch({
-        type: "SET_PENDING_QUESTIONS",
-        questions: state.pendingQuestions.filter(
-          (q) => q.id !== id && q.questionText.trim() !== same
-        ),
-      });
-      setDrafts((d) => ({ ...d, [id]: "" }));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail || "답변 저장에 실패했어요" : "서버에 연결할 수 없습니다");
-    } finally {
-      setAnsweringId(null);
-    }
+    if (!text || !state.token || answer.isPending) return;
+    answer.mutate({ id, text });
   }
 
   return (
@@ -169,9 +123,9 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-3 gap-2.5 max-w-md">
             {[
-              { label: "등록 직원", value: `${state.staff.length}명` },
+              { label: "등록 직원", value: `${staff.length}명` },
               { label: "평균 이해도", value: `${avgProgress}%` },
-              { label: "대기 질문", value: `${state.pendingQuestions.length}건` },
+              { label: "대기 질문", value: `${pendingQuestions.length}건` },
             ].map((s) => (
               <div key={s.label} className="bg-white/12 rounded-2xl py-3 text-center">
                 <p className="text-xl font-bold text-white">{s.value}</p>
@@ -183,34 +137,17 @@ export default function DashboardPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-5 sm:px-8 pt-5 flex items-center gap-2">
-        <Link
-          href="/owner/upload?from=dashboard"
-          className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-4 h-10 text-sm font-semibold text-white hover:bg-brand-700"
-        >
-          <span aria-hidden>＋</span> 자료 추가
-        </Link>
-        <Link
-          href="/owner/preview?from=dashboard"
-          className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
-        >
-          학습 미리보기
-        </Link>
-        <Link
-          href="/owner/questions"
-          className="inline-flex items-center rounded-full border border-border px-4 h-10 text-sm font-semibold text-brand-700 hover:bg-brand-50"
-        >
-          전체 질문
-        </Link>
-        <Link href="/role" className="text-sm text-muted hover:text-foreground px-2 ml-auto">
-          나가기
-        </Link>
+        <div className="w-full max-w-md">
+          <OwnerPrimaryNav />
+        </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-5 sm:px-8 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="space-y-3">
           <h2 className="text-base font-bold text-brand-700">직원 이해도</h2>
           <Card className="divide-y divide-border">
-            {state.staff.map((s) => (
+            {staffResult.isLoading && <div className="h-20 animate-pulse bg-surface-muted" aria-label="직원 목록 불러오는 중" />}
+            {staff.map((s) => (
               <div key={s.id} className="p-4 flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-brand-700 text-white flex items-center justify-center font-bold text-sm">
                   {s.name.slice(0, 1)}
@@ -224,7 +161,7 @@ export default function DashboardPage() {
                 </Badge>
               </div>
             ))}
-            {state.staff.length === 0 && (
+            {!staffResult.isLoading && staff.length === 0 && (
               <p className="p-4 text-sm text-muted">아직 합류한 직원이 없어요.</p>
             )}
           </Card>
@@ -250,9 +187,11 @@ export default function DashboardPage() {
             text="답변하면 Buddy 지식에 자동 반영되고 신입 화면의 배지가 사라져요"
             size={32}
           />
-          {error && <p className="text-xs font-medium text-[#E57373] px-1">{error}</p>}
+          {errorText && <p className="text-xs font-medium text-[#E57373] px-1">{errorText}</p>}
           <div className="flex flex-col gap-3">
-            {state.pendingQuestions.map((q) => (
+            {pending.isLoading && <div className="h-32 animate-pulse rounded-2xl bg-surface-muted" aria-label="대기 질문 불러오는 중" />}
+            {pending.isFetching && !pending.isLoading && <p className="text-[11px] text-muted">최신 질문 확인 중…</p>}
+            {pendingQuestions.map((q) => (
               <Card key={q.id} className="p-4 space-y-3">
                 <div>
                   <p className="text-xs text-muted">{q.askedBy}님의 질문</p>
@@ -264,15 +203,15 @@ export default function DashboardPage() {
                     value={drafts[q.id] ?? ""}
                     onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
                     onKeyDown={(e) => e.key === "Enter" && submitAnswer(q.id)}
-                    disabled={answeringId === q.id}
+                    disabled={answer.isPending && answer.variables?.id === q.id}
                   />
-                  <Button onClick={() => submitAnswer(q.id)} disabled={answeringId === q.id}>
-                    {answeringId === q.id ? "저장 중" : "답변"}
+                  <Button onClick={() => submitAnswer(q.id)} disabled={answer.isPending}>
+                    {answer.isPending && answer.variables?.id === q.id ? "저장 중" : "답변"}
                   </Button>
                 </div>
               </Card>
             ))}
-            {state.pendingQuestions.length === 0 && (
+            {!pending.isLoading && pendingQuestions.length === 0 && (
               <Card className="p-6 text-center text-sm text-muted">대기 중인 질문이 없어요 🎉</Card>
             )}
           </div>

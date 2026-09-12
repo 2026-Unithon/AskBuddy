@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomCta, Button, Shell, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { BUSINESS_TYPES } from "@/lib/types";
-import { listCategories, updateCategories } from "@/lib/api";
+import { ApiError, updateCategories } from "@/lib/api";
+import { categoriesQuery, queryKeys } from "@/lib/query";
 
 // 이번 릴리스는 카페만 구현한다. 나머지 업종은 기본 카테고리가 없어
 // 자료를 올려도 카드가 만들어지지 않는다 — 고를 수 없게 막는다.
@@ -22,47 +24,34 @@ const CATEGORY_ICON: Record<string, string> = {
 export default function CategoryPage() {
   const router = useRouter();
   const { state, dispatch } = useApp();
-  const [saving, setSaving] = useState(false);
-
-  // 매장 생성 시 백엔드가 카페 기본 카테고리를 넣어둔다. 그걸 그대로 받아 쓴다.
-  useEffect(() => {
-    if (!state.token) return;
-    let cancelled = false;
-    listCategories(state.token)
-      .then((rows) => {
-        if (cancelled || rows.length === 0) return;
-        dispatch({
-          type: "SET_CATEGORIES",
-          categories: rows.map((r) => ({
-            key: r.category_name,
-            label: r.category_name,
-            icon: CATEGORY_ICON[r.category_name] ?? "📋",
-            enabled: r.is_enabled,
-          })),
-        });
-      })
-      .catch(() => {
-        // 백엔드 미연결 — mock 카테고리 유지
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [state.token, dispatch]);
+  const queryClient = useQueryClient();
+  const categories = useQuery(categoriesQuery(state.token, state.storeId));
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const rows = (categories.data?.length ? categories.data : state.categories.map((category, index) => ({
+    category_id: index,
+    category_name: category.key,
+    is_enabled: category.enabled,
+    sort_order: index,
+  }))).map((row) => ({
+    ...row,
+    is_enabled: overrides[row.category_name] ?? row.is_enabled,
+  }));
+  const save = useMutation({
+    mutationFn: () => updateCategories(
+      rows.map((row) => ({ category_name: row.category_name, is_enabled: row.is_enabled })),
+      state.token!
+    ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.categories(state.storeId) });
+      router.push("/owner/upload");
+    },
+  });
 
   async function handleNext() {
     // 토글은 화면에서 즉시 반영하고, 넘어갈 때 한 번만 저장한다.
     if (state.token) {
-      setSaving(true);
-      try {
-        await updateCategories(
-          state.categories.map((c) => ({ category_name: c.key, is_enabled: c.enabled })),
-          state.token
-        );
-      } catch {
-        // 저장 실패해도 흐름은 막지 않는다 — 켜짐 여부는 추출 품질에만 영향
-      } finally {
-        setSaving(false);
-      }
+      save.mutate();
+      return;
     }
     router.push("/owner/upload");
   }
@@ -106,22 +95,25 @@ export default function CategoryPage() {
             <p className="text-xs text-muted/80 mt-0.5">우리 매장에서 안 하는 항목은 꺼주세요</p>
 
             <div className="flex flex-col gap-2.5 pt-3">
-              {state.categories.map((c) => (
+              {rows.map((c) => (
                 <button
-                  key={c.key}
-                  onClick={() => dispatch({ type: "TOGGLE_CATEGORY", key: c.key })}
+                  key={c.category_name}
+                  onClick={() => setOverrides((current) => ({
+                    ...current,
+                    [c.category_name]: !c.is_enabled,
+                  }))}
                   className="w-full flex items-center gap-3 rounded-2xl bg-surface px-4 py-4 text-left shadow-[0_1px_2px_-1px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.10)]"
                 >
-                  <span className="text-xl">{c.icon}</span>
-                  <span className="flex-1 text-sm font-semibold">{c.label}</span>
+                  <span className="text-xl">{CATEGORY_ICON[c.category_name] ?? "📋"}</span>
+                  <span className="flex-1 text-sm font-semibold">{c.category_name}</span>
                   <span
                     className={`w-12 h-6 rounded-full relative transition-colors ${
-                      c.enabled ? "bg-brand-500" : "bg-surface-muted"
+                      c.is_enabled ? "bg-brand-500" : "bg-surface-muted"
                     }`}
                   >
                     <span
                       className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                        c.enabled ? "translate-x-[26px]" : "translate-x-1"
+                        c.is_enabled ? "translate-x-[26px]" : "translate-x-1"
                       }`}
                     />
                   </span>
@@ -135,11 +127,16 @@ export default function CategoryPage() {
         <Button
           size="lg"
           className="w-full"
-          disabled={!canContinue || saving}
+          disabled={!canContinue || save.isPending}
           onClick={handleNext}
         >
-          {saving ? "저장 중…" : "다음으로 →"}
+          {save.isPending ? "저장 중…" : "다음으로 →"}
         </Button>
+        {save.error && (
+          <p className="mt-2 text-center text-xs font-medium text-danger-500">
+            {save.error instanceof ApiError ? save.error.detail || "저장에 실패했어요" : "서버에 연결할 수 없습니다"}
+          </p>
+        )}
       </BottomCta>
     </Shell>
   );
