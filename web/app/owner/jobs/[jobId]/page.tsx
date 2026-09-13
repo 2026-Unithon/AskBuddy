@@ -31,7 +31,7 @@ export default function JobDetailPage() {
   const error = job.error ?? retry.error;
   return (
     <Shell>
-      <TopBar title="처리 작업 상세" backHref="/owner/upload?from=dashboard" />
+      <TopBar title="처리 작업 상세" backHref="/owner/upload" />
       <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-8">
         {job.isLoading && <div className="h-56 animate-pulse rounded-3xl bg-surface-muted" aria-label="작업 불러오는 중" />}
         {error && <Card className="space-y-3 p-5 text-center"><p role="alert" className="text-sm text-danger-500">{message(error)}</p><Button variant="secondary" onClick={() => void job.refetch()}>다시 시도</Button></Card>}

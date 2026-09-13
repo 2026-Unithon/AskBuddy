@@ -96,26 +96,6 @@ export default function RoadmapPage() {
 
       {/* 메인 학습 콘텐츠 (하단 탭 높이 64px + 여백 고려 pb-24) */}
       <main className="flex-1 space-y-4 px-4 py-4 pb-24 overflow-y-auto">
-        {/* 사장님 수정 재확인 알림 배너 */}
-        {counts && counts.reconfirm_required > 0 && (
-          <div
-            role="alert"
-            className="flex items-start gap-3 rounded-2xl border border-warn-500/40 bg-warn-50 p-3.5 text-foreground shadow-sm"
-          >
-            <span className="text-xl shrink-0" aria-hidden="true">
-              🔄
-            </span>
-            <div className="space-y-0.5 min-w-0">
-              <strong className="text-xs font-bold text-warn-700 block">
-                {counts.reconfirm_required}개 업무 내용이 바뀌었어요
-              </strong>
-              <p className="text-[11px] text-muted leading-tight">
-                최신 내용을 다시 확인하면 완료 상태로 갱신됩니다.
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* 최우선 CTA: 오늘 이어서 학습할 카드 (Resume Card) */}
         {continueTarget && (
           <div className="rounded-2xl border-2 border-brand-500 bg-gradient-to-b from-brand-50/50 to-surface p-4 shadow-sm">
@@ -129,15 +109,7 @@ export default function RoadmapPage() {
               {continueTarget.item.title}
             </h2>
             <div className="mt-3 flex items-center justify-between gap-2">
-              <Badge
-                tone={
-                  continueTarget.item.status === "RECONFIRM_REQUIRED" ? "warn" : "neutral"
-                }
-              >
-                {continueTarget.item.status === "RECONFIRM_REQUIRED"
-                  ? "다시 확인 필요"
-                  : "미완료"}
-              </Badge>
+              <Badge tone="neutral">미완료</Badge>
               <Link
                 href={`/staff/items/${continueTarget.item.item_id}`}
                 className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-brand-500 px-4 text-xs font-bold text-white shadow-sm transition-transform active:scale-[0.97] hover:bg-brand-600"
@@ -220,7 +192,6 @@ export default function RoadmapPage() {
             <div className="space-y-2">
               {stage.items.map((item) => {
                 const isDone = item.status === "DONE";
-                const isReconfirm = item.status === "RECONFIRM_REQUIRED";
 
                 return (
                   <Link
@@ -230,16 +201,14 @@ export default function RoadmapPage() {
                   >
                     <Card
                       className={`flex min-h-[58px] items-center gap-3 p-3.5 transition-all active:scale-[0.98] ${
-                        isReconfirm
-                          ? "border-warn-500/50 bg-warn-50/30 hover:border-warn-500"
-                          : isDone
+                        isDone
                           ? "border-border/60 bg-surface hover:border-brand-200"
                           : "border-border bg-surface hover:border-brand-300"
                       }`}
                     >
                       {/* 상태 아이콘 */}
                       <span className="text-lg shrink-0" aria-hidden="true">
-                        {isDone ? "✅" : isReconfirm ? "🔄" : "📖"}
+                        {isDone ? "✅" : "📖"}
                       </span>
 
                       {/* 제목 (말줄임 안전성) */}
@@ -252,10 +221,8 @@ export default function RoadmapPage() {
                       </span>
 
                       {/* 상태 배지 */}
-                      <Badge
-                        tone={isDone ? "brand" : isReconfirm ? "warn" : "neutral"}
-                      >
-                        {isDone ? "완료" : isReconfirm ? "다시 확인" : "시작"}
+                      <Badge tone={isDone ? "brand" : "neutral"}>
+                        {isDone ? "완료" : "시작"}
                       </Badge>
 
                       <span

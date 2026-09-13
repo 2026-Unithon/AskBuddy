@@ -30,7 +30,7 @@ export default function OwnerAuthPage() {
     const requested = new URLSearchParams(window.location.search).get("next");
     return requested?.startsWith("/owner/") && !requested.startsWith("//")
       ? requested
-      : "/owner/dashboard";
+      : "/owner/upload";
   }
 
   // 인증은 실패하면 절대 넘어가지 않는다. 회원이 아니면 들어올 수 없다.

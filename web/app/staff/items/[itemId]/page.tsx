@@ -48,7 +48,6 @@ export default function LearnItemPage() {
   const error = item.error ?? completion.error;
 
   const isDone = data?.status === "DONE";
-  const isReconfirm = data?.status === "RECONFIRM_REQUIRED";
 
   return (
     <div className="flex-1 flex flex-col w-full bg-background min-h-dvh relative">
@@ -101,9 +100,6 @@ export default function LearnItemPage() {
               {/* 상단 배지 메타데이터 */}
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="neutral">{data.category.name}</Badge>
-                {isReconfirm && (
-                  <Badge tone="warn">🔄 내용 변경 · 재확인 필요</Badge>
-                )}
                 {isDone && (
                   <Badge tone="brand">✅ 학습 완료됨</Badge>
                 )}
@@ -197,9 +193,7 @@ export default function LearnItemPage() {
             <Button
               size="lg"
               variant={isDone ? "secondary" : "primary"}
-              className={`w-full min-h-[50px] font-bold text-sm shadow-sm transition-transform active:scale-[0.98] ${
-                isReconfirm && !isDone ? "!bg-warn-500 hover:!bg-warn-600 text-white" : ""
-              }`}
+              className="w-full min-h-[50px] font-bold text-sm shadow-sm transition-transform active:scale-[0.98]"
               disabled={completion.isPending}
               onClick={() => completion.mutate(!isDone)}
             >
@@ -207,12 +201,10 @@ export default function LearnItemPage() {
                 ? "저장 중…"
                 : isDone
                 ? "완료 취소"
-                : isReconfirm
-                ? "최신 내용 확인 완료"
                 : "이해했어요"}
             </Button>
             <p className="text-center text-[10px] text-muted">
-              공개 버전 #{data.published_version_id}을 확인한 것으로 매장에 기록됩니다.
+              이 업무를 학습한 것으로 기록됩니다.
             </p>
           </div>
         </div>

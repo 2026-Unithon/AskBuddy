@@ -161,7 +161,7 @@ export default function NotificationsPage() {
 
   return (
     <Shell>
-      <TopBar title="알림" backHref="/owner/dashboard" />
+      <TopBar title="알림" backHref="/owner/upload" />
       <div className="px-5 pb-7 space-y-5 overflow-y-auto">
         <Card className="p-4 space-y-3">
           <div className="flex items-start gap-3">

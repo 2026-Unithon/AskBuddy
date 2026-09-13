@@ -32,7 +32,7 @@ export default function CompletePage() {
         <div className="w-full space-y-3">
           {code ? <button onClick={() => void copyCode()} className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left shadow-sm"><span className="text-xl">📱</span><div><p className="text-sm font-bold text-brand-700">신입 초대 코드</p><p className="text-xs text-muted">{copied ? "복사했어요 ✓" : "탭해서 복사"}</p></div><div className="ml-auto shrink-0 rounded-xl bg-accent-500 px-3 py-1.5"><span className="text-xs font-bold text-brand-900">{code}</span></div></button> : <Button className="w-full" disabled={!state.token || invite.isPending} onClick={() => invite.mutate()}>{invite.isPending ? "발급 중…" : "신입 초대 코드 발급"}</Button>}
           {invite.error && <p role="alert" className="text-xs text-danger-500">{invite.error instanceof ApiError ? invite.error.detail || "초대 코드를 발급하지 못했어요." : "서버에 연결할 수 없습니다."}</p>}
-          <LinkButton href="/owner/dashboard" className="w-full h-13 text-base">대시보드 보기 →</LinkButton>
+          <LinkButton href="/owner/cards" className="w-full h-13 text-base">카드 목록 확인하기 →</LinkButton>
         </div>
       </div>
     </Shell>

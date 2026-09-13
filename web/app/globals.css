@@ -23,16 +23,26 @@
   /* 포인트 핑크 — Buddy 말풍선, 하트, 강조 마커 */
   --accent-50: rgba(240, 123, 138, 0.1);
   --accent-100: rgba(240, 123, 138, 0.14);
+  --accent-200: #f7c4cb;
   --accent-500: #f07b8a;
   --accent-700: #c14f5e;
+  --accent-900: #7f2935;
 
   --warn-50: #fff7ed;
+  --warn-200: #fed7aa;
   --warn-500: #f0a53d;
+  --warn-600: #d9841d;
   --warn-700: #b3690f;
 
   --danger-50: #fef2f2;
+  --danger-100: #fee2e2;
+  --danger-200: #fecaca;
   --danger-500: #e6604f;
+  --danger-600: #d04a38;
   --danger-700: #b0341f;
+  --danger-800: #8f2a1a;
+  --danger-900: #6f2116;
+  --danger-950: #45120c;
 
   --radius-lg: 1.5rem;
   --radius-md: 1rem;
@@ -60,16 +70,26 @@
 
   --color-accent-50: var(--accent-50);
   --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
   --color-accent-500: var(--accent-500);
   --color-accent-700: var(--accent-700);
+  --color-accent-900: var(--accent-900);
 
   --color-warn-50: var(--warn-50);
+  --color-warn-200: var(--warn-200);
   --color-warn-500: var(--warn-500);
+  --color-warn-600: var(--warn-600);
   --color-warn-700: var(--warn-700);
 
   --color-danger-50: var(--danger-50);
+  --color-danger-100: var(--danger-100);
+  --color-danger-200: var(--danger-200);
   --color-danger-500: var(--danger-500);
+  --color-danger-600: var(--danger-600);
   --color-danger-700: var(--danger-700);
+  --color-danger-800: var(--danger-800);
+  --color-danger-900: var(--danger-900);
+  --color-danger-950: var(--danger-950);
 
   --font-sans: var(--font-pretendard);
 }

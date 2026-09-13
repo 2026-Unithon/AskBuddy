@@ -1,45 +1,187 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, BuddyBubble, Button, Card, Input, Shell, TopBar } from "@/components/ui";
-import { OwnerPrimaryNav } from "@/components/owner-primary-nav";
 import { useApp } from "@/lib/store";
-import { ApiError, answerPending, type LearnQuestionItem } from "@/lib/api";
-import { queryKeys, questionsQuery } from "@/lib/query";
+import {
+  ApiError,
+  answerPending,
+  type LearnPendingItem,
+  type LearnQuestionItem,
+} from "@/lib/api";
+import { pendingQuery, queryKeys, questionsQuery } from "@/lib/query";
 
-function formatAskedAt(iso: string) {
-  return new Date(iso).toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+import {
+  PendingQuestionCard,
+  type AggregatedQuestionItem,
+} from "@/components/owner/pending-question-card";
+import { AnswerQuestionSheet } from "@/components/owner/answer-question-sheet";
+import { EmptyState } from "@/components/owner/empty-state";
+import { InlineError } from "@/components/owner/inline-error";
+import { SkeletonList } from "@/components/owner/skeleton-list";
+import { OwnerPageHeader } from "@/components/owner/owner-page-header";
+
+function aggregateQuestions(rawItems: LearnQuestionItem[]): AggregatedQuestionItem[] {
+  const map = new Map<string, {
+    items: LearnQuestionItem[];
+    firstItem: LearnQuestionItem;
+  }>();
+
+  for (const q of rawItems) {
+    const key = q.waiting_question_id
+      ? `waiting-${q.waiting_question_id}`
+      : `text-${q.question_text.trim().toLowerCase()}`;
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { items: [q], firstItem: q });
+    } else {
+      existing.items.push(q);
+    }
+  }
+
+  const result: AggregatedQuestionItem[] = [];
+
+  for (const [key, { items, firstItem }] of map.entries()) {
+    // 날짜 정렬
+    const sorted = [...items].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+
+    const staffSet = new Set(items.map((it) => it.asked_by));
+    const hasWaiting = items.some((it) => it.status === "WAITING");
+    const hasOwnerAnswered = items.some((it) => it.status === "OWNER_ANSWERED");
+
+    const status = hasWaiting
+      ? "WAITING"
+      : hasOwnerAnswered
+      ? "OWNER_ANSWERED"
+      : "HIT";
+
+    const waitingId = items.find((it) => it.waiting_question_id != null)?.waiting_question_id ?? null;
+
+    result.push({
+      key,
+      waitingQuestionId: waitingId,
+      questionText: firstItem.question_text,
+      firstAskedAt: first.created_at,
+      lastAskedAt: last.created_at,
+      distinctStaffCount: staffSet.size,
+      occurrenceCount: items.length,
+      status,
+      answerText:
+        [...sorted].reverse().find((item) => item.answer_text)?.answer_text ?? null,
+      messageId: firstItem.message_id,
+    });
+  }
+
+  // 정렬 규칙: 1) 대기 중 우선, 2) 오래 기다린 질문 우선(firstAskedAt 오름차순), 3) 반복 횟수 많은 순
+  return result.sort((a, b) => {
+    if (a.status === "WAITING" && b.status !== "WAITING") return -1;
+    if (a.status !== "WAITING" && b.status === "WAITING") return 1;
+
+    // 둘 다 WAITING일 경우 오래 기다린 순
+    if (a.status === "WAITING" && b.status === "WAITING") {
+      const timeDiff = new Date(a.firstAskedAt).getTime() - new Date(b.firstAskedAt).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.occurrenceCount - a.occurrenceCount;
+    }
+
+    // 그 외는 최근 질문 순
+    return new Date(b.lastAskedAt).getTime() - new Date(a.lastAskedAt).getTime();
   });
 }
 
-function statusBadge(status: LearnQuestionItem["status"]) {
-  if (status === "WAITING") return { tone: "warn" as const, label: "대기" };
-  if (status === "OWNER_ANSWERED") return { tone: "brand" as const, label: "사장님 답" };
-  return { tone: "neutral" as const, label: "지식 답" };
+function normalizeQuestion(text: string) {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function mergePendingQuestions(
+  pendingItems: LearnPendingItem[],
+  historyItems: AggregatedQuestionItem[]
+): AggregatedQuestionItem[] {
+  const historyByText = new Map(
+    historyItems.map((item) => [normalizeQuestion(item.questionText), item])
+  );
+
+  return pendingItems.map((item) => {
+    const history = historyByText.get(normalizeQuestion(item.question_text));
+    return {
+      key: `waiting-${item.question_id}`,
+      waitingQuestionId: item.question_id,
+      questionText: item.question_text,
+      firstAskedAt: history?.firstAskedAt ?? item.created_at,
+      lastAskedAt: history?.lastAskedAt ?? item.created_at,
+      distinctStaffCount: history?.distinctStaffCount ?? 1,
+      occurrenceCount: history?.occurrenceCount ?? 1,
+      status: "WAITING",
+      answerText: null,
+      messageId: history?.messageId ?? -item.question_id,
+    };
+  });
 }
 
 export default function QuestionsPage() {
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const params = useSearchParams();
   const { state } = useApp();
-  const targetQuestionId = /^\d+$/.test(params.get("question_id") ?? "")
-    ? Number(params.get("question_id"))
-    : null;
   const queryClient = useQueryClient();
+
+  const [activeTab, setActiveTab] = useState<"waiting" | "all">("waiting");
+  const [selectedQuestion, setSelectedQuestion] = useState<AggregatedQuestionItem | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const targetQuestionId = /^\d+$/.test(searchParams.get("question_id") ?? "")
+    ? Number(searchParams.get("question_id"))
+    : null;
+
   const questions = useQuery(questionsQuery(state.token, state.storeId));
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const answer = useMutation({
-    mutationFn: ({ questionId, text }: { questionId: number; messageId: number; text: string }) =>
+  const pending = useQuery(pendingQuery(state.token, state.storeId));
+  const historyItems = useMemo(
+    () => aggregateQuestions(questions.data?.items ?? []),
+    [questions.data?.items]
+  );
+
+  const waitingItems = useMemo(
+    () => mergePendingQuestions(pending.data?.items ?? [], historyItems),
+    [historyItems, pending.data?.items]
+  );
+
+  const aggregated = useMemo(() => {
+    const waitingTexts = new Set(waitingItems.map((item) => normalizeQuestion(item.questionText)));
+    return [
+      ...waitingItems,
+      ...historyItems.filter(
+        (item) =>
+          item.status !== "WAITING" && !waitingTexts.has(normalizeQuestion(item.questionText))
+      ),
+    ];
+  }, [historyItems, waitingItems]);
+
+  const displayedItems = activeTab === "waiting" ? waitingItems : aggregated;
+  const targetQuestion = useMemo(
+    () =>
+      targetQuestionId === null
+        ? null
+        : waitingItems.find((item) => item.waitingQuestionId === targetQuestionId) ?? null,
+    [targetQuestionId, waitingItems]
+  );
+  const activeQuestion = selectedQuestion ?? targetQuestion;
+
+  function closeAnswerSheet() {
+    setSelectedQuestion(null);
+    if (targetQuestionId !== null) router.replace("/owner/questions");
+  }
+
+  const answerMutation = useMutation({
+    mutationFn: ({ questionId, text }: { questionId: number; text: string }) =>
       answerPending(questionId, text, state.token!),
-    onSuccess: async (_, variables) => {
-      setDrafts((d) => ({ ...d, [variables.messageId]: "" }));
+    onSuccess: async () => {
+      setSubmitError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.questions(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.pending(state.storeId) }),
@@ -48,80 +190,128 @@ export default function QuestionsPage() {
         queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) }),
       ]);
     },
+    onError: (err) => {
+      setSubmitError(
+        err instanceof ApiError
+          ? err.detail || "답변을 저장하지 못했어요."
+          : "서버에 연결할 수 없습니다. 입력 내용은 보존되었습니다."
+      );
+    },
   });
 
-  const allItems = questions.data?.items ?? [];
-  const showAll = params.get("view") === "all";
-  const items = showAll ? allItems : allItems.filter((item) => item.status === "WAITING");
-  const error = questions.error ?? answer.error;
-  const errorText = error instanceof ApiError
-    ? error.detail || "질문을 불러오지 못했어요"
-    : error
-      ? "서버에 연결할 수 없습니다"
-      : null;
-
-  async function submitAnswer(item: LearnQuestionItem) {
-    const waitingId = item.waiting_question_id;
-    const text = drafts[item.message_id]?.trim();
-    if (!waitingId || !text || !state.token || answer.isPending) return;
-    answer.mutate({ questionId: waitingId, messageId: item.message_id, text });
+  async function handleAnswerSubmit(questionId: number, answerText: string) {
+    setSubmitError(null);
+    await answerMutation.mutateAsync({ questionId, text: answerText });
   }
 
+  const queryError = pending.error ?? questions.error;
+  const queryErrorMessage = queryError instanceof ApiError
+    ? queryError.detail || "질문 목록을 불러오지 못했어요."
+    : queryError
+    ? "서버에 연결할 수 없습니다."
+    : null;
+
   return (
-    <Shell>
-      <TopBar title="전체 질문" backHref="/owner/dashboard" />
-      <div className="px-5 pb-3"><OwnerPrimaryNav /></div>
-      <div className="px-5 pt-1 pb-3">
-        <BuddyBubble text={params.get("view") === "all" ? "알바가 물은 질문과 답변 기록을 최신순으로 보여 드려요." : "아직 근거가 부족해 사장님 답변을 기다리는 질문이에요."} />
-      </div>
-      <div className="px-5 flex-1 overflow-y-auto pb-6 space-y-3">
-        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-surface-muted p-1.5">
-          <button onClick={() => router.replace("/owner/questions")} className={`min-h-11 rounded-xl text-xs font-bold ${!showAll ? "bg-surface text-brand-700 shadow-sm" : "text-muted"}`}>답변 대기</button>
-          <button onClick={() => router.replace("/owner/questions?view=all")} className={`min-h-11 rounded-xl text-xs font-bold ${showAll ? "bg-surface text-brand-700 shadow-sm" : "text-muted"}`}>전체 질문</button>
+    <div className="flex-1 flex flex-col w-full bg-background min-h-dvh">
+      <OwnerPageHeader
+        title="답변 대기"
+        subtitle="매장 지식으로 답하지 못한 직원 질문"
+        isFetching={questions.isFetching || pending.isFetching}
+        isLoading={questions.isLoading || pending.isLoading}
+      />
+
+      {/* 메인 콘텐츠 (하단 탭 바 높이 고려 pb-24) */}
+      <main className="flex-1 space-y-3.5 px-4 py-3.5 pb-24 overflow-y-auto">
+        {/* 필터 세그먼트 (대기 중 / 전체 질문) */}
+        <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-surface-muted p-1.5 border border-border/50">
+          <button
+            type="button"
+            onClick={() => setActiveTab("waiting")}
+            className={`min-h-[44px] rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+              activeTab === "waiting"
+                ? "bg-surface text-brand-700 shadow-xs"
+                : "text-muted hover:text-foreground"
+            }`}
+          >
+            <span>답변 대기</span>
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                waitingItems.length > 0
+                  ? "bg-warn-500 text-white"
+                  : "bg-surface-muted text-muted"
+              }`}
+            >
+              {waitingItems.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("all")}
+            className={`min-h-[44px] rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+              activeTab === "all"
+                ? "bg-surface text-brand-700 shadow-xs"
+                : "text-muted hover:text-foreground"
+            }`}
+          >
+            <span>전체 질문</span>
+            <span className="text-[10px] font-medium text-muted">
+              ({aggregated.length})
+            </span>
+          </button>
         </div>
-        {questions.isFetching && !questions.isLoading && <p className="text-[11px] text-muted">최신 질문 확인 중…</p>}
-        {questions.isLoading && <div className="space-y-3" aria-label="질문 불러오는 중">{[0, 1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-2xl bg-surface-muted" />)}</div>}
-        {errorText && <p className="text-xs font-medium text-[#E57373]">{errorText}</p>}
-        {!questions.isLoading && items.length === 0 && !errorText && (
-          <Card className="p-6 text-center text-sm text-muted">{showAll ? "아직 질문이 없어요" : "답변을 기다리는 질문이 없어요 🎉"}</Card>
+
+        {/* 쿼리 에러 안내 */}
+        {queryErrorMessage && (
+          <InlineError
+            message={queryErrorMessage}
+            onRetry={() => {
+              void Promise.all([pending.refetch(), questions.refetch()]);
+            }}
+          />
         )}
-        {items.map((q) => {
-          const badge = statusBadge(q.status);
-          const canAnswer = q.status === "WAITING" && q.waiting_question_id != null;
-          return (
-            <Card key={q.message_id} className={`p-4 space-y-3 ${q.waiting_question_id === targetQuestionId ? "border-brand-500 ring-2 ring-brand-500/20" : ""}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted">
-                    {q.asked_by}님 · {formatAskedAt(q.created_at)}
-                  </p>
-                  <p className="text-sm font-medium mt-0.5">{q.question_text}</p>
-                </div>
-                <Badge tone={badge.tone}>{badge.label}</Badge>
-              </div>
-              {q.answer_text && (
-                <p className="text-sm text-foreground whitespace-pre-wrap bg-brand-50 rounded-xl px-3 py-2">
-                  {q.answer_text}
-                </p>
-              )}
-              {canAnswer && (
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="답변을 입력하세요"
-                    value={drafts[q.message_id] ?? ""}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [q.message_id]: e.target.value }))}
-                    onKeyDown={(e) => e.key === "Enter" && submitAnswer(q)}
-                    disabled={answer.isPending && answer.variables?.questionId === q.waiting_question_id}
-                  />
-                  <Button onClick={() => submitAnswer(q)} disabled={answer.isPending}>
-                    {answer.isPending && answer.variables?.questionId === q.waiting_question_id ? "저장 중" : "답변"}
-                  </Button>
-                </div>
-              )}
-            </Card>
-          );
-        })}
-      </div>
-    </Shell>
+
+        {/* 로딩 스켈레톤 */}
+        {(questions.isLoading || pending.isLoading) && displayedItems.length === 0 && (
+          <div className="space-y-3 pt-1">
+            <SkeletonList count={4} heightClass="h-28" label="질문 목록 불러오는 중" />
+          </div>
+        )}
+
+        {/* 빈 상태 (가짜 데이터 없음) */}
+        {!questions.isLoading && !pending.isLoading && !queryErrorMessage && displayedItems.length === 0 && (
+          <EmptyState
+            icon={activeTab === "waiting" ? "🎉" : "💬"}
+            title={activeTab === "waiting" ? "답변을 기다리는 질문이 없어요" : "아직 등록된 질문이 없어요"}
+            description={
+              activeTab === "waiting"
+                ? "직원이 모르는 업무를 질문하면 사장님 답변을 위해 여기에 모입니다."
+                : "직원이 Buddy에게 질문을 시작하면 이곳에서 전체 질의응답 이력을 확인할 수 있습니다."
+            }
+          />
+        )}
+
+        {/* 질문 카드 목록 */}
+        <div className="space-y-2.5">
+          {displayedItems.map((item) => (
+            <PendingQuestionCard
+              key={item.key}
+              item={item}
+              isSelected={item.key === activeQuestion?.key}
+              onSelect={(selected) => setSelectedQuestion(selected)}
+            />
+          ))}
+        </div>
+      </main>
+
+      {/* 모바일 바텀시트 답변 창 */}
+      <AnswerQuestionSheet
+        key={activeQuestion?.key ?? "closed"}
+        item={activeQuestion}
+        onClose={closeAnswerSheet}
+        onSubmit={handleAnswerSubmit}
+        isSubmitting={answerMutation.isPending}
+        error={submitError}
+      />
+    </div>
   );
 }
