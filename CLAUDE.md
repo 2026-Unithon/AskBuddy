@@ -189,7 +189,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
   `python3 .claude/skills/store-isolation-check/check_store_id.py api/app/<폴더>` 로 돈다.
   검토를 마친 예외만 `# store-isolation-ok: <사유>` 로 못 박는다. 사유 없는 면제는 무시된다.
 - `web/` 에는 단위 테스트 러너가 없다. "테스트 통과" 라고 쓰지 않는다.
-  정적 검사(`pnpm check`)와 브라우저 확인을 구분해서 보고한다. 자동 E2E 는 13.3 범위다.
+  정적 검사(`pnpm check`)와 브라우저 확인을 구분해서 보고한다. 자동 E2E 는 13.6 범위다.
 - 확인하지 않은 항목을 완료로 적지 않는다. 브라우저를 못 띄웠으면 그렇게 쓴다.
 
 ---
