@@ -195,7 +195,11 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         f"# 추출 평가 {run_id} — {slug} · {label}",
         "",
         f"- 코드 `{snapshot['code_version']}` · 프롬프트 `{snapshot['prompt_version']}`",
-        f"- 모델 `{snapshot['extract_model']}` · ingest_mode `{snapshot['ingest_mode']}`",
+        f"- 모델 `{snapshot['extract_model']}` · ingest_mode `{snapshot['ingest_mode']}`"
+        f" · temp `{snapshot['extract_temperature']}`",
+        f"- 영상 `{snapshot['video_input_mode']}` · 프레임 상한 "
+        f"`{snapshot['video_max_frames_to_model'] or '없음'}`"
+        f" · 간격 {snapshot['frame_interval_sec']}초",
         f"- 사실 {metrics['fact_count']}건 · 생성 카드 {metrics['card_count']}장",
         "",
     ]

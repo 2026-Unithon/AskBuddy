@@ -4,7 +4,11 @@
   python scripts/reset_eval_store.py --store store-a
 
 **평가 매장(eval-*)에서만 동작한다.** demo-cafe 나 실제 매장에는 쓰지 않는다.
-평가 실행 이력(extraction_runs·evaluation_runs)은 지우지 않는다 — 그건 영구 기록이다.
+평가 실행 이력은 기본적으로 지우지 않는다 — 그건 영구 기록이다.
+
+`--purge-runs` 는 그 예외다. 정답지가 바뀌어 이전 실행과 분모가 달라졌을 때만 쓴다.
+분모가 다른 실행을 남겨두면 나중에 같은 축으로 비교하려다 틀린 결론을 낸다.
+동결 트리거를 일시 해제하므로 명시적으로 요청할 때만 실행한다.
 """
 from __future__ import annotations
 
@@ -46,6 +50,9 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", required=True, help="eval-a 또는 store-a 형식 둘 다 받는다")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--purge-runs", action="store_true",
+                    help="이 매장의 평가 실행 이력까지 지운다. 정답지가 바뀌어 "
+                         "이전 실행과 분모가 달라졌을 때만 쓴다")
     args = ap.parse_args()
 
     slug = args.store.replace("store-", "eval-")
@@ -76,7 +83,39 @@ async def main() -> int:
                 n = result.rsplit(" ", 1)[-1]
                 if n not in ("0",):
                     print(f"  {name:<22} {n}")
-        print("초기화 완료. 평가 실행 이력은 그대로 남아 있다")
+        if args.purge_runs:
+            async with conn.transaction():
+                # 동결 트리거를 일시 해제한다. 예외적 작업이므로 범위를 최소로 둔다
+                await conn.execute("alter table extraction_results disable trigger "
+                                   "trg_extraction_results_append_only")
+                await conn.execute("alter table extraction_runs disable trigger "
+                                   "trg_extraction_runs_freeze")
+                await conn.execute("alter table evaluation_results disable trigger "
+                                   "trg_evaluation_results_append_only")
+                await conn.execute("alter table evaluation_runs disable trigger "
+                                   "trg_evaluation_runs_freeze")
+                try:
+                    for name, sql in [
+                        ("extraction_results", "delete from extraction_results where store_id=$1"),
+                        ("extraction_runs",    "delete from extraction_runs where store_id=$1"),
+                        ("evaluation_results", "delete from evaluation_results where store_id=$1"),
+                        ("evaluation_runs",    "delete from evaluation_runs where store_id=$1"),
+                    ]:
+                        n = (await conn.execute(sql, store_id)).rsplit(" ", 1)[-1]
+                        if n != "0":
+                            print(f"  {name:<22} {n}  (이력 삭제)")
+                finally:
+                    await conn.execute("alter table extraction_results enable trigger "
+                                       "trg_extraction_results_append_only")
+                    await conn.execute("alter table extraction_runs enable trigger "
+                                       "trg_extraction_runs_freeze")
+                    await conn.execute("alter table evaluation_results enable trigger "
+                                       "trg_evaluation_results_append_only")
+                    await conn.execute("alter table evaluation_runs enable trigger "
+                                       "trg_evaluation_runs_freeze")
+            print("초기화 완료. **평가 실행 이력도 지웠다** — 새 정답지로 처음부터 다시 잰다")
+        else:
+            print("초기화 완료. 평가 실행 이력은 그대로 남아 있다")
     finally:
         await conn.close()
     return 0
