@@ -25,7 +25,7 @@ STORES = [
     ("eval-b", "평가매장 B", "dev"),
     ("eval-c", "평가매장 C", "holdout"),
     ("eval-d", "평가매장 D", "holdout"),
-    ("eval-e", "평가매장 E", "holdout"),
+    # eval-e·eval-f 는 자료 수집 후 추가한다. holdout 으로 고정
 ]
 
 

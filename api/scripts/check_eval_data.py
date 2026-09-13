@@ -22,8 +22,12 @@ SOURCE_TYPES = {"VIDEO", "VOICE", "SCAN", "KAKAO"}
 AUTHORITY = {"OWNER_ANSWER": 1, "RECIPE_BOOK": 2, "NOTICE": 2, "OTHER": 3}
 LOCATOR_TYPES = {"PAGE", "TIMESTAMP", "LINE", "WHOLE_SOURCE"}
 
-# 브랜드명이 새어 들어가는 것을 막는다. 익명 slug 만 쓴다
-_BRAND_HINT = re.compile(r"[가-힣A-Za-z]{2,}\s*(커피|카페|coffee|cafe)\b", re.I)
+# 브랜드명이 새어 들어가는 것을 막는다.
+# 패턴 매칭은 쓰지 않는다 — "흑임자커피" 같은 익명화된 일반 메뉴명까지 잡아서 거짓 양성만 낸다.
+# 대신 MENU_MAP.json 의 원본 표현(키)을 금칙어로 삼는다. 매핑을 만들면 검사도 따라 강해진다.
+MENU_MAP = "MENU_MAP.json"
+# 매핑에 없더라도 항상 막는 표현
+_BRAND_ALWAYS = ("메가", "스타벅스", "이디야", "투썸", "컴포즈", "빽다방", "starbucks", "ediya")
 
 
 def _fail(problems: list[str], msg: str) -> None:
@@ -145,17 +149,48 @@ def check_facts(path: Path, source_keys: dict[str, str], problems: list[str]) ->
     return len(facts)
 
 
+def _brand_terms(store_dir: Path) -> list[str]:
+    """금칙어 = MENU_MAP.json 의 원본 표현 + 상시 금지 목록."""
+    terms = list(_BRAND_ALWAYS)
+    mapping = store_dir / MENU_MAP
+    if mapping.exists():
+        try:
+            data = json.loads(mapping.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return terms
+        terms += [k for k in data if not k.startswith("_")]
+    # 긴 것부터 봐야 "왕할메가커피" 가 "메가" 로 잘리지 않는다
+    return sorted(set(terms), key=len, reverse=True)
+
+
 def check_brand_leak(store_dir: Path, problems: list[str]) -> None:
-    """JSON 안에 브랜드명이 새어 들어갔는지 본다."""
-    for path in sorted(store_dir.rglob("*.json")):
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            m = _BRAND_HINT.search(line)
-            if m:
-                _fail(
-                    problems,
-                    f"{path}:{lineno}: 브랜드·상호로 보이는 표현 '{m.group(0).strip()}'. "
-                    f"익명 slug 만 쓴다 (CLAUDE.md)",
-                )
+    """브랜드 원본 표현이 산출물에 새어 들어갔는지 본다.
+
+    MENU_MAP.json 자체는 검사하지 않는다. 원본↔익명 매핑을 담는 것이 그 파일의 용도다.
+    대신 Git 에 올라가지 않는지만 확인한다.
+    """
+    terms = _brand_terms(store_dir)
+    targets = [
+        p for p in sorted(store_dir.rglob("*"))
+        if p.is_file() and p.name != MENU_MAP and p.suffix in (".json", ".md", ".txt")
+    ]
+    for path in targets:
+        for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for term in terms:
+                if term and term.lower() in line.lower():
+                    _fail(
+                        problems,
+                        f"{path}:{lineno}: 브랜드 표현 '{term}'. "
+                        f"MENU_MAP.json 의 익명 표현으로 바꾼다 (CLAUDE.md)",
+                    )
+                    break
+
+    # 파일·디렉터리 이름에도 남으면 안 된다
+    for path in sorted(store_dir.rglob("*")):
+        for term in terms:
+            if term.lower() in path.name.lower():
+                _fail(problems, f"{path}: 파일명에 브랜드 표현 '{term}' 이 있다")
+                break
 
 
 def main() -> int:
