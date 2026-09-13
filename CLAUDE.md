@@ -37,6 +37,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 |---|---|
 | `docs/ASKBUDDY_MVP_CURRENT.md` | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
 | `docs/DEV_TODO_CURRENT.md` | 남은 12.5~15단계의 실행 순서와 완료 기준 |
+| `docs/이관경계_실험설계.md` | 무엇을 모델에 넘기고 무엇을 우리가 쥐는가. 플래그·실험 순서·게이트 지표 |
 | `UI/` | 화면 목업 24장. 프론트 작업 전 반드시 볼 것 |
 | `db/001_init_schema.sql` | 초기 스키마(24 테이블). `users` 에 `email`·`password_hash` 포함 |
 | `supabase/migrations/` | 적용 가능한 스키마 변경 이력. 신규 컬럼·테이블의 실행 기준 |
@@ -167,6 +168,29 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 - `pip freeze > requirements.txt` (공용 파일을 통째로 덮어쓴다. 한 줄씩 append)
 - 인증을 우회하는 엔드포인트 추가. 로컬 토큰은 `api/scripts/dev_token.py` 로 만든다
 - `web/` 에 Supabase 클라이언트·LLM 키·DB 자격증명 배치
+
+---
+
+## 개발 스킬
+
+작업 종류에 따라 아래 스킬을 **작업을 마쳤다고 보고하기 전에** 쓴다.
+스킬은 규칙을 다시 적어둔 문서가 아니라, 규칙이 지켜졌는지 확인하는 절차다.
+
+| 스킬 | 언제 | 위치 |
+|---|---|---|
+| `store-isolation-check` | `api/app/`·`supabase/migrations/`·`db/` 를 건드렸을 때 | 저장소 전용 |
+| `web-async-state-check` | `web/` 의 query·mutation·lifecycle 을 건드렸을 때 | 저장소 전용 |
+| `ui-state-walkthrough` | 화면을 추가·수정하고 실제 동작을 확인할 때 | 저장소 전용 |
+| superpowers 의 TDD·체계적 디버깅 | 기능 구현과 버그 추적 전반 | 플러그인 |
+
+저장소 전용 스킬은 `.claude/skills/<이름>/SKILL.md` 에 있다.
+
+- 매장 격리 정적 검사는 grep 이 아니라
+  `python3 .claude/skills/store-isolation-check/check_store_id.py api/app/<폴더>` 로 돈다.
+  검토를 마친 예외만 `# store-isolation-ok: <사유>` 로 못 박는다. 사유 없는 면제는 무시된다.
+- `web/` 에는 단위 테스트 러너가 없다. "테스트 통과" 라고 쓰지 않는다.
+  정적 검사(`pnpm check`)와 브라우저 확인을 구분해서 보고한다. 자동 E2E 는 13.3 범위다.
+- 확인하지 않은 항목을 완료로 적지 않는다. 브라우저를 못 띄웠으면 그렇게 쓴다.
 
 ---
 

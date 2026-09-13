@@ -35,3 +35,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - query key에는 반드시 storeId와 필요한 식별자를 포함한다.
 - eslint-disable 주석으로 오류를 숨기지 않는다.
 - 변경 완료 전 lint, typecheck, test, build, 관련 E2E를 실행한다.
+
+# 검증 스킬
+
+규칙을 지켰는지 **확인하는 절차**는 저장소 스킬에 있다. 작업을 마쳤다고 보고하기 전에 쓴다.
+
+- `web-async-state-check` — 금지 패턴 탐색, query key·mutation·job 복원 검사. `pnpm check` 포함
+- `ui-state-walkthrough` — 브라우저에서 로딩·빈 상태·오류·재시도·이동·복원·연타를 실제로 확인
+
+`web/` 에는 단위 테스트 러너가 없다(vitest·jest 없음). "테스트가 통과했다" 고 쓰지 않는다.
+정적 검사와 브라우저 확인을 구분해서 보고한다. 자동 E2E 는 13.3 단계에서 들어온다.
