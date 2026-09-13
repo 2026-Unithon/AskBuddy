@@ -48,8 +48,13 @@ async def mint(
     role: str = "OWNER",
     *,
     force: bool = False,
+    team: bool = False,
 ) -> str:
-    """시드 매장 JWT. 기본 거부. force=True 또는 ALLOW_DEV_TOKEN=1 일 때만 발급."""
+    """시드 매장 JWT. 기본 거부. force=True 또는 ALLOW_DEV_TOKEN=1 일 때만 발급.
+
+    team=True 면 scope="team" 을 실어 /team/* 내부 평가 API 를 열어준다.
+    /auth 로그인 토큰에는 이 값이 없으므로 점주·직원 계정으로는 들어갈 수 없다.
+    """
     if not _allowed(force):
         raise RuntimeError(_DISABLE_MSG)
 
@@ -75,12 +80,15 @@ async def mint(
             f"'{slug}' 매장의 {role} 를 찾지 못했다. db/002_seed_demo.sql 를 먼저 적용하라"
         )
 
-    return create_token({
+    payload = {
         "store_id": row["store_id"],
         "user_id": row["user_id"],
         "member_id": row["member_id"],
         "role": role,
-    })
+    }
+    if team:
+        payload["scope"] = "team"
+    return create_token(payload)
 
 
 async def main() -> int:
@@ -94,10 +102,15 @@ async def main() -> int:
         action="store_true",
         help="비활성화를 무시하고 발급 (로컬 임시용)",
     )
+    ap.add_argument(
+        "--team",
+        action="store_true",
+        help='scope="team" 을 실어 /team/* 내부 평가 API 를 연다',
+    )
     args = ap.parse_args()
 
     try:
-        print(await mint(args.slug, args.role, force=args.force))
+        print(await mint(args.slug, args.role, force=args.force, team=args.team))
     except (RuntimeError, LookupError) as e:
         print(e, file=sys.stderr)
         return 1

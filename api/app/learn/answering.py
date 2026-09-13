@@ -28,6 +28,9 @@ class AnswerComposition:
     source: Literal["CARD_ORIGINAL", "GROUNDED_LLM"]
     grounding_status: Literal["VERIFIED", "FALLBACK"]
     fallback_reason: str | None = None
+    # 평가 하네스가 질문당 비용을 계산하려면 토큰이 필요하다.
+    # 제품 경로는 읽지 않으므로 폴백에서는 None 이다.
+    usage: dict[str, int] | None = None
 
 
 _WORD = re.compile(r"[0-9A-Za-z가-힣]+")
@@ -100,7 +103,24 @@ def validate_grounded_payload(
     return True, None, selected
 
 
-def _fallback(candidates: list[dict], reason: str | None = None) -> AnswerComposition:
+def _usage_of(response: object) -> dict[str, int] | None:
+    """모델 응답의 토큰 사용량. SDK 버전에 따라 없을 수 있으므로 실패해도 조용히 넘긴다."""
+    meta = getattr(response, "usage_metadata", None)
+    if meta is None:
+        return None
+    prompt = getattr(meta, "prompt_token_count", None)
+    completion = getattr(meta, "candidates_token_count", None)
+    if prompt is None and completion is None:
+        return None
+    return {"prompt_tokens": int(prompt or 0), "completion_tokens": int(completion or 0)}
+
+
+def _fallback(
+    candidates: list[dict],
+    reason: str | None = None,
+    *,
+    usage: dict[str, int] | None = None,
+) -> AnswerComposition:
     top = candidates[0]
     return AnswerComposition(
         content=top["content"],
@@ -108,6 +128,7 @@ def _fallback(candidates: list[dict], reason: str | None = None) -> AnswerCompos
         source="CARD_ORIGINAL",
         grounding_status="FALLBACK",
         fallback_reason=reason,
+        usage=usage,
     )
 
 
@@ -151,15 +172,17 @@ async def compose_grounded_answer(
                 temperature=0.0,
             ),
         )
+        usage = _usage_of(response)
         payload = GroundedAnswerPayload.model_validate_json(response.text or "")
         valid, reason, selected = validate_grounded_payload(payload, candidates[:3])
         if not valid:
-            return _fallback(candidates, reason)
+            return _fallback(candidates, reason, usage=usage)
         return AnswerComposition(
             content=payload.answer.strip(),
             candidates=selected,
             source="GROUNDED_LLM",
             grounding_status="VERIFIED",
+            usage=usage,
         )
     except Exception as exc:
         logger.warning("grounded answer generation failed; using card original: %s", exc)
