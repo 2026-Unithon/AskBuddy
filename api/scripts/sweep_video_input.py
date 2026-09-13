@@ -18,6 +18,11 @@
 **변동폭을 모르면 어떤 실험도 해석할 수 없다.** 같은 설정 3회의 편차보다 작은
 차이는 신호가 아니라 잡음이다. `--repeat` 를 먼저 돌려 그 선을 정한다.
 
+`--control` 은 기준 설정을 다른 이름으로 한 번 더 돌려 **음성 대조군**을 만든다.
+차이가 없어야 하는 두 군에서 나온 값이 곧 잡음의 크기다.
+프레임 실험에서 60장(=64장 전부)과 '전부' 가 +5건 차이를 낸 적이 있다 —
+대조군이 없었으면 그 오차를 효과로 읽고 틀린 결정을 내렸을 것이다.
+
 한 번에 하나씩만 바꾼다 (0절 실험 규율). 프레임 수를 바꿀 때 모드는 고정이고,
 모드를 바꿀 때 프레임 수는 기준값으로 되돌린다.
 
@@ -74,6 +79,9 @@ def main() -> int:
                     help="원본 앞 N초만 쓰는 클립을 만들어 native 를 먼저 재본다")
     ap.add_argument("--reps", type=int, default=3,
                     help="조합마다 반복할 횟수. 추출이 비결정적이라 1회로는 판정할 수 없다")
+    ap.add_argument("--control", action="store_true",
+                    help="기준 설정을 다른 이름으로 한 번 더 돌려 음성 대조군을 만든다. "
+                         "여기서 나온 차이가 잡음의 크기다")
     ap.add_argument("--fresh-sources", action="store_true",
                     help="자료를 다시 올리고 STT 도 다시 돌린다. 기본은 재사용(빠르고 STT 변동 제거)")
     ap.add_argument("--allow-holdout", action="store_true")
@@ -103,6 +111,9 @@ def main() -> int:
             combos.append((f"E-temp{temp:g}", {"EXTRACT_TEMPERATURE": str(temp)}))
         if args.native:
             combos.append(("E4-native", {"VIDEO_INPUT_MODE": "native"}))
+        if args.control:
+            # 설정을 바꾸지 않은 군. 여기서 나오는 차이가 곧 잡음이다
+            combos.append(("CTRL-baseline", {}))
 
     if not combos:
         print("실행할 조합이 없다. --repeat / --frames / --temps / --native 중 하나를 준다",
