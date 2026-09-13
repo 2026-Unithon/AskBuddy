@@ -268,6 +268,9 @@ async def main() -> int:
                     help="holdout 매장을 연다. 한 번 열면 되돌릴 수 없다")
     ap.add_argument("--reuse-cards", action="store_true",
                     help="자료를 다시 넣지 않고 기존 카드로 채점만 한다")
+    ap.add_argument("--reuse-sources", action="store_true",
+                    help="이미 올린 자료를 다시 태운다. 업로드와 STT 를 건너뛰므로 "
+                         "추출 변동만 분리해서 잴 수 있다")
     ap.add_argument("--notes", default=None)
     args = ap.parse_args()
 
@@ -286,6 +289,7 @@ async def main() -> int:
     truth_confidence = "OWNER" if confirmed is True else "TEST"
 
     s = get_settings()
+    # 스윕하는 값은 반드시 여기 남아야 한다. 없으면 결과를 설정에 귀속시킬 수 없다
     snapshot = {
         "code_version": code_version(),
         "prompt_version": prompt_digest("extract_cards.ko.txt"),
@@ -293,6 +297,10 @@ async def main() -> int:
         "stt_model": s.stt_model,
         "ingest_mode": s.ingest_mode,
         "embedding_model": s.embedding_model,
+        "extract_temperature": s.extract_temperature,
+        "video_input_mode": s.video_input_mode,
+        "video_max_frames_to_model": s.video_max_frames_to_model,
+        "frame_interval_sec": s.frame_interval_sec,
     }
 
     await init_pool()
@@ -369,6 +377,14 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
     """자료 적재 → 추출 → 채점 → 저장. 실패하면 호출부가 실행을 FAILED 로 닫는다."""
     if args.reuse_cards:
         print("  기존 카드로 채점만 한다 (--reuse-cards)")
+    elif args.reuse_sources:
+        rows = await conn.fetch(
+            "select source_id from sources where store_id = $1 order by source_id",
+            store_id)
+        if not rows:
+            raise RuntimeError("올려둔 자료가 없다. --reuse-sources 없이 먼저 한 번 돌린다")
+        print(f"  기존 자료 {len(rows)}건을 다시 태운다 (업로드·STT 건너뜀)")
+        await run_pipeline(store_id, [int(r["source_id"]) for r in rows])
     else:
         print("  자료 적재")
         mapping = await ingest_sources(conn, store_id, store_dir, manifest, owner)

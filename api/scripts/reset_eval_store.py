@@ -50,6 +50,9 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", required=True, help="eval-a 또는 store-a 형식 둘 다 받는다")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--keep-sources", action="store_true",
+                    help="카드만 지우고 자료·전사문은 남긴다. 재업로드와 STT 를 건너뛰므로 "
+                         "추출 변동만 따로 재거나 실험을 빠르게 반복할 때 쓴다")
     ap.add_argument("--purge-runs", action="store_true",
                     help="이 매장의 평가 실행 이력까지 지운다. 정답지가 바뀌어 "
                          "이전 실행과 분모가 달라졌을 때만 쓴다")
@@ -77,8 +80,16 @@ async def main() -> int:
             print("dry-run. 지우지 않았다")
             return 0
 
+        steps = STEPS
+        if args.keep_sources:
+            # 자료·전사문·프레임은 남긴다. 파이프라인이 기존 전사문을 재사용한다
+            keep = {"source_video", "source_voice", "source_kakao", "source_scan",
+                    "source_frames", "sources"}
+            steps = [(n, q) for n, q in STEPS if n not in keep]
+            print("  (--keep-sources: 자료·전사문 유지)")
+
         async with conn.transaction():
-            for name, sql in STEPS:
+            for name, sql in steps:
                 result = await conn.execute(sql, store_id)
                 n = result.rsplit(" ", 1)[-1]
                 if n not in ("0",):

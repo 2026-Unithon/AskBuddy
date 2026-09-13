@@ -18,6 +18,19 @@ Verdict = Literal["COVERED", "PARTIAL", "MISSING"]
 _WORD = re.compile(r"[0-9A-Za-z가-힣]+")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
+# 조사·어미. 긴 것부터 떼어낸다.
+# reg/retrieve.py 에 같은 성격의 목록이 따로 있다. 14.4 에서 하나로 합친다 —
+# 지금 합치면 검색 동작이 함께 바뀌어 기준선과 비교가 끊긴다.
+_TAIL = (
+    "합니다", "입니다", "됩니다", "습니다", "해주세요", "하세요", "한다", "된다",
+    "이다", "이며", "하며", "하고", "해서", "에서", "으로", "한테", "에게",
+    "까지", "부터", "이랑", "보다", "처럼", "이라", "라고",
+    "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "로", "과", "와", "랑",
+)
+# 한 글자여도 근거가 되는 말이 있다 — 물·샷·컵·잔.
+# 아래 글자들만 근거가 못 된다고 본다 (reg/retrieve.py 의 _STOP1 과 같은 취지)
+_STOP1 = set("것거때곳수개몇왜뭐등안잘좀더또그이저첫한두세네위밑앞뒤옆말일분초년월를을은는가에의도만로와과")
+
 # 규격 표기 흔들림. HOT 카드와 ICE 카드가 뒤섞이는 것을 막는다
 _VARIANT_SYNONYMS: dict[str, tuple[str, ...]] = {
     "HOT": ("hot", "핫", "따뜻", "뜨거", "온음료"),
@@ -36,8 +49,49 @@ def normalize(text: str) -> str:
     return " ".join(_WORD.findall((text or "").lower()))
 
 
+def stem(word: str) -> str:
+    """낱말 끝의 조사·어미를 뗀다. "스푼을" → "스푼", "처리합니다" → "처리"."""
+    for tail in _TAIL:
+        if word.endswith(tail) and len(word) - len(tail) >= 1:
+            return word[: -len(tail)]
+    return word
+
+
 def _tokens(text: str) -> set[str]:
-    return {t for t in normalize(text).split() if t not in _VALUE_STOP and len(t) >= 2}
+    """비교에 쓸 낱말. 한 글자라도 근거가 되면 살린다 (물·샷·컵)."""
+    out: set[str] = set()
+    for raw in normalize(text).split():
+        if raw in _VALUE_STOP:
+            continue
+        for form in {raw, stem(raw)}:
+            if not form or form in _VALUE_STOP:
+                continue
+            if len(form) == 1 and form in _STOP1:
+                continue
+            out.add(form)
+    return out
+
+
+def _near(a: str, b: str) -> bool:
+    """한 음절만 다른 같은 말인가. "포터필터" ↔ "포타필터".
+
+    현장 표기가 흔들리는 경우가 잦다. 길이가 같고 한 자리만 다를 때만 인정한다 —
+    더 느슨하게 잡으면 다른 메뉴끼리 붙는다.
+    """
+    if len(a) != len(b) or len(a) < 4:
+        return False
+    return sum(1 for x, y in zip(a, b) if x != y) == 1
+
+
+def _subject_in(subject: str, card_text: str) -> bool:
+    """대상이 카드에 나오는가. 표기 흔들림을 한 음절까지 허용한다."""
+    if not subject:
+        return False
+    want = normalize(subject)
+    hay = normalize(card_text)
+    if want in hay:
+        return True
+    return any(_near(want, w) or _near(want, stem(w)) for w in hay.split())
 
 
 def numbers_in(text: str) -> list[str]:
@@ -80,8 +134,7 @@ def _score_one(fact: dict[str, Any], card_text: str) -> FactMatch:
     value = fact.get("value") or ""
     variant = fact.get("variant")
 
-    haystack = normalize(card_text)
-    subject_hit = bool(subject) and normalize(subject) in haystack
+    subject_hit = _subject_in(subject, card_text)
     variant_hit = variant_present(variant, card_text)
 
     want_numbers = numbers_in(value)
@@ -128,7 +181,11 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]]) -> FactMatch:
     for card in cards:
         text = f"{card.get('title') or ''} {card.get('content') or ''}"
         m = _score_one(fact, text)
-        if (_RANK[m.verdict], m.score) > (_RANK[best.verdict], best.score):
+        # 같은 판정 안에서는 값이 든 카드를 먼저 집는다.
+        # 대상 이름만 겹치는 카드가 값을 담은 카드를 밀어내면 진단이 뒤집힌다
+        if (_RANK[m.verdict], m.value_hit, m.score) > (
+            _RANK[best.verdict], best.value_hit, best.score
+        ):
             best = FactMatch(
                 m.verdict, int(card["card_id"]), m.score, m.reason,
                 m.subject_hit, m.value_hit, m.variant_hit, m.number_ratio,
