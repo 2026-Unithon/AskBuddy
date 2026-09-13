@@ -117,7 +117,7 @@ async def _call(prompt: str, media: list[Path]) -> str:
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=ExtractionResult,
-            temperature=0.2,
+            temperature=s.extract_temperature,
         ),
     )
     return res.text or ""

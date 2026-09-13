@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # 몇 장이 최적인지는 가정하지 말고 하네스로 정한다
     video_max_frames_to_model: int = 20
 
+    # 추출 온도. 답변 생성은 D12 로 0.0 이 못 박혀 있는데 추출만 0.2 였다.
+    # 근거가 문서 어디에도 없었고, 같은 자료를 두 번 돌리면 손실률이 8%p 가까이 흔들렸다.
+    # 측정 도구의 오차가 측정하려는 효과보다 크면 실험이 성립하지 않으므로 0.0 을 기본으로 둔다.
+    # 0.2 단위로 올려가며 다양성 이득이 있는지는 하네스로 확인한다
+    extract_temperature: float = 0.0
+
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""
