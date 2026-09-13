@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import json
 import mimetypes
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,10 +37,71 @@ from app.team.extraction import ExtractionReport, aggregate, match_fact  # noqa:
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "eval" / "data"
+# manifest 의 authority 를 SCAN 문서 분류로 옮긴다
+_DOC_CATEGORY = {"RECIPE_BOOK": "RECIPE", "NOTICE": "MANUAL", "OWNER_ANSWER": "ETC", "OTHER": "ETC"}
 REPORT_DIR = Path(__file__).resolve().parents[1] / "eval" / "reports"
 
 
 # ── 자료 적재 ──────────────────────────────────────────────────────────────
+
+def _duration_sec(path: Path) -> int:
+    """ffprobe 로 길이를 잰다. 없거나 실패하면 0 — 파이프라인은 길이를 강제하지 않는다."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout.strip()
+        return int(float(out))
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return 0
+
+
+def _page_count(path: Path) -> int:
+    """PDF 쪽수. 이미지면 1장이다."""
+    if path.suffix.lower() != ".pdf":
+        return 1
+    try:
+        data = path.read_bytes()
+        return max(1, data.count(b"/Type /Page") - data.count(b"/Type /Pages")) or 1
+    except OSError:
+        return 1
+
+
+async def _create_child_row(
+    conn: asyncpg.Connection, source_id: int, source_type: str, path: Path,
+    doc_category: str | None = None,
+) -> None:
+    """유형별 자식 행. 파이프라인이 이 행을 전제로 전처리한다.
+
+    제품 경로에서는 POST /ingest/sources 가 만든다. 평가 스크립트도 같은 계약을 지킨다.
+    """
+    # video·voice 의 포맷은 소문자, scan 의 doc_type 은 대문자다 (DB check 제약)
+    ext = path.suffix.lstrip(".").lower()
+    if source_type == "VIDEO":
+        await ingest_repo.create_video(
+            conn, source_id,
+            video_format=ext, duration_sec=_duration_sec(path),
+            resolution=None, fps=None,
+        )
+    elif source_type == "VOICE":
+        await ingest_repo.create_voice(
+            conn, source_id,
+            audio_format=ext, duration_sec=_duration_sec(path),
+            record_method="UPLOAD", sample_rate=None,
+        )
+    elif source_type == "KAKAO":
+        await ingest_repo.create_kakao(
+            conn, source_id, import_type="TXT_EXPORT", room_name=None,
+        )
+    elif source_type == "SCAN":
+        doc_type = {"pdf": "PDF", "png": "PNG"}.get(ext, "JPG")
+        await ingest_repo.create_scan(
+            conn, source_id,
+            doc_type=doc_type, doc_category=doc_category, page_count=_page_count(path),
+        )
+    else:
+        raise ValueError(f"알 수 없는 source_type: {source_type}")
 
 async def ingest_sources(
     conn: asyncpg.Connection,
@@ -72,6 +134,10 @@ async def ingest_sources(
             content_hash=storage.sha256_of(path),
             mime_type=mimetypes.guess_type(path.name)[0],
             original_filename=path.name,
+        )
+        await _create_child_row(
+            conn, int(source_id), entry["type"], path,
+            doc_category=_DOC_CATEGORY.get(entry.get("authority", ""), "ETC"),
         )
         mapping[int(source_id)] = entry["source_key"]
         print(f"    올림 {entry['source_key']:<24} {entry['type']:<6} {len(data)/1024:,.0f}KB")
