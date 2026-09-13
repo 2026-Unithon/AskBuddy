@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 FRAME_WIDTH = 640           # 가로 640. Gemini 입력 비용과 판독성의 절충
 FFMPEG_TIMEOUT = 600
-MAX_FRAMES_TO_MODEL = 20    # 멀티모달 호출에 넣을 최대 장수
+# 상한은 config.py 가 단일 출처다 (불변식 8). sample_for_model() 에서 읽는다
 
 
 async def _run(*args: str, timeout: int) -> bytes:
@@ -99,8 +99,13 @@ async def upload_frames(store_id: int, source_id: int, frames: list[Path]) -> li
 
 
 def sample_for_model(frames: list[Path]) -> list[Path]:
-    """모델에 넣을 프레임을 고르게 솎는다. 전부 넣으면 느리고 비싸다."""
-    if len(frames) <= MAX_FRAMES_TO_MODEL:
+    """모델에 넣을 프레임을 고르게 솎는다. 전부 넣으면 느리고 비싸다.
+
+    상한은 `VIDEO_MAX_FRAMES_TO_MODEL` 이며 0 이면 솎지 않고 전부 넣는다.
+    몇 장이 최적인지는 가정하지 않고 평가 하네스로 정한다.
+    """
+    cap = get_settings().video_max_frames_to_model
+    if cap <= 0 or len(frames) <= cap:
         return frames
-    step = len(frames) / MAX_FRAMES_TO_MODEL
-    return [frames[int(i * step)] for i in range(MAX_FRAMES_TO_MODEL)]
+    step = len(frames) / cap
+    return [frames[int(i * step)] for i in range(cap)]

@@ -64,6 +64,8 @@ async def process_source(
                     job_id,
                 )
 
+            # native 영상이 실패하면 프레임으로 폴백한다 (이관경계 4절).
+            # 한 모드가 죽었다고 자료 전체를 버리지 않는다.
             result = await extract_cards(
                 source_id=source_id,
                 source_type=src["source_type"],
@@ -178,6 +180,8 @@ async def _preprocess_video(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
 ) -> tuple[str, list[Path]]:
     """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
+    from app.config import get_settings
+
     source_id = src["source_id"]
     row = await repo.get_video(conn, source_id)
     if row is None:
@@ -207,6 +211,14 @@ async def _preprocess_video(
     )
 
     text = transcript or "(오디오 없음. 화면 이미지만으로 판단할 것)"
+
+    # E4 실험 (이관경계_실험설계.md 4절). 기본값은 frames — 현재 검증된 경로다.
+    # native 는 원본을 통째로 모델에 넘긴다. 토큰이 10배 이상 늘 수 있다.
+    # 근거용 source_frames 저장은 어느 모드에서도 유지한다.
+    if get_settings().video_input_mode == "native":
+        logger.info("video_input_mode=native — 원본 영상을 그대로 투입 source=%s", source_id)
+        return text, [path]
+
     return text, video.sample_for_model(frames)
 
 

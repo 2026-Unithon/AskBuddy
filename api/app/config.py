@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.6-flash"
     stt_model: str = "whisper-1"
 
+    # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).
+    # 기본값은 현재 검증된 경로다. 실험은 플래그로 opt-in 한다.
+    #   frames — 프레임을 솎아 이미지로 투입 (현재 기본)
+    #   native — 원본 영상을 Gemini Files API 로 통째 투입. 토큰이 10배 이상 늘 수 있다
+    video_input_mode: Literal["frames", "native"] = "frames"
+    # 모델에 넣을 최대 프레임 수. 0 이면 상한 없음(추출된 전부).
+    # 몇 장이 최적인지는 가정하지 말고 하네스로 정한다
+    video_max_frames_to_model: int = 20
+
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""
