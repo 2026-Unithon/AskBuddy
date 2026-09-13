@@ -83,8 +83,10 @@ async def main() -> int:
         steps = STEPS
         if args.keep_sources:
             # 자료·전사문·프레임은 남긴다. 파이프라인이 기존 전사문을 재사용한다
+            # 전사문은 source_video·source_voice 에 있다. 프레임은 매 실행 다시 뽑으므로
+            # 남겨두면 중복만 쌓인다
             keep = {"source_video", "source_voice", "source_kakao", "source_scan",
-                    "source_frames", "sources"}
+                    "sources"}
             steps = [(n, q) for n, q in STEPS if n not in keep]
             print("  (--keep-sources: 자료·전사문 유지)")
 

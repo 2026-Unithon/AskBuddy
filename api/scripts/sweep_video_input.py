@@ -72,6 +72,10 @@ def main() -> int:
     ap.add_argument("--native", action="store_true", help="native 영상 조합을 추가한다")
     ap.add_argument("--clip", type=int, default=0,
                     help="원본 앞 N초만 쓰는 클립을 만들어 native 를 먼저 재본다")
+    ap.add_argument("--reps", type=int, default=3,
+                    help="조합마다 반복할 횟수. 추출이 비결정적이라 1회로는 판정할 수 없다")
+    ap.add_argument("--fresh-sources", action="store_true",
+                    help="자료를 다시 올리고 STT 도 다시 돌린다. 기본은 재사용(빠르고 STT 변동 제거)")
     ap.add_argument("--allow-holdout", action="store_true")
     args = ap.parse_args()
 
@@ -105,17 +109,29 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    print(f"조합 {len(combos)}개: {', '.join(label for label, _ in combos)}")
+    reps = 1 if args.repeat else max(1, args.reps)
+    total = len(combos) * reps
+    print(f"조합 {len(combos)}개 × {reps}회 = 실행 {total}건")
+    print(f"  {', '.join(label for label, _ in combos)}")
+
     failed = []
     for label, env in combos:
-        if run([PY, "scripts/reset_eval_store.py", "--store", args.store]) != 0:
-            failed.append(f"{label} (reset)")
-            continue
-        cmd = [PY, "scripts/run_extract_eval.py", "--store", args.store, "--label", label]
-        if args.allow_holdout:
-            cmd.append("--allow-holdout")
-        if run(cmd, env) != 0:
-            failed.append(label)
+        for rep in range(1, reps + 1):
+            reset = [PY, "scripts/reset_eval_store.py", "--store", args.store]
+            if not args.fresh_sources:
+                reset.append("--keep-sources")
+            if run(reset) != 0:
+                failed.append(f"{label}#{rep} (reset)")
+                continue
+            run_label = label if reps == 1 else f"{label}#{rep}"
+            cmd = [PY, "scripts/run_extract_eval.py", "--store", args.store,
+                   "--label", run_label]
+            if not args.fresh_sources:
+                cmd.append("--reuse-sources")
+            if args.allow_holdout:
+                cmd.append("--allow-holdout")
+            if run(cmd, env) != 0:
+                failed.append(run_label)
 
     print("\n" + "=" * 60)
     if failed:
