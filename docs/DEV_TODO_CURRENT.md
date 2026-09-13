@@ -233,6 +233,29 @@ api/eval/data/              ← Git 제외
 - [ ] 결과를 `이관경계_실험설계.md` 7절 실험 기록에 남긴다.
 - [ ] **기준선은 `card_type` 도입 전 상태로 찍는다.** 13.5 의 효과를 재려면 그 전 값이 필요하다.
 
+### 구현 현황 (13.2)
+
+- [x] 추출 회귀 스크립트 — `scripts/run_extract_eval.py`.
+      자료 적재 → 파이프라인 → 채점 → Markdown·JSON 리포트.
+      holdout 매장은 `--allow-holdout` 없이 돌지 않는다.
+- [x] 추출 지표 정의 — `app/team/extraction.py` 순수 함수.
+      재현율·E-O0 손실·치명 누락(`must_have`)·source type 별 분해·부분 포착 사유.
+- [x] 이력 보존 — `extraction_runs`·`extraction_results`. 읽기 경로와 표를 나눴고
+      동결 트리거로 이전 결과를 덮어쓰지 않는다.
+- [x] 매장 초기화 — `scripts/reset_eval_store.py`. `eval-*` 에서만 동작.
+- [x] 품질 추이에 쓰기 경로 연결 — `scripts/track_progress.py` 가
+      `extraction_runs` 도 읽어 `PROGRESS.md` 에 E-O0 추이를 쌓는다.
+
+**채점은 과소평가하는 방향으로 설계했다.** 경계가 애매하면 `COVERED` 로 세지 않는다.
+
+- 숫자가 있는 값은 숫자가 전부 맞아야 담긴 것으로 본다 (275ml → 27ml 왜곡 차단)
+- 값이 맞아도 규격 표기가 없으면 `PARTIAL` (HOT/ICE 혼동 차단)
+- 대상과 값이 서로 다른 카드에 흩어져 있으면 담긴 것이 아니다
+  (카드를 이어붙여 인정하면 신입이 카드 하나로는 답을 못 얻는데도 담았다고 세게 된다)
+
+- [ ] 매칭 규칙의 거짓 음성을 사람이 표본 검토한다. 과소평가 설계라 실제보다 낮게 나온다.
+      `PARTIAL` 판정 중 실제로는 담긴 것이 얼마나 되는지 확인하고 리포트에 함께 적는다.
+
 ### 다중 매장을 위한 하네스 보완
 
 - [ ] **매장 간 비교 조회를 만든다.** 현재 `list_runs` 는 JWT 의 `store_id` 로 묶여 있어
