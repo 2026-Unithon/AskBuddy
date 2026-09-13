@@ -94,11 +94,15 @@ def check_facts(path: Path, source_keys: dict[str, str], problems: list[str]) ->
         _fail(problems, f"{path}: judged_by 를 채운다. 누가 정한 정답인지 남겨야 이견을 푼다")
     if not d.get("judged_at"):
         _fail(problems, f"{path}: judged_at 을 채운다")
-    if not d.get("owner_confirmed"):
+    # true  — 실제 점주가 확인했다
+    # "TEST" — 팀이 자체 판정했다. 점주 확인은 아니다. 수치 해석에 이 한계를 표시한다
+    # false — 아직 확인 전. 채점에 쓰지 않는다
+    confirmed = d.get("owner_confirmed")
+    if confirmed not in (True, "TEST"):
         _fail(
             problems,
-            f"{path}: owner_confirmed 가 false 다. "
-            f"매장 사실 관계는 점주 확인이 필수다 (13.1)",
+            f"{path}: owner_confirmed 가 {confirmed!r} 다. "
+            f"true(점주 확인) 또는 \"TEST\"(팀 자체 판정) 여야 한다 (13.1)",
         )
 
     ids: set[str] = set()
