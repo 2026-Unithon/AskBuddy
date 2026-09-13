@@ -38,6 +38,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 | `docs/ASKBUDDY_MVP_CURRENT.md` | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
 | `docs/DEV_TODO_CURRENT.md` | 남은 12.5~15단계의 실행 순서와 완료 기준 |
 | `docs/이관경계_실험설계.md` | 무엇을 모델에 넘기고 무엇을 우리가 쥐는가. 플래그·실험 순서·게이트 지표 |
+| `api/eval/progress/PROGRESS.md` | 품질 추이. 처음 대비 현재 수치. `scripts/track_progress.py` 로 갱신 |
 | `UI/` | 화면 목업 24장. 프론트 작업 전 반드시 볼 것 |
 | `db/001_init_schema.sql` | 초기 스키마(24 테이블). `users` 에 `email`·`password_hash` 포함 |
 | `supabase/migrations/` | 적용 가능한 스키마 변경 이력. 신규 컬럼·테이블의 실행 기준 |

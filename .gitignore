@@ -38,6 +38,9 @@ notes/
 # next 생성 산출물
 web/next-env.d.ts
 
-# 평가 리포트 — 실행 산출물. 정본은 DB(evaluation_runs·evaluation_results)다.
-# 골든셋 문항(eval/*.json)은 커밋한다
+# 평가 리포트 — 실행 산출물. 질문·답변 원문이 들어간다. 정본은 DB다
 api/eval/reports/
+# 평가용 원본 자료 — 매장 자료는 절대 커밋하지 않는다. 분할 기록(SPLIT.md)만 예외
+api/eval/data/
+!api/eval/data/SPLIT.md
+# 골든셋 문항(eval/*.json)과 품질 추이(eval/progress/)는 커밋한다
