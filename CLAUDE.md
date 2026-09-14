@@ -100,15 +100,18 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 
 각 브랜치는 **자기 폴더 밖을 수정하지 않는다.**
 
-| 폴더 | 담당 | 브랜치 |
-|---|---|---|
-| `db/` | 관호 | `feat/db` |
-| `api/app/reg/`, `api/app/auth/` | 관호 | `feat/db` |
-| `api/app/ingest/`, `api/prompts/`, `api/scripts/` | 준혁 | `feat/input` |
-| `web/`, `UI/` | 도영 | `feat/output` |
-| `docs/`, `CLAUDE.md`, `api/app/main.py`, `api/app/deps.py`, `api/app/config.py`, `api/requirements.txt`, `supabase/` | **공용 — 수정 전 팀 합의** | `main` 직접 |
+팀: 차준혁(개발 전담) · 김태환 · 황도영 · 김선재(합류 예정).
+**현재 개발은 차준혁이 전담한다.** 아래 표는 김선재 합류 후 다시 나눈다.
 
-공용 파일을 고쳐야 하면 먼저 사람에게 물어본다. 임의로 수정하지 않는다.
+| 폴더 | 담당 |
+|---|---|
+| `db/`, `api/app/` 전체, `api/prompts/`, `api/scripts/`, `supabase/` | 차준혁 |
+| `web/`, `UI/` | 황도영 (차준혁 병행) |
+| `docs/`, `CLAUDE.md` | 공용 — 계약 변경은 기록을 남긴다 |
+
+분담이 한 사람에게 모여 있으므로 폴더 경계로 충돌을 막을 수 없다.
+대신 **계약을 바꾸는 변경**(스키마, 공개 API, 확정 결정)은 `docs/` 두 정본에 먼저
+반영하고 커밋 메시지에 이유를 남긴다. 나중에 합류하는 사람이 그것만 읽고 따라올 수 있어야 한다.
 
 ---
 
