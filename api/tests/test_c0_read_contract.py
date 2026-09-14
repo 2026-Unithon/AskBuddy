@@ -164,13 +164,16 @@ class ConsumerTest(unittest.TestCase):
             with self.subTest(broken=sorted(broken)), self.assertRaises(ValueError):
                 PublishedKnowledgeSnapshot(**{**base, **broken})
 
-    def test_partial_block_or_missing_dependency_rejected(self):
+    def test_atomic_fact_subset_allowed_but_missing_dependency_rejected(self):
         extra = {**snapshot().fact_revisions[0].model_dump(),
                  "fact_revision_id": "7", "requires": ["6"]}
         snap = rebuilt(extra_facts=[extra], block_facts=["6", "7"])
-        with self.assertRaises(ValueError):
-            validate_answer_plan(answer(), snap, QUERY, store_id=1)
+        # §5.2: 전체 사실 단위 부분 선택은 허용한다. 선행이 없는 사실 6만 선택 가능.
+        validate_answer_plan(answer(), snap, QUERY, store_id=1)
         selected = answer().selected_blocks[0].model_dump()
+        selected["fact_revision_ids"] = ["7"]
+        with self.assertRaises(ValueError):
+            validate_answer_plan(answer(selected_blocks=[selected]), snap, QUERY, store_id=1)
         selected["fact_revision_ids"] = ["6", "7"]
         validate_answer_plan(answer(selected_blocks=[selected]), snap, QUERY, store_id=1)
 

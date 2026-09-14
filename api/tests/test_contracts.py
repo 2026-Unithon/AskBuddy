@@ -477,14 +477,14 @@ class AnswerPlanAgainstSnapshotTest(unittest.TestCase):
         "약품을 넣는다" 만 인용하고 "먼저 전원을 끈다" 를 빼면 위험한 절반만 간다.
         """
         snap = snapshot(
-            cards=(card(blocks=(block(fact_revision_ids=("4002", "4003")),)),),
+            cards=(card(blocks=(block(fact_revision_ids=("4003", "4002")),)),),
             fact_revisions=(fact("4002", requires=("4003",)),
                             fact("4003", assertion="먼저 전원을 끈다")))
         with self.assertRaises(AnswerPlanViolation):
             validate_answer_plan(self._plan(), snap, store_id="5")
         ok = self._plan(selected_blocks=(SelectedBlock(
             card_id="1001", card_version_id="2003", block_id="b1",
-            fact_revision_ids=("4002", "4003")),))
+            fact_revision_ids=("4003", "4002")),))
         validate_answer_plan(ok, snap, store_id="5")
 
 

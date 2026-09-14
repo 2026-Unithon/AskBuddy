@@ -85,7 +85,7 @@ from app.contracts.snapshot import (
     PublishedKnowledgeSnapshot,
     RawSpan,
 )
-from app.contracts.validate import AnswerPlanViolation, validate_answer_plan
+from app.contracts.validate import AnswerPlanViolation, validate_answer_plan, validate_answer_references
 
 __all__ = [
     "AnswerAction", "AnswerPlan", "SelectedBlock",
@@ -110,5 +110,5 @@ __all__ = [
     "LocatorType",
     "FactProvenance", "FactRevision", "PublishedCard", "PublishedKnowledgeSnapshot",
     "RawSpan",
-    "AnswerPlanViolation", "validate_answer_plan",
+    "AnswerPlanViolation", "validate_answer_plan", "validate_answer_references",
 ]

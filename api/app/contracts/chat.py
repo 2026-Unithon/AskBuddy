@@ -19,6 +19,7 @@ from app.contracts.answer import AnswerAction, AnswerPlan
 from app.contracts.common import (
     Contract,
     EntityId,
+    RawText,
     RevisionId,
     UtcDatetime,
 )
@@ -105,7 +106,8 @@ class ChatResponse(Contract):
     contract_version: Literal["v2"] = "v2"
     request_id: str = Field(min_length=1, max_length=80)
     action: AnswerAction
-    message: str = Field(min_length=1, max_length=2000)
+    # RAW 원문의 들여쓰기·끝 줄바꿈까지 응답 경계에서 보존한다.
+    message: RawText = Field(min_length=1, max_length=2000)
     snapshot_id: EntityId
     knowledge_revision: RevisionId
     citations: tuple[Citation, ...] = ()
