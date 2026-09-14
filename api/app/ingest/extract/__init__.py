@@ -29,3 +29,19 @@ async def extract_cards(
         source_id=source_id, source_type=source_type, text=text,
         category_names=category_names, glossary=glossary, media=media or [],
     )
+
+
+async def assemble_cards(
+    *, source_id: int, facts: list[dict],
+    category_names: list[str], glossary: list[dict],
+):
+    """reduce — 뽑아둔 사실을 카드로 조립한다. mock 모드에서는 쓰지 않는다."""
+    if get_settings().ingest_mode != "real":
+        raise RuntimeError("assemble 은 INGEST_MODE=real 에서만 쓴다")
+    from app.ingest.extract import gemini as impl
+
+    logger.info("assemble source=%s facts=%d", source_id, len(facts))
+    return await impl.assemble(
+        source_id=source_id, facts=facts,
+        category_names=category_names, glossary=glossary,
+    )

@@ -4,6 +4,7 @@ M1 을 통과하기 전에는 쓰지 않는다. INGEST_MODE=real 일 때만 선�
 응답은 response_schema 로 강제한다. 자유 텍스트를 파싱하지 않는다.
 """
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -19,21 +20,30 @@ logger = logging.getLogger(__name__)
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "extract_cards.ko.txt"
+ASSEMBLE_PROMPT_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "assemble_cards.ko.txt")
+
+
+def _category_block(category_names: list[str]) -> str:
+    return "\n".join(f"- {c}" for c in category_names) or "- (없음)"
+
+
+def _glossary_block(glossary: list[dict[str, str]]) -> str:
+    if not glossary:
+        return "- (등록된 용어 없음)"
+    return "\n".join(
+        f"- {g['term']}"
+        + (f" (={g['variants']})" if g.get("variants") else "")
+        + (f": {g['description']}" if g.get("description") else "")
+        for g in glossary
+    )
 
 
 def _render_prompt(*, source_type: str, text: str,
                    category_names: list[str], glossary: list[dict[str, str]]) -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
-    categories = "\n".join(f"- {c}" for c in category_names) or "- (없음)"
-    if glossary:
-        terms = "\n".join(
-            f"- {g['term']}"
-            + (f" (={g['variants']})" if g.get("variants") else "")
-            + (f": {g['description']}" if g.get("description") else "")
-            for g in glossary
-        )
-    else:
-        terms = "- (등록된 용어 없음)"
+    categories = _category_block(category_names)
+    terms = _glossary_block(glossary)
     return (template
             .replace("{categories}", categories)
             .replace("{glossary}", terms)
@@ -153,4 +163,34 @@ async def extract(
     # evidence.source_id 는 모델이 지어낼 수 있다. 항상 실제 값으로 덮어쓴다
     for card in result.cards:
         card.evidence.source_id = source_id
+    return result
+
+
+async def assemble(
+    *, source_id: int, facts: list[dict], category_names: list[str],
+    glossary: list[dict],
+) -> ExtractionResult:
+    """reduce — 뽑아둔 사실을 모아 카드로 조립한다 (13.4 2패스).
+
+    새 사실을 만들지 않는다. 구간별 map 이 만든 사실을 대상 단위로 묶는 일만 한다.
+    구간 분할만 켜면 같은 대상이 여러 카드로 쪼개져 신입이 카드 하나로는 답을
+    못 얻는다 — 그 손실(ASSEMBLY)을 여기서 되돌린다.
+    """
+    s = get_settings()
+    if not s.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 가 없다")
+    if not facts:
+        return ExtractionResult(cards=[], unresolved=[])
+
+    prompt = (ASSEMBLE_PROMPT_PATH.read_text(encoding="utf-8")
+              .replace("{categories}", _category_block(category_names))
+              .replace("{glossary}", _glossary_block(glossary))
+              .replace("{facts_json}",
+                       json.dumps(facts, ensure_ascii=False, indent=1)))
+
+    started = time.perf_counter()
+    raw = await _call(prompt, [])
+    result = ExtractionResult.model_validate_json(raw)
+    logger.info("assemble source=%s 사실 %d건 → 카드 %d장 (%.1fs)",
+                source_id, len(facts), len(result.cards), time.perf_counter() - started)
     return result
