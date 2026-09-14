@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "IdempotencyKey": {
+      "additionalProperties": false,
+      "description": "같은 요청이 두 번 와도 업무가 두 번 생기지 않게 하는 키 (§4.3).\n\n같은 키에 다른 본문이면 `IDEMPOTENCY_CONFLICT` 다 — 조용히 덮지 않는다.",
+      "properties": {
+        "body_hash": {
+          "title": "Body Hash",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 80,
+          "minLength": 8,
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "body_hash"
+      ],
+      "title": "IdempotencyKey",
+      "type": "object"
+    },
+    "TrustedScope": {
+      "additionalProperties": false,
+      "description": "JWT 와 현재 membership 으로 확인한 범위. **요청 본문에서 만들지 않는다.**\n\n내부 worker 도 이 값을 필수로 전달받는다. \"호출한 쪽이 알아서 걸렀겠지\" 로\n두면 매장 격리가 호출 경로마다 달라진다.",
+      "properties": {
+        "member_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "store_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Store Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "store_id"
+      ],
+      "title": "TrustedScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "approved_at": {
+      "format": "date-time",
+      "title": "Approved At",
+      "type": "string"
+    },
+    "approved_by": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Approved By",
+      "type": "string"
+    },
+    "expected_card_revisions": {
+      "default": [],
+      "items": {
+        "maxLength": 19,
+        "pattern": "^[0-9]+$",
+        "type": "string"
+      },
+      "title": "Expected Card Revisions",
+      "type": "array"
+    },
+    "expected_draft_revision": {
+      "anyOf": [
+        {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Draft Revision"
+    },
+    "expected_publication_revision": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Expected Publication Revision",
+      "type": "string"
+    },
+    "idempotency": {
+      "$ref": "#/$defs/IdempotencyKey"
+    },
+    "prepared_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Prepared Id",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/TrustedScope"
+    }
+  },
+  "required": [
+    "scope",
+    "idempotency",
+    "prepared_id",
+    "expected_publication_revision",
+    "approved_by",
+    "approved_at"
+  ],
+  "title": "PublishKnowledgeRequest",
+  "type": "object"
+}

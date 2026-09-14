@@ -1,0 +1,78 @@
+{
+  "additionalProperties": false,
+  "description": "되묻기를 이어가는 서버 문맥 (§5.1).\n\n`(store, member, session, contract_version)` 에 묶인다. 다른 대화로 복사되지\n않는다 — 복사되면 A 직원의 확정 슬롯으로 B 직원에게 답하게 된다.",
+  "properties": {
+    "chat_session_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Chat Session Id",
+      "type": "string"
+    },
+    "clarify_turns": {
+      "default": 0,
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Clarify Turns",
+      "type": "integer"
+    },
+    "confirmed_slots": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Confirmed Slots",
+      "type": "object"
+    },
+    "context_id": {
+      "maxLength": 80,
+      "minLength": 8,
+      "title": "Context Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "maxLength": 20,
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "member_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Member Id",
+      "type": "string"
+    },
+    "original_question": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Original Question",
+      "type": "string"
+    },
+    "proposed_slots": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Proposed Slots",
+      "type": "object"
+    },
+    "store_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Store Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "context_id",
+    "store_id",
+    "member_id",
+    "chat_session_id",
+    "contract_version",
+    "expires_at",
+    "original_question"
+  ],
+  "title": "QuestionContext",
+  "type": "object"
+}

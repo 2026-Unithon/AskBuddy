@@ -35,7 +35,7 @@ def fact(fact_revision_id="40", assertion="합성 사실", **changes):
 def snapshot(**changes):
     data = dict(
         store_id="1", knowledge_revision="1", snapshot_id="10",
-        snapshot_hash="a" * 64, created_at=datetime(2026, 9, 14, tzinfo=timezone.utc),
+        snapshot_hash="sha256:" + "a" * 64, created_at=datetime(2026, 9, 14, tzinfo=timezone.utc),
         glossary_version="g1", renderer_version="r1",
         cards=[PublishedCard(
             card_id="20", card_version_id="21", entity_id="30", title="합성 음료",

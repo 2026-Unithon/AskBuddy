@@ -32,7 +32,7 @@ from app.contracts import (
     validate_answer_plan,
 )
 
-HASH = "a" * 64
+HASH = "sha256:" + "a" * 64
 
 
 def prov(occurrence_id="7001", source_id="8001"):
@@ -312,6 +312,11 @@ class SnapshotTest(unittest.TestCase):
         """RV-09 — 길이만 보면 임의 문자열이 통과한다."""
         with self.assertRaises(ValidationError):
             snapshot(snapshot_hash="abc12345")
+
+    def test_hash_carries_its_algorithm(self):
+        """알고리즘을 값에 담아 두면 나중에 바꿀 때 옛 hash 와 섞이지 않는다."""
+        with self.assertRaises(ValidationError):
+            snapshot(snapshot_hash="a" * 64)
 
     def test_naive_datetime_rejected(self):
         """RV-09 — 시각대 없는 승인 시각은 9시간 밀려 판 순서를 뒤집는다."""

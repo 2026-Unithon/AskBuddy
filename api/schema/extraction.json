@@ -1,0 +1,410 @@
+{
+  "$defs": {
+    "Assertion": {
+      "additionalProperties": false,
+      "description": "사실 하나. 원문이 권위 기준이고 typed 속성은 그 위의 해석이다.\n\ntyped projection 이 원문과 다르면 검수 전에 공개하지 않는다 (MVP 31-3).",
+      "properties": {
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Conditions",
+          "type": "array"
+        },
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceLocator",
+          "default": {
+            "bbox": null,
+            "line": null,
+            "page": null,
+            "timestamp_sec": null,
+            "type": "WHOLE_SOURCE"
+          }
+        },
+        "exceptions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Exceptions",
+          "type": "array"
+        },
+        "local_ref": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Local Ref",
+          "type": "string"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        },
+        "original_assertion": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Original Assertion",
+          "type": "string"
+        },
+        "polarity": {
+          "default": "AFFIRM",
+          "enum": [
+            "AFFIRM",
+            "NEGATE"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Quantity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Requires",
+          "type": "array"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "value_text": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Text"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variant"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "local_ref",
+        "original_assertion"
+      ],
+      "title": "Assertion",
+      "type": "object"
+    },
+    "EvidenceLocator": {
+      "additionalProperties": false,
+      "description": "이 사실이 자료의 어디에서 나왔는가. 값 객체이므로 불변이다.\n\n자료 유형에 맞는 값을 요구한다 — 영상·음성은 시각, 문서는 페이지.\n위치가 없으면 나중에 \"정말 그래요?\" 에 답할 수 없고 영상 구간도 못 띄운다.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "timestamp_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Sec"
+        },
+        "type": {
+          "default": "WHOLE_SOURCE",
+          "enum": [
+            "PAGE",
+            "TIMESTAMP",
+            "LINE",
+            "BBOX",
+            "WHOLE_SOURCE"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "EvidenceLocator",
+      "type": "object"
+    },
+    "Quantity": {
+      "additionalProperties": false,
+      "description": "수치는 decimal string 과 unit 을 함께 보존한다 (MVP 31-2).\n\nfloat 로 담으면 275 가 274.99999 가 되고, 단위를 버리면 275ml 와 275g 이 같아진다.\n단위 변환은 명시된 규칙·원래 값·반올림 이력을 갖고 따로 한다.",
+      "properties": {
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "value": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Quantity",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": false,
+      "description": "규격. 같은 이름이라도 값이 다른 축이다.\n\n`null` 은 **모든 규격에 통용된다는 뜻이 아니라 미확정이다** (MVP 31-2).\n여러 규격이 가능하면 보류하거나 되묻는다.\n\n카드는 규격을 한 장에 담되 값은 규격별로 나란히 둔다 (D19).\n사실은 여기서 갈라 저장한다 — 카드는 표시 단위이고 사실이 값의 단위다.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "enum": [
+                "HOT",
+                "ICE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "구간 하나의 추출 결과.\n\n부분 성공·유효한 빈 결과·실패를 구분한다 (MVP 31-2).\n빈 JSON 을 성공으로 만들지 않는다 — `assertions` 가 비었어도 `unresolved` 에\n왜 비었는지 남아야 한다.",
+  "properties": {
+    "assertions": {
+      "items": {
+        "$ref": "#/$defs/Assertion"
+      },
+      "maxItems": 500,
+      "title": "Assertions",
+      "type": "array"
+    },
+    "attempt_id": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attempt Id"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "raw_response_ref": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Response Ref"
+    },
+    "result_status": {
+      "enum": [
+        "OK",
+        "NO_RESULT",
+        "PARTIAL",
+        "FAILED"
+      ],
+      "title": "Result Status",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "extraction/v1",
+      "default": "extraction/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "segment_id": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Segment Id"
+    },
+    "source_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "truncated": {
+      "default": false,
+      "title": "Truncated",
+      "type": "boolean"
+    },
+    "unresolved": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Unresolved",
+      "type": "array"
+    }
+  },
+  "required": [
+    "source_id",
+    "result_status"
+  ],
+  "title": "ExtractionEnvelope",
+  "type": "object"
+}

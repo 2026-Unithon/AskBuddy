@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "SelectedBlock": {
+      "additionalProperties": false,
+      "description": "인용할 블록. 카드 버전까지 고정해 과거 인용이 재현되게 한다.",
+      "properties": {
+        "block_id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "card_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Id",
+          "type": "string"
+        },
+        "card_version_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Version Id",
+          "type": "string"
+        },
+        "fact_revision_ids": {
+          "items": {
+            "maxLength": 19,
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Fact Revision Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "card_id",
+        "card_version_id",
+        "block_id",
+        "fact_revision_ids"
+      ],
+      "title": "SelectedBlock",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "enum": [
+        "ANSWER",
+        "CLARIFY",
+        "ESCALATE",
+        "REFUSE",
+        "SAFE_ROUTE"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "allowed_options": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Allowed Options",
+      "type": "array"
+    },
+    "clarification_slot": {
+      "anyOf": [
+        {
+          "maxLength": 60,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarification Slot"
+    },
+    "context_id": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Context Id"
+    },
+    "escalation_reason": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Escalation Reason"
+    },
+    "knowledge_revision": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Knowledge Revision",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "answer_plan/v1",
+      "default": "answer_plan/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selected_blocks": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SelectedBlock"
+      },
+      "maxItems": 20,
+      "title": "Selected Blocks",
+      "type": "array"
+    },
+    "snapshot_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Snapshot Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "knowledge_revision",
+    "action"
+  ],
+  "title": "AnswerPlan",
+  "type": "object"
+}

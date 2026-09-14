@@ -1,0 +1,125 @@
+{
+  "$defs": {
+    "IdempotencyKey": {
+      "additionalProperties": false,
+      "description": "같은 요청이 두 번 와도 업무가 두 번 생기지 않게 하는 키 (§4.3).\n\n같은 키에 다른 본문이면 `IDEMPOTENCY_CONFLICT` 다 — 조용히 덮지 않는다.",
+      "properties": {
+        "body_hash": {
+          "title": "Body Hash",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 80,
+          "minLength": 8,
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "body_hash"
+      ],
+      "title": "IdempotencyKey",
+      "type": "object"
+    },
+    "TrustedScope": {
+      "additionalProperties": false,
+      "description": "JWT 와 현재 membership 으로 확인한 범위. **요청 본문에서 만들지 않는다.**\n\n내부 worker 도 이 값을 필수로 전달받는다. \"호출한 쪽이 알아서 걸렀겠지\" 로\n두면 매장 격리가 호출 경로마다 달라진다.",
+      "properties": {
+        "member_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "store_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Store Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "store_id"
+      ],
+      "title": "TrustedScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "card_ids": {
+      "items": {
+        "maxLength": 19,
+        "pattern": "^[0-9]+$",
+        "type": "string"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Card Ids",
+      "type": "array"
+    },
+    "content_hash": {
+      "title": "Content Hash",
+      "type": "string"
+    },
+    "embedding_model": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Embedding Model",
+      "type": "string"
+    },
+    "expected_card_revisions": {
+      "default": [],
+      "items": {
+        "maxLength": 19,
+        "pattern": "^[0-9]+$",
+        "type": "string"
+      },
+      "title": "Expected Card Revisions",
+      "type": "array"
+    },
+    "expected_publication_revision": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Expected Publication Revision",
+      "type": "string"
+    },
+    "glossary_version": {
+      "maxLength": 40,
+      "title": "Glossary Version",
+      "type": "string"
+    },
+    "idempotency": {
+      "$ref": "#/$defs/IdempotencyKey"
+    },
+    "renderer_version": {
+      "maxLength": 40,
+      "title": "Renderer Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/TrustedScope"
+    }
+  },
+  "required": [
+    "scope",
+    "idempotency",
+    "card_ids",
+    "content_hash",
+    "expected_publication_revision",
+    "embedding_model",
+    "glossary_version",
+    "renderer_version"
+  ],
+  "title": "PrepareIndexRequest",
+  "type": "object"
+}

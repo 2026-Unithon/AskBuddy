@@ -21,11 +21,11 @@ from app.contracts.common import (
     SCHEMA_PUBLISHED,
     EntityId,
     FrozenContract,
+    HashRef,
     Polarity,
     Quantity,
     RawText,
     RevisionId,
-    Sha256Hex,
     UtcDatetime,
     Variant,
 )
@@ -41,7 +41,12 @@ class FactProvenance(FrozenContract):
 
     occurrence_id: EntityId
     source_id: EntityId
+    # 자료 내용의 지문. 자료를 지워도 남아 어느 판본에서 나온 말인지 대조한다 (D9·D20)
+    source_content_hash: HashRef | None = None
     locator: EvidenceLocator = EvidenceLocator()
+
+    # 자료가 지금 열람 가능한지는 **여기 담지 않는다**. 가변 상태를 불변 묶음에
+    # 넣으면 내용이 같은 두 발행의 hash 가 달라진다. 현재 상태는 조회 시 덧입힌다
 
 
 class FactRevision(FrozenContract):
@@ -80,6 +85,19 @@ class FactRevision(FrozenContract):
         return self
 
 
+class RawSpan(FrozenContract):
+    """typed 로 쪼개지 않고 승인된 원문 구간 (RV-05, §3.4).
+
+    RAW 블록이 가리키는 대상이다. snapshot 이 이것을 싣지 않으면 `raw_span_id` 는
+    아무 데도 닿지 못하는 참조가 된다 — 블록이 사실을 가리킬 때와 같은 문제다.
+    """
+
+    raw_span_id: EntityId
+    source_id: EntityId
+    text: RawText = Field(min_length=1, max_length=4000)
+    locator: EvidenceLocator = EvidenceLocator()
+
+
 class PublishedCard(FrozenContract):
     card_id: EntityId
     card_version_id: EntityId
@@ -107,12 +125,13 @@ class PublishedKnowledgeSnapshot(FrozenContract):
     # 매장 범위에서 단조 증가한다. 캐시 키와 재현에 쓴다
     knowledge_revision: RevisionId
     snapshot_id: EntityId
-    snapshot_hash: Sha256Hex
+    snapshot_hash: HashRef
     created_at: UtcDatetime
     glossary_version: str = Field(max_length=40)
     renderer_version: str = Field(max_length=40)
     cards: tuple[PublishedCard, ...] = ()
     fact_revisions: tuple[FactRevision, ...] = ()
+    raw_spans: tuple[RawSpan, ...] = ()
 
     @model_validator(mode="after")
     def _ids_unique(self) -> "PublishedKnowledgeSnapshot":
@@ -125,6 +144,7 @@ class PublishedKnowledgeSnapshot(FrozenContract):
             ("fact_revision_id", [f.fact_revision_id for f in self.fact_revisions]),
             ("card_id", [c.card_id for c in self.cards]),
             ("card_version_id", [c.card_version_id for c in self.cards]),
+            ("raw_span_id", [r.raw_span_id for r in self.raw_spans]),
         ):
             dupes = {v for v in values if values.count(v) > 1}
             if dupes:
@@ -138,6 +158,7 @@ class PublishedKnowledgeSnapshot(FrozenContract):
         없으면 R 이 인용할 수 없는 카드를 받는다 — 그 상태로 답하면 불변식 3 위반이다.
         """
         known = {f.fact_revision_id for f in self.fact_revisions}
+        spans = {r.raw_span_id for r in self.raw_spans}
         for card in self.cards:
             for block in card.blocks:
                 missing = [fid for fid in block.fact_revision_ids if fid not in known]
@@ -145,6 +166,11 @@ class PublishedKnowledgeSnapshot(FrozenContract):
                     raise ValueError(
                         f"카드 {card.card_id} 블록 {block.block_id} 가 "
                         f"snapshot 에 없는 사실을 가리킨다: {missing}")
+                if (block.raw_span_id
+                        and block.raw_span_id not in spans):
+                    raise ValueError(
+                        f"카드 {card.card_id} 블록 {block.block_id} 가 "
+                        f"snapshot 에 없는 원문 구간을 가리킨다: {block.raw_span_id}")
         return self
 
     @model_validator(mode="after")
@@ -187,6 +213,12 @@ class PublishedKnowledgeSnapshot(FrozenContract):
         orphans = sorted(set(by_id) - reachable)
         if orphans:
             raise ValueError(f"어느 카드도 인용하지 않는 사실이 실렸다: {orphans}")
+
+        cited_spans = {b.raw_span_id for c in self.cards for b in c.blocks
+                       if b.raw_span_id}
+        span_orphans = sorted({r.raw_span_id for r in self.raw_spans} - cited_spans)
+        if span_orphans:
+            raise ValueError(f"어느 카드도 인용하지 않는 원문 구간이 실렸다: {span_orphans}")
         return self
 
     def fact(self, fact_revision_id: str) -> FactRevision | None:

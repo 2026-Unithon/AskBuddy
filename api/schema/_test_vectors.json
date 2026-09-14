@@ -1,0 +1,21 @@
+{
+  "bigint_id_keeps_precision": "sha256:379c3c261310b93aedb504a467c47b9494b0c2e0205c0130684079a029e3da34",
+  "empty_object": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "float_and_int_differ": [
+    "sha256:1a2613ec93fa82b8b76d7decf6f493cff9bdf9999208caa30deb11440c1f8b43",
+    "sha256:443032e7cd6bef879392820ada88add03083b73a7a32c3c1958bdef0119533a3"
+  ],
+  "int_is_decimal_string": "sha256:1a2613ec93fa82b8b76d7decf6f493cff9bdf9999208caa30deb11440c1f8b43",
+  "key_order_does_not_matter": [
+    "sha256:21f76dfbfe6dfe21f762080ef484112cf2952974cef30741fd1931e1c6d92112",
+    "sha256:21f76dfbfe6dfe21f762080ef484112cf2952974cef30741fd1931e1c6d92112"
+  ],
+  "note": "canonical JSON 규칙이 바뀌면 여기 값이 달라진다. 그때 과거 인용의 재현이 끊긴다",
+  "snapshot_hash": "sha256:1ee6f3d4ceaf1ac424916ca7fc9073c8579ac7a48c4cf9024ae3b00d6149795b",
+  "snapshot_payload_excludes": [
+    "snapshot_id",
+    "created_at",
+    "snapshot_hash"
+  ],
+  "unicode_is_not_normalized": "sha256:ac59038a6c22a8081bbb98554c07217bbdd9f1666a7311d2bf8159ccbcea8839"
+}

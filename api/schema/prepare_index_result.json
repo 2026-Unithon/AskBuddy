@@ -1,0 +1,158 @@
+{
+  "$defs": {
+    "ErrorDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "INVALID_CONTRACT",
+            "UNSUPPORTED_SCHEMA",
+            "INVALID_REFERENCE",
+            "STALE_DRAFT",
+            "STALE_PUBLICATION",
+            "STALE_KNOWLEDGE",
+            "HASH_MISMATCH",
+            "INDEX_PREPARE_FAILED",
+            "INDEX_PREPARE_TIMEOUT",
+            "CONTEXT_EXPIRED",
+            "IDEMPOTENCY_CONFLICT",
+            "RATE_LIMITED",
+            "MODEL_UNAVAILABLE",
+            "STORAGE_FAILED"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operation Id"
+        },
+        "request_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retry_after_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Ms"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "request_id"
+      ],
+      "title": "ErrorDetail",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorDetail"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "index_config_version": {
+      "anyOf": [
+        {
+          "maxLength": 40,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Index Config Version"
+    },
+    "payload_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payload Hash"
+    },
+    "prepared_id": {
+      "anyOf": [
+        {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prepared Id"
+    },
+    "status": {
+      "enum": [
+        "PREPARED",
+        "FAILED"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "PrepareIndexResult",
+  "type": "object"
+}

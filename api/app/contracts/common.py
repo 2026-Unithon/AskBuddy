@@ -72,6 +72,18 @@ def _sha256_hex(value: str) -> str:
 
 Sha256Hex = Annotated[str, AfterValidator(_sha256_hex)]
 
+# 표시용 hash. 알고리즘을 값에 담아 나중에 바꿀 때 옛 값과 섞이지 않게 한다 (§3.4)
+_HASH_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _hash_ref(value: str) -> str:
+    if not _HASH_REF.match(value):
+        raise ValueError("hash 는 `sha256:<64 소문자 16진>` 형식이어야 한다")
+    return value
+
+
+HashRef = Annotated[str, AfterValidator(_hash_ref)]
+
 
 def _utc_aware(value: datetime) -> datetime:
     """naive datetime 을 거절한다.

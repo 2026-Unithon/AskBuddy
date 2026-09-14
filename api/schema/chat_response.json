@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "Citation": {
+      "additionalProperties": false,
+      "description": "근거 칩 하나. 어느 카드 버전의 어느 블록인지까지 고정한다.",
+      "properties": {
+        "block_id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "card_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Id",
+          "type": "string"
+        },
+        "card_version_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Version Id",
+          "type": "string"
+        },
+        "fact_revision_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Revision Id"
+        },
+        "raw_span_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Span Id"
+        },
+        "source_availability": {
+          "default": "AVAILABLE",
+          "enum": [
+            "AVAILABLE",
+            "DELETED",
+            "UNAVAILABLE"
+          ],
+          "title": "Source Availability",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Source Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "card_id",
+        "card_version_id",
+        "block_id",
+        "source_id"
+      ],
+      "title": "Citation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "서버가 확정해 내보내는 답변. 모델 출력이 그대로 여기 오지 않는다.",
+  "properties": {
+    "action": {
+      "enum": [
+        "ANSWER",
+        "CLARIFY",
+        "ESCALATE",
+        "REFUSE",
+        "SAFE_ROUTE"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "allowed_options": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Allowed Options",
+      "type": "array"
+    },
+    "citations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Citation"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "clarification_slot": {
+      "anyOf": [
+        {
+          "maxLength": 60,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarification Slot"
+    },
+    "context_id": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Context Id"
+    },
+    "contract_version": {
+      "const": "v2",
+      "default": "v2",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "knowledge_revision": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Knowledge Revision",
+      "type": "string"
+    },
+    "message": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "pending_id": {
+      "anyOf": [
+        {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pending Id"
+    },
+    "request_id": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Snapshot Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "action",
+    "message",
+    "snapshot_id",
+    "knowledge_revision"
+  ],
+  "title": "ChatResponse",
+  "type": "object"
+}

@@ -1,0 +1,82 @@
+{
+  "additionalProperties": false,
+  "description": "소비자에게 나가는 사건. **업무 내용을 담지 않는다** (§4.3).\n\n원문·직원 목록을 payload 에 실으면 권한이 바뀐 뒤에도 옛 내용이 전달된다.\n소비자는 이 사건을 신호로만 쓰고 내용은 권한 있는 조회로 가져온다.",
+  "properties": {
+    "aggregate_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Aggregate Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "v1",
+      "default": "v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "event_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "knowledge_revision": {
+      "anyOf": [
+        {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Knowledge Revision"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "owner_answer_id": {
+      "anyOf": [
+        {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Owner Answer Id"
+    },
+    "store_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Store Id",
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "KNOWLEDGE_PUBLISHED",
+        "CARD_EXCLUDED",
+        "CARD_RESTORED",
+        "OWNER_ANSWER_SUBMITTED"
+      ],
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_id",
+    "store_id",
+    "type",
+    "aggregate_id",
+    "occurred_at"
+  ],
+  "title": "OutboxEvent",
+  "type": "object"
+}

@@ -1,0 +1,124 @@
+{
+  "cards": [
+    {
+      "blocks": [
+        {
+          "block_id": "b1",
+          "fact_revision_ids": [
+            "9",
+            "10"
+          ],
+          "kind": "STEPS",
+          "order": 1,
+          "raw_span_id": null
+        },
+        {
+          "block_id": "b2",
+          "fact_revision_ids": [],
+          "kind": "RAW",
+          "order": 2,
+          "raw_span_id": "70"
+        }
+      ],
+      "card_id": "20",
+      "card_version_id": "21",
+      "entity_id": "30",
+      "title": "합성 카드",
+      "variant": {
+        "size": null,
+        "temperature": null
+      }
+    }
+  ],
+  "fact_revisions": [
+    {
+      "assertion": "정리된 표현",
+      "conditions": [],
+      "entity_id": "30",
+      "exceptions": [],
+      "fact_id": "4",
+      "fact_revision_id": "9",
+      "order": 2,
+      "original_assertion": "  들여쓴 원문\n",
+      "polarity": "AFFIRM",
+      "predicate": null,
+      "provenance": [
+        {
+          "locator": {
+            "bbox": null,
+            "line": null,
+            "page": null,
+            "timestamp_sec": null,
+            "type": "WHOLE_SOURCE"
+          },
+          "occurrence_id": "50",
+          "source_content_hash": null,
+          "source_id": "60"
+        }
+      ],
+      "quantity": null,
+      "requires": [
+        "10"
+      ],
+      "subject": null,
+      "value_text": null,
+      "variant": {
+        "size": null,
+        "temperature": null
+      }
+    },
+    {
+      "assertion": "먼저 확인한다",
+      "conditions": [],
+      "entity_id": "30",
+      "exceptions": [],
+      "fact_id": "5",
+      "fact_revision_id": "10",
+      "order": 1,
+      "original_assertion": "먼저 확인한다",
+      "polarity": "AFFIRM",
+      "predicate": null,
+      "provenance": [
+        {
+          "locator": {
+            "bbox": null,
+            "line": null,
+            "page": null,
+            "timestamp_sec": null,
+            "type": "WHOLE_SOURCE"
+          },
+          "occurrence_id": "51",
+          "source_content_hash": null,
+          "source_id": "60"
+        }
+      ],
+      "quantity": null,
+      "requires": [],
+      "subject": null,
+      "value_text": null,
+      "variant": {
+        "size": null,
+        "temperature": null
+      }
+    }
+  ],
+  "glossary_version": "g1",
+  "knowledge_revision": "7",
+  "raw_spans": [
+    {
+      "locator": {
+        "bbox": null,
+        "line": null,
+        "page": null,
+        "timestamp_sec": null,
+        "type": "WHOLE_SOURCE"
+      },
+      "raw_span_id": "70",
+      "source_id": "60",
+      "text": "승인된 원문 그대로"
+    }
+  ],
+  "renderer_version": "r1",
+  "schema_version": "published_knowledge/v1",
+  "store_id": "1"
+}

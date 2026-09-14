@@ -1,0 +1,142 @@
+{
+  "$defs": {
+    "CardBlock": {
+      "additionalProperties": false,
+      "description": "카드의 한 줄. 사실을 고를 뿐 새 사실을 만들지 않는다.\n\n승인 snapshot 에 그대로 실리므로 불변이다. 인용 목록을 파싱 뒤에 늘릴 수 있으면\n\"승인된 것만 인용한다\" 가 검증이 아니라 약속이 된다 (RV-07).",
+      "properties": {
+        "block_id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "fact_revision_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 19,
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Fact Revision Ids",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "QUANTITIES",
+            "STEPS",
+            "NOTES",
+            "RAW"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        },
+        "raw_span_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Span Id"
+        }
+      },
+      "required": [
+        "block_id",
+        "kind",
+        "order"
+      ],
+      "title": "CardBlock",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": false,
+      "description": "규격. 같은 이름이라도 값이 다른 축이다.\n\n`null` 은 **모든 규격에 통용된다는 뜻이 아니라 미확정이다** (MVP 31-2).\n여러 규격이 가능하면 보류하거나 되묻는다.\n\n카드는 규격을 한 장에 담되 값은 규격별로 나란히 둔다 (D19).\n사실은 여기서 갈라 저장한다 — 카드는 표시 단위이고 사실이 값의 단위다.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "enum": [
+                "HOT",
+                "ICE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "조립 결과. 아직 공개된 것이 아니라 검수 대기 상태다.",
+  "properties": {
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/CardBlock"
+      },
+      "maxItems": 20,
+      "title": "Blocks",
+      "type": "array"
+    },
+    "entity_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Entity Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "card_plan/v1",
+      "default": "card_plan/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "variant": {
+      "$ref": "#/$defs/Variant",
+      "default": {
+        "size": null,
+        "temperature": null
+      }
+    }
+  },
+  "required": [
+    "entity_id",
+    "title"
+  ],
+  "title": "CardPlan",
+  "type": "object"
+}

@@ -1,0 +1,599 @@
+{
+  "$defs": {
+    "CardBlock": {
+      "additionalProperties": false,
+      "description": "카드의 한 줄. 사실을 고를 뿐 새 사실을 만들지 않는다.\n\n승인 snapshot 에 그대로 실리므로 불변이다. 인용 목록을 파싱 뒤에 늘릴 수 있으면\n\"승인된 것만 인용한다\" 가 검증이 아니라 약속이 된다 (RV-07).",
+      "properties": {
+        "block_id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "fact_revision_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 19,
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Fact Revision Ids",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "QUANTITIES",
+            "STEPS",
+            "NOTES",
+            "RAW"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        },
+        "raw_span_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Span Id"
+        }
+      },
+      "required": [
+        "block_id",
+        "kind",
+        "order"
+      ],
+      "title": "CardBlock",
+      "type": "object"
+    },
+    "EvidenceLocator": {
+      "additionalProperties": false,
+      "description": "이 사실이 자료의 어디에서 나왔는가. 값 객체이므로 불변이다.\n\n자료 유형에 맞는 값을 요구한다 — 영상·음성은 시각, 문서는 페이지.\n위치가 없으면 나중에 \"정말 그래요?\" 에 답할 수 없고 영상 구간도 못 띄운다.",
+      "properties": {
+        "bbox": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "timestamp_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Sec"
+        },
+        "type": {
+          "default": "WHOLE_SOURCE",
+          "enum": [
+            "PAGE",
+            "TIMESTAMP",
+            "LINE",
+            "BBOX",
+            "WHOLE_SOURCE"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "EvidenceLocator",
+      "type": "object"
+    },
+    "FactProvenance": {
+      "additionalProperties": false,
+      "description": "이 사실이 어느 자료의 어디에서 나왔는가 (RV-06).\n\n공개된 사실은 전부 출처를 갖는다. 출처 없는 사실이 실리면 \"승인된 매장 지식만\n근거로 답한다\" 를 검사할 수 없고, 자료를 지운 뒤 인용 끊김 표시도 못 한다 (D20).",
+      "properties": {
+        "locator": {
+          "$ref": "#/$defs/EvidenceLocator",
+          "default": {
+            "bbox": null,
+            "line": null,
+            "page": null,
+            "timestamp_sec": null,
+            "type": "WHOLE_SOURCE"
+          }
+        },
+        "occurrence_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Occurrence Id",
+          "type": "string"
+        },
+        "source_content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Content Hash"
+        },
+        "source_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Source Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "occurrence_id",
+        "source_id"
+      ],
+      "title": "FactProvenance",
+      "type": "object"
+    },
+    "FactRevision": {
+      "additionalProperties": false,
+      "description": "승인된 사실 한 판. 불변이다 — 수정은 새 revision 이다 (MVP 31-2).",
+      "properties": {
+        "assertion": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Assertion",
+          "type": "string"
+        },
+        "conditions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "entity_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "exceptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exceptions",
+          "type": "array"
+        },
+        "fact_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "fact_revision_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Fact Revision Id",
+          "type": "string"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        },
+        "original_assertion": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Original Assertion",
+          "type": "string"
+        },
+        "polarity": {
+          "default": "AFFIRM",
+          "enum": [
+            "AFFIRM",
+            "NEGATE"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/FactProvenance"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Provenance",
+          "type": "array"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Quantity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "maxLength": 19,
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "value_text": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Text"
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": {
+            "size": null,
+            "temperature": null
+          }
+        }
+      },
+      "required": [
+        "fact_revision_id",
+        "fact_id",
+        "entity_id",
+        "original_assertion",
+        "assertion",
+        "provenance"
+      ],
+      "title": "FactRevision",
+      "type": "object"
+    },
+    "PublishedCard": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/CardBlock"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Blocks",
+          "type": "array"
+        },
+        "card_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Id",
+          "type": "string"
+        },
+        "card_version_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Card Version Id",
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": {
+            "size": null,
+            "temperature": null
+          }
+        }
+      },
+      "required": [
+        "card_id",
+        "card_version_id",
+        "entity_id",
+        "title",
+        "blocks"
+      ],
+      "title": "PublishedCard",
+      "type": "object"
+    },
+    "Quantity": {
+      "additionalProperties": false,
+      "description": "수치는 decimal string 과 unit 을 함께 보존한다 (MVP 31-2).\n\nfloat 로 담으면 275 가 274.99999 가 되고, 단위를 버리면 275ml 와 275g 이 같아진다.\n단위 변환은 명시된 규칙·원래 값·반올림 이력을 갖고 따로 한다.",
+      "properties": {
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "value": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Quantity",
+      "type": "object"
+    },
+    "RawSpan": {
+      "additionalProperties": false,
+      "description": "typed 로 쪼개지 않고 승인된 원문 구간 (RV-05, §3.4).\n\nRAW 블록이 가리키는 대상이다. snapshot 이 이것을 싣지 않으면 `raw_span_id` 는\n아무 데도 닿지 못하는 참조가 된다 — 블록이 사실을 가리킬 때와 같은 문제다.",
+      "properties": {
+        "locator": {
+          "$ref": "#/$defs/EvidenceLocator",
+          "default": {
+            "bbox": null,
+            "line": null,
+            "page": null,
+            "timestamp_sec": null,
+            "type": "WHOLE_SOURCE"
+          }
+        },
+        "raw_span_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Raw Span Id",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 19,
+          "pattern": "^[0-9]+$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw_span_id",
+        "source_id",
+        "text"
+      ],
+      "title": "RawSpan",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": false,
+      "description": "규격. 같은 이름이라도 값이 다른 축이다.\n\n`null` 은 **모든 규격에 통용된다는 뜻이 아니라 미확정이다** (MVP 31-2).\n여러 규격이 가능하면 보류하거나 되묻는다.\n\n카드는 규격을 한 장에 담되 값은 규격별로 나란히 둔다 (D19).\n사실은 여기서 갈라 저장한다 — 카드는 표시 단위이고 사실이 값의 단위다.",
+      "properties": {
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "enum": [
+                "HOT",
+                "ICE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        }
+      },
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "R 이 소비하는 전부. 이 밖의 것은 답변 근거가 될 수 없다.",
+  "properties": {
+    "cards": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PublishedCard"
+      },
+      "title": "Cards",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "fact_revisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/FactRevision"
+      },
+      "title": "Fact Revisions",
+      "type": "array"
+    },
+    "glossary_version": {
+      "maxLength": 40,
+      "title": "Glossary Version",
+      "type": "string"
+    },
+    "knowledge_revision": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Knowledge Revision",
+      "type": "string"
+    },
+    "raw_spans": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RawSpan"
+      },
+      "title": "Raw Spans",
+      "type": "array"
+    },
+    "renderer_version": {
+      "maxLength": 40,
+      "title": "Renderer Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "published_knowledge/v1",
+      "default": "published_knowledge/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "snapshot_hash": {
+      "title": "Snapshot Hash",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "store_id": {
+      "maxLength": 19,
+      "pattern": "^[0-9]+$",
+      "title": "Store Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "store_id",
+    "knowledge_revision",
+    "snapshot_id",
+    "snapshot_hash",
+    "created_at",
+    "glossary_version",
+    "renderer_version"
+  ],
+  "title": "PublishedKnowledgeSnapshot",
+  "type": "object"
+}
