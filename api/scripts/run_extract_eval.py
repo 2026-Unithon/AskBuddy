@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import mimetypes
 import subprocess
 import sys
@@ -29,6 +30,16 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from app.config import get_settings  # noqa: E402
+
+# 파이프라인 내부 로그를 보이게 한다. logging.basicConfig 는 app/main.py 에만 있어서
+# 스크립트로 돌리면 구간 분할·조립이 실제로 돌았는지 확인할 수가 없었다.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 from app.deps import get_pool, init_pool, close_pool  # noqa: E402
 from app.ingest import repository as ingest_repo  # noqa: E402
 from app.ingest.pipeline import process_source  # noqa: E402
