@@ -898,9 +898,13 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 코드 위치와 판단의 상세 검토 결과는 `AI_PLAN_REVIEW_20260914.md`에 기록한다.
 
-## 22-5. pull 65c2403 이후 C0 상태
+## 22-5. C0 상태 (CP-00A~04 이후)
 
-`api/app/contracts/`의 common/extraction/card/snapshot/answer 타입과 기존 unit 22개를 재사용한다. 현재 runtime에서 이 계약을 소비하는 import는 아직 없으며, 전체 schema·RAW/provenance·event/API·DB 원자성 완료는 아니다. 추가 순수 반례에서는 중복/순환/원문 변경/action 혼합 등 보강 지점이 확인됐다. [C0_REVIEW_20260914.md](C0_REVIEW_20260914.md)의 재현 결과와 CP-01~05가 후속 기준이다. 사용자 원가 회신으로 CP-00A~C usage 계측·등록/운영 report를 먼저 수행하도록 순서를 구체화했다.
+`api/app/contracts/`가 common/extraction/card/snapshot/answer에 더해 usage/errors/publication/chat/hashing/validate를 담는다. [C0_REVIEW_20260914.md](C0_REVIEW_20260914.md)의 RV-01~10 보강 지점(중복·고아·순환·원문 변경·action 혼합·occurrence 식별·hash/시각/ID 정규형·빈 추출 분기)은 계약과 테스트로 닫혔고, 같은 문서의 probe 19개가 전부 통과한다(GAP 0).
+
+계약 밖으로 나온 것도 있다. canonical JSON과 snapshot hash, JSON schema·test vector export(`api/schema/`), F01~F35 공유 fixture(`api/tests/fixtures/contracts/v1/`), fake renderer/indexer/outbox, M0·M1 migration과 발행 트랜잭션 서비스다. 실제 DB에서 삭제 보존·멱등·동시 발행·매장 격리·불변성 12개 시나리오를 확인했고, 빈 DB에 17개 migration을 처음부터 쌓는 재구축도 확인했다.
+
+**아직 아닌 것을 분명히 한다.** 제품 runtime(`learn/router`, ingest 파이프라인)이 이 계약을 소비하는 경로는 아직 연결되지 않았다. 원가는 관측만 되고 요율표가 비어 있어 D21 판정이 UNDETERMINED이며 이는 통과가 아니다. R 몫인 embed/answer 계측과 M2·M3, 그리고 CP-05 품질 통합이 남아 있다. 계약·fixture·fake로 확인한 것을 실자료 캠페인 결과로 옮겨 적지 않는다.
 
 ---
 

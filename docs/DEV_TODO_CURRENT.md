@@ -76,33 +76,37 @@ W는 **원본 → 사실 JSON → 카드 초안 → 검수·공개**, R은 **질
 - [x] pull의 D18~D21과 기존 계약 타입·22개 unit 검증 범위를 확인하고 C0 상세 결정서·계획 검토에 연결했다.
 - [x] W/R 접점·공유 파일 담당·migration 순서·동기화 규칙을 결정서에 고정했다(구현 완료 체크 아님).
 - [x] 사용자 회신으로 U1 비용 범위를 확정하고 U2를 입력틀·첫 달/안정기 시나리오·메타데이터 수집 계획으로 전환했다.
-- [ ] CP-00A: 공통 UsageContext/호출 receipt·rate/phase/purpose·원가 summary·MC0 가산형 migration을 구현한다. null/0·기존 종료 run freeze·store FK를 검증한다.
-- [ ] CP-00B: W의 extract/assemble/STT/분류/Storage, R의 embed/answer/runner/metrics에 usage를 연결한다. parsing 실패·재시도·timeout·batch/cache와 직접 Storage 전송을 포함한다.
-- [ ] CP-00C: 등록/운영/EVALUATION 분리 report·예산환산/잔여 예산 보전·6개 입력틀·시나리오·Storage 대조를 검증한다. fake 인수 후 첫 실자료 캠페인에서도 모든 비용을 기록한다.
-- [ ] CP-01~02: 계약 보강·서버 참조 검증·RAW/provenance·event/error·schema/hash export를 구현한다.
-- [ ] CP-03~04: 공유 fixture·생산자/소비자·격리 DB 경합/삭제/멱등 검증을 완료한다.
+- [x] CP-00A: `UsageContext`/`UsageAttempt` 계약과 MC0 원장(`ai_usage_attempts`·`cost_assessments`·`extraction_runs` 요약)을 구현했다. 결측과 0을 구분하고, PARTIAL/UNKNOWN은 총액을 내지 않는다. 요율표는 `config/rate_card.json`에 전부 null로 두어 토큰만 쌓인다.
+- [x] CP-00B: extract/assemble/STT/Storage에 usage를 연결했다. 유료 호출 전에 STARTED를 먼저 커밋하고, 실패해도 공급자를 다시 부르지 않는다. Storage는 클라이언트가 보낸 `file_size`가 아니라 서버가 확인한 bytes를 쓴다. **R의 embed/answer/runner/metrics 연결은 R 몫으로 남아 있다.**
+- [x] CP-00C: `app/usage/report.py`와 `scripts/cost_report.py`로 단계별 단가·관측률, 등록/운영 분리, LOW/BASE/HIGH 시나리오, D21 판정을 낸다. **현재 판정은 UNDETERMINED이고 이는 통과가 아니다** — 답변 단가·저장비·환율·요율표가 없다. 첫 실측은 호출 5회 100% 관측(prompt 28,084 / completion 4,542 / thought 9,502)이며 요율 미설정이라 금액은 없다.
+- [x] CP-01: `docs/C0_REVIEW_20260914.md`의 RV-01~10을 계약으로 닫았다. 중복/고아 사실·순환 선행·action 필드 배타·원문 공백 보존·불변 snapshot·occurrence 단위 판정·SHA-256/UTC/bigint 정규형·추출 `result_status` 분기. 모양만으로 권한을 볼 수 없어 `validate_answer_plan(plan, snapshot, store_id)`을 따로 뒀다. probe 19/19, GAP 0.
+- [x] CP-02: 발행/색인/오류/채팅 DTO와 canonical JSON·snapshot hash를 구현했다. hash 대상에서 `snapshot_id`·`created_at`·hash 자신을 빼 같은 내용의 두 발행이 같은 hash를 갖게 했다. JSON schema 13종과 고정 test vector를 `api/schema/`에 내보내고 `--check`로 코드와의 불일치를 잡는다.
+- [x] CP-03: `api/tests/fixtures/contracts/v1/`에 snapshot·타 매장 snapshot·manifest를 JSON으로 얼리고 F01~F35 전부에 검사를 붙였다. 소비자는 파일에서 읽는다. fake renderer/indexer/outbox를 구현했다. fixture가 계약 구멍을 하나 잡았다 — `SelectedBlock`이 승인 RAW 원문을 인용할 수 없었다(F09).
+- [x] CP-04(W 몫): M0 operation/outbox/consumer dedupe/lease와 M1 fact revision/occurrence/raw span/version-block/publication manifest를 추가하고 트랜잭션 서비스를 구현했다. 실제 DB에서 12/12 확인(삭제 보존·물리 삭제 거절·원문 공백 왕복·멱등 재시도·키 충돌·STALE·동시 발행 1승 1패·타 매장 사실 차단·판/snapshot 불변), 빈 DB에 17개 migration 재구축 성공. **M2(색인 staging)·M3(v2 session/context)는 R 몫으로 남아 있다.**
 - [ ] CP-05: CP-00 계측 결과를 품질 manifest·D18/D21 하네스에 통합한다. 미계측/미귀속 비용이 있으면 UNKNOWN, 알려진 부분합만으로 상한 초과면 FAIL이다.
 
-- [ ] 원본 segment·추출 fact·카드 계획·공개 snapshot·답변 계획 계약을 MVP 31절대로 고정한다. 서버가 ID·매장·권한을 확정하며 모델이 낸 임의 ID를 신뢰하지 않는다.
-- [ ] `schema_version=published_knowledge/v1`과 JWT `store_id`, `knowledge_revision`, `snapshot_hash`, `card_id/card_version_id`, 불변 `fact_revision_id`, 렌더링 블록·근거·glossary/schema 버전을 포함한다. DB bigint ID는 API에서 decimal string으로 전달한다.
-- [ ] 원문 assertion과 선택적인 typed 속성·규격·조건·부정·예외·순서·dependencies·evidence occurrence를 보존한다. 미확인 규격은 모든 규격에 통용되는 wildcard가 아니다.
+- [x] 원본 segment·추출 fact·카드 계획·공개 snapshot·답변 계획 계약을 MVP 31절대로 고정했다 (CP-01~02, `api/app/contracts/`). 서버가 ID·매장·권한을 확정하며 모델이 낸 임의 ID를 신뢰하지 않는다.
+- [x] `schema_version=published_knowledge/v1`과 JWT `store_id`, `knowledge_revision`, `snapshot_hash`, `card_id/card_version_id`, 불변 `fact_revision_id`, 렌더링 블록·근거·glossary/schema 버전을 포함한다. DB bigint ID는 API에서 decimal string으로 전달한다.
+- [x] 원문 assertion과 선택적인 typed 속성·규격·조건·부정·예외·순서·dependencies·evidence occurrence를 보존한다 (CP-01). 원문은 공백까지 그대로 두고 계약이 정규화하지 않는다. 미확인 규격은 모든 규격에 통용되는 wildcard가 아니다.
 - [ ] `effective_facts`는 초안 작업용으로만 사용한다. 카드 버전이 승인한 fact revision·RAW 블록만 공개 근거다. legacy 원문을 모델로 역추출한 facts가 기존 승인을 상속하지 않게 한다.
 - [ ] `POST/GET /learn/chat/v2`를 additive 계약으로 설계한다. `action`은 `ANSWER / CLARIFY / ESCALATE / REFUSE / SAFE_ROUTE`, 인프라 `ERROR`는 별도 구조화 오류 응답이다. v1 binary 계약은 유지하며 클라이언트를 점진 전환한다.
 - [ ] `CLARIFY`는 pending/점주 알림을 만들지 않고 `context_id`의 tenant·member·session·TTL을 검사한다. `ESCALATE`만 질문 저장 성공 후 WAITING을 반환한다. 정책 안내 `REFUSE/SAFE_ROUTE`도 자동 pending을 만들지 않는다.
 - [ ] pending 문맥 snapshot과 의미 중복키를 고정한다. 원문 + resolved_query·확정 대상/규격/속성/조건을 보존하며 문맥이 다른 동일 문장을 합치지 않는다. 요청 idempotency와 의미 중복 묶기는 분리한다.
 - [ ] R의 `owner_answer_id` 원문 보존·멱등 event/outbox와 W의 `knowledge_apply` 내부 command·발행 결과를 고정한다. 직원 원문 답변 전달과 지식화 상태는 분리한다.
-- [ ] 합성 fixture에 HOT/ICE·크기 차이, 금지·조건·예외·순서, 교차 매장, 승인 취소·최신 초안·RAW 카드·모델 오류를 포함한다. 합성 fixture만 Git에 둔다.
+- [x] 합성 fixture에 HOT/ICE·크기 차이, 금지·조건·예외·순서, 교차 매장, 승인 취소·최신 초안·RAW 카드·모델 오류를 포함했다 (CP-03 F01~F35). 합성 fixture만 Git에 둔다.
 - [x] source 삭제·카드 제외·사실 정정이 기존 인용과 신규 응답에 미치는 영향을 정한다 (D20).
       **자료를 지워도 사실과 카드는 남는다.** 이미 나간 답변의 인용은 끊지 않고
       `인용 끊김` 으로 표시한다. 개인정보 삭제 요청은 별도 절차로 다룬다.
 - [x] `인용 끊김`의 API/UI 설계를 결정서 §4.4에 고정했다. occurrence별 source_availability overlay와 승인 카드 접근을 제공한다.
-- [ ] D20의 source tombstone·보존 FK·파일 접근 해제·인용 UI를 구현하고 source 삭제가 facts/card_versions/citations를 지우지 않는지 검증한다.
-- [ ] 멱등성 키·schema version·content hash·발행 실패 코드·timeout·재시도 상한과 C0 승격 수치를 확정한다. 미확정 항목이 있으면 실험은 탐색으로 표시하고 승격하지 않는다.
-- [ ] W는 지식·발행 schema, R은 질문·인용 schema를 작성하고 migration 순서·외래키는 상호 검토한다. 적용된 migration은 수정하지 않는다.
+- [~] D20의 source tombstone·보존 FK를 구현하고 source 삭제가 facts/occurrence를 지우지 않는 것을 실제 DB에서 확인했다 (CP-04 M1). 근거로 쓰이는 자료는 물리 삭제를 거절한다. **원본 파일 접근 해제와 `인용 끊김` UI는 아직이다.**
+- [x] 멱등성 키·schema version·content hash·발행 실패 코드·timeout·재시도 상한을 계약과 DB로 고정했다 (CP-02 `errors.py`·`hashing.py`, CP-04 `operations`). 재시도 가능 여부는 표가 정하고 호출부가 바꾸지 못한다. 미확정 항목이 있으면 실험은 탐색으로 표시하고 승격하지 않는다.
+- [~] W의 지식·발행 schema(M0·M1)를 작성했고 적용된 migration은 수정하지 않았다 — 기존 CASCADE는 새 migration에서 제약만 교체했다. **R의 질문·인용 schema(M2·M3)와 상호 검토는 남아 있다.**
 - [ ] `config.py`, 공용 schema/router, 의존성 파일, 공유 UI·query key는 변경마다 한 주 작성자를 지정한다. `learn/router`는 R이 주 편집하고 W는 합의한 command 인터페이스로 연결한다.
 - [ ] 품질 변경은 기능 플래그로 분리하고 지원 schema/legacy 조합을 명시한다. 인증·매장 격리·승인 확인을 끄는 플래그는 만들지 않는다.
 
-C0-4의 CP-00A→B→C 계측을 선행하고, CP-01 계약 보강·R 보안은 병행한다. 그 뒤 CP-02→03 계약·fixture 동결을 거쳐 W/R 계약 의존 개발과 CP-04~05를 진행한다. C0 계획의 사용자 미결 질문은 해소됐으며 계측 구현·실제 원가/품질 통과는 아직 별도다.
+2026-09-14 기준 CP-00A~C·CP-01~03과 CP-04의 W 몫이 구현·검증됐다 (282 unit, C0 probe 19/19 GAP 0, DB 시나리오 12/12, 빈 DB 재구축 성공). 남은 것은 R 몫(CP-00B의 embed/answer 계측, M2·M3)과 CP-05, 그리고 실제 캠페인이다.
+
+**구현됐다는 것이 통과했다는 뜻이 아니다.** 원가 D21 판정은 요율·답변 단가·저장비·환율이 없어 UNDETERMINED이고, 품질 게이트는 CP-05 통합 전이다. 계약·fixture·fake로 확인한 것과 실자료 캠페인 결과를 같은 칸에 적지 않는다.
 
 # 12.5단계. 화면·개발 환경 — 각 파이프라인 담당자가 수행
 
