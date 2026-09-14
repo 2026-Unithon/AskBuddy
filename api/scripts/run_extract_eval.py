@@ -484,7 +484,8 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         [(run_id, store_id, r["fact_id"], r["subject"], r["variant"],
           r["attribute"], r["value"], r["must_have"], r["source_key"],
           r["source_type"], r["verdict"], r["card_id"], r["score"],
-          r["reason"], r["subject_hit"], r["value_hit"], r["variant_hit"])
+          r["reason"], r["subject_hit"], r["value_hit"], r["variant_hit"],
+          r["in_ledger"], r["ledger_fact_id"], r["loss_stage"])
          for r in report.rows],
     )
     await conn.execute(

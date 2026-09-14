@@ -98,6 +98,58 @@ async def upload_frames(store_id: int, source_id: int, frames: list[Path]) -> li
     return rows
 
 
+def frame_time_sec(frame: Path) -> int:
+    """파일명 frame_0007.jpg → 시각(초). 1-base 라 1을 뺀다."""
+    try:
+        index = int(frame.stem.rsplit("_", 1)[-1])
+    except ValueError:
+        return 0
+    return max(0, index - 1) * get_settings().frame_interval_sec
+
+
+def split_by_time(
+    segments: list[dict], frames: list[Path], window_sec: int
+) -> list[tuple[str, list[Path]]]:
+    """전사 구간과 프레임을 같은 시간 창으로 묶는다.
+
+    한 호출이 보는 범위를 줄이는 것이 목적이다. 38분을 통째로 주면 모델이
+    요약해버리고 세부를 버린다 (store-a 실측: 영상 사실 62건 중 61건 미추출).
+
+    창마다 그 시간대의 전사문과 프레임만 들어간다. 창 밖은 보이지 않는다.
+    """
+    if window_sec <= 0:
+        return []
+
+    last = 0.0
+    if segments:
+        last = max(float(s.get("end", 0) or 0) for s in segments)
+    if frames:
+        # 목록 순서를 믿지 않는다. 실제 시각의 최댓값을 쓴다
+        last = max(last, float(max(frame_time_sec(f) for f in frames)))
+        # 마지막 프레임 자체도 창 안에 들어와야 하므로 한 칸 뒤까지 본다
+        last += get_settings().frame_interval_sec
+    if last <= 0:
+        return []
+
+    windows: list[tuple[str, list[Path]]] = []
+    start = 0
+    while start < last:
+        end = start + window_sec
+        lines = [
+            f"[{int(sg['start']) // 60:02d}:{int(sg['start']) % 60:02d}] {sg['text']}"
+            for sg in segments
+            if start <= float(sg.get("start", 0) or 0) < end
+        ]
+        window_frames = [f for f in frames if start <= frame_time_sec(f) < end]
+        if lines or window_frames:
+            head = (f"(영상 {start // 60}분 {start % 60}초 ~ "
+                    f"{min(int(end), int(last)) // 60}분 {min(int(end), int(last)) % 60}초 구간)")
+            body = "\n".join(lines) if lines else "(이 구간에 말이 없다. 화면만으로 판단할 것)"
+            windows.append((f"{head}\n{body}", sample_for_model(window_frames)))
+        start = end
+    return windows
+
+
 def sample_for_model(frames: list[Path]) -> list[Path]:
     """모델에 넣을 프레임을 고르게 솎는다. 전부 넣으면 느리고 비싸다.
 

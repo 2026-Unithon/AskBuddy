@@ -40,7 +40,7 @@ async def process_source(
 
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
-            text, media = await _preprocess(conn, store_id, src)
+            text, media, segments = await _preprocess(conn, store_id, src)
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
 
@@ -64,15 +64,14 @@ async def process_source(
                     job_id,
                 )
 
-            # native 영상이 실패하면 프레임으로 폴백한다 (이관경계 4절).
-            # 한 모드가 죽었다고 자료 전체를 버리지 않는다.
-            result = await extract_cards(
+            result = await _extract_all(
                 source_id=source_id,
                 source_type=src["source_type"],
                 text=text,
-                category_names=list(categories),
-                glossary=glossary,
                 media=media,
+                categories=list(categories),
+                glossary=glossary,
+                segments=segments,
             )
 
             # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
@@ -116,6 +115,54 @@ async def process_source(
             shutil.rmtree(storage.workdir(source_id), ignore_errors=True)
 
 
+async def _extract_all(
+    *, source_id: int, source_type: str, text: str, media: list[Path],
+    categories: list[str], glossary: list[dict],
+    segments: list[tuple[str, list[Path]]],
+) -> ExtractionResult:
+    """구간이 있으면 구간마다 뽑고 합친다. 없으면 통째로 한 번 뽑는다.
+
+    38분을 한 호출에 담으면 모델이 요약하고 세부를 버린다 —
+    store-a 실측에서 영상 사실 62건 중 61건을 아예 못 뽑았다.
+    구간을 나누면 한 호출이 보는 범위가 줄어든다.
+
+    구간 하나가 실패해도 나머지는 살린다. 전부 실패했을 때만 예외를 올린다.
+    """
+    if not segments:
+        # native 영상이 실패하면 프레임으로 폴백한다 (이관경계 4절).
+        # 한 모드가 죽었다고 자료 전체를 버리지 않는다.
+        return await extract_cards(
+            source_id=source_id, source_type=source_type, text=text,
+            category_names=categories, glossary=glossary, media=media,
+        )
+
+    merged = ExtractionResult(cards=[], unresolved=[])
+    failed = 0
+    for index, (seg_text, seg_media) in enumerate(segments, start=1):
+        try:
+            part = await extract_cards(
+                source_id=source_id, source_type=source_type, text=seg_text,
+                category_names=categories, glossary=glossary, media=seg_media,
+            )
+        except Exception as exc:
+            failed += 1
+            logger.warning("구간 %d/%d 추출 실패 source=%s: %s",
+                           index, len(segments), source_id, exc)
+            continue
+        merged.cards.extend(part.cards)
+        merged.unresolved.extend(part.unresolved)
+        logger.info("구간 %d/%d 카드 %d장 (프레임 %d장)",
+                    index, len(segments), len(part.cards), len(seg_media))
+
+    if failed == len(segments):
+        raise RuntimeError(f"모든 구간({failed}개) 추출이 실패했다")
+    if failed:
+        logger.warning("구간 %d/%d 실패 — 나머지 결과로 진행한다", failed, len(segments))
+    logger.info("구간 %d개 합계 카드 %d장 source=%s",
+                len(segments), len(merged.cards), source_id)
+    return merged
+
+
 async def _mark_failed(
     conn: asyncpg.Connection, store_id: int, source_id: int, exc: Exception
 ) -> None:
@@ -136,7 +183,7 @@ async def _mark_failed(
 
 async def _preprocess(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path]]:
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """자료 유형별 전처리.
 
     반환값은 (추출기에 넣을 텍스트, 모델에 함께 보낼 파일들).
@@ -156,7 +203,7 @@ async def _preprocess(
     # 목 모드는 원본을 내려받지 않는다. VOICE 는 전사문 재사용 분기가 있어 그쪽에서 처리한다
     if get_settings().ingest_mode == "mock" and source_type != "VOICE":
         logger.info("preprocess skipped (mock) source=%s type=%s", source_id, source_type)
-        return MOCK_PLACEHOLDER, []
+        return MOCK_PLACEHOLDER, [], []
 
     return await handler(conn, store_id, src)
 
@@ -178,7 +225,7 @@ async def _download(conn: asyncpg.Connection, store_id: int,
 
 async def _preprocess_video(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path]]:
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
     from app.config import get_settings
 
@@ -192,11 +239,17 @@ async def _preprocess_video(
     meta = await video.probe(path)
 
     transcript = row["transcript"]
+    stt_segments: list[dict] = []
     if transcript:
         logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s", source_id)
+        # 시각과 함께 저장해둔 전사문이면 구간을 되살린다
+        stt_segments = audio.parse_timestamped(transcript)
     elif meta["has_audio"]:
         audio_path = await video.extract_audio(path, work)
-        transcript, _ = await audio.transcribe(audio_path)
+        _, stt_segments, _ = await audio.transcribe_detailed(audio_path)
+        # 시각을 붙여 저장한다. 추출 프롬프트가 근거 시각을 채우려면 보여야 하고,
+        # 재실행 때 STT 없이 다시 쪼개려면 남아 있어야 한다
+        transcript = audio.with_timestamps(stt_segments) if stt_segments else ""
     else:
         logger.info("오디오 트랙 없음 source=%s — 화면만으로 추출한다", source_id)
         transcript = ""
@@ -217,14 +270,19 @@ async def _preprocess_video(
     # 근거용 source_frames 저장은 어느 모드에서도 유지한다.
     if get_settings().video_input_mode == "native":
         logger.info("video_input_mode=native — 원본 영상을 그대로 투입 source=%s", source_id)
-        return text, [path]
+        return text, [path], []
 
-    return text, video.sample_for_model(frames)
+    # 긴 영상은 시간 창으로 쪼개 map 한다 (13.4). 창 밖은 그 호출에 보이지 않는다.
+    window = get_settings().video_segment_sec
+    segments = video.split_by_time(stt_segments, frames, window) if window > 0 else []
+    if segments:
+        logger.info("영상 %d초 창으로 %d구간 분할 source=%s", window, len(segments), source_id)
+    return text, video.sample_for_model(frames), segments
 
 
 async def _preprocess_kakao(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path]]:
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """카톡: txt 를 파싱한다. LLM 을 쓰지 않는다."""
     source_id = src["source_id"]
     if await repo.get_kakao(conn, source_id) is None:
@@ -238,7 +296,7 @@ async def _preprocess_kakao(
             conn, source_id, room_name=None, message_count=0, participant_cnt=0,
             period_start=None, period_end=None, parsed_text="",
         )
-        return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path]
+        return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path], []
 
     raw = path.read_text(encoding="utf-8", errors="replace")
     parsed = kakao.parse(raw)
@@ -251,12 +309,12 @@ async def _preprocess_kakao(
         period_start=parsed["period_start"], period_end=parsed["period_end"],
         parsed_text=parsed["parsed_text"],
     )
-    return parsed["parsed_text"], []
+    return parsed["parsed_text"], [], []
 
 
 async def _preprocess_scan(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path]]:
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """문서·이미지: PDF 는 텍스트 레이어를 먼저 읽고, 없으면 모델에 그림째 넘긴다."""
     source_id = src["source_id"]
     row = await repo.get_scan(conn, source_id)
@@ -270,7 +328,7 @@ async def _preprocess_scan(
         if text:
             await repo.update_scan_result(conn, source_id, page_count=pages,
                                           ocr_text=text, ocr_engine="pypdf")
-            return text, []
+            return text, [], []
         # 텍스트 레이어가 없는 스캔본 — PDF 를 그대로 모델에 넘긴다
         await repo.update_scan_result(conn, source_id, page_count=pages,
                                       ocr_text=None, ocr_engine=None)
@@ -283,7 +341,7 @@ async def _preprocess_scan(
 
 async def _preprocess_voice(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path]]:
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     from app.config import get_settings
     source_id = src["source_id"]
 
@@ -294,14 +352,15 @@ async def _preprocess_voice(
     if row and row["transcript"]:
         logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s chars=%d",
                     source_id, len(row["transcript"]))
-        return row["transcript"], []
+        return row["transcript"], [], []
 
     if get_settings().ingest_mode == "mock":
-        return MOCK_PLACEHOLDER, []
+        return MOCK_PLACEHOLDER, [], []
 
     path = await _download(conn, store_id, src)
     meta = await audio.probe(path)
-    text, model = await audio.transcribe(path)
+    plain, stt_segments, model = await audio.transcribe_detailed(path)
+    text = audio.with_timestamps(stt_segments) if stt_segments else plain
 
     await repo.update_voice_result(
         conn, source_id,
@@ -309,7 +368,7 @@ async def _preprocess_voice(
         transcript=text,
         stt_model=model,
     )
-    return text, []
+    return text, [], []
 
 
 async def _persist(
