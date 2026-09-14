@@ -11,14 +11,20 @@ from app.contracts.card import (
     OccurrenceDisposition,
 )
 from app.contracts.common import (
+    MAX_BIGINT,
     SCHEMA_ANSWER_PLAN,
     SCHEMA_CARD_PLAN,
     SCHEMA_EXTRACTION,
     SCHEMA_PUBLISHED,
     Contract,
     EntityId,
+    FrozenContract,
     Polarity,
     Quantity,
+    RawText,
+    RevisionId,
+    Sha256Hex,
+    UtcDatetime,
     Variant,
     as_id,
 )
@@ -26,19 +32,25 @@ from app.contracts.extraction import (
     Assertion,
     EvidenceLocator,
     ExtractionEnvelope,
+    ExtractionStatus,
     LocatorType,
 )
 from app.contracts.snapshot import (
+    FactProvenance,
     FactRevision,
     PublishedCard,
     PublishedKnowledgeSnapshot,
 )
+from app.contracts.validate import AnswerPlanViolation, validate_answer_plan
 
 __all__ = [
     "AnswerAction", "AnswerPlan", "SelectedBlock",
     "BlockKind", "CardBlock", "CardPlan", "Disposition", "OccurrenceDisposition",
-    "Contract", "EntityId", "Polarity", "Quantity", "Variant", "as_id",
+    "Contract", "EntityId", "FrozenContract", "Polarity", "Quantity", "Variant",
+    "RawText", "RevisionId", "Sha256Hex", "UtcDatetime", "MAX_BIGINT", "as_id",
     "SCHEMA_ANSWER_PLAN", "SCHEMA_CARD_PLAN", "SCHEMA_EXTRACTION", "SCHEMA_PUBLISHED",
-    "Assertion", "EvidenceLocator", "ExtractionEnvelope", "LocatorType",
-    "FactRevision", "PublishedCard", "PublishedKnowledgeSnapshot",
+    "Assertion", "EvidenceLocator", "ExtractionEnvelope", "ExtractionStatus",
+    "LocatorType",
+    "FactProvenance", "FactRevision", "PublishedCard", "PublishedKnowledgeSnapshot",
+    "AnswerPlanViolation", "validate_answer_plan",
 ]

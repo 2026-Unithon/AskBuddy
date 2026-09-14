@@ -16,31 +16,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pydantic import ValidationError
 
 from app.contracts import (
-    AnswerPlan, Assertion, CardBlock, ExtractionEnvelope, FactRevision,
-    PublishedCard, PublishedKnowledgeSnapshot, SelectedBlock,
+    AnswerPlan, AnswerPlanViolation, Assertion, CardBlock, ExtractionEnvelope,
+    FactProvenance, FactRevision, PublishedCard, PublishedKnowledgeSnapshot,
+    SelectedBlock, validate_answer_plan,
 )
+
+
+def fact(fact_revision_id="40", assertion="합성 사실", **changes):
+    data = dict(
+        fact_revision_id=fact_revision_id, fact_id="4", entity_id="30",
+        original_assertion=assertion, assertion=assertion,
+        provenance=(FactProvenance(occurrence_id="50", source_id="60"),),
+    )
+    data.update(changes)
+    return FactRevision(**data)
 
 
 def snapshot(**changes):
     data = dict(
-        store_id="1", knowledge_revision=1, snapshot_id="10",
+        store_id="1", knowledge_revision="1", snapshot_id="10",
         snapshot_hash="a" * 64, created_at=datetime(2026, 9, 14, tzinfo=timezone.utc),
         glossary_version="g1", renderer_version="r1",
         cards=[PublishedCard(
             card_id="20", card_version_id="21", entity_id="30", title="합성 음료",
-            blocks=[CardBlock(block_id="b1", kind="NOTES", fact_revision_ids=["40"])],
+            blocks=[CardBlock(block_id="b1", kind="NOTES", order=1,
+                              fact_revision_ids=["40"])],
         )],
-        fact_revisions=[FactRevision(fact_revision_id="40", assertion="합성 사실")],
+        fact_revisions=[fact()],
     )
     data.update(changes)
     return PublishedKnowledgeSnapshot(**data)
 
 
 def duplicate_facts():
-    return snapshot(fact_revisions=[
-        FactRevision(fact_revision_id="40", assertion="첫 주장"),
-        FactRevision(fact_revision_id="40", assertion="다른 주장"),
-    ])
+    return snapshot(fact_revisions=[fact(assertion="첫 주장"),
+                                    fact(assertion="다른 주장")])
 
 
 def duplicate_cards():
@@ -55,16 +65,13 @@ def duplicate_blocks():
 
 
 def orphan_fact():
-    return snapshot(fact_revisions=[
-        FactRevision(fact_revision_id="40", assertion="공개 블록에 있는 사실"),
-        FactRevision(fact_revision_id="41", assertion="공개 블록에 없는 사실"),
-    ])
+    return snapshot(fact_revisions=[fact("40", "공개 블록에 있는 사실"),
+                                    fact("41", "공개 블록에 없는 사실")])
 
 
 def self_dependency():
     return snapshot(fact_revisions=[
-        FactRevision(fact_revision_id="40", assertion="자신을 선행으로 참조", requires=["40"]),
-    ])
+        fact("40", "자신을 선행으로 참조", requires=["40"])])
 
 
 def missing_snapshot_fact():
@@ -72,27 +79,31 @@ def missing_snapshot_fact():
 
 
 def missing_prerequisite():
-    return snapshot(fact_revisions=[
-        FactRevision(fact_revision_id="40", assertion="선행 필요", requires=["99"]),
-    ])
+    return snapshot(fact_revisions=[fact("40", "선행 필요", requires=["99"])])
 
 
 def mixed_answer():
     return AnswerPlan(
-        snapshot_id="10", knowledge_revision=1, action="ESCALATE",
+        snapshot_id="10", knowledge_revision="1", action="ESCALATE",
         escalation_reason="근거 부족", clarification_slot="temperature",
         allowed_options=["HOT", "ICE"], context_id="ctx",
     )
 
 
 def arbitrary_answer_references():
-    return AnswerPlan(
-        snapshot_id="999", knowledge_revision=999, action="ANSWER",
+    """모양만으로는 임의 ID 가 통과한다. 서버 snapshot 에 대조해야 걸린다 (RV-04).
+
+    `AnswerPlan(...)` 하나로는 여기서 예외가 나지 않는다 — 그것이 지적의 내용이다.
+    """
+    plan = AnswerPlan(
+        snapshot_id="999", knowledge_revision="999", action="ANSWER",
         selected_blocks=[SelectedBlock(
             card_id="888", card_version_id="777", block_id="absent",
             fact_revision_ids=["666"],
         )],
     )
+    validate_answer_plan(plan, snapshot(), store_id="1")
+    return plan
 
 
 def lost_original_whitespace():
@@ -101,14 +112,32 @@ def lost_original_whitespace():
 
 
 def mutable_snapshot():
+    """승인 묶음을 파싱한 뒤 내용이나 인용 목록을 바꿀 수 있는가.
+
+    바꿀 수 있으면 "승인된 것만 인용한다" 가 검증이 아니라 약속이 된다.
+    """
     value = snapshot()
-    value.fact_revisions[0].assertion = "수정된 주장"
-    value.cards[0].blocks[0].fact_revision_ids.append("999")
-    return value.fact_revisions[0].assertion == "수정된 주장" and "999" in value.cards[0].blocks[0].fact_revision_ids
+    changed = False
+    try:
+        value.fact_revisions[0].assertion = "수정된 주장"
+        changed = True
+    except Exception:
+        pass
+    try:
+        value.cards[0].blocks[0].fact_revision_ids.append("999")
+        changed = True
+    except Exception:
+        pass
+    return changed
 
 
 def raw_without_invented_fact():
-    return CardBlock(block_id="raw", kind="RAW", fact_revision_ids=[])
+    """승인된 원문을 사실로 쪼개지 않고 그대로 실을 수 있어야 한다 (RV-05).
+
+    가리키는 것이 아무것도 없는 빈 RAW 블록은 여전히 거절된다 — 표현 경로가
+    필요하다는 것이지 빈 블록을 허용하자는 뜻이 아니다.
+    """
+    return CardBlock(block_id="raw", kind="RAW", order=1, raw_span_id="70")
 
 
 def occurrence_identity_missing():
@@ -157,6 +186,10 @@ def run():
             rows.append(dict(case_id=case_id, result="GAP" if gap else "PASS", observed=observed))
         except ValidationError:
             rows.append(dict(case_id=case_id, result="PASS" if expectation == "REJECT" else "GAP", observed="REJECTED"))
+        except AnswerPlanViolation:
+            rows.append(dict(case_id=case_id,
+                             result="PASS" if expectation == "REJECT" else "GAP",
+                             observed="REJECTED"))
         except Exception as exc:
             rows.append(dict(case_id=case_id, result="ERROR", error_type=type(exc).__name__))
     counts = {kind: sum(r["result"] == kind for r in rows) for kind in ("PASS", "GAP", "ERROR")}

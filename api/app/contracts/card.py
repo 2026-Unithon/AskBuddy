@@ -13,7 +13,14 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from app.contracts.common import SCHEMA_CARD_PLAN, Contract, EntityId, Variant
+from app.contracts.common import (
+    SCHEMA_CARD_PLAN,
+    Contract,
+    EntityId,
+    FrozenContract,
+    UtcDatetime,
+    Variant,
+)
 
 BlockKind = Literal["QUANTITIES", "STEPS", "NOTES", "RAW"]
 """
@@ -27,13 +34,37 @@ RAW         typed 파싱이 불확실한 승인 원문 그대로. **답변 가�
 Disposition = Literal["LINKED", "REVIEW_PENDING", "EXCLUDED"]
 
 
-class CardBlock(Contract):
-    """카드의 한 줄. 사실을 고를 뿐 새 사실을 만들지 않는다."""
+class CardBlock(FrozenContract):
+    """카드의 한 줄. 사실을 고를 뿐 새 사실을 만들지 않는다.
+
+    승인 snapshot 에 그대로 실리므로 불변이다. 인용 목록을 파싱 뒤에 늘릴 수 있으면
+    "승인된 것만 인용한다" 가 검증이 아니라 약속이 된다 (RV-07).
+    """
 
     block_id: str = Field(min_length=1, max_length=40)
     kind: BlockKind
+    # 카드 안의 자리. 리스트 순서에만 기대면 DB 왕복·재직렬화에서 뒤집힌다.
+    # STEPS 에서 순서가 바뀌면 절차가 달라진다 (RV-06)
+    order: int = Field(ge=1)
     # 이 블록이 보여줄 사실들. 비면 블록 자체를 만들지 않는다
-    fact_revision_ids: list[EntityId] = Field(min_length=1, max_length=50)
+    fact_revision_ids: tuple[EntityId, ...] = Field(default=(), max_length=50)
+    # RAW 전용 — typed 로 쪼개지 않고 승인된 원문 구간 (RV-05).
+    # 이것이 없으면 승인된 원문 카드를 표현하려고 사실을 억지로 만들어야 했다
+    raw_span_id: EntityId | None = None
+
+    @model_validator(mode="after")
+    def _payload_matches_kind(self) -> "CardBlock":
+        if self.kind == "RAW":
+            if not self.fact_revision_ids and not self.raw_span_id:
+                raise ValueError("RAW 블록에는 사실이나 원문 구간 중 하나가 필요하다")
+        else:
+            if self.raw_span_id:
+                raise ValueError(f"{self.kind} 블록은 원문 구간을 직접 인용하지 않는다")
+            if not self.fact_revision_ids:
+                raise ValueError(f"{self.kind} 블록에는 사실이 최소 하나 필요하다")
+        if len(set(self.fact_revision_ids)) != len(self.fact_revision_ids):
+            raise ValueError(f"블록 {self.block_id} 안에서 같은 사실을 두 번 인용했다")
+        return self
 
 
 class CardPlan(Contract):
@@ -51,6 +82,9 @@ class CardPlan(Contract):
         ids = [b.block_id for b in self.blocks]
         if len(ids) != len(set(ids)):
             raise ValueError("block_id 가 중복됐다")
+        orders = [b.order for b in self.blocks]
+        if len(orders) != len(set(orders)):
+            raise ValueError("블록 order 가 중복됐다. 자리가 둘이면 순서가 정해지지 않는다")
         return self
 
     def fact_ids(self) -> set[str]:
@@ -59,20 +93,37 @@ class CardPlan(Contract):
 
 
 class OccurrenceDisposition(Contract):
-    """사실 하나가 카드에 어떻게 반영됐는가.
+    """추출 occurrence 하나가 카드에 어떻게 반영됐는가.
+
+    **주체는 occurrence 다** (RV-08). 같은 사실이 자료 여러 곳에 나오면 판정도
+    여러 건이다. 사실 단위로만 기록하면 "3번 나왔고 2번은 제외했다" 가 한 줄로
+    뭉개져 무엇이 왜 빠졌는지 되짚을 수 없다.
 
     이유 없는 미처리를 남기지 않는다. 보류·제외를 늘려 지표를 부풀리지 않도록
     원본 truth 대비 공개 커버리지와 함께 보고한다 (MVP 31-3).
     """
 
-    fact_revision_id: EntityId
+    occurrence_id: EntityId
+    fact_revision_id: EntityId | None = None
     disposition: Disposition
+    # LINKED 면 어느 카드의 어느 블록에 실렸는가
+    card_id: EntityId | None = None
+    block_id: str | None = Field(default=None, max_length=40)
     # REVIEW_PENDING·EXCLUDED 는 사유가 필수다
     reason: str | None = Field(default=None, max_length=300)
     decided_by: EntityId | None = None
+    decided_at: UtcDatetime | None = None
 
     @model_validator(mode="after")
     def _reason_required(self) -> "OccurrenceDisposition":
-        if self.disposition != "LINKED" and not self.reason:
-            raise ValueError(f"{self.disposition} 에는 사유가 필요하다")
+        if self.disposition == "LINKED":
+            if not self.fact_revision_id:
+                raise ValueError("LINKED 는 어느 사실 판에 실렸는지가 있어야 한다")
+            if not self.card_id or not self.block_id:
+                raise ValueError("LINKED 는 실린 카드·블록을 남긴다")
+        else:
+            if not self.reason:
+                raise ValueError(f"{self.disposition} 에는 사유가 필요하다")
+            if self.card_id or self.block_id:
+                raise ValueError(f"{self.disposition} 는 카드에 실리지 않는다")
         return self
