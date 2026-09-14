@@ -1,0 +1,29 @@
+{
+  "note": "R3 서버 판단을 대신하는 사전 작성 합성 입력. 기대 출력 manifest에서 자동 생성하지 않는다. 실제 질문 이해 모델 품질을 입증하지 않는다.",
+  "store_id": "1",
+  "snapshot_id": "100",
+  "knowledge_revision": "7",
+  "snapshot_hash": "sha256:2e99e93e6573b06d9aee93fb6a5f0b2fce62cd7b787e76abc804366d97754f81",
+  "entity_id": "300",
+  "facts": {
+    "900": {"variant_scope": "SPECIFIC", "conditions": ["규격 ICE"], "exceptions": []},
+    "901": {"variant_scope": "SPECIFIC", "conditions": ["규격 HOT"], "exceptions": []},
+    "902": {"variant_scope": "SPECIFIC", "conditions": ["규격 ICE", "크기 L"], "exceptions": []},
+    "903": {"variant_scope": "NOT_APPLICABLE", "conditions": [], "exceptions": []},
+    "904": {"variant_scope": "NOT_APPLICABLE", "conditions": [], "exceptions": ["재고 소진 시 재료 D 로 대체한다"]},
+    "905": {"variant_scope": "NOT_APPLICABLE", "conditions": [], "exceptions": []},
+    "906": {"variant_scope": "NOT_APPLICABLE", "conditions": [], "exceptions": []},
+    "907": {"variant_scope": "NOT_APPLICABLE", "conditions": [], "exceptions": []}
+  },
+  "cases": {
+    "F02": {"question": "ICE 로 재료 B 를 얼마나 넣어요?", "predicate": "ingredient_b_amount", "variants": [["ICE", null]], "targets": ["900"], "selected": ["900"]},
+    "F03": {"question": "ICE L 사이즈는 재료 B 를 얼마나 넣어요?", "predicate": "ingredient_b_amount", "variants": [["ICE", "L"]], "targets": ["902"], "selected": ["902"]},
+    "F04": {"question": "ICE 기준 재료 B 양 알려주세요", "predicate": "ingredient_b_amount", "variants": [["ICE", null]], "targets": ["900"], "selected": ["900"]},
+    "F05": {"question": "얼음을 먼저 넣나요?", "predicate": "ice_order", "variants": [], "targets": ["903"], "selected": ["903"]},
+    "F06": {"question": "재료 C 가 없으면 어떻게 해요?", "predicate": "substitution", "variants": [], "targets": ["904"], "selected": ["904"]},
+    "F07": {"question": "세척 순서 알려주세요", "predicate": "cleaning_sequence", "variants": [], "targets": ["905", "906", "907"], "selected": ["905", "906", "907"]},
+    "F08": {"question": "세척제는 언제 넣어요?", "predicate": "cleaner_timing", "variants": [], "targets": ["906"], "selected": ["905", "906"]},
+    "F09": {"question": "마감 전에 뭐 확인해요?", "predicate": "closing_checklist", "variants": [], "targets": [], "selected": [], "raw_blocks": [["200", "210", "b4", "700"]]},
+    "COMPARE": {"question": "HOT과 ICE의 재료 B 양을 비교해 주세요", "predicate": "ingredient_b_amount", "variants": [["ICE", null], ["HOT", null]], "targets": ["900", "901"], "selected": ["900", "901"]}
+  }
+}
