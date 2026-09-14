@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import statistics
 import sys
@@ -36,6 +37,28 @@ METRICS = [
 ]
 
 
+def _as_dict(settings) -> dict:
+    if not settings:
+        return {}
+    return json.loads(settings) if isinstance(settings, str) else dict(settings)
+
+
+def _hash_settings(settings) -> str:
+    """스윕 값의 지문. 캠페인 메모는 설정이 아니므로 뺀다."""
+    payload = {k: v for k, v in sorted(_as_dict(settings).items())
+               if k not in ("campaign", "source_hashes")}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()[:12]
+
+
+def _hash_sources(settings) -> str:
+    """입력 자료의 지문. 자료가 바뀌면 변동을 모델 탓으로 돌릴 수 없다."""
+    payload = _as_dict(settings).get("source_hashes") or {}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _dig(d: dict, path: tuple[str, ...]):
     for key in path:
         if not isinstance(d, dict):
@@ -47,7 +70,8 @@ def _dig(d: dict, path: tuple[str, ...]):
 async def main() -> int:
     ap = argparse.ArgumentParser(description="반복 실행 변동폭")
     ap.add_argument("--store", required=True, help="store-b 또는 eval-b")
-    ap.add_argument("--label-prefix", default="VAR-")
+    ap.add_argument("--label-prefix", default="VAR",
+                    help="실험군 라벨. 반복 번호(#1, -1)만 같은 군으로 묶는다")
     args = ap.parse_args()
 
     slug = args.store.replace("store-", "eval-")
@@ -55,18 +79,28 @@ async def main() -> int:
     try:
         rows = await conn.fetch(
             """
-            select r.run_id, r.label, r.metrics, r.card_count, r.code_version,
-                   r.prompt_version, r.extract_model, r.settings
+            select r.run_id, r.label, r.status, r.metrics, r.card_count,
+                   r.code_version, r.prompt_version, r.extract_model, r.settings
             from extraction_runs r
             join stores s on s.store_id = r.store_id
-            where s.store_slug = $1 and r.status = 'SUCCEEDED'
-              and r.label like $2
+            -- 반복 번호만 한 군으로 묶는다. like 'BASE%' 로 잡으면
+            -- 대조군 BASE-AA 까지 같은 군에 섞여 변동폭이 실험 차이로 오염된다
+            where s.store_slug = $1
+              and (r.label = $2 or r.label ~ ('^' || $2 || '[#-][0-9]+$'))
             order by r.run_id
             """,
-            slug, args.label_prefix + "%",
+            slug, args.label_prefix.rstrip("#-"),
         )
     finally:
         await conn.close()
+
+    # 실패한 실행도 이 설정의 결과다. 성공만 세면 변동폭이 실제보다 좁아진다
+    # 카드 0장은 성공으로 기록됐어도 측정이 아니다 (파이프라인이 돌지 않은 실행)
+    def _valid(r):
+        return r["status"] == "SUCCEEDED" and int(r["card_count"] or 0) > 0
+
+    failed = [int(r["run_id"]) for r in rows if not _valid(r)]
+    rows = [r for r in rows if _valid(r)]
 
     if len(rows) < 2:
         print(f"반복 실행이 {len(rows)}건이다. 최소 2회가 필요하다.\n"
@@ -84,8 +118,21 @@ async def main() -> int:
     codes = {r["code"] for r in runs}
     prompts = {r["prompt"] for r in runs}
     print(f"{slug} · 반복 {len(runs)}회 (run {', '.join(str(r['run_id']) for r in runs)})")
+    if failed:
+        print(f"  ⚠ 실패한 실행 {len(failed)}회 (run {failed}) — 변동폭에 못 넣지만 "
+              f"이 설정의 결과다. 실패율 {len(failed) / (len(failed) + len(runs)):.0%}")
     if len(codes) > 1 or len(prompts) > 1:
         print("  경고: 코드 또는 프롬프트 버전이 실행마다 다르다. 순수한 변동폭이 아니다")
+
+    # 설정·입력이 같은 실행끼리만 변동폭이 의미를 갖는다
+    settings_hashes = {_hash_settings(r["settings"]) for r in rows}
+    if len(settings_hashes) > 1:
+        print(f"  ⚠ 실행마다 설정이 다르다 {sorted(settings_hashes)} — "
+              f"같은 조건의 변동폭이 아니다")
+    source_hashes = {_hash_sources(r["settings"]) for r in rows}
+    if len(source_hashes) > 1:
+        print(f"  ⚠ 입력 자료가 실행마다 다르다 — 변동이 모델 때문인지 자료 때문인지 "
+              f"가를 수 없다")
     print()
 
     print(f"{'지표':<14}{'최소':>10}{'최대':>10}{'평균':>10}{'표준편차':>10}{'폭':>10}")

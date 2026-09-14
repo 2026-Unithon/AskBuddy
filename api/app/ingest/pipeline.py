@@ -139,10 +139,18 @@ def _usage_context(store_id: int, source_id: int, job_id: int | None,
                    stage: str, cost_phase: str, cost_purpose: str,
                    extraction_run_id: int | None, segment_id: str | None = None,
                    attempt_no: int = 1):
-    """호출 하나를 어느 매장·단계에 귀속시킬지. 논리 호출 ID 로 재시도를 묶는다."""
+    """호출 하나를 어느 매장·단계에 귀속시킬지. 논리 호출 ID 로 재시도를 묶는다.
+
+    **재추출은 재시도가 아니다.** 논리 호출 ID 에 실행 범위를 넣지 않으면 같은
+    자료를 다시 뽑을 때 원장 unique 에 걸려 추출 자체가 죽는다 — 계측이 제품을
+    멈추게 한다. 같은 실행 안의 재시도만 `attempt_no` 로 묶는다.
+    """
     from app.contracts.usage import UsageContext
 
-    call = f"src{source_id}:{stage.lower()}"
+    # 실행 범위: 평가는 run, 제품은 job. 둘 다 없으면 자료 단위로만 묶인다
+    scope = (f"run{extraction_run_id}:" if extraction_run_id
+             else f"job{job_id}:" if job_id else "")
+    call = f"{scope}src{source_id}:{stage.lower()}"
     if segment_id:
         call = f"{call}:{segment_id}"
     return UsageContext(

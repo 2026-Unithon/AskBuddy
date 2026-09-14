@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from collections import Counter
+
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal
@@ -333,3 +335,191 @@ def _count(values: Iterable[str]) -> dict[str, int]:
     for v in values:
         out[v] = out.get(v, 0) + 1
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
+# ── 출력 쪽 채점 (W0) ─────────────────────────────────────────────────────
+# 지금까지는 정답지만 순회했다. 그러면 **재현율만 보인다** — 쓰레기 사실을
+# 500건 뱉어도 점수가 같다. 뽑아낸 주장 쪽에서도 한 번 세야 한다.
+#
+# 다만 "정답지에 없다 = 틀렸다" 가 아니다. 정답지는 전수가 아니다. 사람이
+# 라벨링한 278건 밖에도 자료에는 사실이 더 있다. 그래서 셋으로 가른다:
+#   MATCHED    정답지의 어떤 사실과 맞는다
+#   CONFLICT   대상·속성은 같은데 값이나 규격이 다르다 — **누락보다 위험하다**
+#   UNVERIFIED 정답지에 없다. 틀렸는지 정답지가 모자란지는 사람이 봐야 한다
+#
+# UNVERIFIED 를 오답으로 세면 precision 이 실제보다 낮게 나오고, 정답으로 세면
+# 지어낸 사실이 점수를 올린다. 둘 다 하지 않고 그대로 남겨 표본 판정으로 넘긴다.
+
+OutputVerdict = str
+
+
+def _same_variant(a: str | None, b: str | None) -> bool:
+    """규격이 같은가. 한쪽이 비면 '미확정' 이지 '아무거나' 가 아니다 (MVP 31-2)."""
+    if not a or not b:
+        return not a and not b
+    return normalize(a) == normalize(b)
+
+
+def _same_attribute(a: str | None, b: str | None) -> bool:
+    """같은 것을 묻고 있는가.
+
+    이름은 갈린다 — 정답지가 "스팀우유량" 인데 모델은 "우유 용량" 이라 쓴다.
+    그래서 낱말이 겹치면 같은 속성으로 본다.
+
+    **이 판단이 오연결 검출의 전제다.** 속성을 보지 않으면 "원두 발주요일" 과
+    "원두 사용기한" 처럼 둘 다 참인 별개 사실이 서로 모순이라고 잡힌다.
+    """
+    if not a or not b:
+        return False
+    if normalize(a) == normalize(b):
+        return True
+    return bool(_tokens(a) & _tokens(b))
+
+
+def classify_claim(
+    claim: dict[str, Any], truth_facts: list[dict[str, Any]]
+) -> tuple[OutputVerdict, str | None, str]:
+    """뽑아낸 주장 하나를 정답지와 대조한다. (판정, 맞은 fact_id, 사유).
+
+    오연결(CONFLICT)은 **대상과 속성이 같은데 값이나 규격이 다를 때만** 이다.
+    같은 대상의 다른 속성은 모순이 아니라 추가 정보다.
+    """
+    subject = normalize(claim.get("subject") or "")
+    value = normalize(claim.get("value") or "")
+    if not subject:
+        return "UNVERIFIED", None, "대상이 비어 있어 대조할 수 없다"
+
+    conflict: tuple[str, str] | None = None
+    for fact in truth_facts:
+        t_subject = normalize(fact.get("subject") or "")
+        if not (t_subject == subject or _near(t_subject, subject)):
+            continue
+        value_hit = bool(value) and bool(_tokens(fact.get("value") or "") & _tokens(value))
+        variant_hit = _same_variant(claim.get("variant"), fact.get("variant"))
+        if value_hit and variant_hit:
+            return "MATCHED", fact["fact_id"], "대상·값·규격이 맞는다"
+        if not _same_attribute(claim.get("attribute"), fact.get("attribute")):
+            continue  # 같은 대상의 다른 속성. 모순이 아니다
+        if conflict is None:
+            conflict = (
+                fact["fact_id"],
+                "같은 대상·속성인데 규격이 다르다" if value_hit
+                else "같은 대상·속성인데 값이 다르다",
+            )
+    if conflict:
+        # 같은 것을 묻는데 다른 값을 실어 보내는 것이 누락보다 위험하다.
+        # 신입은 그걸 읽고 그대로 따른다
+        return "CONFLICT", conflict[0], conflict[1]
+    return "UNVERIFIED", None, "정답지에 같은 대상·속성이 없다"
+
+
+def score_output(
+    claims: list[dict[str, Any]], truth_facts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """출력 쪽 지표. precision 을 **단정하지 않고** 범위로 낸다.
+
+    정답지가 전수가 아니므로 참값은 두 수 사이에 있다:
+      하한 = MATCHED / 전체        (UNVERIFIED 를 전부 오답으로 볼 때)
+      상한 = (MATCHED + UNVERIFIED) / 전체  (전부 정답으로 볼 때)
+    표본 판정으로 좁히기 전까지 이 폭을 그대로 보고한다.
+    """
+    rows = []
+    for claim in claims:
+        verdict, fact_id, reason = classify_claim(claim, truth_facts)
+        rows.append({
+            "claim_id": claim.get("fact_id"),
+            "subject": claim.get("subject"),
+            "variant": claim.get("variant"),
+            "attribute": claim.get("attribute"),
+            "value": claim.get("value"),
+            "verdict": verdict,
+            "truth_fact_id": fact_id,
+            "reason": reason,
+        })
+
+    total = len(rows)
+    counts = {v: sum(1 for r in rows if r["verdict"] == v)
+              for v in ("MATCHED", "CONFLICT", "UNVERIFIED")}
+    if total == 0:
+        return {"claim_count": 0, **counts, "rows": rows}
+    return {
+        "claim_count": total,
+        **counts,
+        "precision_lower": round(counts["MATCHED"] / total, 4),
+        "precision_upper": round(
+            (counts["MATCHED"] + counts["UNVERIFIED"]) / total, 4),
+        # 판정이 갈리는 폭. 넓으면 표본 판정이 더 필요하다는 뜻이다
+        "undetermined_rate": round(counts["UNVERIFIED"] / total, 4),
+        # 오연결 — 같은 대상에 다른 값. 누락보다 위험하다
+        "conflict_rate": round(counts["CONFLICT"] / total, 4),
+        "conflict_ids": [r["claim_id"] for r in rows if r["verdict"] == "CONFLICT"],
+        "rows": rows,
+    }
+
+
+# ── 실행 건강도 (W0) ──────────────────────────────────────────────────────
+# 아무것도 못 뽑은 실행이 SUCCEEDED 로 기록되면, 그 빈 실행 둘을 비교해
+# "차이 없음" 이라는 답이 나온다. 실제로 겪었다 — 자료 5건이 전부 실패했는데
+# 손실 100% 가 측정값으로 남았다.
+#
+# 측정이 아닌 것을 측정으로 기록하지 않는다. 순수 함수로 빼서 검사한다.
+
+RUN_OK = "SUCCEEDED"
+RUN_PARTIAL = "PARTIAL"
+RUN_DEAD = "DEAD"
+
+
+def judge_run_health(
+    source_states: dict[str, int], card_count: int
+) -> tuple[str, str | None]:
+    """실행을 어떤 상태로 닫을지. (상태, 멈출 이유).
+
+    이유가 돌아오면 **기록하지 않고 멈춘다.** 파이프라인이 돌지 않은 것을
+    "손실 100%" 라는 성능 수치로 남기면 다음 사람이 그걸 기준선으로 쓴다.
+    """
+    total = sum(source_states.values())
+    failed = source_states.get("FAILED", 0)
+
+    if total and failed == total:
+        return RUN_DEAD, (
+            f"자료 {total}건이 모두 처리에 실패했다. 이건 측정이 아니다")
+    if card_count == 0:
+        return RUN_DEAD, (
+            "카드가 한 장도 만들어지지 않았다. 손실 100% 는 측정 결과가 아니라 "
+            "파이프라인이 돌지 않았다는 뜻이다")
+    if failed:
+        # 일부만 실패하면 분모가 달라진 측정이다. 성공과 같은 칸에 두지 않는다
+        return RUN_PARTIAL, None
+    return RUN_OK, None
+
+
+# ── 반복 판정 (W0) ────────────────────────────────────────────────────────
+# 같은 설정을 여러 번 돌리면 사실마다 판정이 여러 개 나온다. 그걸 하나로 줄일 때
+# **다수결을 쓰면 잡음이 신호가 된다.** 3회에서 2:1 과 1:2 가 맞붙으면 아무것도
+# 바꾸지 않았는데 '개선 1건' 이 기록된다. 실측에서 그렇게 10건이 뒤집혔고,
+# 만장일치로 세니 0건이었다.
+#
+# 그래서 만장일치를 기준으로 쓰되, **갈린 것을 버리지 않고 세어 보고한다.**
+# 엄격한 기준은 진짜 작은 악화도 함께 가리기 때문이다.
+
+VERDICT_RANK = {"MISSING": 0, "PARTIAL": 1, "COVERED": 2}
+
+
+def decide_majority(verdicts: list[str]) -> tuple[str, bool]:
+    """다수결 판정과 안정 여부. 참고용이며 승격 판정에 쓰지 않는다."""
+    if not verdicts:
+        return "MISSING", False
+    top, n = Counter(verdicts).most_common(1)[0]
+    return top, n * 2 > len(verdicts)
+
+
+def decide_unanimous(verdicts: list[str]) -> tuple[str, bool]:
+    """만장일치일 때만 안정으로 본다. 하나라도 갈리면 '흔들림' 이다.
+
+    판정이 아예 없는 경우도 안정이 아니다 — 판정하지 않은 것을 '일치' 로
+    세면 실행이 빠진 사실이 조용히 '동일' 에 들어간다.
+    """
+    if not verdicts:
+        return "MISSING", False
+    top, n = Counter(verdicts).most_common(1)[0]
+    return top, n == len(verdicts)

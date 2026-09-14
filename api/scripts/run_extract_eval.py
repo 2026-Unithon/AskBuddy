@@ -12,6 +12,8 @@ holdout 매장은 `--allow-holdout` 없이는 돌지 않는다. 한 번 열면 �
 from __future__ import annotations
 
 import argparse
+import pathlib
+import hashlib
 import asyncio
 import json
 import logging
@@ -45,7 +47,8 @@ from app.ingest import repository as ingest_repo  # noqa: E402
 from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
 from app.team.extraction import (  # noqa: E402
-    ExtractionReport, aggregate, match_fact, match_fact_in_ledger,
+    ExtractionReport, aggregate, judge_run_health, match_fact,
+    match_fact_in_ledger, score_output,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
@@ -269,6 +272,17 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         "",
         "**이것이 시스템 정확도의 천장이다.** 여기서 흘린 사실은 검색·생성을 아무리 고쳐도 복구되지 않는다.",
         "",
+        "## 출력 주장 정확도",
+        "",
+        "정답지는 전수가 아니다. '정답지에 없다' 를 '틀렸다' 로 세지 않고",
+        "판정불가로 남겨 표본 판정으로 넘긴다.",
+        "",
+        (lambda o: (f"- 뽑은 주장 {o['claim_count']}건 — 일치 {o['MATCHED']} · "
+                    f"오연결 {o['CONFLICT']} · 판정불가 {o['UNVERIFIED']}\n"
+                    f"- 정확도 {o['precision_lower'] * 100:.1f}~"
+                    f"{o['precision_upper'] * 100:.1f}%")
+         if o.get("claim_count") else "- 출력 주장 없음")(metrics.get("output") or {}),
+        "",
         "## 치명 누락 (must_have)",
         "",
     ]
@@ -352,6 +366,27 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
 
 # ── 실행 ──────────────────────────────────────────────────────────────────
 
+def _drifted_sources(store_dir: pathlib.Path, manifest: dict) -> list[str]:
+    """기록된 해시와 지금 파일이 다른 자료를 찾는다.
+
+    영상을 다시 인코딩하거나 스캔을 다시 찍으면 입력이 조용히 달라진다. 그걸
+    모르고 재면 입력이 바뀐 결과를 개선으로 읽는다 — 프레임 실험에서 겪은 일이다.
+    """
+    drifted = []
+    for source in manifest["sources"]:
+        recorded = source.get("sha256")
+        target = store_dir / source["file"]
+        if not recorded or not target.exists():
+            continue
+        digest = hashlib.sha256()
+        with target.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != recorded:
+            drifted.append(source["source_key"])
+    return drifted
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(description="추출 평가 (E-O0)")
     ap.add_argument("--store", required=True, help="예: store-a")
@@ -364,19 +399,45 @@ async def main() -> int:
                     help="이미 올린 자료를 다시 태운다. 업로드와 STT 를 건너뛰므로 "
                          "추출 변동만 분리해서 잴 수 있다")
     ap.add_argument("--notes", default=None)
+    ap.add_argument("--campaign", default=None,
+                    help="사전등록 캠페인 JSON. holdout 을 열 때는 필수다")
     args = ap.parse_args()
 
     store_dir = DATA_DIR / args.store
     manifest = json.loads((store_dir / "manifest.json").read_text(encoding="utf-8"))
-    truth = json.loads((store_dir / "truth" / "facts.json").read_text(encoding="utf-8"))
     slug = manifest["store_slug"]
 
+    # ── holdout guard ────────────────────────────────────────────────────
+    # **정답지를 읽기 전에** 판단한다. 읽고 나서 막으면 이미 이 프로세스가
+    # 정답을 손에 쥔 뒤다 — 로그·예외·디버거 어디로든 샐 수 있다.
     if manifest.get("split") == "holdout" and not args.allow_holdout:
         print(f"{args.store} 는 holdout 이다. 개선 중에 열면 holdout 이 아니게 된다.\n"
               f"정말 열려면 --allow-holdout 을 붙이고, SPLIT.md 의 개봉 기록에 남긴다.",
               file=sys.stderr)
         return 2
+    if manifest.get("split") == "holdout" and not args.campaign:
+        # 열기로 했다면 무엇을 검증하려는지 먼저 적어야 한다. 열어 보고 나서
+        # 가설을 정하면 holdout 이 아니라 두 번째 dev 가 된다 (D17)
+        print("holdout 은 사전등록한 캠페인에서만 연다. --campaign <파일> 을 붙인다.",
+              file=sys.stderr)
+        return 2
 
+    campaign = None
+    if args.campaign:
+        campaign_path = pathlib.Path(args.campaign)
+        campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+        campaign["campaign_hash"] = hashlib.sha256(
+            campaign_path.read_bytes()).hexdigest()[:16]
+
+    # 입력이 기록된 해시와 같은지 본다. 다르면 기준선과 비교할 수 없다
+    drifted = _drifted_sources(store_dir, manifest)
+    if drifted:
+        print(f"자료가 기록된 해시와 다르다: {', '.join(drifted)}\n"
+              f"기준선과 같은 입력이 아니다. scripts/backfill_source_hashes.py --check 로 확인한다.",
+              file=sys.stderr)
+        return 2
+
+    truth = json.loads((store_dir / "truth" / "facts.json").read_text(encoding="utf-8"))
     confirmed = truth.get("owner_confirmed")
     truth_confidence = "OWNER" if confirmed is True else "TEST"
 
@@ -395,6 +456,11 @@ async def main() -> int:
         "frame_interval_sec": s.frame_interval_sec,
         "video_segment_sec": s.video_segment_sec,
         "extract_passes": s.extract_passes,
+        # 무엇을 검증하려고 돌렸는가. holdout 개봉은 이 기록 없이는 근거가 없다
+        "campaign": campaign,
+        # 입력 자료의 지문. 같은 자료로 잰 것인지 나중에 대조한다
+        "source_hashes": {x["source_key"]: (x.get("sha256") or "")[:16]
+                          for x in manifest["sources"]},
     }
 
     await init_pool()
@@ -462,8 +528,24 @@ async def main() -> int:
     print(f"\n  E-O0 추출 손실 {metrics['loss'] * 100:.1f}% "
           f"(재현율 {metrics['recall'] * 100:.1f}%, 카드 {cards_n}장)")
     print(f"  치명 누락 {mh['fact_count'] - mh['covered']}/{mh['fact_count']}")
+    out = metrics.get("output") or {}
+    if out.get("claim_count"):
+        print(f"  뽑은 주장 {out['claim_count']}건 — 정답 일치 {out['MATCHED']} · "
+              f"오연결 {out['CONFLICT']} · 판정불가 {out['UNVERIFIED']}")
+        print(f"  정확도 {out['precision_lower'] * 100:.1f}~"
+              f"{out['precision_upper'] * 100:.1f}% "
+              f"(판정불가를 전부 오답/정답으로 봤을 때의 폭)")
+        if out["CONFLICT"]:
+            # 같은 대상에 다른 값을 실어 보내는 것이 누락보다 위험하다.
+            # 신입은 그걸 읽고 그대로 따른다
+            print(f"  ⚠ 오연결 {out['CONFLICT']}건 — 같은 대상 다른 값: "
+                  f"{out['conflict_ids'][:8]}")
     print(f"  리포트: {path}")
     return 0
+
+
+# 이 실행에서 몇 건이 실패했는가. 상태를 SUCCEEDED 로 닫을지 가른다
+_PARTIAL: dict = {}
 
 
 async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
@@ -485,6 +567,20 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         print("  추출 파이프라인")
         await run_pipeline(store_id, list(mapping), run_id)
 
+    # ── 자료 처리 결과를 확인한다 ──────────────────────────────────────
+    # process_source 는 예외를 안에서 삼키고 자료를 FAILED 로 표시한다. 여기서
+    # 확인하지 않으면 **한 건도 못 뽑은 실행이 SUCCEEDED 로 기록된다** —
+    # 그리고 빈 실행 둘을 비교해 "차이 없음" 이라는 답이 나온다. 실제로 겪었다.
+    if not args.reuse_cards:
+        states = await conn.fetch(
+            "select status, count(*) as n from sources where store_id = $1 "
+            "group by status", store_id)
+        counts = {r["status"]: int(r["n"]) for r in states}
+        failed = counts.get("FAILED", 0)
+        if failed:
+            print(f"  ⚠ 자료 {failed}/{sum(counts.values())}건 처리 실패: {counts}")
+        _PARTIAL["source_states"] = counts
+
     # 원장에서 실행 단위 원가 summary 를 만든다 (CP-00B)
     try:
         from app.deps import get_pool
@@ -501,7 +597,17 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
     ledger = await fetch_ledger(conn, store_id)
     report = score(truth["facts"], cards, source_types, ledger)
     print(f"  원장 {len(ledger)}건 · 카드 {len(cards)}장")
+    # 측정이 아닌 것을 측정으로 기록하지 않는다 (W0). 판정은 순수 함수에 있고
+    # tests/test_run_health.py 가 그 함수를 검사한다
+    health, reason = judge_run_health(_PARTIAL.get("source_states") or {}, len(cards))
+    if reason:
+        raise RuntimeError(f"{reason}. 로그를 보고 원인을 고친 뒤 다시 돌린다")
+    _PARTIAL["health"] = health
+
     metrics = aggregate(report.rows, card_count=len(cards))
+    # 정답지만 순회하면 재현율만 보인다. 뽑아낸 주장 쪽에서도 센다 (W0)
+    output = score_output(ledger, truth["facts"])
+    metrics["output"] = {k: v for k, v in output.items() if k != "rows"}
 
     await conn.executemany(
         """
@@ -523,10 +629,12 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
     await conn.execute(
         """
         update extraction_runs
-        set status='SUCCEEDED', finished_at=now(), metrics=$3::jsonb, card_count=$4
+        set status=$5, finished_at=now(), metrics=$3::jsonb, card_count=$4
         where run_id=$1 and store_id=$2
         """,
         run_id, store_id, json.dumps(metrics, ensure_ascii=False), len(cards),
+        # 일부 자료가 실패한 실행을 성공으로 닫지 않는다. 분모가 달라진 측정이다
+        _PARTIAL.get("health", "SUCCEEDED"),
     )
 
 
