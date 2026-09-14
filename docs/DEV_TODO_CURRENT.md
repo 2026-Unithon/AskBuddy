@@ -505,6 +505,11 @@ reduce  job 의 모든 사실을 모아 카드로 조립한다  (1회)
 - [ ] 지원 한도 초과 또는 실패 시 URI 기반 프레임 분석으로 폴백한다.
 - [ ] 카드 근거용 `source_frames` 전체 저장은 유지한다.
 - [ ] STT segment timestamp를 보존하고 `[00:14]` 형식으로 추출에 전달한다.
+      **현재 근거 타임스탬프가 전부 0이다.** `schemas.py` 의 `Evidence.timestamp_sec`
+      필드는 있는데 `prompts/extract_cards.ko.txt` 가 그 값을 요구하지 않는다.
+      모델이 채울 이유가 없어 기본값 0 으로 남는다. 그래서 사실이 영상의 어느 지점에서
+      나왔는지 알 수 없고, `evidence.timestamp_sec → source_frames` 연결도 성립하지 않는다.
+      전사문에 `[00:14]` 를 넣는 것과 프롬프트가 그 값을 요구하는 것을 **함께** 고친다.
 - [ ] 실제 파일로 크기·길이·처리 시간 한도를 측정해 `/ingest/capabilities`에 반영한다.
 
 ## 13.5. 카드 모델과 렌더러

@@ -5,6 +5,9 @@ RLS 가 없으므로(D1) 여기서 빠뜨리면 그대로 전 매장이 열린�
 sources 하위 테이블은 source_id 로만 접근하지만, 진입 전에 반드시
 get_source(store_id, source_id) 로 소유 매장을 확인한 뒤 호출한다.
 """
+import hashlib
+import json
+
 import asyncpg
 
 MAX_ERROR_LEN = 500          # sources.error_message varchar(500)
@@ -223,6 +226,83 @@ async def insert_facts(
         "values ($1, $2, $3, $4, $5, false)",
         [(card_id, o[:100], a[:100], v[:500], c) for o, a, v, c in facts],
     )
+
+
+# ── 사실 원장 (13.3-1) ─────────────────────────────────────────────────────
+# 사실의 소유자는 카드가 아니라 자료다. 카드를 다시 조립해도 사실은 남는다.
+# legacy facts 와 당분간 둘 다 쓴다 — 코드 이전이 끝나면 legacy 를 끊는다.
+
+def fact_content_hash(subject: str, variant: str | None, attribute: str, value: str) -> str:
+    """같은 자료에서 같은 사실이 두 번 들어오는 것을 막는 열쇠.
+
+    재추출은 흔한 일이다. 값이 같으면 같은 사실로 보고 새 행을 만들지 않는다.
+    """
+    raw = "|".join((subject.strip(), (variant or "").strip(),
+                    attribute.strip(), value.strip()))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def insert_source_facts(
+    conn: asyncpg.Connection,
+    store_id: int,
+    source_id: int,
+    facts: list[dict],
+    *,
+    locator_type: str,
+    locator: dict,
+    extract_version: str | None = None,
+) -> list[int]:
+    """원장에 사실을 넣고 fact_id 를 돌려준다. 이미 있으면 기존 행의 id 를 돌려준다.
+
+    D1 — store_id 는 필수 인자다.
+    """
+    if not facts:
+        return []
+
+    ids: list[int] = []
+    payload = json.dumps(locator, ensure_ascii=False)
+    for f in facts:
+        digest = fact_content_hash(
+            f["subject"], f.get("variant"), f["attribute"], f["value"])
+        fact_id = await conn.fetchval(
+            """
+            insert into source_facts (
+              store_id, source_id, subject, variant, attribute, value,
+              confidence, locator_type, locator, content_hash, extract_version
+            )
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
+            on conflict (source_id, content_hash) do nothing
+            returning fact_id
+            """,
+            store_id, source_id,
+            f["subject"][:200], (f.get("variant") or None),
+            f["attribute"][:200], f["value"][:1000],
+            f.get("confidence", 0), locator_type, payload, digest, extract_version,
+        )
+        if fact_id is None:
+            # 같은 사실이 이미 있다. 새로 만들지 않고 그 행에 잇는다
+            fact_id = await conn.fetchval(
+                "select fact_id from source_facts "
+                "where source_id = $1 and content_hash = $2",
+                source_id, digest,
+            )
+        if fact_id is not None:
+            ids.append(int(fact_id))
+    return ids
+
+
+async def link_card_facts(
+    conn: asyncpg.Connection, store_id: int, card_id: int, fact_ids: list[int]
+) -> None:
+    """카드가 담은 사실을 잇는다. 카드를 지워도 사실은 남고 링크만 끊긴다."""
+    if not fact_ids:
+        return
+    await conn.executemany(
+        "insert into card_facts (card_id, fact_id, store_id) values ($1,$2,$3) "
+        "on conflict (card_id, fact_id) do nothing",
+        [(card_id, fid, store_id) for fid in fact_ids],
+    )
+
 
 
 async def insert_card_evidence(

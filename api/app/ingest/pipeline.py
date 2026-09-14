@@ -323,7 +323,12 @@ async def _persist(
     category_version: int,
 ) -> int:
     """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다."""
+    from app.config import get_settings
+
     saved = 0
+    # 어느 추출이 이 사실을 만들었나. 프롬프트를 바꾼 뒤 무엇이 달라졌는지 되짚는다
+    s = get_settings()
+    extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
     source_type = await conn.fetchval(
         "select source_type from sources where store_id = $1 and source_id = $2",
         store_id,
@@ -350,16 +355,40 @@ async def _persist(
             origin_job_id=job_id,
             category_version=category_version,
         )
+        # legacy facts — 코드 이전이 끝나면 끊는다 (13.3-1)
         await repo.insert_facts(conn, card_id, [
             (f.object_name, f.attribute, f.value, _to_percent(f.confidence))
             for f in card.facts
         ])
+
         if source_type in ("VOICE", "VIDEO"):
             locator_type = "TIMESTAMP"
             locator = {"timestamp_sec": max(0, card.evidence.timestamp_sec)}
         else:
             locator_type = "WHOLE_SOURCE"
             locator = {}
+
+        # 사실 원장 — 소유자는 자료다. 카드를 다시 조립해도 사실은 남는다 (13.3-1).
+        # 근거 위치는 지금 카드 단위라 같은 카드의 사실이 같은 위치를 갖는다.
+        # 13.4 에서 map 이 사실별 위치를 뽑으면 그 값으로 바뀐다.
+        fact_ids = await repo.insert_source_facts(
+            conn, store_id, source_id,
+            [
+                {
+                    "subject": f.object_name,
+                    "variant": None,   # 13.5 에서 RECIPE 스키마가 규격을 채운다
+                    "attribute": f.attribute,
+                    "value": f.value,
+                    "confidence": _to_percent(f.confidence),
+                }
+                for f in card.facts
+            ],
+            locator_type=locator_type,
+            locator=locator,
+            extract_version=extract_version,
+        )
+        await repo.link_card_facts(conn, store_id, card_id, fact_ids)
+
         await repo.insert_card_evidence(
             conn,
             store_id,

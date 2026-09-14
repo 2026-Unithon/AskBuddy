@@ -29,6 +29,10 @@ from app.config import get_settings  # noqa: E402
 # FK 순서대로 지운다. 자식부터 부모로
 STEPS = [
     ("facts",              "delete from facts where card_id in (select card_id from knowledge_cards where store_id=$1)"),
+    # 원장은 자료 소유지만 추출 산물이다. 다시 추출할 것이므로 같이 비운다.
+    # 운영에서는 지우지 않는다 — 평가용 재실행에서만 하는 일이다
+    ("card_facts",         "delete from card_facts where store_id=$1"),
+    ("source_facts",       "delete from source_facts where store_id=$1"),
     ("card_evidence",      "delete from card_evidence where store_id=$1"),
     ("card_review_events", "delete from card_review_events where store_id=$1"),
     ("card_embeddings",    "delete from card_embeddings where store_id=$1"),
@@ -87,6 +91,7 @@ async def main() -> int:
             # 남겨두면 중복만 쌓인다
             keep = {"source_video", "source_voice", "source_kakao", "source_scan",
                     "sources"}
+            # source_facts 는 자료 소유지만 추출 산물이라 재추출 때 다시 만든다
             steps = [(n, q) for n, q in STEPS if n not in keep]
             print("  (--keep-sources: 자료·전사문 유지)")
 
