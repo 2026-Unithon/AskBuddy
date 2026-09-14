@@ -374,11 +374,11 @@ async def _preprocess_scan(
         # 텍스트 레이어가 없는 스캔본 — PDF 를 그대로 모델에 넘긴다
         await repo.update_scan_result(conn, source_id, page_count=pages,
                                       ocr_text=None, ocr_engine=None)
-        return "(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)", [path]
+        return "(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)", [path], []
 
     await repo.update_scan_result(conn, source_id, page_count=1,
                                   ocr_text=None, ocr_engine=None)
-    return "(이미지 자료. 첨부한 그림을 읽고 판단할 것)", [path]
+    return "(이미지 자료. 첨부한 그림을 읽고 판단할 것)", [path], []
 
 
 async def _preprocess_voice(

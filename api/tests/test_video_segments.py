@@ -90,3 +90,30 @@ class SplitByTimeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreprocessContractTest(unittest.TestCase):
+    """전처리는 (전사문, 미디어, 구간) 3-튜플을 돌려준다.
+
+    반환 형태를 바꾼 뒤 일부 경로를 빠뜨려 SCAN 자료 2건이 통째로 실패한 적이 있다.
+    런타임에만 드러나고 그 실행의 측정값이 통째로 못 쓰게 되므로 정적으로 막는다.
+    """
+
+    def test_all_preprocess_returns_three_values(self):
+        import ast
+        from pathlib import Path as P
+
+        src = P(__file__).resolve().parents[1] / "app" / "ingest" / "pipeline.py"
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        offenders = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.AsyncFunctionDef):
+                continue
+            if not fn.name.startswith("_preprocess"):
+                continue
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple):
+                    if len(node.value.elts) != 3:
+                        offenders.append(
+                            f"{fn.name}:{node.lineno} 가 {len(node.value.elts)}개를 돌려준다")
+        self.assertEqual(offenders, [], "\n".join(offenders))

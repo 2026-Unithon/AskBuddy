@@ -228,6 +228,8 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         f"- 코드 `{snapshot['code_version']}` · 프롬프트 `{snapshot['prompt_version']}`",
         f"- 모델 `{snapshot['extract_model']}` · ingest_mode `{snapshot['ingest_mode']}`"
         f" · temp `{snapshot['extract_temperature']}`",
+        f"- 구간 {snapshot['video_segment_sec'] or '분할없음'}초 · "
+        f"{snapshot['extract_passes']}패스",
         f"- 영상 `{snapshot['video_input_mode']}` · 프레임 상한 "
         f"`{snapshot['video_max_frames_to_model'] or '없음'}`"
         f" · 간격 {snapshot['frame_interval_sec']}초",
@@ -375,6 +377,8 @@ async def main() -> int:
         "video_input_mode": s.video_input_mode,
         "video_max_frames_to_model": s.video_max_frames_to_model,
         "frame_interval_sec": s.frame_interval_sec,
+        "video_segment_sec": s.video_segment_sec,
+        "extract_passes": s.extract_passes,
     }
 
     await init_pool()
