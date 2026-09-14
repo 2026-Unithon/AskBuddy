@@ -5,6 +5,7 @@ ffmpeg 는 시스템 설치다. 없으면 조용히 넘어가지 않고 명확�
 import asyncio
 import json
 import logging
+from decimal import Decimal
 import re
 import shutil
 from pathlib import Path
@@ -55,7 +56,9 @@ async def probe(path: Path) -> dict[str, int | None]:
     }
 
 
-async def transcribe_detailed(path: Path) -> tuple[str, list[dict], str]:
+async def transcribe_detailed(
+    path: Path, *, usage_sink=None, usage_context=None
+) -> tuple[str, list[dict], str]:
     """(전사문, 구간 목록, 사용 모델).
 
     `verbose_json` 으로 받아 구간별 시작·끝 시각을 보존한다.
@@ -69,11 +72,28 @@ async def transcribe_detailed(path: Path) -> tuple[str, list[dict], str]:
         raise RuntimeError("OPENAI_API_KEY 가 없다. api/.env 를 확인하라")
 
     client = AsyncOpenAI(api_key=s.openai_api_key, timeout=STT_TIMEOUT)
-    with path.open("rb") as f:
-        res = await client.audio.transcriptions.create(
-            model=s.stt_model, file=f, language="ko",
-            response_format="verbose_json",
-        )
+
+    if usage_context is None:
+        res = await _transcribe_call(client, path, s.stt_model)
+    else:
+        from app.usage import recorder
+
+        async with recorder.attempt(usage_sink, usage_context,
+                                    model=s.stt_model, mode="real") as rec:
+            rec.measure_input(input_bytes=path.stat().st_size)
+            res = await _transcribe_call(client, path, s.stt_model)
+            rec.reported_model = s.stt_model
+            # Whisper 는 토큰이 아니라 **오디오 길이**로 과금한다.
+            # verbose_json 의 duration 이 그 단위다. 없으면 못 잰 것이지 0 이 아니다
+            duration = getattr(res, "duration", None)
+            if duration is not None:
+                rec.measure_input(input_bytes=path.stat().st_size,
+                                  media_duration_sec=float(duration))
+                rec.observe(billable_units=Decimal(str(duration)) / Decimal("60"),
+                            billable_unit_name="minute",
+                            raw={"duration_sec": float(duration)})
+            else:
+                rec.partial("공급자가 duration 을 보고하지 않았다")
 
     text = (getattr(res, "text", "") or "").strip()
     segments: list[dict] = []
@@ -100,6 +120,13 @@ async def transcribe(path: Path) -> tuple[str, str]:
     """(전사문, 사용 모델). 구간이 필요 없는 호출부용."""
     text, _, model = await transcribe_detailed(path)
     return text, model
+
+
+async def _transcribe_call(client, path: Path, model: str):
+    with path.open("rb") as f:
+        return await client.audio.transcriptions.create(
+            model=model, file=f, language="ko", response_format="verbose_json",
+        )
 
 
 def parse_timestamped(text: str) -> list[dict]:

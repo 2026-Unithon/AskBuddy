@@ -1,0 +1,22 @@
+{
+  "version": "unset-2026-09-14",
+  "currency": "USD",
+  "note": "요율 미확정. null 인 항목은 비용을 계산하지 않고 토큰만 쌓는다. 공급자 요금표를 확인한 뒤 채우고 version 을 올린다. 과거 receipt 는 그때의 rate_card_version 으로 재현한다.",
+  "models": {
+    "gemini-3.6-flash": {
+      "input_per_1m_tokens": null,
+      "output_per_1m_tokens": null,
+      "cached_input_per_1m_tokens": null
+    },
+    "whisper-1": {
+      "per_minute": null
+    },
+    "text-embedding-3-small": {
+      "input_per_1m_tokens": null
+    }
+  },
+  "storage": {
+    "per_gb_month": null,
+    "egress_per_gb": null
+  }
+}

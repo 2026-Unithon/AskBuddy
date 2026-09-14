@@ -26,9 +26,20 @@ MOCK_PLACEHOLDER = "(목 모드 — 전처리를 건너뛰었다)"
 
 
 async def process_source(
-    store_id: int, source_id: int, *, job_id: int | None = None
+    store_id: int, source_id: int, *, job_id: int | None = None,
+    cost_phase: str = "REGISTRATION", cost_purpose: str = "PRODUCT",
+    extraction_run_id: int | None = None,
 ) -> None:
+    """자료 하나를 처리한다.
+
+    원가 계측(CP-00B) — 유료 호출마다 원장에 receipt 를 남긴다. 등록인지 운영인지는
+    호출부가 정한다. 추출 결과만 보고 자동 분류하지 않는다 (승인 카드 0건이어도
+    운영 중 추가 업로드일 수 있다).
+    """
+    from app.usage import DbUsageSink
+
     pool = get_pool()
+    usage_sink = DbUsageSink(pool)
     started = time.perf_counter()
 
     async with pool.acquire() as conn:
@@ -40,7 +51,13 @@ async def process_source(
 
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
-            text, media, segments = await _preprocess(conn, store_id, src)
+            text, media, segments = await _preprocess(
+                conn, store_id, src,
+                usage_sink=usage_sink,
+                usage_context=_usage_context(
+                    store_id, source_id, job_id, "STT",
+                    cost_phase, cost_purpose, extraction_run_id),
+            )
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
 
@@ -72,6 +89,9 @@ async def process_source(
                 categories=list(categories),
                 glossary=glossary,
                 segments=segments,
+                usage_sink=usage_sink,
+                usage_base=(store_id, job_id, cost_phase, cost_purpose,
+                            extraction_run_id),
             )
 
             # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
@@ -115,10 +135,40 @@ async def process_source(
             shutil.rmtree(storage.workdir(source_id), ignore_errors=True)
 
 
+def _usage_context(store_id: int, source_id: int, job_id: int | None,
+                   stage: str, cost_phase: str, cost_purpose: str,
+                   extraction_run_id: int | None, segment_id: str | None = None,
+                   attempt_no: int = 1):
+    """호출 하나를 어느 매장·단계에 귀속시킬지. 논리 호출 ID 로 재시도를 묶는다."""
+    from app.contracts.usage import UsageContext
+
+    call = f"src{source_id}:{stage.lower()}"
+    if segment_id:
+        call = f"{call}:{segment_id}"
+    return UsageContext(
+        store_id=str(store_id), cost_phase=cost_phase, cost_purpose=cost_purpose,
+        stage=stage, logical_call_id=call, attempt_no=attempt_no,
+        job_id=str(job_id) if job_id else None,
+        source_id=str(source_id), segment_id=segment_id,
+        extraction_run_id=str(extraction_run_id) if extraction_run_id else None,
+    )
+
+
+def _ctx_for(base: tuple | None, source_id: int, stage: str,
+             segment_id: str | None = None):
+    """usage_base 가 없으면 계측하지 않는다 (기존 호출 경로 호환)."""
+    if base is None:
+        return None
+    store_id, job_id, phase, purpose, run_id = base
+    return _usage_context(store_id, source_id, job_id, stage, phase, purpose,
+                          run_id, segment_id=segment_id)
+
+
 async def _extract_all(
     *, source_id: int, source_type: str, text: str, media: list[Path],
     categories: list[str], glossary: list[dict],
     segments: list[tuple[str, list[Path]]],
+    usage_sink=None, usage_base: tuple | None = None,
 ) -> ExtractionResult:
     """구간이 있으면 구간마다 뽑고 합친다. 없으면 통째로 한 번 뽑는다.
 
@@ -136,6 +186,8 @@ async def _extract_all(
         return await extract_cards(
             source_id=source_id, source_type=source_type, text=text,
             category_names=categories, glossary=glossary, media=media,
+            usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "EXTRACT"),
         )
 
     merged = ExtractionResult(cards=[], unresolved=[])
@@ -145,6 +197,9 @@ async def _extract_all(
             part = await extract_cards(
                 source_id=source_id, source_type=source_type, text=seg_text,
                 category_names=categories, glossary=glossary, media=seg_media,
+                usage_sink=usage_sink,
+                usage_context=_ctx_for(usage_base, source_id, "EXTRACT",
+                                       segment_id=f"seg{index}"),
             )
         except Exception as exc:
             failed += 1
@@ -189,6 +244,8 @@ async def _extract_all(
         reduced = await assemble_cards(
             source_id=source_id, facts=flat,
             category_names=categories, glossary=glossary,
+            usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
         )
     except Exception as exc:
         # 조립이 죽었다고 뽑아둔 것을 버리지 않는다. map 결과로 폴백한다
@@ -225,7 +282,7 @@ async def _mark_failed(
 
 async def _preprocess(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """자료 유형별 전처리.
 
     반환값은 (추출기에 넣을 텍스트, 모델에 함께 보낼 파일들).
@@ -247,7 +304,8 @@ async def _preprocess(
         logger.info("preprocess skipped (mock) source=%s type=%s", source_id, source_type)
         return MOCK_PLACEHOLDER, [], []
 
-    return await handler(conn, store_id, src)
+    return await handler(conn, store_id, src,
+                         usage_sink=usage_sink, usage_context=usage_context)
 
 
 async def _download(conn: asyncpg.Connection, store_id: int,
@@ -267,7 +325,7 @@ async def _download(conn: asyncpg.Connection, store_id: int,
 
 async def _preprocess_video(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
     from app.config import get_settings
 
@@ -288,7 +346,8 @@ async def _preprocess_video(
         stt_segments = audio.parse_timestamped(transcript)
     elif meta["has_audio"]:
         audio_path = await video.extract_audio(path, work)
-        _, stt_segments, _ = await audio.transcribe_detailed(audio_path)
+        _, stt_segments, _ = await audio.transcribe_detailed(
+            audio_path, usage_sink=usage_sink, usage_context=usage_context)
         # 시각을 붙여 저장한다. 추출 프롬프트가 근거 시각을 채우려면 보여야 하고,
         # 재실행 때 STT 없이 다시 쪼개려면 남아 있어야 한다
         transcript = audio.with_timestamps(stt_segments) if stt_segments else ""
@@ -324,7 +383,7 @@ async def _preprocess_video(
 
 async def _preprocess_kakao(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """카톡: txt 를 파싱한다. LLM 을 쓰지 않는다."""
     source_id = src["source_id"]
     if await repo.get_kakao(conn, source_id) is None:
@@ -356,7 +415,7 @@ async def _preprocess_kakao(
 
 async def _preprocess_scan(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """문서·이미지: PDF 는 텍스트 레이어를 먼저 읽고, 없으면 모델에 그림째 넘긴다."""
     source_id = src["source_id"]
     row = await repo.get_scan(conn, source_id)
@@ -383,7 +442,7 @@ async def _preprocess_scan(
 
 async def _preprocess_voice(
     conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
-) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     from app.config import get_settings
     source_id = src["source_id"]
 
@@ -401,7 +460,8 @@ async def _preprocess_voice(
 
     path = await _download(conn, store_id, src)
     meta = await audio.probe(path)
-    plain, stt_segments, model = await audio.transcribe_detailed(path)
+    plain, stt_segments, model = await audio.transcribe_detailed(
+        path, usage_sink=usage_sink, usage_context=usage_context)
     text = audio.with_timestamps(stt_segments) if stt_segments else plain
 
     await repo.update_voice_result(
