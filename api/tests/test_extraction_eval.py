@@ -5,7 +5,9 @@ import unittest
 from app.team.extraction import (
     ExtractionReport,
     aggregate,
+    loss_stage,
     match_fact,
+    match_fact_in_ledger,
     normalize,
     numbers_in,
     variant_present,
@@ -190,6 +192,77 @@ class HelperTest(unittest.TestCase):
 
     def test_no_variant_always_passes(self):
         self.assertTrue(variant_present(None, "아무 텍스트"))
+
+
+class LedgerMatchTest(unittest.TestCase):
+    """원장 대조 — 추출이 사실을 뽑았는가를 카드 본문이 아니라 구조로 본다."""
+
+    def _ledger(self, *rows):
+        return [
+            {"fact_id": i + 1, "subject": s, "attribute": a, "value": v}
+            for i, (s, a, v) in enumerate(rows)
+        ]
+
+    def test_matches_on_subject_and_value(self):
+        hit, fid = match_fact_in_ledger(
+            FACT_HOT, self._ledger(("카페라떼", "스팀우유량", "275ml")))
+        self.assertTrue(hit)
+        self.assertEqual(fid, 1)
+
+    def test_attribute_name_may_differ(self):
+        """정답지 "스팀우유량" vs 모델 "우유 용량" — 이름이 갈려도 같은 사실이다."""
+        hit, _ = match_fact_in_ledger(
+            FACT_HOT, self._ledger(("카페라떼", "우유 용량", "275ml")))
+        self.assertTrue(hit)
+
+    def test_number_distortion_is_not_a_match(self):
+        hit, _ = match_fact_in_ledger(
+            FACT_HOT, self._ledger(("카페라떼", "스팀우유량", "270ml")))
+        self.assertFalse(hit)
+
+    def test_different_subject_is_not_a_match(self):
+        hit, _ = match_fact_in_ledger(
+            FACT_HOT, self._ledger(("카푸치노", "스팀우유량", "275ml")))
+        self.assertFalse(hit)
+
+    def test_spelling_drift_still_matches(self):
+        fact = {"subject": "포터필터", "value": "30분"}
+        hit, _ = match_fact_in_ledger(fact, self._ledger(("포타필터", "침지시간", "30분")))
+        self.assertTrue(hit)
+
+    def test_empty_ledger_is_miss(self):
+        self.assertEqual(match_fact_in_ledger(FACT_HOT, []), (False, None))
+
+
+class LossStageTest(unittest.TestCase):
+    """손실이 어느 단계에서 났는가. 2패스가 고칠 자리를 정한다."""
+
+    def test_four_quadrants(self):
+        self.assertEqual(loss_stage(True, "COVERED"), "OK")
+        self.assertEqual(loss_stage(True, "PARTIAL"), "ASSEMBLY")
+        self.assertEqual(loss_stage(True, "MISSING"), "ASSEMBLY")
+        self.assertEqual(loss_stage(False, "COVERED"), "CARD_ONLY")
+        self.assertEqual(loss_stage(False, "MISSING"), "EXTRACTION")
+
+    def test_report_records_stage(self):
+        rep = ExtractionReport()
+        cards = [_card(1, "카페라떼(HOT)", "스팀우유 275ml")]
+        rep.add(FACT_HOT, match_fact(FACT_HOT, cards), "SCAN",
+                in_ledger=True, ledger_fact_id=7)
+        self.assertEqual(rep.rows[0]["loss_stage"], "OK")
+        self.assertEqual(rep.rows[0]["ledger_fact_id"], 7)
+
+    def test_extraction_loss_is_distinguished_from_assembly_loss(self):
+        rep = ExtractionReport()
+        cards = [_card(1, "다른 카드", "관계없는 내용")]
+        # 뽑았으나 카드에 안 실림
+        rep.add(FACT_HOT, match_fact(FACT_HOT, cards), "VIDEO", in_ledger=True)
+        # 아예 못 뽑음
+        rep.add(FACT_ICE, match_fact(FACT_ICE, cards), "VIDEO", in_ledger=False)
+        m = aggregate(rep.rows, card_count=1)
+        self.assertEqual(m["loss_stage"]["ASSEMBLY"], 1)
+        self.assertEqual(m["loss_stage"]["EXTRACTION"], 1)
+        self.assertEqual(m["ledger_recall"], 0.5)
 
 
 class AggregateTest(unittest.TestCase):

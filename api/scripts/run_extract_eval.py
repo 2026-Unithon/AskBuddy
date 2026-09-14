@@ -33,7 +33,9 @@ from app.deps import get_pool, init_pool, close_pool  # noqa: E402
 from app.ingest import repository as ingest_repo  # noqa: E402
 from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
-from app.team.extraction import ExtractionReport, aggregate, match_fact  # noqa: E402
+from app.team.extraction import (  # noqa: E402
+    ExtractionReport, aggregate, match_fact, match_fact_in_ledger,
+)
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "eval" / "data"
@@ -167,11 +169,40 @@ async def fetch_cards(conn: asyncpg.Connection, store_id: int) -> list[dict[str,
     return [dict(r) for r in rows]
 
 
-def score(facts: list[dict], cards: list[dict], source_types: dict[str, str]) -> ExtractionReport:
+async def fetch_ledger(conn: asyncpg.Connection, store_id: int) -> list[dict[str, Any]]:
+    """이 매장의 사실 원장. 추출이 무엇을 뽑았는지 그대로 담고 있다."""
+    rows = await conn.fetch(
+        """
+        select fact_id, subject, variant, attribute, value, source_id
+        from source_facts
+        where store_id = $1
+        order by fact_id
+        """,
+        store_id,
+    )
+    return [dict(r) for r in rows]
+
+
+def score(
+    facts: list[dict], cards: list[dict], source_types: dict[str, str],
+    ledger: list[dict] | None = None,
+) -> ExtractionReport:
+    """정답지를 두 번 대조한다.
+
+    ① 원장 — 추출이 이 사실을 뽑았는가
+    ② 카드 — 그 사실이 카드에 실렸는가
+
+    둘을 갈라야 손실이 map 에서 났는지 조립에서 났는지 알 수 있다.
+    """
+    ledger = ledger or []
     report = ExtractionReport()
     for fact in facts:
         stype = source_types.get(fact.get("source_key", ""), "UNKNOWN")
-        report.add(fact, match_fact(fact, cards), stype)
+        in_ledger, ledger_fact_id = match_fact_in_ledger(fact, ledger)
+        report.add(
+            fact, match_fact(fact, cards), stype,
+            in_ledger=in_ledger, ledger_fact_id=ledger_fact_id,
+        )
     return report
 
 
@@ -237,6 +268,49 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
             L.append(f"- `{fid}` {r.get('subject','')} {r.get('variant') or ''} "
                      f"— {r.get('attribute','')} = {r.get('value','')} ({r.get('verdict')})")
         L.append("")
+
+    # ── 손실이 어느 단계에서 났는가 ────────────────────────────────────
+    stage = metrics.get("loss_stage") or {}
+    if stage:
+        n = metrics["fact_count"]
+        L += [
+            "## 손실 단계 — map 인가 조립인가",
+            "",
+            "정답지를 두 번 대조한다. ① 추출이 사실을 **뽑았는가**(원장)",
+            "② 그 사실이 **카드에 실렸는가**. 둘을 갈라야 어디를 고칠지 정해진다.",
+            "",
+            "| 단계 | 뜻 | 건수 | 비율 |",
+            "|---|---|---:|---:|",
+        ]
+        labels = [
+            ("OK",         "뽑았고 카드에도 실렸다"),
+            ("ASSEMBLY",   "**뽑았는데 카드에 안 실렸다** — 조립이 문제"),
+            ("CARD_ONLY",  "카드 본문엔 있으나 사실로는 안 뽑혔다"),
+            ("EXTRACTION", "**아예 못 뽑았다** — map 이 문제"),
+        ]
+        for key, desc in labels:
+            c = stage.get(key, 0)
+            L.append(f"| `{key}` | {desc} | {c} | {c / n * 100:.1f}% |")
+        L += [
+            "",
+            f"원장 재현율 {metrics.get('ledger_recall', 0) * 100:.1f}% "
+            f"— 정답지 사실 중 추출이 실제로 뽑아낸 비율이다.",
+            "",
+        ]
+        by_stype = metrics.get("loss_stage_by_source_type") or {}
+        if by_stype:
+            L += ["| 유형 | OK | ASSEMBLY | CARD_ONLY | EXTRACTION |",
+                  "|---|---:|---:|---:|---:|"]
+            for stype, counts in by_stype.items():
+                L.append(
+                    f"| {stype} | {counts.get('OK', 0)} | {counts.get('ASSEMBLY', 0)} "
+                    f"| {counts.get('CARD_ONLY', 0)} | {counts.get('EXTRACTION', 0)} |"
+                )
+            L += [
+                "",
+                "`EXTRACTION` 이 크면 뽑기(map)를, `ASSEMBLY` 가 크면 조립(reduce)을 고친다.",
+                "",
+            ]
 
     L += ["## source type 별", "", "| 유형 | 사실 | 담김 | 부분 | 누락 | 손실 |", "|---|---:|---:|---:|---:|---:|"]
     for stype, b in metrics["by_source_type"].items():
@@ -392,7 +466,9 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         await run_pipeline(store_id, list(mapping))
 
     cards = await fetch_cards(conn, store_id)
-    report = score(truth["facts"], cards, source_types)
+    ledger = await fetch_ledger(conn, store_id)
+    report = score(truth["facts"], cards, source_types, ledger)
+    print(f"  원장 {len(ledger)}건 · 카드 {len(cards)}장")
     metrics = aggregate(report.rows, card_count=len(cards))
 
     await conn.executemany(
@@ -400,8 +476,10 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         insert into extraction_results (
           run_id, store_id, fact_id, subject, variant, attribute, value,
           must_have, source_key, source_type, verdict, card_id, score,
-          reason, subject_hit, value_hit, variant_hit
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          reason, subject_hit, value_hit, variant_hit,
+          in_ledger, ledger_fact_id, loss_stage
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                  $18,$19,$20)
         """,
         [(run_id, store_id, r["fact_id"], r["subject"], r["variant"],
           r["attribute"], r["value"], r["must_have"], r["source_key"],

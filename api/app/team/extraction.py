@@ -193,12 +193,69 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]]) -> FactMatch:
     return best
 
 
+def match_fact_in_ledger(
+    fact: dict[str, Any], ledger: list[dict[str, Any]]
+) -> tuple[bool, int | None]:
+    """정답지 사실이 원장(source_facts)에 뽑혀 있는가.
+
+    카드 본문 대조와 달리 **구조끼리** 맞춘다 — 대상과 값이 각각 필드로 있으므로
+    훨씬 정밀하다. 속성(attribute)은 요구하지 않는다: 정답지는 "스팀우유량" 인데
+    모델은 "우유 용량" 이라 쓰는 식으로 이름이 갈리기 때문이다. 대상과 값이 맞으면
+    같은 사실로 본다.
+
+    규격(variant)은 정답지에 있을 때만 본다. 현재 추출은 규격을 채우지 않으므로
+    (13.5 가 RECIPE 스키마로 채운다) 여기서 요구하면 전부 탈락한다.
+    """
+    subject = fact.get("subject") or ""
+    value = fact.get("value") or ""
+    if not subject or not value:
+        return False, None
+
+    want_numbers = numbers_in(value)
+    want_tokens = _tokens(value)
+
+    for row in ledger:
+        if not _subject_in(subject, row.get("subject") or ""):
+            continue
+        have = row.get("value") or ""
+        if want_numbers:
+            # 숫자가 있는 값은 숫자가 전부 맞아야 한다 (275 → 27 왜곡 차단)
+            if all(n in set(numbers_in(have)) for n in want_numbers):
+                return True, row.get("fact_id")
+        elif want_tokens:
+            overlap = len(want_tokens & _tokens(have)) / len(want_tokens)
+            if overlap >= 0.6:
+                return True, row.get("fact_id")
+    return False, None
+
+
+def loss_stage(in_ledger: bool, verdict: Verdict) -> str:
+    """손실이 어느 단계에서 났는가.
+
+    이 구분이 13.4 의 2패스가 어디를 고쳐야 하는지 정한다.
+    """
+    in_card = verdict == "COVERED"
+    if in_ledger and in_card:
+        return "OK"
+    if in_ledger and not in_card:
+        return "ASSEMBLY"      # 뽑았는데 카드에 안 실렸다 — 조립이 문제
+    if not in_ledger and in_card:
+        return "CARD_ONLY"     # 카드 본문에 녹아 있으나 사실로는 안 뽑혔다
+    return "EXTRACTION"        # 애초에 못 뽑았다 — map 이 문제
+
+
 @dataclass
 class ExtractionReport:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def add(self, fact: dict[str, Any], match: FactMatch, source_type: str) -> None:
+    def add(
+        self, fact: dict[str, Any], match: FactMatch, source_type: str,
+        *, in_ledger: bool = False, ledger_fact_id: int | None = None,
+    ) -> None:
         self.rows.append({
+            "in_ledger": in_ledger,
+            "ledger_fact_id": ledger_fact_id,
+            "loss_stage": loss_stage(in_ledger, match.verdict),
             "fact_id": fact.get("fact_id"),
             "subject": fact.get("subject"),
             "variant": fact.get("variant"),
@@ -259,6 +316,15 @@ def aggregate(rows: list[dict[str, Any]], card_count: int = 0) -> dict[str, Any]
         "by_source_type": {k: bucket(v) for k, v in sorted(by_type.items())},
         # 값이 틀어진 것과 아예 없는 것을 가른다. 원인이 다르다
         "partial_reasons": _count(r["reason"] for r in rows if r["verdict"] == "PARTIAL"),
+        # 손실이 어느 단계에서 났는가. 2패스가 고칠 자리를 정한다
+        "loss_stage": _count(r.get("loss_stage") or "UNKNOWN" for r in rows),
+        "loss_stage_by_source_type": {
+            stype: _count(r.get("loss_stage") or "UNKNOWN" for r in group)
+            for stype, group in sorted(by_type.items())
+        },
+        "ledger_recall": round(
+            sum(1 for r in rows if r.get("in_ledger")) / total, 4
+        ),
     }
 
 
