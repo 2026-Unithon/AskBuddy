@@ -48,6 +48,8 @@ W는 **원본 → 사실 JSON → 카드 초안 → 검수·공개**, R은 **질
 
 # C0. 공통 계약과 병렬 개발 준비 — W 주 작성, R 필수 검토
 
+R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](C0_R_IMPLEMENTATION_20260914.md). CP-01 R typed 검증·검색 인증·기존 usage 결함 보강을 구현했다. W usage 원장·snapshot 보강을 기다리는 CP 선행과 DB 통합 인수는 아래에서 미완료로 유지한다.
+
 | 작업 | 산출물 | 완료 기준 |
 |---|---|---|
 | C0-1 | MVP 31절의 schema·오류·버전 호환표 | 타입 기반·기존 22개 테스트 확인. 중복·원문·RAW·provenance·action/참조 검증 보강은 CP-01~02 |

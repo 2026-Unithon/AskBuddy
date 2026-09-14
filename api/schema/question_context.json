@@ -23,8 +23,7 @@
       "type": "object"
     },
     "context_id": {
-      "maxLength": 80,
-      "minLength": 8,
+      "format": "uuid",
       "title": "Context Id",
       "type": "string"
     },

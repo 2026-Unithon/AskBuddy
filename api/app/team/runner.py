@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import asyncpg
@@ -72,6 +73,7 @@ async def run_case(
         "prompt_tokens": outcome.prompt_tokens,
         "completion_tokens": outcome.completion_tokens,
         "cost_usd": outcome.cost_usd,
+        "answer_usage_status": outcome.answer_usage_status,
         "passed": score.passed,
         "failure_kind": score.failure_kind,
         "error": outcome.error,
@@ -94,6 +96,8 @@ async def _execute(
         return CaseOutcome(
             actual_kind="ERROR",
             retrieve_latency_ms=_elapsed_ms(started),
+            prompt_tokens=0, completion_tokens=0, cost_usd=Decimal(0),
+            answer_usage_status="NOT_CALLED",
             error=f"retrieve: {exc}",
         )
     retrieve_ms = _elapsed_ms(started)
@@ -104,6 +108,8 @@ async def _execute(
             actual_kind="MISS",
             miss_reason=result.get("reason"),
             retrieve_latency_ms=retrieve_ms,
+            prompt_tokens=0, completion_tokens=0, cost_usd=Decimal(0),
+            answer_usage_status="NOT_CALLED",
         )
 
     candidates = result["candidates"]
@@ -126,6 +132,9 @@ async def _execute(
     usage = composition.usage or {}
     prompt_tokens = usage.get("prompt_tokens")
     completion_tokens = usage.get("completion_tokens")
+    not_called = composition.model_call_status == "NOT_CALLED"
+    if not_called:
+        prompt_tokens = completion_tokens = 0
 
     return CaseOutcome(
         actual_kind="HIT",
@@ -138,7 +147,8 @@ async def _execute(
         answer_latency_ms=answer_ms,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        cost_usd=estimate_cost(prompt_tokens, completion_tokens, cost_per_1k),
+        cost_usd=Decimal(0) if not_called else estimate_cost(prompt_tokens, completion_tokens, cost_per_1k),
+        answer_usage_status=composition.model_call_status,
     )
 
 
@@ -146,16 +156,21 @@ def estimate_cost(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     cost_per_1k: dict[str, float] | None,
-) -> float | None:
+) -> Decimal | None:
     """단가를 준 실행만 비용을 계산한다. 모르는 단가를 코드에 박아 추정하지 않는다."""
-    if not cost_per_1k or (prompt_tokens is None and completion_tokens is None):
+    if not cost_per_1k or prompt_tokens is None or completion_tokens is None:
         return None
-    inp = float(cost_per_1k.get("input", 0) or 0)
-    out = float(cost_per_1k.get("output", 0) or 0)
-    if inp == 0 and out == 0:
+    if any(type(n) is not int or n < 0 for n in (prompt_tokens, completion_tokens)):
         return None
-    total = (prompt_tokens or 0) / 1000 * inp + (completion_tokens or 0) / 1000 * out
-    return round(total, 6)
+    try:
+        inp = Decimal(str(cost_per_1k.get("input")))
+        out = Decimal(str(cost_per_1k.get("output")))
+        if not all(rate.is_finite() and rate >= 0 for rate in (inp, out)):
+            return None
+        total = (prompt_tokens * inp + completion_tokens * out) / Decimal(1000)
+        return total
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _elapsed_ms(started: float) -> int:

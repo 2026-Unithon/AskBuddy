@@ -124,7 +124,7 @@
     "context_id": {
       "anyOf": [
         {
-          "maxLength": 80,
+          "format": "uuid",
           "type": "string"
         },
         {

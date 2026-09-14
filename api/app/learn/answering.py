@@ -28,9 +28,9 @@ class AnswerComposition:
     source: Literal["CARD_ORIGINAL", "GROUNDED_LLM"]
     grounding_status: Literal["VERIFIED", "FALLBACK"]
     fallback_reason: str | None = None
-    # 평가 하네스가 질문당 비용을 계산하려면 토큰이 필요하다.
-    # 제품 경로는 읽지 않으므로 폴백에서는 None 이다.
-    usage: dict[str, int] | None = None
+    # 미호출과 응답 관측 누락을 구분한다. 원문 폴백도 모델 호출 후일 수 있다.
+    usage: dict[str, int | None] | None = None
+    model_call_status: Literal["NOT_CALLED", "OBSERVED", "UNKNOWN"] = "UNKNOWN"
 
 
 _WORD = re.compile(r"[0-9A-Za-z가-힣]+")
@@ -97,13 +97,13 @@ def validate_grounded_payload(
 
     unsupported_terms = _fact_terms(answer) - _fact_terms(source_text)
     if unsupported_terms:
-        logger.info("grounded answer rejected: unsupported_terms=%s", sorted(unsupported_terms))
+        logger.info("grounded answer rejected: unsupported_terms")
         return False, "unsupported_terms", []
 
     return True, None, selected
 
 
-def _usage_of(response: object) -> dict[str, int] | None:
+def _usage_of(response: object) -> dict[str, int | None] | None:
     """모델 응답의 토큰 사용량. SDK 버전에 따라 없을 수 있으므로 실패해도 조용히 넘긴다."""
     meta = getattr(response, "usage_metadata", None)
     if meta is None:
@@ -112,14 +112,18 @@ def _usage_of(response: object) -> dict[str, int] | None:
     completion = getattr(meta, "candidates_token_count", None)
     if prompt is None and completion is None:
         return None
-    return {"prompt_tokens": int(prompt or 0), "completion_tokens": int(completion or 0)}
+    return {
+        "prompt_tokens": prompt if type(prompt) is int and prompt >= 0 else None,
+        "completion_tokens": completion if type(completion) is int and completion >= 0 else None,
+    }
 
 
 def _fallback(
     candidates: list[dict],
     reason: str | None = None,
     *,
-    usage: dict[str, int] | None = None,
+    usage: dict[str, int | None] | None = None,
+    model_call_status: Literal["NOT_CALLED", "OBSERVED", "UNKNOWN"] = "UNKNOWN",
 ) -> AnswerComposition:
     top = candidates[0]
     return AnswerComposition(
@@ -129,6 +133,7 @@ def _fallback(
         grounding_status="FALLBACK",
         fallback_reason=reason,
         usage=usage,
+        model_call_status=model_call_status,
     )
 
 
@@ -142,10 +147,12 @@ async def compose_grounded_answer(
 
     settings = get_settings()
     if settings.answer_mode == "extractive":
-        return _fallback(candidates, "extractive_mode")
+        return _fallback(candidates, "extractive_mode", model_call_status="NOT_CALLED")
     if not settings.gemini_api_key:
-        return _fallback(candidates, "missing_api_key")
+        return _fallback(candidates, "missing_api_key", model_call_status="NOT_CALLED")
 
+    usage = None
+    model_call_status = "NOT_CALLED"
     try:
         from google import genai
         from google.genai import types
@@ -163,6 +170,7 @@ async def compose_grounded_answer(
             cards_json=json.dumps(evidence, ensure_ascii=False),
         )
         client = genai.Client(api_key=settings.gemini_api_key)
+        model_call_status = "UNKNOWN"
         response = await client.aio.models.generate_content(
             model=settings.gemini_model,
             contents=prompt,
@@ -172,18 +180,20 @@ async def compose_grounded_answer(
                 temperature=0.0,
             ),
         )
+        model_call_status = "OBSERVED"
         usage = _usage_of(response)
         payload = GroundedAnswerPayload.model_validate_json(response.text or "")
         valid, reason, selected = validate_grounded_payload(payload, candidates[:3])
         if not valid:
-            return _fallback(candidates, reason, usage=usage)
+            return _fallback(candidates, reason, usage=usage, model_call_status=model_call_status)
         return AnswerComposition(
             content=payload.answer.strip(),
             candidates=selected,
             source="GROUNDED_LLM",
             grounding_status="VERIFIED",
             usage=usage,
+            model_call_status=model_call_status,
         )
     except Exception as exc:
-        logger.warning("grounded answer generation failed; using card original: %s", exc)
-        return _fallback(candidates, "generation_failed")
+        logger.warning("grounded answer generation failed: %s", type(exc).__name__)
+        return _fallback(candidates, "generation_failed", usage=usage, model_call_status=model_call_status)

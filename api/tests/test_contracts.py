@@ -368,14 +368,14 @@ class AnswerPlanTest(unittest.TestCase):
             self._plan(action="CLARIFY", clarification_slot="temperature",
                        allowed_options=("HOT", "ICE"))
         ok = self._plan(action="CLARIFY", clarification_slot="temperature",
-                        allowed_options=("HOT", "ICE"), context_id="ctx-1")
+                        allowed_options=("HOT", "ICE"), context_id="00000000-0000-4000-8000-000000000001")
         self.assertEqual(ok.action, "CLARIFY")
 
     def test_clarify_does_not_cite(self):
         """되묻는 중에는 아직 답하지 않는다."""
         with self.assertRaises(ValidationError):
             self._plan(action="CLARIFY", clarification_slot="temperature",
-                       allowed_options=("HOT",), context_id="c",
+                       allowed_options=("HOT",), context_id="00000000-0000-4000-8000-000000000001",
                        selected_blocks=(self._block(),))
 
     def test_escalate_needs_reason_and_does_not_cite(self):
@@ -390,12 +390,12 @@ class AnswerPlanTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self._plan(action="ESCALATE", escalation_reason="지식 없음",
                        clarification_slot="temperature",
-                       allowed_options=("HOT",), context_id="c")
+                       allowed_options=("HOT",), context_id="00000000-0000-4000-8000-000000000001")
 
     def test_answer_cannot_carry_context_id(self):
         with self.assertRaises(ValidationError):
             self._plan(action="ANSWER", selected_blocks=(self._block(),),
-                       context_id="c")
+                       context_id="00000000-0000-4000-8000-000000000001")
 
     def test_policy_actions_never_cite_store_knowledge(self):
         for action in ("REFUSE", "SAFE_ROUTE"):

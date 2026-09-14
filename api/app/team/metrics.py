@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from math import log2
+from math import ceil, log2
+from decimal import Decimal
 from typing import Any, Iterable, Literal
 
 ExpectedKind = Literal["HIT", "MISS", "REFUSE", "SAFE_ROUTE"]
@@ -35,7 +36,8 @@ class CaseOutcome:
     answer_latency_ms: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
-    cost_usd: float | None = None
+    cost_usd: Decimal | None = None
+    answer_usage_status: Literal["NOT_CALLED", "OBSERVED", "UNKNOWN"] = "UNKNOWN"
     error: str | None = None
 
 
@@ -246,7 +248,9 @@ def percentile(values: list[int | float], ratio: float) -> float | None:
     clean = sorted(v for v in values if v is not None)
     if not clean:
         return None
-    index = max(0, min(len(clean) - 1, round(ratio * len(clean) + 0.5) - 1))
+    if not 0 < ratio <= 1:
+        raise ValueError("percentile ratio must be in (0, 1]")
+    index = ceil(ratio * len(clean)) - 1
     return round(float(clean[index]), 2)
 
 
@@ -300,10 +304,27 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if r["actual_kind"] == "MISS" and r.get("total_latency_ms") is not None
     ]
 
-    prompt_tokens = sum(r.get("prompt_tokens") or 0 for r in rows)
-    completion_tokens = sum(r.get("completion_tokens") or 0 for r in rows)
-    cost_values = [float(r["cost_usd"]) for r in rows if r.get("cost_usd") is not None]
-    cost_total = round(sum(cost_values), 6) if cost_values else None
+    prompt_values = [r["prompt_tokens"] for r in rows if r.get("prompt_tokens") is not None]
+    completion_values = [r["completion_tokens"] for r in rows if r.get("completion_tokens") is not None]
+    prompt_tokens = sum(prompt_values) if len(prompt_values) == total else None
+    completion_tokens = sum(completion_values) if len(completion_values) == total else None
+    cost_values = [Decimal(str(r["cost_usd"])) for r in rows if r.get("cost_usd") is not None]
+    known_cost = float(sum(cost_values, Decimal(0)).quantize(Decimal("0.000001")))
+    cost_total = known_cost if len(cost_values) == total else None
+
+    # 기존 NUMERIC(12,6) 문항 컬럼은 표시용이다. 반올림 전 금액과 호출 상태는
+    # 종료 run의 기존 JSON 보고서에 함께 보존하여 재조회/재집계에도 재사용한다.
+    cost_details = {}
+    for row in rows:
+        if "case_id" not in row:
+            continue
+        key = str(row["case_id"])
+        if key in cost_details:
+            raise ValueError("duplicate evaluation case_id")
+        cost_details[key] = {
+            "cost_usd": format(Decimal(str(row["cost_usd"])), "f") if row.get("cost_usd") is not None else None,
+            "answer_usage_status": row.get("answer_usage_status", "UNKNOWN"),
+        }
 
     return {
         "case_count": total,
@@ -350,6 +371,18 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         # 입력·질문당 모델 비용
         "prompt_tokens_total": prompt_tokens,
         "completion_tokens_total": completion_tokens,
+        "prompt_tokens_known_total": sum(prompt_values),
+        "completion_tokens_known_total": sum(completion_values),
+        "cost_usd_known_total": known_cost,
+        "cost_scope": "ANSWER_MODEL_ONLY",
+        "cost_basis": "ESTIMATED",
+        "question_total_cost_status": "UNKNOWN",
+        "cost_excluded_stages": ["EMBEDDING", "STORAGE", "UNOBSERVED_RETRIES"],
+        "answer_not_called_count": sum(r.get("answer_usage_status") == "NOT_CALLED" for r in rows),
+        "answer_cost_details": {"schema_version": "r_answer_cost/v1", "cases": cost_details},
+        "cost_observed_count": len(cost_values),
+        "cost_missing_count": total - len(cost_values),
+        "cost_observation_status": "COMPLETE" if len(cost_values) == total else ("PARTIAL" if cost_values else "UNKNOWN"),
         "cost_usd_total": cost_total,
         "cost_usd_per_question": (
             round(cost_total / total, 6) if cost_total is not None else None

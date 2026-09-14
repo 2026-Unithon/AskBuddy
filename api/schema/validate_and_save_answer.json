@@ -39,7 +39,7 @@
         "context_id": {
           "anyOf": [
             {
-              "maxLength": 80,
+              "format": "uuid",
               "type": "string"
             },
             {
@@ -79,7 +79,6 @@
           "items": {
             "$ref": "#/$defs/SelectedBlock"
           },
-          "maxItems": 20,
           "title": "Selected Blocks",
           "type": "array"
         },

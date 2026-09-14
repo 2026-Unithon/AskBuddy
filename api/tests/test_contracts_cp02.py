@@ -276,13 +276,13 @@ class ChatResponseTest(unittest.TestCase):
     def test_clarify_does_not_create_a_pending(self):
         with self.assertRaises(ValidationError):
             self._resp(action="CLARIFY", message="HOT 인가요 ICE 인가요?",
-                       citations=(), context_id="ctx", clarification_slot="t",
+                       citations=(), context_id="00000000-0000-4000-8000-000000000001", clarification_slot="t",
                        allowed_options=("HOT", "ICE"), pending_id="80")
 
 
 class QuestionContextTest(unittest.TestCase):
     def _ctx(self, **kw):
-        base = dict(context_id="ctx-00000001", store_id="1", member_id="2",
+        base = dict(context_id="00000000-0000-4000-8000-000000000001", store_id="1", member_id="2",
                     chat_session_id="3", contract_version="v2",
                     expires_at=datetime.now(timezone.utc),
                     original_question="우유 얼마나 넣어요?")

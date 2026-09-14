@@ -1,0 +1,108 @@
+{
+  "accepted": [
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "3",
+          "card_version_id": "4",
+          "block_id": "b1",
+          "fact_revision_ids": [
+            "6"
+          ]
+        }
+      ]
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "CLARIFY",
+      "clarification_slot": "temperature",
+      "allowed_options": [
+        "HOT",
+        "ICE"
+      ],
+      "context_id": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "ESCALATE",
+      "escalation_reason": "NO_APPROVED_EVIDENCE"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "REFUSE"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "SAFE_ROUTE"
+    }
+  ],
+  "rejected": [
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "ANSWER"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "ESCALATE",
+      "escalation_reason": "NO_APPROVED_EVIDENCE",
+      "clarification_slot": "temperature"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "REFUSE",
+      "context_id": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": "1",
+      "action": "CLARIFY",
+      "clarification_slot": "temperature",
+      "allowed_options": [
+        "HOT",
+        "ICE"
+      ],
+      "context_id": "00000000-0000-4000-8000-000000000001",
+      "escalation_reason": "NO_APPROVED_EVIDENCE"
+    },
+    {
+      "snapshot_id": "2",
+      "knowledge_revision": 1,
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "3",
+          "card_version_id": "4",
+          "block_id": "b1",
+          "fact_revision_ids": [
+            "6"
+          ]
+        }
+      ]
+    },
+    {
+      "snapshot_id": "9223372036854775808",
+      "knowledge_revision": "1",
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "3",
+          "card_version_id": "4",
+          "block_id": "b1",
+          "fact_revision_ids": [
+            "6"
+          ]
+        }
+      ]
+    }
+  ]
+}

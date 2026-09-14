@@ -152,7 +152,8 @@ class HelperTest(unittest.TestCase):
         self.assertIsNone(estimate_cost(1000, 500, None))
 
     def test_cost_uses_given_pricing(self):
-        self.assertEqual(estimate_cost(1000, 500, {"input": 0.1, "output": 0.4}), 0.3)
+        from decimal import Decimal
+        self.assertEqual(estimate_cost(1000, 500, {"input": 0.1, "output": 0.4}), Decimal("0.3"))
 
 
 class RankQualityTest(unittest.TestCase):
@@ -252,8 +253,11 @@ class AggregateTest(unittest.TestCase):
         self.assertEqual(m["ndcg_at_10"], 0.5)
         self.assertEqual(m["ndcg_k"], 10)
         self.assertEqual(m["latency_p50_ms"], 300.0)
-        self.assertEqual(m["prompt_tokens_total"], 700)
-        self.assertEqual(m["cost_usd_total"], 0.001)
+        self.assertIsNone(m["prompt_tokens_total"])
+        self.assertEqual(m["prompt_tokens_known_total"], 700)
+        self.assertIsNone(m["cost_usd_total"])
+        self.assertEqual(m["cost_usd_known_total"], 0.001)
+        self.assertEqual(m["cost_observation_status"], "PARTIAL")
 
     def test_empty_run_does_not_divide_by_zero(self):
         self.assertEqual(aggregate([]), {"case_count": 0})

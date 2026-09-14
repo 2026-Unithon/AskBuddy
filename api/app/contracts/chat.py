@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import Field, model_validator
 
@@ -52,7 +53,9 @@ class QuestionContext(Contract):
     않는다 — 복사되면 A 직원의 확정 슬롯으로 B 직원에게 답하게 된다.
     """
 
-    context_id: str = Field(min_length=8, max_length=80)
+    # 서버가 발급한 UUID 다. 모델이 짐작할 수 있는 형식이면 문맥 소유권 검사가
+    # 무의미해진다 (§5.1). AnswerPlan 과 같은 타입을 쓴다
+    context_id: UUID
     store_id: EntityId
     member_id: EntityId
     chat_session_id: EntityId
@@ -107,7 +110,7 @@ class ChatResponse(Contract):
     knowledge_revision: RevisionId
     citations: tuple[Citation, ...] = ()
     # CLARIFY 에서만 — 서버가 발급한 문맥과 고를 값
-    context_id: str | None = Field(default=None, max_length=80)
+    context_id: UUID | None = None
     allowed_options: tuple[str, ...] = Field(default=(), max_length=10)
     clarification_slot: str | None = Field(default=None, max_length=60)
     # ESCALATE 성공 시에만 — WAITING 저장이 끝난 뒤다 (불변식 5)

@@ -157,7 +157,7 @@ class AnswerCaseTest(unittest.TestCase):
                            clarification_slot=case["clarification_slot"],
                            allowed_options=tuple(case.get("allowed_options",
                                                           ["A", "B"])),
-                           context_id="ctx-00000001")
+                           context_id="00000000-0000-4000-8000-000000000001")
             resp = self._render(p)
             self.assertEqual(resp.action, "CLARIFY")
             self.assertIsNone(resp.pending_id, "되묻기는 점주를 부르지 않는다")
@@ -317,7 +317,7 @@ class StateCaseTest(unittest.TestCase):
 
     def test_F29_context_ttl_and_session_ownership(self):
         ctx = QuestionContext(
-            context_id="ctx-00000001", store_id="1", member_id="2",
+            context_id="00000000-0000-4000-8000-000000000001", store_id="1", member_id="2",
             chat_session_id="3", contract_version="v2",
             expires_at=datetime.now(UTC) - timedelta(minutes=1),
             original_question="얼마나 넣어요?")
@@ -443,7 +443,7 @@ class ActionCoverageTest(unittest.TestCase):
         seen.add(renderer.render(
             AnswerPlan(snapshot_id="100", knowledge_revision="7",
                        action="CLARIFY", clarification_slot="temperature",
-                       allowed_options=("HOT", "ICE"), context_id="ctx-00000001"),
+                       allowed_options=("HOT", "ICE"), context_id="00000000-0000-4000-8000-000000000001"),
             snap, store_id="1", request_id="r").action)
         seen.add(renderer.render(
             AnswerPlan(snapshot_id="100", knowledge_revision="7",

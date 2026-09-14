@@ -40,15 +40,27 @@ def _canonical_id(value: str) -> str:
     return value
 
 
+def _issued_id(value: str) -> str:
+    """발급된 ID 는 1 부터 시작한다. `"0"` 은 어떤 행도 가리키지 않는다."""
+    if value == "0":
+        raise ValueError("0 은 발급된 ID 가 아니다")
+    return _canonical_id(value)
+
+
 # 서버가 발급한 DB ID. 문자열이지만 숫자만 담고, 표기는 하나뿐이다
 EntityId = Annotated[
     str,
     Field(pattern=r"^[0-9]+$", max_length=19),
-    AfterValidator(_canonical_id),
+    AfterValidator(_issued_id),
 ]
 
-# 매장 범위에서 단조 증가하는 판 번호. ID 와 같은 이유로 문자열이다 (RV-09)
-RevisionId = EntityId
+# 매장 범위에서 단조 증가하는 판 번호. ID 와 같은 이유로 문자열이다 (RV-09).
+# ID 와 달리 **0 이 유효하다** — 자료를 아직 안 올린 매장의 판이 0 이다 (§3.4)
+RevisionId = Annotated[
+    str,
+    Field(pattern=r"^[0-9]+$", max_length=19),
+    AfterValidator(_canonical_id),
+]
 
 # 원문. **공백을 손대지 않는다** (RV-07).
 # 계약 전체는 str_strip_whitespace 로 앞뒤 공백을 떼지만, 원문에 그걸 적용하면
