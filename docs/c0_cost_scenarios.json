@@ -1,0 +1,54 @@
+{
+  "schema_version": "cost_workload_plan/v1",
+  "status": "PLANNING_ASSUMPTIONS_NOT_MEASURED_COST",
+  "operating_variable_budget_krw": "3000",
+  "include_costs": ["AI_ALL_STAGES_AND_RETRIES", "STORAGE_BYTES_TIME", "STORAGE_TRANSFER"],
+  "exclude_from_operating_budget": ["INITIAL_REGISTRATION_TRACKED_SEPARATELY", "RAILWAY_FIXED", "VERCEL_FIXED", "DB_FIXED", "EVALUATION_AND_DEVELOPMENT"],
+  "source": "User supplied ranges; scenario points selected for planning, not observed customer averages",
+  "calendar_days_assumption": 30,
+  "scenarios": [
+    {"id": "LOW", "employees": 3, "questions_per_employee_day_first_month": "5", "questions_per_employee_day_stable": "0.3", "initial_video_minutes": 20},
+    {"id": "BASE", "employees": 4, "questions_per_employee_day_first_month": "8", "questions_per_employee_day_stable": "0.5", "initial_video_minutes": 30},
+    {"id": "HIGH", "employees": 5, "questions_per_employee_day_first_month": "10", "questions_per_employee_day_stable": "0.9", "initial_video_minutes": 40}
+  ],
+  "unmeasured_inputs_per_scenario": {
+    "initial_standalone_audio_minutes": null,
+    "initial_document_pages": null,
+    "monthly_added_video_minutes": null,
+    "monthly_added_audio_minutes": null,
+    "monthly_added_document_pages": null,
+    "kakao_message_count": null,
+    "source_and_derived_object_bytes": null,
+    "storage_transfer_bytes": null,
+    "rate_card_version": null,
+    "fx_version": null,
+    "initial_cost_krw": null,
+    "operating_cost_krw": null
+  },
+  "clarification_profiles": [
+    {"id": "NO_EXTRA_TURN", "additional_user_turns_per_question": "0"},
+    {"id": "PLANNING_LOAD", "additional_user_turns_per_question": "0.2"},
+    {"id": "ALL_QUESTIONS_TWO_EXTRA_TURNS", "additional_user_turns_per_question": "2"}
+  ],
+  "concentration_profile": {"status": "STRESS_ASSUMPTION", "first_week_days": 7, "first_week_share_of_monthly_questions": "0.5"},
+  "retention_forecast_months": [1, 3, 6, 12],
+  "reported_registration_sample": {
+    "store_alias": "store-a",
+    "provenance": "USER_REPORTED_MEASUREMENT_NOT_REMEASURED_IN_THIS_TASK",
+    "run_id": null,
+    "manifest_hash": null,
+    "video_minutes_reported": 38,
+    "video_mb_reported": "111",
+    "standalone_audio_mb_reported": "2.5",
+    "standalone_audio_minutes": null,
+    "document_file_count": 3,
+    "document_page_count": null,
+    "kakao_file_count": 1,
+    "total_mb_reported_approx": "118",
+    "exact_total_bytes": null,
+    "output_fact_count_reported": 101,
+    "output_card_count_reported": 70,
+    "truth_fact_count": null,
+    "published_card_count": null
+  }
+}

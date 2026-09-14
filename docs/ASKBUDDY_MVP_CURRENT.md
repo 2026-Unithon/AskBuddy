@@ -1,7 +1,7 @@
 # AskBuddy 현재 MVP 정본
 
 > 개정일: 2026-09-14 — 두 파이프라인 정반합 개정
-> 코드 대조 기준 커밋: `0b8e1c4` (`main`, 계획 개정 전 HEAD). 이번 개정은 문서 변경이며 아래 목표 구조의 구현 완료를 뜻하지 않는다.
+> 코드 대조 기준: 기존 런타임 분석 `0b8e1c4`, 추가 C0 계약·D18~D21 `65c2403`. C0 상세 결정·구현 계획과 재현 검토를 반영했으며 새 목표 런타임의 구현 완료를 뜻하지 않는다.
 > 운영 구성: Supabase + Railway API + Vercel Web
 > 문서 성격: 제품 결정, 데이터·API 계약, 화면 흐름, 구현 현황, 검증 및 배포 기준을 하나로 합친 최신 기준서
 
@@ -117,7 +117,7 @@ flowchart LR
 3. AI 지식 답변은 공개 카드 ID·버전과 사용한 block/fact revision을 인용한다. 점주 원문 전달은 `OWNER_ANSWER`라는 별도 출처다.
 4. 목표 경로에서 모델은 사실을 자유 재서술하지 않고 참조 ID와 배치 계획을 제안한다. 서버가 승인된 값·부정·조건·예외·선행 단계를 함께 렌더링한다.
 5. 참조·버전·필수 문맥 검증 실패 시 무조건 첫 카드를 반환하지 않는다. 질문 적합성을 확인한 승인 원문 블록만 폴백하고, 불충분하면 명확화 또는 점주 이관한다. 인프라 오류는 별도 오류다.
-6. 원본, 추출 원문, 점주 질문·답변, 과거 공개 버전은 변경 없이 보존한다.
+6. 추출 원문, 점주 질문·답변, 과거 공개 버전은 변경 없이 보존한다. D20 일반 source 삭제는 원본 파일 접근을 해제하고 tombstone·사실·카드·인용 관계를 유지하며 개인정보 삭제는 별도 절차다.
 7. `Q&A`를 별도 업무 카테고리로 만들지 않는다.
 8. 점주 답변의 출처는 `OWNER_ANSWER`로 남기고 현재 업무 카테고리에 반영한다. 애매한 분류는 `기타`다.
 9. 모델 파생 사실과 보완·충돌 제안은 기존 공개 카드를 자동 덮어쓰지 않는다. 점주가 직접 제출한 원문 그대로의 신규·동일 답변은 §13·§31의 별도 경로를 따른다.
@@ -174,7 +174,7 @@ flowchart LR
 | Q&A·FAQ | 별도 Q&A 지식 저장소를 만들지 않는다. 원문·occurrence·proposal은 보존하고 FAQ는 실제 질문 빈도와 현재 승인 카드에서 파생한다. |
 | 자료 업로드 관계 처리 | IDENTICAL/NEW/SUPPLEMENT/CONFLICT 모두 점주 검토 대상으로 제시한다. 관련 기존 카드와 신규 후보를 함께 보여주며 공개본을 유지한다. |
 | 점주 답변 예외 | 점주 제출 원문 그대로의 IDENTICAL/NEW는 재입력·재검수 없이 연결/공개할 수 있다. 모델이 재서술·추출한 내용까지 승인된 것은 아니다. SUPPLEMENT/CONFLICT 또는 관계 불확실성은 검토한다. |
-| 공개·학습 | 초안과 공개 포인터 분리, 새 공개 버전은 학습 재확인, 제외는 검색·FAQ·로드맵에 동시 반영한다. 원본·버전은 물리 삭제하지 않는다. |
+| 공개·학습 | 초안과 공개 포인터 분리, 새 공개 버전은 학습 재확인, 제외는 검색·FAQ·로드맵에 동시 반영한다. source 삭제와 카드 제외는 다르며 D20의 사실·승인 버전 보존을 따른다. |
 | 카드 표시 | 제목(대상·규격), 수치, 순서, 주의·목록, 근거의 공통 문법. 없는 속성을 채우지 않는다. 한 화면·2~3문장 제한으로 사실을 버리지 않으며 긴 블록은 접되 상태·건수·원문 접근을 보존한다. |
 | 수치·순서 | 수치줄에도 HOT/ICE·사이즈·단위·조건·부정이 붙는다. 번호·의존성은 데이터이며 장식적 재배치로 바꾸지 않는다. |
 | 원장 | `source_facts/card_facts` 기반 테이블은 이미 있다. 현재는 최종 카드 결과를 저장하므로 map 원장 선저장·구간 provenance·revision 연결은 남은 구현이다. |
@@ -193,6 +193,8 @@ flowchart LR
 | 평가 자료 | 실제 상용 자료는 내부 평가용으로만 쓰고 문서·발표·fixture에는 익명 또는 합성 자료를 사용한다. 팀 TEST 정답지와 실제 점주 확인을 구별한다. |
 
 상세 자료형·상태·소유권은 §30~31, 실행 순서는 TODO, 실험의 분모와 승격 규칙은 실험설계가 담당한다.
+
+2026-09-14 pull `65c2403`에서 합의된 D18~D21을 이어받는다. D18은 순증 문턱(대조군 폭 × 1.5, 최소 5건)·must_have 악화 0·원장 재현율 하락 없음·3회 중 2회 같은 방향을 요구하고, 원가 중립은 대조군 폭 문턱으로 낮춘다. D19는 동일 메뉴 여러 규격을 한 카드에 나란히 표시하며 fact는 규격별로 분리한다. D20은 source 삭제 후 사실·카드·인용 관계와 `인용 끊김` 표시를 유지한다. D21은 사용자 후속 회신에 따라 월 운영 변동비 3,000원(AI+Storage, 서버/DB 고정비 제외)·등록비 별도 추적·답변 p95 5초이며 카드 생성 지연 상한은 보류한다. 사용량 시나리오와 계산은 실험설계 §9-1 및 [C0 상세 결정서](C0_DECISIONS_AND_PLAN.md)에 기록한다.
 
 ---
 
@@ -279,6 +281,8 @@ APPROVED/PENDING/NEEDS_REVIEW
 ```
 
 복원 시 이전에 공개 버전이 있었다면 승인 상태로, 없었다면 미확인 상태로 돌아간다. 매장 전체 데이터의 완전 삭제는 T4의 별도 요청·감사·복구 절차에서 다룬다.
+
+D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/hash·승인 사실과 과거 카드/인용은 보존하고 원본 파일 접근을 해제한다. 인용 API는 현재 권한으로 occurrence별 `source_availability`를 조회해 `인용 끊김`을 표시한다. 삭제된 source 때문에 승인 카드를 자동 제외하거나 과거 snapshot을 수정하지 않는다. 기존 source_facts의 CASCADE FK 전환·삭제 서비스·로컬 보존 검증이 구현되기 전에는 새 삭제 경로를 활성화하지 않는다.
 
 ---
 
@@ -784,7 +788,8 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 | hit 질문 응답 | 목표 3초 이내, 실제 측정값 기록 |
 | miss 판정 | 목표 1초 이내, miss에서 답변 LLM 미호출 |
 | 업로드 서버 접수 | 목표 2초 이내, 이후 백그라운드 |
-| 추출 완료 | 자료 1건 목표 5분 이내, 초과 시 실제 상태만 안내 |
+| 추출 완료 | D21에 따라 카드 생성 지연 상한 보류. 단계별 timeout·재시도·checkpoint와 실제 상태 표시는 유지 |
+| 전체 질문 응답 | D21: 서버 인증 요청 접수부터 전체 응답 생성·저장까지 p95 5초; 실패·timeout·coverage 함께 보고 |
 | 임베딩 | 본문과 공개 버전이 바뀌지 않으면 재사용 |
 | 영상 | 프레임 수·길이·크기 상한을 실측 후 서버 설정으로 강제 |
 | 질문 | 사용자·매장 단위 rate limit과 비용 보호 |
@@ -792,7 +797,9 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 위 시간은 제품 목표이며 현재 충족했다고 주장하지 않는다. C0에서 입력 길이·질문 구성·측정 구간·허용 비용/지연 예산·비열등 마진을 실험 전에 기록한다. 예산이 미확정이면 구현/진단은 진행할 수 있지만 성능 승격을 승인하지 않는다.
 
-매장당 월 비용 목표는 실제 모델·영상·질문량을 측정한 뒤 확정한다. 과거 사업계획의 가정값을 운영 사실처럼 표시하지 않는다.
+매장당 월 3,000원은 운영 변동비 상한이다. AI 전 단계·STT·임베딩·재시도와 Storage 저장/전송을 포함하며 Railway/Vercel/DB 고정비는 제외한다. 최초 등록비는 별도 캠페인으로 추적하고 예산환산 개월·운영비를 뺀 잔여 예산 보전 개월을 구분한다. 최초 등록 파일의 지속 보관/조회는 발생 월 운영비에 포함한다. 실제 사용량을 예측 확정하는 대신 첫 달/안정기 LOW/BASE/HIGH 시나리오와 메타데이터 계측으로 검증한다.
+
+[C0 원가 계측 계획](C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 발행/공용 fixture 본구현보다 앞세운다. extraction_runs summary·공통 호출 원장·Storage 사용량·읽기의 누락→0 집계를 함께 보강한다. 미확정 비용은 UNKNOWN, 알려진 부분합만으로 상한 초과면 FAIL, 완전한 변동비 관측에서만 PASS다. 첫 달을 안정기 평균으로 상쇄하거나 등록 예산환산 개월을 실제 매출 회수기간으로 표시하지 않는다.
 
 ---
 
@@ -890,6 +897,10 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 - ZIP에서 확인한 dev truth는 132+48=180건이며 `owner_confirmed=TEST`다. 읽기 smoke는 8개 고유 사례의 반복 결과이고 추출 원시 실행 결과는 들어 있지 않다. 과거 추출률·지연의 재현 증거로 쓰지 않는다.
 
 코드 위치와 판단의 상세 검토 결과는 `AI_PLAN_REVIEW_20260914.md`에 기록한다.
+
+## 22-5. pull 65c2403 이후 C0 상태
+
+`api/app/contracts/`의 common/extraction/card/snapshot/answer 타입과 기존 unit 22개를 재사용한다. 현재 runtime에서 이 계약을 소비하는 import는 아직 없으며, 전체 schema·RAW/provenance·event/API·DB 원자성 완료는 아니다. 추가 순수 반례에서는 중복/순환/원문 변경/action 혼합 등 보강 지점이 확인됐다. [C0_REVIEW_20260914.md](C0_REVIEW_20260914.md)의 재현 결과와 CP-01~05가 후속 기준이다. 사용자 원가 회신으로 CP-00A~C usage 계측·등록/운영 report를 먼저 수행하도록 순서를 구체화했다.
 
 ---
 
@@ -1167,7 +1178,7 @@ C0부터 계약 테스트와 축소 E2E 뼈대를 공동으로 작성한다. W/R
 
 # 31. AI 파이프라인 공통 계약 — 이번 개정의 기술 정본
 
-이 절은 **목표 설계**다. 현재 코드 자료형과 혼동하지 않는다. 실행 schema·DB 제약·fixture는 C0/W/R에서 구현한다. JSON schema 통과는 의미 정확성 보장이 아니다.
+이 절은 **목표 설계**다. `65c2403`에서 타입 기반이 추가됐고 실행 schema 보강·DB 제약·공용 fixture는 C0/W/R에서 완성한다. 상세 결정과 담당/순서는 [C0_DECISIONS_AND_PLAN.md](C0_DECISIONS_AND_PLAN.md)에 고정했다. JSON schema 통과는 현재 승인·권한·의미 정확성 보장이 아니다.
 
 ## 31-1. 전체 경로와 모델 역할
 
@@ -1210,6 +1221,8 @@ ExtractionEnvelope 최소 필드: schema_version, source_id, segment_id, attempt
 
 CardPlan은 schema_version, entity_id, variant, title 참조, blocks[]를 갖는다. 각 block은 kind와 fact_revision_ids를 선택한다. 업무 사실을 자유 생성하는 설명 필드를 두지 않는다.
 
+D19에 따라 카드 표시 단위는 동일 entity의 여러 규격을 담을 수 있다. QUANTITIES는 규격별 블록/행으로 구분하고 R은 확정된 규격만 선택한다. 승인 RAW는 immutable raw_span 참조로 별도 표현하며 fact를 역추출해 승인을 상속시키지 않는다. 현재 CardBlock의 fact-only shape는 CP-01에서 보강한다.
+
 | kind | 렌더링 규칙 |
 |---|---|
 | QUANTITIES | 대상·규격·속성·값·단위와 적용 조건을 한 단위로 표시 |
@@ -1233,24 +1246,30 @@ W→R 계약은 **승인 카드 버전에 고정된 불변 사실·블록 묶음
 
 필수 envelope: `schema_version=published_knowledge/v1`, 서버 결정 store_id, store 범위 단조 증가 knowledge_revision, snapshot_id/hash/생성 시각, glossary_version, renderer_version, 승인 cards[]·fact_revisions[]·provenance. 색인 항목도 card_version/fact revision을 참조한다.
 
-다음은 **합성 fixture의 카드 항목 예시**이며 실제 매장 정보나 현재 응답이 아니다.
+다음은 **합성 fixture의 cards/fact_revisions 부분 예시**다. 실제 매장 정보나 전체 응답이 아니며 최상위 envelope와 provenance 등 필수 메타데이터는 생략했다.
 
 ```json
 {
-  "card_id": "1001",
-  "card_version_id": "2003",
-  "entity_id": "3001",
-  "variant": {"temperature": "ICE", "size": null},
-  "blocks": [
-    {"block_id": "b1", "kind": "QUANTITIES", "fact_revision_ids": ["4002"]}
+  "cards": [
+    {
+      "card_id": "1001",
+      "card_version_id": "2003",
+      "entity_id": "3001",
+      "variant": {"temperature": "ICE", "size": null},
+      "title": "예시음료",
+      "blocks": [
+        {"block_id": "b1", "kind": "QUANTITIES", "fact_revision_ids": ["4002"]}
+      ]
+    }
   ],
   "fact_revisions": [
     {
       "fact_revision_id": "4002",
       "assertion": "ICE 예시음료에는 물 225ml를 넣는다.",
       "predicate": "water_amount",
-      "value": "225",
-      "unit": "ml",
+      "entity_id": "3001",
+      "variant": {"temperature": "ICE", "size": null},
+      "quantity": {"value": "225", "unit": "ml"},
       "polarity": "AFFIRM",
       "conditions": ["temperature=ICE"],
       "exceptions": [],
@@ -1262,6 +1281,7 @@ W→R 계약은 **승인 카드 버전에 고정된 불변 사실·블록 묶음
 ```
 
 - snapshot은 최신 fact를 붙이는 view가 아니다. card_version이 검수한 revision 집합·블록·표현을 불변 고정한다.
+- 최초 C0 동결 시 knowledge/index revision도 bigint 범위 decimal string으로 직렬화한다. 원문 공백 보존·SHA-256 canonical hash·중복 ID·orphan 승인 사실·순환 dependency·RAW/provenance를 함께 검증한다. shape 검증 이후 서버가 trusted store 및 DB 승인 상태를 확인한다.
 - 임베딩은 트랜잭션 밖에서 준비한다. 승인 시 예상 draft/publication revision을 CAS 검사하고 공개 포인터·같은 버전 색인·fact refs·knowledge_revision을 원자 전환한다. 실패/경합이면 기존 공개본을 유지한다.
 - 제외·복원·공개 내용 변경도 knowledge_revision과 색인 가시성을 갱신한다. 캐시 키는 store_id·권한 범위·knowledge_revision·glossary_version·정규화 질문·필요 문맥을 포함한다.
 - 응답 저장 직전 현재 공개 상태를 다시 검사한다. 저장 시점 일관성이지 전송 직후 미래 변경까지 막는 보장은 아니다.
@@ -1321,3 +1341,9 @@ C0에서 schema/fixture hash·truth/행동 라벨·prompt/config/model·입력 �
 - 의미 게이트: HOT/ICE 교환·부정/조건/선행 단계 삭제·서술형 누락·alias 충돌·답 없는 동일 대상 질문·문맥/정책 사례를 사람 truth로 판정.
 - 측정 게이트: 모든 사실/질문·오류를 고정 분모에 남기고 같은 입력/모델/snapshot의 짝비교·A/A·반복·비용/지연을 보고.
 - 승격 게이트: 안전 회귀셋 오답/누출 0건, 사전 품질·비용·지연 기준과 대조군 변동을 넘는 효과 충족. 불확실하면 추가 측정/보류하며 ‘절대 개선’이라 표시하지 않는다.
+
+## 31-8. C0 상세 실행 결정
+
+[C0_DECISIONS_AND_PLAN.md](C0_DECISIONS_AND_PLAN.md)에 접점 DTO, RAW·occurrence·hash, publication CAS/lock 순서, source 삭제, context TTL/질문 중복, OWNER_ANSWER 상태, 오류/시간 예산, migration, W/R PR 선행 관계와 기존 47개 질문의 결정을 기록한다. 이 세부 결정은 §31의 구현 기준이며 변경 시 본 정본·TODO·실험설계를 함께 검토한다.
+
+현재 C0의 계획 결정은 원가 범위·사용량 시나리오까지 확정됐다. 구현은 CP-00A~C 원가 계측을 선행하고 CP-01 계약/보안을 병행한 뒤 CP-02~03 fixture 동결→W/R 병렬·CP-04~05로 진행한다. 원가·source 삭제/공개/인용의 실제 인수 검증 없이 C0 구현 완료로 표시하지 않는다. 실제 사용량·청구 관측은 계획을 막는 질문이 아니라 구현/평가 산출물로 수집하며 D21 달성 여부는 결과를 보고 판정한다.
