@@ -171,3 +171,49 @@ class StorageCostTest(unittest.TestCase):
         r = self.fn([], Decimal("1"), Decimal("0.021"))
         self.assertEqual(r["cost_status"], "UNKNOWN")
         self.assertIsNone(r["cost_usd"])
+
+
+class ReportTest(unittest.TestCase):
+    """등록·운영을 가르고, 못 재면 통과를 선언하지 않는다."""
+
+    def setUp(self):
+        from app.usage import report
+        self.r = report
+
+    def test_scenarios_file_loads(self):
+        data = self.r.load_scenarios()
+        self.assertEqual(len(data["scenarios"]), 3)
+
+    def test_first_month_is_more_expensive_than_stable(self):
+        """신입이 몰리는 달이 가장 비싸다. 평균으로 뭉개면 첫 달을 못 버틴다."""
+        base = next(s for s in self.r.load_scenarios()["scenarios"] if s["id"] == "BASE")
+        first = self.r.project_operating(base, Decimal("0.001"), Decimal("0"), month=1)
+        stable = self.r.project_operating(base, Decimal("0.001"), Decimal("0"), month=2)
+        self.assertGreater(first["questions"], stable["questions"])
+        self.assertEqual(first["questions"], 960)
+
+    def test_unmeasured_cost_is_undetermined_not_pass(self):
+        self.assertEqual(self.r.judge_d21(None), self.r.UNDETERMINED)
+
+    def test_over_budget_fails(self):
+        self.assertEqual(self.r.judge_d21(Decimal("3001")), self.r.FAIL)
+        self.assertEqual(self.r.judge_d21(Decimal("3000")), self.r.PASS)
+
+    def test_missing_component_blocks_the_total(self):
+        base = next(s for s in self.r.load_scenarios()["scenarios"] if s["id"] == "LOW")
+        out = self.r.project_operating(base, None, Decimal("1"))
+        self.assertIsNone(out["total_usd"], "한 항목이라도 못 재면 총액이 없다")
+
+    def test_unit_costs_report_observation_rate(self):
+        attempts = [
+            {"stage": "ANSWER", "usage_status": "COMPLETE",
+             "known_cost_usd": "0.002", "prompt_tokens": 500, "completion_tokens": 50},
+            {"stage": "ANSWER", "usage_status": "UNKNOWN", "known_cost_usd": None},
+        ]
+        u = self.r.unit_costs(attempts)["ANSWER"]
+        self.assertEqual(u["attempts"], 2)
+        self.assertEqual(u["observation_rate"], 0.5)
+
+    def test_registration_months_is_budget_equivalent_not_payback(self):
+        self.assertEqual(self.r.registration_months(Decimal("6000")), Decimal("2"))
+        self.assertIsNone(self.r.registration_months(None))
