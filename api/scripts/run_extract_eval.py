@@ -157,10 +157,15 @@ async def ingest_sources(
     return mapping
 
 
-async def run_pipeline(store_id: int, source_ids: list[int]) -> None:
+async def run_pipeline(store_id: int, source_ids: list[int],
+                       extraction_run_id: int | None = None) -> None:
     for i, source_id in enumerate(source_ids, 1):
         print(f"    처리 {i}/{len(source_ids)} source_id={source_id} ...", flush=True)
-        await process_source(store_id, source_id)
+        # 평가 실행의 호출은 고객 월 비용이 아니다 (EVALUATION).
+        # 합산하면 D21 이 거짓으로 실패한다
+        await process_source(store_id, source_id,
+                             cost_phase="REGISTRATION", cost_purpose="EVALUATION",
+                             extraction_run_id=extraction_run_id)
 
 
 # ── 채점 ──────────────────────────────────────────────────────────────────
@@ -473,12 +478,24 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         if not rows:
             raise RuntimeError("올려둔 자료가 없다. --reuse-sources 없이 먼저 한 번 돌린다")
         print(f"  기존 자료 {len(rows)}건을 다시 태운다 (업로드·STT 건너뜀)")
-        await run_pipeline(store_id, [int(r["source_id"]) for r in rows])
+        await run_pipeline(store_id, [int(r["source_id"]) for r in rows], run_id)
     else:
         print("  자료 적재")
         mapping = await ingest_sources(conn, store_id, store_dir, manifest, owner)
         print("  추출 파이프라인")
-        await run_pipeline(store_id, list(mapping))
+        await run_pipeline(store_id, list(mapping), run_id)
+
+    # 원장에서 실행 단위 원가 summary 를 만든다 (CP-00B)
+    try:
+        from app.deps import get_pool
+        from app.usage.repository import rollup_extraction_run
+        cost = await rollup_extraction_run(get_pool(), store_id, run_id)
+        print(f"  원가: 호출 {cost['ai_attempt_count']}회 "
+              f"(재시도 {cost['retry_count']} · 미관측 {cost['unknown_attempt_count']}) "
+              f"· 토큰 {cost['prompt_tokens'] or '?'}/{cost['completion_tokens'] or '?'} "
+              f"· {cost['cost_status']}")
+    except Exception as exc:
+        print(f"  원가 집계 실패(측정은 원장에 남아 있다): {exc}")
 
     cards = await fetch_cards(conn, store_id)
     ledger = await fetch_ledger(conn, store_id)

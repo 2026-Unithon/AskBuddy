@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 async def extract_cards(
     *, source_id: int, source_type: str, text: str,
     category_names: list[str], glossary: list[dict[str, str]],
-    media: list[Path] | None = None,
+    media: list[Path] | None = None, usage_sink=None, usage_context=None,
 ) -> ExtractionResult:
     mode = get_settings().ingest_mode
     if mode == "real":
@@ -25,15 +25,21 @@ async def extract_cards(
 
     logger.info("extract mode=%s source=%s type=%s media=%d",
                 mode, source_id, source_type, len(media or []))
+    kwargs = {}
+    if mode == "real":
+        # mock 구현은 계측 인자를 받지 않는다. mock 실행은 원가가 아니다 (D10)
+        kwargs = {"usage_sink": usage_sink, "usage_context": usage_context}
     return await impl.extract(
         source_id=source_id, source_type=source_type, text=text,
         category_names=category_names, glossary=glossary, media=media or [],
+        **kwargs,
     )
 
 
 async def assemble_cards(
     *, source_id: int, facts: list[dict],
     category_names: list[str], glossary: list[dict],
+    usage_sink=None, usage_context=None,
 ):
     """reduce — 뽑아둔 사실을 카드로 조립한다. mock 모드에서는 쓰지 않는다."""
     if get_settings().ingest_mode != "real":
@@ -44,4 +50,5 @@ async def assemble_cards(
     return await impl.assemble(
         source_id=source_id, facts=facts,
         category_names=category_names, glossary=glossary,
+        usage_sink=usage_sink, usage_context=usage_context,
     )

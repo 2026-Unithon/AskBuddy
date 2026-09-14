@@ -4,6 +4,7 @@ M1 을 통과하기 전에는 쓰지 않는다. INGEST_MODE=real 일 때만 선�
 응답은 response_schema 로 강제한다. 자유 텍스트를 파싱하지 않는다.
 """
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -115,7 +116,8 @@ async def _parts(prompt: str, media: list[Path], client=None):
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
-async def _call(prompt: str, media: list[Path]) -> str:
+async def _call(prompt: str, media: list[Path]) -> tuple[str, dict]:
+    """(응답 텍스트, 공급자 usage). usage 는 못 받으면 빈 dict 다 — 0 으로 채우지 않는다."""
     from google import genai
     from google.genai import types
 
@@ -130,13 +132,39 @@ async def _call(prompt: str, media: list[Path]) -> str:
             temperature=s.extract_temperature,
         ),
     )
-    return res.text or ""
+    return res.text or "", _usage_of(res)
+
+
+def _usage_of(res: object) -> dict:
+    """공급자가 보고한 과금 단위. **없는 값은 담지 않는다.**
+
+    SDK 버전마다 필드가 달라 실패해도 조용히 넘긴다 — 계측 때문에 추출을 죽이지 않는다.
+    원형(raw)을 함께 남겨 나중에 새 과금 항목이 생겨도 다시 해석할 수 있다.
+    """
+    meta = getattr(res, "usage_metadata", None)
+    if meta is None:
+        return {}
+    out: dict = {}
+    for key, attr in (("prompt_tokens", "prompt_token_count"),
+                      ("completion_tokens", "candidates_token_count"),
+                      ("cached_tokens", "cached_content_token_count"),
+                      ("thought_tokens", "thoughts_token_count")):
+        value = getattr(meta, attr, None)
+        if value is not None:
+            out[key] = int(value)
+    if out:
+        try:
+            out["raw"] = {k: v for k, v in vars(meta).items()
+                          if isinstance(v, (int, float, str, type(None)))}
+        except TypeError:
+            pass
+    return out
 
 
 async def extract(
     *, source_id: int, source_type: str, text: str,
     category_names: list[str], glossary: list[dict[str, str]],
-    media: list[Path] = (),
+    media: list[Path] = (), usage_sink=None, usage_context=None,
 ) -> ExtractionResult:
     s = get_settings()
     if not s.gemini_api_key:
@@ -150,10 +178,12 @@ async def extract(
 
     media = list(media)
     started = time.perf_counter()
-    raw = await _call(prompt, media)
+    raw, usage = await _measured_call(prompt, media, usage_sink, usage_context,
+                                      prompt_hash=_hash(prompt))
     elapsed = time.perf_counter() - started
-    logger.info("gemini model=%s elapsed=%.1fs in=%dchars media=%d out=%dchars",
-                s.gemini_model, elapsed, len(prompt), len(media), len(raw))
+    logger.info("gemini model=%s elapsed=%.1fs in=%dchars media=%d out=%dchars usage=%s",
+                s.gemini_model, elapsed, len(prompt), len(media), len(raw),
+                usage or "미보고")
 
     try:
         result = ExtractionResult.model_validate_json(raw)
@@ -168,7 +198,7 @@ async def extract(
 
 async def assemble(
     *, source_id: int, facts: list[dict], category_names: list[str],
-    glossary: list[dict],
+    glossary: list[dict], usage_sink=None, usage_context=None,
 ) -> ExtractionResult:
     """reduce — 뽑아둔 사실을 모아 카드로 조립한다 (13.4 2패스).
 
@@ -189,8 +219,40 @@ async def assemble(
                        json.dumps(facts, ensure_ascii=False, indent=1)))
 
     started = time.perf_counter()
-    raw = await _call(prompt, [])
+    raw, usage = await _measured_call(prompt, [], usage_sink, usage_context,
+                                      prompt_hash=_hash(prompt))
     result = ExtractionResult.model_validate_json(raw)
-    logger.info("assemble source=%s 사실 %d건 → 카드 %d장 (%.1fs)",
-                source_id, len(facts), len(result.cards), time.perf_counter() - started)
+    logger.info("assemble source=%s 사실 %d건 → 카드 %d장 (%.1fs) usage=%s",
+                source_id, len(facts), len(result.cards),
+                time.perf_counter() - started, usage or "미보고")
     return result
+
+
+def _hash(text: str) -> str:
+    """어느 프롬프트로 부른 호출인지. 프롬프트를 바꾼 뒤 원가가 왜 변했는지 되짚는다."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+async def _measured_call(prompt: str, media: list[Path], sink, context,
+                         *, prompt_hash: str | None = None) -> tuple[str, dict]:
+    """계측을 감싼 호출. sink 가 없으면 계측 없이 그대로 부른다."""
+    from app.usage import recorder
+
+    s = get_settings()
+    if context is None:
+        return await _call(prompt, media)
+
+    async with recorder.attempt(sink, context, model=s.gemini_model,
+                                mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
+        rec.measure_input(
+            input_bytes=len(prompt.encode("utf-8")) + sum(
+                m.stat().st_size for m in media if m.exists()),
+            frame_count=len(media) or None,
+        )
+        text, usage = await _call(prompt, media)
+        rec.reported_model = s.gemini_model
+        if usage:
+            rec.observe(**usage)
+        else:
+            rec.partial("공급자가 usage 를 보고하지 않았다")
+        return text, usage

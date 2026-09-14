@@ -140,3 +140,34 @@ class SummaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StorageCostTest(unittest.TestCase):
+    """저장비는 누적이라 작은 누락도 개월 수만큼 커진다."""
+
+    def setUp(self):
+        from app.usage.storage_inventory import storage_cost
+        self.fn = storage_cost
+
+    def test_known_sizes_are_priced_over_months(self):
+        objs = [{"bytes": 1024 ** 3}, {"bytes": 1024 ** 3}]  # 2GB
+        r = self.fn(objs, Decimal("3"), Decimal("0.021"))
+        self.assertEqual(r["cost_status"], "COMPLETE")
+        self.assertAlmostEqual(float(r["cost_usd"]), 0.126, places=6)
+
+    def test_one_unknown_size_blocks_the_total(self):
+        r = self.fn([{"bytes": 1024 ** 3}, {"bytes": None}],
+                    Decimal("1"), Decimal("0.021"))
+        self.assertIsNone(r["cost_usd"], "크기를 못 재면 총액을 주장하지 않는다")
+        self.assertEqual(r["unknown_size_count"], 1)
+        self.assertEqual(r["cost_status"], "PARTIAL")
+
+    def test_missing_rate_keeps_bytes_but_no_cost(self):
+        r = self.fn([{"bytes": 1024 ** 3}], Decimal("1"), None)
+        self.assertIsNone(r["cost_usd"])
+        self.assertEqual(r["known_bytes"], 1024 ** 3)
+
+    def test_empty_store_is_unknown_not_zero(self):
+        r = self.fn([], Decimal("1"), Decimal("0.021"))
+        self.assertEqual(r["cost_status"], "UNKNOWN")
+        self.assertIsNone(r["cost_usd"])
