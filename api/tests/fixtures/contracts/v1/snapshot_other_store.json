@@ -1,0 +1,373 @@
+{
+  "schema_version": "published_knowledge/v1",
+  "store_id": "2",
+  "knowledge_revision": "3",
+  "snapshot_id": "100",
+  "snapshot_hash": "sha256:f27dc54de415bb50d29824bfba6d95e39c39f4183862b8e88de62472598366ae",
+  "created_at": "2026-09-14T00:00:00Z",
+  "glossary_version": "glossary/v1",
+  "renderer_version": "fake-renderer/v1",
+  "cards": [
+    {
+      "card_id": "200",
+      "card_version_id": "210",
+      "entity_id": "300",
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "title": "음료 A",
+      "blocks": [
+        {
+          "block_id": "b1",
+          "kind": "QUANTITIES",
+          "order": 1,
+          "fact_revision_ids": [
+            "900",
+            "901",
+            "902"
+          ],
+          "raw_span_id": null
+        },
+        {
+          "block_id": "b2",
+          "kind": "NOTES",
+          "order": 2,
+          "fact_revision_ids": [
+            "903",
+            "904"
+          ],
+          "raw_span_id": null
+        },
+        {
+          "block_id": "b3",
+          "kind": "STEPS",
+          "order": 3,
+          "fact_revision_ids": [
+            "905",
+            "906",
+            "907"
+          ],
+          "raw_span_id": null
+        },
+        {
+          "block_id": "b4",
+          "kind": "RAW",
+          "order": 4,
+          "fact_revision_ids": [],
+          "raw_span_id": "700"
+        }
+      ]
+    }
+  ],
+  "fact_revisions": [
+    {
+      "fact_revision_id": "900",
+      "fact_id": "400",
+      "entity_id": "300",
+      "original_assertion": "재료 B 를 225ml 넣는다",
+      "assertion": "재료 B 를 225ml 넣는다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": "ICE",
+        "size": null
+      },
+      "quantity": {
+        "value": "225",
+        "unit": "ml"
+      },
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": null,
+      "conditions": [
+        "규격 ICE"
+      ],
+      "exceptions": [],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5900",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "901",
+      "fact_id": "401",
+      "entity_id": "300",
+      "original_assertion": "재료 B 를 275ml 넣는다",
+      "assertion": "재료 B 를 275ml 넣는다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": "HOT",
+        "size": null
+      },
+      "quantity": {
+        "value": "275",
+        "unit": "ml"
+      },
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": null,
+      "conditions": [
+        "규격 HOT"
+      ],
+      "exceptions": [],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5901",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "902",
+      "fact_id": "402",
+      "entity_id": "300",
+      "original_assertion": "재료 B 를 300ml 넣는다",
+      "assertion": "재료 B 를 300ml 넣는다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": "ICE",
+        "size": "L"
+      },
+      "quantity": {
+        "value": "300",
+        "unit": "ml"
+      },
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": null,
+      "conditions": [
+        "규격 ICE",
+        "크기 L"
+      ],
+      "exceptions": [],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5902",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "903",
+      "fact_id": "403",
+      "entity_id": "300",
+      "original_assertion": "얼음을 먼저 넣는다",
+      "assertion": "얼음을 먼저 넣는다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "quantity": null,
+      "value_text": null,
+      "polarity": "NEGATE",
+      "order": null,
+      "conditions": [],
+      "exceptions": [],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5903",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "904",
+      "fact_id": "404",
+      "entity_id": "300",
+      "original_assertion": "재료 C 를 사용한다",
+      "assertion": "재료 C 를 사용한다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "quantity": null,
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": null,
+      "conditions": [],
+      "exceptions": [
+        "재고 소진 시 재료 D 로 대체한다"
+      ],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5904",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "905",
+      "fact_id": "405",
+      "entity_id": "300",
+      "original_assertion": "기기 전원을 끈다",
+      "assertion": "기기 전원을 끈다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "quantity": null,
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": 1,
+      "conditions": [],
+      "exceptions": [],
+      "requires": [],
+      "provenance": [
+        {
+          "occurrence_id": "5905",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "906",
+      "fact_id": "406",
+      "entity_id": "300",
+      "original_assertion": "세척제를 넣는다",
+      "assertion": "세척제를 넣는다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "quantity": null,
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": 2,
+      "conditions": [],
+      "exceptions": [],
+      "requires": [
+        "905"
+      ],
+      "provenance": [
+        {
+          "occurrence_id": "5906",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    },
+    {
+      "fact_revision_id": "907",
+      "fact_id": "407",
+      "entity_id": "300",
+      "original_assertion": "10분 뒤 헹군다",
+      "assertion": "10분 뒤 헹군다",
+      "subject": null,
+      "predicate": null,
+      "variant": {
+        "temperature": null,
+        "size": null
+      },
+      "quantity": null,
+      "value_text": null,
+      "polarity": "AFFIRM",
+      "order": 3,
+      "conditions": [],
+      "exceptions": [],
+      "requires": [
+        "906"
+      ],
+      "provenance": [
+        {
+          "occurrence_id": "5907",
+          "source_id": "600",
+          "source_content_hash": null,
+          "locator": {
+            "type": "WHOLE_SOURCE",
+            "page": null,
+            "timestamp_sec": null,
+            "line": null,
+            "bbox": null
+          }
+        }
+      ]
+    }
+  ],
+  "raw_spans": [
+    {
+      "raw_span_id": "700",
+      "source_id": "600",
+      "text": "  마감 전 점검표\n  1) 냉장고 온도 확인\n",
+      "locator": {
+        "type": "WHOLE_SOURCE",
+        "page": null,
+        "timestamp_sec": null,
+        "line": null,
+        "bbox": null
+      }
+    }
+  ]
+}

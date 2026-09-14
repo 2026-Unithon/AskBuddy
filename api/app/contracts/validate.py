@@ -56,6 +56,10 @@ def validate_answer_plan(
         if block is None:
             raise AnswerPlanViolation(
                 f"카드 {sel.card_id} 에 없는 블록이다: {sel.block_id}")
+        if sel.raw_span_id and sel.raw_span_id != block.raw_span_id:
+            raise AnswerPlanViolation(
+                f"블록 {sel.block_id} 이 담지 않은 원문 구간을 인용한다: "
+                f"{sel.raw_span_id}")
         outside = [f for f in sel.fact_revision_ids
                    if f not in block.fact_revision_ids]
         if outside:

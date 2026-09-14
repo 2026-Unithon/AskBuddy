@@ -37,10 +37,16 @@ class SelectedBlock(FrozenContract):
     card_id: EntityId
     card_version_id: EntityId
     block_id: str = Field(min_length=1, max_length=40)
-    fact_revision_ids: tuple[EntityId, ...] = Field(min_length=1, max_length=50)
+    fact_revision_ids: tuple[EntityId, ...] = Field(default=(), max_length=50)
+    # RAW 블록을 인용할 때. 승인된 원문에는 쪼갠 사실이 없다 (RV-05)
+    raw_span_id: EntityId | None = None
 
     @model_validator(mode="after")
-    def _no_duplicate_citation(self) -> "SelectedBlock":
+    def _cites_exactly_one_kind(self) -> "SelectedBlock":
+        if bool(self.fact_revision_ids) == bool(self.raw_span_id):
+            raise ValueError(
+                "인용은 사실 묶음이나 원문 구간 중 하나를 가리킨다. "
+                "둘 다이거나 아무것도 아니면 무엇을 보여줄지 정해지지 않는다")
         if len(set(self.fact_revision_ids)) != len(self.fact_revision_ids):
             raise ValueError("같은 사실을 두 번 인용하지 않는다")
         return self

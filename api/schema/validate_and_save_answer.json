@@ -121,22 +121,35 @@
           "type": "string"
         },
         "fact_revision_ids": {
+          "default": [],
           "items": {
             "maxLength": 19,
             "pattern": "^[0-9]+$",
             "type": "string"
           },
           "maxItems": 50,
-          "minItems": 1,
           "title": "Fact Revision Ids",
           "type": "array"
+        },
+        "raw_span_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Span Id"
         }
       },
       "required": [
         "card_id",
         "card_version_id",
-        "block_id",
-        "fact_revision_ids"
+        "block_id"
       ],
       "title": "SelectedBlock",
       "type": "object"
