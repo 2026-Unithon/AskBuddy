@@ -79,15 +79,15 @@ def missing_prerequisite():
 
 def mixed_answer():
     return AnswerPlan(
-        snapshot_id="10", knowledge_revision=1, action="ESCALATE",
+        snapshot_id="10", knowledge_revision="1", action="ESCALATE",
         escalation_reason="근거 부족", clarification_slot="temperature",
-        allowed_options=["HOT", "ICE"], context_id="ctx",
+        allowed_options=["HOT", "ICE"], context_id="00000000-0000-4000-8000-000000000001",
     )
 
 
 def arbitrary_answer_references():
     return AnswerPlan(
-        snapshot_id="999", knowledge_revision=999, action="ANSWER",
+        snapshot_id="999", knowledge_revision="999", action="ANSWER",
         selected_blocks=[SelectedBlock(
             card_id="888", card_version_id="777", block_id="absent",
             fact_revision_ids=["666"],

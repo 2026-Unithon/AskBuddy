@@ -9,11 +9,23 @@
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
+from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, model_validator
 
-from app.contracts.common import SCHEMA_ANSWER_PLAN, Contract, EntityId
+from app.contracts.common import SCHEMA_ANSWER_PLAN, Contract
+
+
+def _bigint(value: str) -> str:
+    if int(value) > 9223372036854775807:
+        raise ValueError("bigint 범위를 벗어났다")
+    return value
+
+
+# W 공통 ID 타입 동결 전에도 R 입력 경계는 엄격하게 검사한다.
+AnswerId = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,18}$"), AfterValidator(_bigint)]
+Revision = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]{0,18})$"), AfterValidator(_bigint)]
 
 AnswerAction = Literal["ANSWER", "CLARIFY", "ESCALATE", "REFUSE", "SAFE_ROUTE"]
 """
@@ -28,29 +40,49 @@ SAFE_ROUTE  안전 판정을 추측하지 않는 고정 안내      자동 pendi
 class SelectedBlock(Contract):
     """인용할 블록. 카드 버전까지 고정해 과거 인용이 재현되게 한다."""
 
-    card_id: EntityId
-    card_version_id: EntityId
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=False)
+
+    card_id: AnswerId
+    card_version_id: AnswerId
     block_id: str = Field(min_length=1, max_length=40)
-    fact_revision_ids: list[EntityId] = Field(min_length=1, max_length=50)
+    fact_revision_ids: tuple[AnswerId, ...] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def _unique_facts(self) -> "SelectedBlock":
+        if not self.block_id.strip() or len(set(self.fact_revision_ids)) != len(self.fact_revision_ids):
+            raise ValueError("빈 블록 식별자 또는 중복 사실 참조")
+        return self
 
 
 class AnswerPlan(Contract):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=False)
     schema_version: Literal["answer_plan/v1"] = SCHEMA_ANSWER_PLAN
     # 어느 공개 상태에서 답했는가. 재현과 캐시 무효화에 쓴다
-    snapshot_id: EntityId
-    knowledge_revision: int = Field(ge=0)
+    snapshot_id: AnswerId
+    knowledge_revision: Revision
     action: AnswerAction
 
-    selected_blocks: list[SelectedBlock] = Field(default_factory=list)
+    selected_blocks: tuple[SelectedBlock, ...] = ()
     # CLARIFY — 무엇이 모호한지와 고를 수 있는 값
     clarification_slot: str | None = Field(default=None, max_length=60)
-    allowed_options: list[str] = Field(default_factory=list, max_length=10)
-    context_id: str | None = Field(default=None, max_length=80)
+    allowed_options: tuple[str, ...] = Field(default=(), max_length=10)
+    context_id: UUID | None = None
     # ESCALATE — 왜 넘기는지
     escalation_reason: str | None = Field(default=None, max_length=300)
 
     @model_validator(mode="after")
     def _fields_match_action(self) -> "AnswerPlan":
+        clarification = (
+            self.clarification_slot is not None or bool(self.allowed_options)
+            or self.context_id is not None
+        )
+        if self.action != "CLARIFY" and clarification:
+            raise ValueError("CLARIFY 전용 필드는 다른 action에 허용하지 않는다")
+        if self.action != "ESCALATE" and self.escalation_reason is not None:
+            raise ValueError("ESCALATE 전용 필드는 다른 action에 허용하지 않는다")
+        keys = [(b.card_id, b.card_version_id, b.block_id) for b in self.selected_blocks]
+        if len(keys) != len(set(keys)):
+            raise ValueError("중복 블록 인용")
         if self.action == "ANSWER":
             if not self.selected_blocks:
                 raise ValueError(
@@ -58,14 +90,16 @@ class AnswerPlan(Contract):
             if self.clarification_slot or self.escalation_reason:
                 raise ValueError("ANSWER 에 되묻기·넘김 필드를 함께 두지 않는다")
         elif self.action == "CLARIFY":
-            if not self.clarification_slot or not self.allowed_options:
+            if not self.clarification_slot or not self.clarification_slot.strip() or not self.allowed_options:
                 raise ValueError("CLARIFY 에는 슬롯과 고를 값이 필요하다")
             if not self.context_id:
                 raise ValueError("CLARIFY 에는 소유권·TTL 을 검사할 context_id 가 필요하다")
+            if any(not option.strip() for option in self.allowed_options) or len(set(self.allowed_options)) != len(self.allowed_options):
+                raise ValueError("빈 선택지 또는 중복 선택지")
             if self.selected_blocks:
                 raise ValueError("CLARIFY 는 아직 답하지 않는다. 블록을 고르지 않는다")
         elif self.action == "ESCALATE":
-            if not self.escalation_reason:
+            if not self.escalation_reason or not self.escalation_reason.strip():
                 raise ValueError("ESCALATE 에는 넘기는 사유가 필요하다")
             if self.selected_blocks:
                 raise ValueError("ESCALATE 는 답하지 않는다. 블록을 고르지 않는다")
@@ -75,4 +109,4 @@ class AnswerPlan(Contract):
         return self
 
     def citation_count(self) -> int:
-        return sum(len(b.fact_revision_ids) for b in self.selected_blocks)
+        return len(self.selected_blocks)

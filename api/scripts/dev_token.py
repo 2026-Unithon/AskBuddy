@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -85,6 +86,7 @@ async def mint(
         "user_id": row["user_id"],
         "member_id": row["member_id"],
         "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=s.jwt_expire_minutes),
     }
     if team:
         payload["scope"] = "team"

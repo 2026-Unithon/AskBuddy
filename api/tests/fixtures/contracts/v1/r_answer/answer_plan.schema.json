@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "SelectedBlock": {
+      "additionalProperties": false,
+      "description": "인용할 블록. 카드 버전까지 고정해 과거 인용이 재현되게 한다.",
+      "properties": {
+        "card_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "title": "Card Id",
+          "type": "string"
+        },
+        "card_version_id": {
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "title": "Card Version Id",
+          "type": "string"
+        },
+        "block_id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "fact_revision_ids": {
+          "items": {
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Fact Revision Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "card_id",
+        "card_version_id",
+        "block_id",
+        "fact_revision_ids"
+      ],
+      "title": "SelectedBlock",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "answer_plan/v1",
+      "default": "answer_plan/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "pattern": "^[1-9][0-9]{0,18}$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "knowledge_revision": {
+      "pattern": "^(0|[1-9][0-9]{0,18})$",
+      "title": "Knowledge Revision",
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "ANSWER",
+        "CLARIFY",
+        "ESCALATE",
+        "REFUSE",
+        "SAFE_ROUTE"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "selected_blocks": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SelectedBlock"
+      },
+      "title": "Selected Blocks",
+      "type": "array"
+    },
+    "clarification_slot": {
+      "anyOf": [
+        {
+          "maxLength": 60,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarification Slot"
+    },
+    "allowed_options": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Allowed Options",
+      "type": "array"
+    },
+    "context_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Context Id"
+    },
+    "escalation_reason": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Escalation Reason"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "knowledge_revision",
+    "action"
+  ],
+  "title": "AnswerPlan",
+  "type": "object"
+}

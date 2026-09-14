@@ -195,7 +195,12 @@ def _summary_text(metrics: dict[str, Any]) -> str:
         f"판정정확도 {pct('kind_accuracy')} · 기대카드 {pct('expected_card_hit_rate')} · "
         f"MRR {metrics.get('mrr', '-')} · nDCG@10 {metrics.get('ndcg_at_10', '-')} · "
         f"근거없는답변 {metrics.get('ungrounded_count', 0)}건 · "
-        f"p50 {metrics.get('latency_p50_ms', '-')}ms / p95 {metrics.get('latency_p95_ms', '-')}ms"
+        f"p50 {metrics.get('latency_p50_ms', '-')}ms / p95 {metrics.get('latency_p95_ms', '-')}ms · "
+        f"비용범위 {metrics.get('cost_scope', 'LEGACY_UNSPECIFIED')} · "
+        f"관측 {metrics.get('cost_observation_status', 'UNKNOWN')} · "
+        f"알려진 비용 {metrics.get('cost_usd_known_total', 'UNKNOWN')} USD · "
+        f"비용 합 {metrics.get('cost_usd_total') if metrics.get('cost_usd_total') is not None else 'UNKNOWN'} USD · "
+        f"누락 {metrics.get('cost_missing_count', 'UNKNOWN')}건"
     )
 
 
@@ -271,11 +276,26 @@ def _markdown(run, rows: list[dict[str, Any]], metrics: dict[str, Any], previous
         "completion_tokens_total": "completion 토큰 합",
         "cost_usd_total": "비용 합 (USD)",
         "cost_usd_per_question": "질문당 비용 (USD)",
+        "cost_scope": "비용 범위",
+        "cost_basis": "비용 산정 방식",
+        "cost_usd_known_total": "알려진 비용 부분합 (USD)",
+        "cost_observation_status": "비용 관측 상태",
+        "cost_observed_count": "비용 확인 문항 수",
+        "cost_missing_count": "비용 누락 문항 수",
+        "answer_not_called_count": "답변 모델 미호출 수",
+        "question_total_cost_status": "임베딩·Storage 포함 전체 질문 원가",
         "error_count": "실행 오류",
     }
     for key, label in labels.items():
         if metrics.get(key) is not None:
             lines.append(f"| {label} | {metrics[key]} |")
+        elif key in ("prompt_tokens_total", "completion_tokens_total", "cost_usd_total", "cost_usd_per_question"):
+            lines.append(f"| {label} | UNKNOWN |")
+
+    if metrics.get("cost_scope") == "ANSWER_MODEL_ONLY":
+        lines += ["", "비용은 관측된 답변 모델의 ESTIMATED 비용입니다. "
+                  "임베딩·Storage·미관측 재시도는 포함하지 않아 전체 질문 원가는 UNKNOWN입니다.",
+                  "누락 금액은 사용량·단가 또는 호출 결과가 미확정인 경우이며 0으로 대체하지 않습니다."]
 
     if previous is not None:
         prev_metrics = (

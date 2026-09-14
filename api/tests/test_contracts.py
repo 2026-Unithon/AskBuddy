@@ -151,7 +151,7 @@ class AnswerPlanTest(unittest.TestCase):
                              block_id="b1", fact_revision_ids=["4002"])
 
     def _plan(self, **kw):
-        return AnswerPlan(snapshot_id="9001", knowledge_revision=1, **kw)
+        return AnswerPlan(snapshot_id="9001", knowledge_revision="1", **kw)
 
     def test_answer_requires_citation(self):
         """불변식 3·6 — 근거 없는 ANSWER 는 존재할 수 없다."""
@@ -169,7 +169,7 @@ class AnswerPlanTest(unittest.TestCase):
             self._plan(action="CLARIFY", clarification_slot="temperature",
                        allowed_options=["HOT", "ICE"])
         ok = self._plan(action="CLARIFY", clarification_slot="temperature",
-                        allowed_options=["HOT", "ICE"], context_id="ctx-1")
+                        allowed_options=["HOT", "ICE"], context_id="00000000-0000-4000-8000-000000000001")
         self.assertEqual(ok.action, "CLARIFY")
 
     def test_clarify_does_not_cite(self):

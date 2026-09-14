@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import asyncpg
@@ -263,16 +264,51 @@ async def list_results(
     run_id: int,
     *,
     failed_only: bool = False,
-) -> list[asyncpg.Record]:
-    return await db.fetch(
+) -> list[dict[str, Any]]:
+    rows = await db.fetch(
         """
-        select *
-        from evaluation_results
-        where store_id = $1 and run_id = $2
-          and ($3::boolean is false or passed = false)
-        order by case_key
+        select r.*,
+          e.metrics -> 'answer_cost_details' ->> 'schema_version' as answer_cost_schema,
+          e.metrics -> 'answer_cost_details' -> 'cases' -> r.case_id::text as exact_answer_cost
+        from evaluation_results r
+        join evaluation_runs e on e.run_id = r.run_id and e.store_id = r.store_id
+        where r.store_id = $1 and r.run_id = $2
+          and ($3::boolean is false or r.passed = false)
+        order by r.case_key
         """,
         store_id,
         run_id,
         failed_only,
     )
+    return [_restore_answer_cost(dict(row)) for row in rows]
+
+
+def _restore_answer_cost(row: dict[str, Any]) -> dict[str, Any]:
+    """같은 store/run의 불변 보고서로 표시용 NUMERIC 컬럼의 정밀도를 보완한다."""
+    schema = row.pop("answer_cost_schema", None)
+    entry = row.pop("exact_answer_cost", None)
+    if schema is None and entry is None:
+        # 과거 run의 미계측 상태를 0으로 backfill하지 않는다.
+        row["answer_usage_status"] = "UNKNOWN"
+        return row
+    if schema != "r_answer_cost/v1":
+        raise ValueError("unsupported answer cost report")
+    if entry is None:
+        raise ValueError("missing answer cost report case")
+    if isinstance(entry, str):
+        entry = json.loads(entry)
+    status = entry["answer_usage_status"]
+    if status not in ("NOT_CALLED", "OBSERVED", "UNKNOWN"):
+        raise ValueError("invalid answer usage status")
+    raw = entry["cost_usd"]
+    try:
+        cost = Decimal(raw) if isinstance(raw, str) else None
+    except InvalidOperation as exc:
+        raise ValueError("invalid answer cost") from exc
+    if (raw is not None and cost is None) or (cost is not None and (not cost.is_finite() or cost < 0)):
+        raise ValueError("invalid answer cost")
+    if status == "NOT_CALLED" and cost != 0:
+        raise ValueError("nonzero or unknown cost for uncalled answer")
+    row["cost_usd"] = cost
+    row["answer_usage_status"] = status
+    return row
