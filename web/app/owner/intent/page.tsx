@@ -28,12 +28,12 @@ export default function OwnerIntentPage() {
           </Link>
 
           <Link
-            href="/owner/questions"
+            href="/owner/dashboard"
             className="rounded-[var(--radius-lg)] bg-surface border border-border p-6 flex flex-col gap-3 shadow-[0_1px_2px_-1px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.10)] hover:-translate-y-0.5 transition-transform"
           >
-            <span className="text-4xl">💬</span>
+            <span className="text-4xl">📊</span>
             <div>
-              <p className="text-xl font-bold text-brand-700">직원 질문에 답하러 왔어요</p>
+              <p className="text-xl font-bold text-brand-700">대시보드 보러 왔어요</p>
               <p className="text-sm text-muted mt-1 leading-relaxed">
                 지식으로 답하지 못한 질문을 확인하고
                 <br />

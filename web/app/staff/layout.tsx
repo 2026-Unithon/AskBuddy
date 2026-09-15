@@ -11,10 +11,8 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
 
   if (!ready) return null;
 
-  const showBottomNav =
-    pathname === "/staff/roadmap" ||
-    pathname === "/staff/chat" ||
-    pathname === "/staff/faqs";
+  // Figma의 게임형 로드맵은 화면 전체를 쓰고 자체 미션 CTA를 제공한다.
+  const showBottomNav = pathname === "/staff/chat" || pathname === "/staff/faqs";
 
   return (
     <div className="min-h-dvh w-full flex justify-center bg-background text-foreground">
@@ -25,4 +23,3 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
