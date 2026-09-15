@@ -81,17 +81,22 @@ async def process_source(
                     job_id,
                 )
 
-            result = await _extract_all(
+            usage_base = (store_id, job_id, cost_phase, cost_purpose,
+                          extraction_run_id)
+
+            # ── 입력 → 사실 → (원장) → 카드 ──────────────────────────────
+            # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
+            # 사실은 원장에도 안 남아, 못 뽑은 것과 뽑고 버린 것을 구분할 수
+            # 없었다. 이제 뽑는 즉시 전부 원장에 적고 조립이 그중에서 고른다.
+            assertions, unresolved = await _extract_facts_all(
                 source_id=source_id,
                 source_type=src["source_type"],
                 text=text,
                 media=media,
-                categories=list(categories),
                 glossary=glossary,
                 segments=segments,
                 usage_sink=usage_sink,
-                usage_base=(store_id, job_id, cost_phase, cost_purpose,
-                            extraction_run_id),
+                usage_base=usage_base,
             )
 
             # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
@@ -111,6 +116,20 @@ async def process_source(
                     store_id,
                     f"legacy-source-{source_id}",
                 )
+            # 원장 선저장 — 조립 전에, 뽑은 것을 전부 적는다
+            async with conn.transaction():
+                ledger_ids = await _persist_ledger(
+                    conn, store_id, source_id, src["source_type"], assertions)
+            logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
+
+            # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다
+            result = await _assemble_from_ledger(
+                source_id=source_id, assertions=assertions, ledger_ids=ledger_ids,
+                categories=list(categories), glossary=glossary,
+                usage_sink=usage_sink, usage_base=usage_base,
+            )
+            result.unresolved.extend(unresolved)
+
             async with conn.transaction():
                 saved = await _persist(
                     conn,
@@ -120,6 +139,7 @@ async def process_source(
                     result,
                     job_id=int(origin_job_id) if origin_job_id is not None else None,
                     category_version=category_version,
+                    ledger_ids=ledger_ids,
                 )
 
             await repo.set_status(conn, store_id, source_id, "DONE")
@@ -481,6 +501,164 @@ async def _preprocess_voice(
     return text, [], []
 
 
+# ── W1: 입력 → 사실 → 원장 → 카드 ────────────────────────────────────────
+
+async def _extract_facts_all(
+    *, source_id: int, source_type: str, text: str, media: list[Path],
+    glossary: list[dict], segments: list[tuple[str, list[Path]]],
+    usage_sink=None, usage_base: tuple | None = None,
+):
+    """map — 구간마다 **사실**을 뽑아 모은다. 카드를 만들지 않는다.
+
+    구간 하나가 실패해도 나머지는 살린다. 전부 실패했을 때만 예외를 올린다.
+    `local_ref` 는 구간 안에서만 유일하므로 구간 번호를 붙여 전역에서 갈라준다 —
+    안 그러면 2구간의 `f1` 이 1구간의 `f1` 을 덮어쓴다.
+    """
+    from app.ingest.extract import extract_facts
+
+    def _tag(items, segment: str | None):
+        for a in items:
+            if segment:
+                a.local_ref = f"{segment}:{a.local_ref}"
+                a.requires = [f"{segment}:{r}" for r in a.requires]
+            a.segment_id = segment
+        return items
+
+    if not segments:
+        result = await extract_facts(
+            source_id=source_id, source_type=source_type, text=text,
+            glossary=glossary, media=media, usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "EXTRACT"),
+        )
+        return _tag(result.assertions, None), list(result.unresolved)
+
+    merged, unresolved, failed = [], [], 0
+    for index, (seg_text, seg_media) in enumerate(segments, start=1):
+        segment = f"seg{index}"
+        try:
+            part = await extract_facts(
+                source_id=source_id, source_type=source_type, text=seg_text,
+                glossary=glossary, media=seg_media, usage_sink=usage_sink,
+                usage_context=_ctx_for(usage_base, source_id, "EXTRACT",
+                                       segment_id=segment),
+            )
+        except Exception as exc:
+            failed += 1
+            logger.warning("구간 %d/%d 사실 추출 실패 source=%s: %s",
+                           index, len(segments), source_id, exc)
+            continue
+        merged.extend(_tag(part.assertions, segment))
+        unresolved.extend(part.unresolved)
+        logger.info("구간 %d/%d 사실 %d건", index, len(segments), len(part.assertions))
+
+    if failed == len(segments):
+        raise RuntimeError(f"모든 구간({failed}개) 사실 추출이 실패했다")
+    if failed:
+        logger.warning("구간 %d/%d 실패 — 나머지로 진행한다", failed, len(segments))
+    return merged, unresolved
+
+
+async def _persist_ledger(
+    conn: asyncpg.Connection, store_id: int, source_id: int, source_type: str,
+    assertions: list,
+) -> dict[str, int]:
+    """뽑은 사실을 **조립 전에** 전부 원장에 적는다 (W1).
+
+    {local_ref: fact_id} 를 돌려준다. 조립이 고른 사실을 원장 행에 잇는 열쇠다.
+
+    여기서 적지 않으면 조립이 버린 사실은 어디에도 남지 않는다. 그러면 추출이
+    못 뽑은 것과 조립이 버린 것이 같은 숫자로 합쳐져, 무엇을 고쳐야 할지 알 수 없다.
+    """
+    from app.config import get_settings
+
+    if not assertions:
+        return {}
+
+    s = get_settings()
+    extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
+    rows = []
+    for a in assertions:
+        # 근거 위치는 사실마다 다르다. 영상·음성은 시각, 나머지는 자료 전체
+        if source_type in ("VOICE", "VIDEO") and a.evidence.timestamp_sec:
+            locator_type = "TIMESTAMP"
+            locator = {"timestamp_sec": max(0, a.evidence.timestamp_sec)}
+        else:
+            locator_type = "WHOLE_SOURCE"
+            locator = {}
+        rows.append({
+            "subject": a.subject,
+            "variant": a.as_variant(),
+            "attribute": a.attribute,
+            "value": a.value,
+            "confidence": _to_percent(a.confidence),
+            "original_assertion": a.original_assertion,
+            "unit": (a.unit or None),
+            "polarity": a.polarity,
+            "conditions": list(a.conditions),
+            "exceptions": list(a.exceptions),
+            "step_order": a.as_order(),
+            "requires": list(a.requires),
+            "local_ref": a.local_ref[:40],
+            "segment_id": getattr(a, "segment_id", None),
+            "locator_type": locator_type,
+            "locator": locator,
+            "assembly_state": "PENDING",
+        })
+
+    fact_ids = await repo.insert_source_facts(
+        conn, store_id, source_id, rows,
+        locator_type="WHOLE_SOURCE", locator={},
+        extract_version=extract_version,
+    )
+    return {a.local_ref: fid for a, fid in zip(assertions, fact_ids)}
+
+
+async def _assemble_from_ledger(
+    *, source_id: int, assertions: list, ledger_ids: dict[str, int],
+    categories: list[str], glossary: list[dict],
+    usage_sink=None, usage_base: tuple | None = None,
+):
+    """reduce — 원장에 적힌 사실을 대상 단위로 묶어 카드로 만든다.
+
+    새 사실을 만들지 않는다. 고르고 문장으로 다듬는 일만 한다.
+    조립이 실패하면 예외를 올리지 않고 빈 결과를 돌려준다 — 원장은 이미 적혔으므로
+    뽑은 것이 사라지지 않는다. 그것이 순서를 뒤집은 이유다.
+    """
+    from app.ingest.extract import assemble_cards
+    from app.ingest.schemas import ExtractionResult
+
+    if not assertions:
+        return ExtractionResult(cards=[], unresolved=[])
+
+    flat = [
+        {
+            "ref": a.local_ref,
+            "대상": a.subject,
+            "규격": a.as_variant() or "",
+            "속성": a.attribute,
+            "값": a.value + (f" {a.unit}" if a.unit else ""),
+            "부정": a.polarity == "NEGATE",
+            "조건": list(a.conditions),
+            "예외": list(a.exceptions),
+            "순서": a.as_order() or 0,
+            "확실함": round(a.confidence, 2),
+            "근거시각": a.evidence.timestamp_sec,
+        }
+        for a in assertions
+    ]
+    try:
+        return await assemble_cards(
+            source_id=source_id, facts=flat,
+            category_names=categories, glossary=glossary,
+            usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
+        )
+    except Exception as exc:
+        # 원장은 이미 적혔다. 카드를 못 만들어도 사실은 남는다
+        logger.warning("조립 실패 source=%s: %s — 원장의 사실은 남는다", source_id, exc)
+        return ExtractionResult(cards=[], unresolved=[f"조립 실패: {exc}"])
+
+
 async def _persist(
     conn: asyncpg.Connection,
     store_id: int,
@@ -490,14 +668,20 @@ async def _persist(
     *,
     job_id: int | None,
     category_version: int,
+    ledger_ids: dict[str, int] | None = None,
 ) -> int:
-    """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다."""
+    """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다.
+
+    **원장에는 쓰지 않는다** (W1). 사실은 조립 전에 이미 적혔고, 여기서는 카드가
+    그 사실을 가리키게 잇기만 한다. 예전처럼 카드에서 원장을 만들면 조립이 버린
+    사실이 사라져 추출 손실과 조립 손실을 구분할 수 없다.
+    """
     from app.config import get_settings
 
     saved = 0
-    # 어느 추출이 이 사실을 만들었나. 프롬프트를 바꾼 뒤 무엇이 달라졌는지 되짚는다
-    s = get_settings()
-    extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
+    ledger = ledger_ids or {}
+    linked_refs: set[str] = set()
+    unmatched: list[str] = []
     source_type = await conn.fetchval(
         "select source_type from sources where store_id = $1 and source_id = $2",
         store_id,
@@ -537,26 +721,17 @@ async def _persist(
             locator_type = "WHOLE_SOURCE"
             locator = {}
 
-        # 사실 원장 — 소유자는 자료다. 카드를 다시 조립해도 사실은 남는다 (13.3-1).
-        # 근거 위치는 지금 카드 단위라 같은 카드의 사실이 같은 위치를 갖는다.
-        # 13.4 에서 map 이 사실별 위치를 뽑으면 그 값으로 바뀐다.
-        fact_ids = await repo.insert_source_facts(
-            conn, store_id, source_id,
-            [
-                {
-                    "subject": f.object_name,
-                    "variant": None,   # 13.5 에서 RECIPE 스키마가 규격을 채운다
-                    "attribute": f.attribute,
-                    "value": f.value,
-                    "confidence": _to_percent(f.confidence),
-                }
-                for f in card.facts
-            ],
-            locator_type=locator_type,
-            locator=locator,
-            extract_version=extract_version,
-        )
-        await repo.link_card_facts(conn, store_id, card_id, fact_ids)
+        # 카드 ↔ 원장 잇기 — 조립이 고른 사실의 ref 로 찾는다 (W1)
+        refs = [f.ref for f in card.facts if getattr(f, "ref", "")]
+        fact_ids = [ledger[r] for r in refs if r in ledger]
+        linked_refs.update(r for r in refs if r in ledger)
+        unmatched.extend(r for r in refs if r and r not in ledger)
+        if refs and not fact_ids:
+            # ref 를 하나도 못 이었다. 카드는 남기되 조용히 넘기지 않는다
+            logger.warning("카드 '%s' 의 사실 참조를 원장에서 찾지 못했다: %s",
+                           card.title[:30], refs[:5])
+        if fact_ids:
+            await repo.link_card_facts(conn, store_id, card_id, fact_ids)
 
         await repo.insert_card_evidence(
             conn,
@@ -567,6 +742,17 @@ async def _persist(
             locator=locator,
         )
         saved += 1
+
+    # 조립이 무엇을 싣고 무엇을 버렸는지 원장에 표시한다 (W1).
+    # **버린 것이 남아야 조립 손실을 셀 수 있다.**
+    if ledger:
+        linked = [ledger[r] for r in linked_refs]
+        dropped = [fid for r, fid in ledger.items() if r not in linked_refs]
+        await repo.set_assembly_state(conn, store_id, linked, "LINKED")
+        await repo.set_assembly_state(conn, store_id, dropped, "DROPPED")
+        logger.info("조립 결과 source=%s 사실 %d건 중 실림 %d · 버림 %d%s",
+                    source_id, len(ledger), len(linked), len(dropped),
+                    f" · 못 이은 참조 {len(unmatched)}" if unmatched else "")
 
     for item in result.unresolved:
         logger.info("unresolved source=%s: %s", source_id, item)

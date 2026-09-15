@@ -48,7 +48,7 @@ from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
 from app.team.extraction import (  # noqa: E402
     ExtractionReport, aggregate, judge_run_health, match_fact,
-    match_fact_in_ledger, score_output,
+    match_fact_in_ledger, score_output, variant_axis,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
@@ -215,11 +215,16 @@ def score(
     """
     ledger = ledger or []
     report = ExtractionReport()
+    # 규격 축이 있는 대상에서만 규격을 요구한다. 아이스만 있는 음료에 ICE 표기를
+    # 요구하면 카드가 아니라 자가 틀린 것이다
+    axis = variant_axis(facts)
     for fact in facts:
         stype = source_types.get(fact.get("source_key", ""), "UNKNOWN")
         in_ledger, ledger_fact_id = match_fact_in_ledger(fact, ledger)
+        from app.team.extraction import normalize
+        needs_variant = axis.get(normalize(fact.get("subject") or ""), False)
         report.add(
-            fact, match_fact(fact, cards), stype,
+            fact, match_fact(fact, cards, require_variant=needs_variant), stype,
             in_ledger=in_ledger, ledger_fact_id=ledger_fact_id,
         )
     return report

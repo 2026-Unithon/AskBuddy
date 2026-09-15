@@ -260,24 +260,39 @@ async def insert_source_facts(
         return []
 
     ids: list[int] = []
-    payload = json.dumps(locator, ensure_ascii=False)
+    default_locator = json.dumps(locator, ensure_ascii=False)
     for f in facts:
         digest = fact_content_hash(
             f["subject"], f.get("variant"), f["attribute"], f["value"])
+        # 사실마다 근거 위치가 다르면 그 값을 쓴다. 없으면 자료 단위 기본값
+        payload = (json.dumps(f["locator"], ensure_ascii=False)
+                   if f.get("locator") else default_locator)
         fact_id = await conn.fetchval(
             """
             insert into source_facts (
               store_id, source_id, subject, variant, attribute, value,
-              confidence, locator_type, locator, content_hash, extract_version
+              confidence, locator_type, locator, content_hash, extract_version,
+              original_assertion, unit, polarity, conditions, exceptions,
+              step_order, requires, local_ref, segment_id, assembly_state
             )
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,
+                    $12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20,$21)
             on conflict (source_id, content_hash) do nothing
             returning fact_id
             """,
             store_id, source_id,
             f["subject"][:200], (f.get("variant") or None),
             f["attribute"][:200], f["value"][:1000],
-            f.get("confidence", 0), locator_type, payload, digest, extract_version,
+            f.get("confidence", 0), f.get("locator_type") or locator_type,
+            payload, digest, extract_version,
+            f.get("original_assertion"), f.get("unit"),
+            f.get("polarity") or "AFFIRM",
+            json.dumps(f.get("conditions") or [], ensure_ascii=False),
+            json.dumps(f.get("exceptions") or [], ensure_ascii=False),
+            f.get("step_order"),
+            json.dumps(f.get("requires") or [], ensure_ascii=False),
+            f.get("local_ref"), f.get("segment_id"),
+            f.get("assembly_state") or "PENDING",
         )
         if fact_id is None:
             # 같은 사실이 이미 있다. 새로 만들지 않고 그 행에 잇는다
@@ -595,3 +610,25 @@ async def set_card_verified(
         "update facts set is_verified = $2 where card_id = $1", card_id, verified
     )
     return True
+
+
+async def set_assembly_state(
+    conn: asyncpg.Connection, store_id: int, fact_ids: list[int], state: str
+) -> None:
+    """조립이 이 사실들을 실었는지 표시한다 (W1).
+
+    D1 — store_id 는 필수 인자다.
+
+    **원장을 조립 전에 쓰기 때문에 이 칸이 필요하다.** 예전에는 카드에 실린
+    사실만 원장에 들어가서 버려진 사실이 흔적도 없었고, 그래서 "못 뽑은 것" 과
+    "뽑고 버린 것" 을 구분할 수 없었다.
+    """
+    if not fact_ids:
+        return
+    await conn.execute(
+        """
+        update source_facts set assembly_state = $3, updated_at = now()
+         where store_id = $1 and fact_id = any($2::bigint[])
+        """,
+        store_id, fact_ids, state,
+    )

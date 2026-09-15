@@ -799,7 +799,7 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 매장당 월 3,000원은 운영 변동비 상한이다. AI 전 단계·STT·임베딩·재시도와 Storage 저장/전송을 포함하며 Railway/Vercel/DB 고정비는 제외한다. 최초 등록비는 별도 캠페인으로 추적하고 예산환산 개월·운영비를 뺀 잔여 예산 보전 개월을 구분한다. 최초 등록 파일의 지속 보관/조회는 발생 월 운영비에 포함한다. 실제 사용량을 예측 확정하는 대신 첫 달/안정기 LOW/BASE/HIGH 시나리오와 메타데이터 계측으로 검증한다.
 
-[C0 원가 계측 계획](C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 발행/공용 fixture 본구현보다 앞세운다. extraction_runs summary·공통 호출 원장·Storage 사용량·읽기의 누락→0 집계를 함께 보강한다. 미확정 비용은 UNKNOWN, 알려진 부분합만으로 상한 초과면 FAIL, 완전한 변동비 관측에서만 PASS다. 첫 달을 안정기 평균으로 상쇄하거나 등록 예산환산 개월을 실제 매출 회수기간으로 표시하지 않는다.
+[C0 원가 계측 계획](plan/C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 발행/공용 fixture 본구현보다 앞세운다. extraction_runs summary·공통 호출 원장·Storage 사용량·읽기의 누락→0 집계를 함께 보강한다. 미확정 비용은 UNKNOWN, 알려진 부분합만으로 상한 초과면 FAIL, 완전한 변동비 관측에서만 PASS다. 첫 달을 안정기 평균으로 상쇄하거나 등록 예산환산 개월을 실제 매출 회수기간으로 표시하지 않는다.
 
 ---
 
@@ -900,11 +900,27 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 ## 22-5. C0 상태 (CP-00A~04 이후)
 
-`api/app/contracts/`가 common/extraction/card/snapshot/answer에 더해 usage/errors/publication/chat/hashing/validate를 담는다. [C0_REVIEW_20260914.md](C0_REVIEW_20260914.md)의 RV-01~10 보강 지점(중복·고아·순환·원문 변경·action 혼합·occurrence 식별·hash/시각/ID 정규형·빈 추출 분기)은 계약과 테스트로 닫혔고, 같은 문서의 probe 19개가 전부 통과한다(GAP 0).
+`api/app/contracts/`가 common/extraction/card/snapshot/answer에 더해 usage/errors/publication/chat/hashing/validate를 담는다. [C0_REVIEW_20260914.md](review/C0_REVIEW_20260914.md)의 RV-01~10 보강 지점(중복·고아·순환·원문 변경·action 혼합·occurrence 식별·hash/시각/ID 정규형·빈 추출 분기)은 계약과 테스트로 닫혔고, 같은 문서의 probe 19개가 전부 통과한다(GAP 0).
 
 계약 밖으로 나온 것도 있다. canonical JSON과 snapshot hash, JSON schema·test vector export(`api/schema/`), F01~F35 공유 fixture(`api/tests/fixtures/contracts/v1/`), fake renderer/indexer/outbox, M0·M1 migration과 발행 트랜잭션 서비스다. 실제 DB에서 삭제 보존·멱등·동시 발행·매장 격리·불변성 12개 시나리오를 확인했고, 빈 DB에 17개 migration을 처음부터 쌓는 재구축도 확인했다.
 
 **아직 아닌 것을 분명히 한다.** 제품 runtime(`learn/router`, ingest 파이프라인)이 이 계약을 소비하는 경로는 아직 연결되지 않았다. 원가는 관측만 되고 요율표가 비어 있어 D21 판정이 UNDETERMINED이며 이는 통과가 아니다. R 몫인 embed/answer 계측과 M2·M3, 그리고 CP-05 품질 통합이 남아 있다. 계약·fixture·fake로 확인한 것을 실자료 캠페인 결과로 옮겨 적지 않는다.
+
+## 22-6. W0·W1 현황 (2026-09-15)
+
+정답지 감사와 기준선 측정을 마쳤다. **분모는 278건**이고 holdout 두 매장은 봉인돼 있다.
+측정 도구에서 여섯 가지 결함을 찾아 고쳤다 — 계측이 재추출을 죽이던 것, 빈 실행이
+성공으로 기록되던 것, 실험군이 대조군을 삼키던 것, 분모가 교집합이던 것, 실패 실행을
+세지 않던 것, precision 을 아예 재지 않던 것.
+
+W1 에서 파이프라인을 `입력 → 사실 → 원장 → 조립 → 카드` 로 바꿨다. 원장이 더 이상
+최종 카드의 파생물이 아니며, 조립이 버린 사실이 `assembly_state=DROPPED` 로 남는다.
+원장이 규격·부정·조건·예외·순서·원문을 담게 넓혔다.
+
+**아직 개선을 주장할 수 없다.** 현재 채점기가 단위 불일치·부정·정정 문장·규격 교차를
+모두 `COVERED` 로 통과시킨다. 교정 후 기준선과 W1 을 같은 기준으로 재평가해야
+"구조 변경이 개선인가" 를 물을 수 있다. 순서는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md),
+측정 기록은 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
 
 ---
 

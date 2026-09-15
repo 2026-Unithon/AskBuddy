@@ -18,6 +18,9 @@ class ExtractedFact(BaseModel):
     attribute: str
     value: str
     confidence: float = Field(ge=0, le=1)
+    # 원장에 적힌 사실의 이름표. 조립이 어느 사실을 골랐는지 잇는다 (W1).
+    # 빈 값이면 잇지 못한 것이고, 그것도 세어서 드러낸다
+    ref: str = ""
 
 
 class Evidence(BaseModel):
@@ -36,6 +39,46 @@ class ExtractedCard(BaseModel):
 
 class ExtractionResult(BaseModel):
     cards: list[ExtractedCard] = []
+    unresolved: list[str] = []
+
+
+# ── 사실 추출 (W1) ─────────────────────────────────────────────────────────
+# 카드가 아니라 **사실**을 뽑는다. 카드 스키마로 뽑으면 "한 카드에 한 대상" 규칙
+# 때문에 카드 한 장이 사실 한 개가 되고, 조립이 합칠 것이 없어진다.
+#
+# 선택 필드에 None 대신 빈 값을 쓴다 — Gemini response_schema 가 nullable 을
+# 일관되게 다루지 못해, 빈 문자열/0 으로 받고 코드에서 None 으로 바꾼다.
+
+class ExtractedAssertion(BaseModel):
+    """자료에서 확인된 사실 하나. 한 주장 = 한 건이다."""
+
+    local_ref: str                      # 이 출력 안에서만 쓰는 이름표 (f1, f2…)
+    original_assertion: str             # 원문 그대로. 값은 이것의 해석이다
+    subject: str
+    attribute: str
+    value: str
+    variant: str = ""                   # HOT / ICE / 사이즈. 모르면 빈 값
+    unit: str = ""
+    polarity: Literal["AFFIRM", "NEGATE"] = "AFFIRM"
+    conditions: list[str] = []          # "포장 주문일 때만"
+    exceptions: list[str] = []          # "재고 없으면 대체"
+    order: int = 0                      # 절차의 자리. 없으면 0
+    requires: list[str] = []            # 먼저 지켜야 하는 사실의 local_ref
+    category_name: str = ""
+    evidence: Evidence = Evidence()
+    confidence: float = Field(ge=0, le=1)
+    # 서버가 채운다. 모델이 보내는 값이 아니다 — 어느 구간에서 나왔는지 표시용
+    segment_id: str | None = None
+
+    def as_variant(self) -> str | None:
+        return self.variant.strip().upper() or None
+
+    def as_order(self) -> int | None:
+        return self.order if self.order and self.order >= 1 else None
+
+
+class FactExtractionResult(BaseModel):
+    assertions: list[ExtractedAssertion] = []
     unresolved: list[str] = []
 
 

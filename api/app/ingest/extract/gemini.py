@@ -13,7 +13,7 @@ from pathlib import Path
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
-from app.ingest.schemas import ExtractionResult
+from app.ingest.schemas import ExtractionResult, FactExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,8 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "extract_cards.ko.txt"
 ASSEMBLE_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "assemble_cards.ko.txt")
+FACTS_PROMPT_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts.ko.txt")
 
 
 def _category_block(category_names: list[str]) -> str:
@@ -116,7 +118,7 @@ async def _parts(prompt: str, media: list[Path], client=None):
     retry=retry_if_exception_type(Exception),
     reraise=True,
 )
-async def _call(prompt: str, media: list[Path]) -> tuple[str, dict]:
+async def _call(prompt: str, media: list[Path], schema=None) -> tuple[str, dict]:
     """(응답 텍스트, 공급자 usage). usage 는 못 받으면 빈 dict 다 — 0 으로 채우지 않는다."""
     from google import genai
     from google.genai import types
@@ -128,7 +130,7 @@ async def _call(prompt: str, media: list[Path]) -> tuple[str, dict]:
         contents=await _parts(prompt, media, client),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=ExtractionResult,
+            response_schema=schema or ExtractionResult,
             temperature=s.extract_temperature,
         ),
     )
@@ -196,6 +198,43 @@ async def extract(
     return result
 
 
+async def extract_facts(
+    *, source_id: int, source_type: str, text: str,
+    glossary: list[dict[str, str]], media: list[Path] = (),
+    usage_sink=None, usage_context=None,
+) -> FactExtractionResult:
+    """map — 자료에서 **사실만** 뽑는다 (W1).
+
+    카드를 만들지 않는다. 카드 스키마로 뽑으면 "한 카드에 한 대상" 규칙 때문에
+    구간마다 카드 한 장 = 사실 한 개가 되고, 그러면 조립이 합칠 것이 없다.
+    store-a 실측에서 map 이 39장을 만들고 조립이 36장으로 줄이는 데 그쳤다.
+    """
+    s = get_settings()
+    if not s.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 가 없다")
+
+    prompt = (FACTS_PROMPT_PATH.read_text(encoding="utf-8")
+              .replace("{glossary}", _glossary_block(glossary))
+              .replace("{source_type}", source_type)
+              .replace("{transcript}", text))
+
+    media = list(media)
+    started = time.perf_counter()
+    raw, usage = await _measured_call(prompt, media, usage_sink, usage_context,
+                                      prompt_hash=_hash(prompt),
+                                      schema=FactExtractionResult)
+    elapsed = time.perf_counter() - started
+    try:
+        result = FactExtractionResult.model_validate_json(raw)
+    except Exception as e:
+        raise RuntimeError(f"사실 추출 JSON 파싱 실패: {e}") from e
+
+    logger.info("extract_facts source=%s %.1fs 사실 %d건 미해결 %d건 usage=%s",
+                source_id, elapsed, len(result.assertions),
+                len(result.unresolved), usage or "미보고")
+    return result
+
+
 async def assemble(
     *, source_id: int, facts: list[dict], category_names: list[str],
     glossary: list[dict], usage_sink=None, usage_context=None,
@@ -234,13 +273,14 @@ def _hash(text: str) -> str:
 
 
 async def _measured_call(prompt: str, media: list[Path], sink, context,
-                         *, prompt_hash: str | None = None) -> tuple[str, dict]:
+                         *, prompt_hash: str | None = None,
+                         schema=None) -> tuple[str, dict]:
     """계측을 감싼 호출. sink 가 없으면 계측 없이 그대로 부른다."""
     from app.usage import recorder
 
     s = get_settings()
     if context is None:
-        return await _call(prompt, media)
+        return await _call(prompt, media, schema)
 
     async with recorder.attempt(sink, context, model=s.gemini_model,
                                 mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
@@ -249,7 +289,7 @@ async def _measured_call(prompt: str, media: list[Path], sink, context,
                 m.stat().st_size for m in media if m.exists()),
             frame_count=len(media) or None,
         )
-        text, usage = await _call(prompt, media)
+        text, usage = await _call(prompt, media, schema)
         rec.reported_model = s.gemini_model
         if usage:
             rec.observe(**usage)

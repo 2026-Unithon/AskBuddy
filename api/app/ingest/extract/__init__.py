@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from app.config import get_settings
-from app.ingest.schemas import ExtractionResult
+from app.ingest.schemas import ExtractionResult, FactExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,46 @@ async def extract_cards(
         category_names=category_names, glossary=glossary, media=media or [],
         **kwargs,
     )
+
+
+async def extract_facts(
+    *, source_id: int, source_type: str, text: str,
+    glossary: list[dict[str, str]], media: list[Path] | None = None,
+    usage_sink=None, usage_context=None,
+) -> FactExtractionResult:
+    """map — 자료에서 사실만 뽑는다 (W1). 카드를 만들지 않는다."""
+    mode = get_settings().ingest_mode
+    logger.info("extract_facts mode=%s source=%s type=%s media=%d",
+                mode, source_id, source_type, len(media or []))
+    if mode == "real":
+        from app.ingest.extract import gemini as impl
+        return await impl.extract_facts(
+            source_id=source_id, source_type=source_type, text=text,
+            glossary=glossary, media=media or [],
+            usage_sink=usage_sink, usage_context=usage_context,
+        )
+
+    # mock 에는 사실 추출기가 없다. 카드 목을 사실로 펴서 계약만 맞춘다.
+    # mock 실행을 모델 성능으로 집계하지 않는다 (D10)
+    from app.ingest.extract import mock as impl
+    from app.ingest.schemas import ExtractedAssertion
+
+    carded = await impl.extract(
+        source_id=source_id, source_type=source_type, text=text,
+        category_names=[], glossary=glossary, media=media or [],
+    )
+    assertions = [
+        ExtractedAssertion(
+            local_ref=f"m{i}", original_assertion=f"{f.object_name} {f.attribute} {f.value}",
+            subject=f.object_name, attribute=f.attribute, value=f.value,
+            category_name=card.category_name, evidence=card.evidence,
+            confidence=f.confidence,
+        )
+        for i, (card, f) in enumerate(
+            ((c, f) for c in carded.cards for f in c.facts), start=1)
+    ]
+    return FactExtractionResult(assertions=assertions,
+                                unresolved=list(carded.unresolved))
 
 
 async def assemble_cards(

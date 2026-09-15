@@ -119,6 +119,36 @@ def variant_present(variant: str | None, card_text: str) -> bool:
     return False
 
 
+def variant_axis(truth_facts: list[dict[str, Any]]) -> dict[str, bool]:
+    """대상마다 **규격이라는 축이 있는가**. {대상: True/False}
+
+    D19 가 막으려는 위험은 "같은 메뉴의 다른 규격이 섞이는 것" 이다. 그 위험은
+    규격이 둘 이상 있을 때만 존재한다. 아이스만 파는 음료라면 카드에 ICE 라고
+    안 써도 헷갈릴 대상이 없다.
+
+    그래서 정답지에 서로 다른 규격이 둘 이상 나오는 대상만 축이 있다고 본다.
+    정답지가 이 측정의 기준이므로 그 안에 없는 규격은 이 측정에서 존재하지 않는다.
+
+    자동 판정이지만 숨기지 않는다 — `scripts/audit_truth.py` 가 어느 대상을
+    어떻게 분류했는지 내보내고, 정답지에 `variant_axis` 를 직접 적으면 그 값이 이긴다.
+    """
+    seen: dict[str, set[str]] = {}
+    override: dict[str, bool] = {}
+    for fact in truth_facts:
+        subject = normalize(fact.get("subject") or "")
+        if not subject:
+            continue
+        if "variant_axis" in fact:
+            # 사람이 직접 적은 값은 추론을 이긴다
+            override[subject] = bool(fact["variant_axis"])
+        variant = fact.get("variant")
+        seen.setdefault(subject, set())
+        if variant:
+            seen[subject].add(variant.upper())
+    return {subject: override.get(subject, len(variants) > 1)
+            for subject, variants in seen.items()}
+
+
 @dataclass(frozen=True)
 class FactMatch:
     verdict: Verdict
@@ -131,13 +161,16 @@ class FactMatch:
     number_ratio: float | None = None
 
 
-def _score_one(fact: dict[str, Any], card_text: str) -> FactMatch:
+def _score_one(fact: dict[str, Any], card_text: str,
+               require_variant: bool = True) -> FactMatch:
     subject = fact.get("subject") or ""
     value = fact.get("value") or ""
     variant = fact.get("variant")
 
     subject_hit = _subject_in(subject, card_text)
-    variant_hit = variant_present(variant, card_text)
+    # 규격 축이 없는 대상은 규격을 안 적어도 헷갈릴 것이 없다.
+    # 축이 없는데 감점하면 자가 틀린 것이지 카드가 틀린 것이 아니다
+    variant_hit = variant_present(variant, card_text) if require_variant else True
 
     want_numbers = numbers_in(value)
     if want_numbers:
@@ -172,7 +205,8 @@ def _score_one(fact: dict[str, Any], card_text: str) -> FactMatch:
 _RANK = {"COVERED": 2, "PARTIAL": 1, "MISSING": 0}
 
 
-def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]]) -> FactMatch:
+def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
+               require_variant: bool = True) -> FactMatch:
     """사실 하나를 카드 전체와 대조해 가장 좋은 판정을 돌려준다.
 
     카드를 가로질러 합치지 않는다. **한 카드 안에** 대상과 값이 같이 있어야 한다.
@@ -182,7 +216,7 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]]) -> FactMatch:
     best = FactMatch("MISSING", None, 0.0, "대조할 카드가 없음")
     for card in cards:
         text = f"{card.get('title') or ''} {card.get('content') or ''}"
-        m = _score_one(fact, text)
+        m = _score_one(fact, text, require_variant)
         # 같은 판정 안에서는 값이 든 카드를 먼저 집는다.
         # 대상 이름만 겹치는 카드가 값을 담은 카드를 밀어내면 진단이 뒤집힌다
         if (_RANK[m.verdict], m.value_hit, m.score) > (

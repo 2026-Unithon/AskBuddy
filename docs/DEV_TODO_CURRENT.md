@@ -8,9 +8,9 @@
 >
 > 실험·지표·승격 판정 정본: [이관경계_실험설계.md](이관경계_실험설계.md)
 >
-> C0 상세 결정·PR·migration·담당: [C0_DECISIONS_AND_PLAN.md](C0_DECISIONS_AND_PLAN.md). 재현 검토: [C0_REVIEW_20260914.md](C0_REVIEW_20260914.md).
+> C0 상세 결정·PR·migration·담당: [C0_DECISIONS_AND_PLAN.md](C0_DECISIONS_AND_PLAN.md). 재현 검토: [C0_REVIEW_20260914.md](review/C0_REVIEW_20260914.md).
 >
-> 사용자 원가 회신 반영: [C0_COST_MEASUREMENT_PLAN.md](C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 먼저 구현한다. 월 3,000원은 운영 변동비, 등록비는 별도 추적하며 사용량은 첫 달/안정기 시나리오로 검증한다.
+> 사용자 원가 회신 반영: [C0_COST_MEASUREMENT_PLAN.md](plan/C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 먼저 구현한다. 월 3,000원은 운영 변동비, 등록비는 별도 추적하며 사용량은 첫 달/안정기 시나리오로 검증한다.
 
 W는 **원본 → 사실 JSON → 카드 초안 → 검수·공개**, R은 **질문 → 공개 근거 → 답변·재질문·점주 전달**을 각각 끝까지 담당한다. 두 담당자의 실제 이름은 이 문서에서 추정하지 않는다.
 
@@ -52,9 +52,9 @@ R 전체 순차 진행 위임 이후 최신 상태: [C0_R_SEQUENTIAL_STATUS.md](
 
 R 순차 구현: [답변 호출 계측 기록](C0_R_ANSWER_USAGE.md). adapter와 채팅/평가 API의 DB 연결 수명 정리·trusted context/sink 주입 구현 및 오프라인 검증 완료(2026-09-15). 격리 PostgreSQL 17의 실제 원장 DB 검증 14/14 통과; 정본 PostgreSQL 15 전체 schema/채팅 종단 인수는 별도다. 다음 코드 항목은 embed 단일 진입점 계측이며 CP-00B 전체 완료로 표시하지 않는다.
 
-병합 후 1번 작업인 답변 검증 접점 통합과 합성 연결 검증 완료: [접점 인수 기록](C0_WR_ANSWER_BOUNDARY.md). 실제 R3 의미 판정·CP-00B/C·DB 통합 인수는 남아 있으며, 기존 R 진행 기록 이후 변경은 이 문서에서 확인한다.
+병합 후 1번 작업인 답변 검증 접점 통합과 합성 연결 검증 완료: [접점 인수 기록](review/C0_WR_ANSWER_BOUNDARY.md). 실제 R3 의미 판정·CP-00B/C·DB 통합 인수는 남아 있으며, 기존 R 진행 기록 이후 변경은 이 문서에서 확인한다.
 
-R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](C0_R_IMPLEMENTATION_20260914.md). CP-01 R typed 검증·검색 인증·기존 usage 결함 보강을 구현했다. W usage 원장·snapshot 보강을 기다리는 CP 선행과 DB 통합 인수는 아래에서 미완료로 유지한다.
+R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20260914.md). CP-01 R typed 검증·검색 인증·기존 usage 결함 보강을 구현했다. W usage 원장·snapshot 보강을 기다리는 CP 선행과 DB 통합 인수는 아래에서 미완료로 유지한다.
 
 | 작업 | 산출물 | 완료 기준 |
 |---|---|---|
@@ -87,7 +87,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](C0_R_IMPLEMENTATION_20260914.
 - [x] CP-00A: `UsageContext`/`UsageAttempt` 계약과 MC0 원장(`ai_usage_attempts`·`cost_assessments`·`extraction_runs` 요약)을 구현했다. 결측과 0을 구분하고, PARTIAL/UNKNOWN은 총액을 내지 않는다. 요율표는 `config/rate_card.json`에 전부 null로 두어 토큰만 쌓인다.
 - [x] CP-00B: extract/assemble/STT/Storage에 usage를 연결했다. 유료 호출 전에 STARTED를 먼저 커밋하고, 실패해도 공급자를 다시 부르지 않는다. Storage는 클라이언트가 보낸 `file_size`가 아니라 서버가 확인한 bytes를 쓴다. **R의 embed/answer/runner/metrics 연결은 R 몫으로 남아 있다.**
 - [x] CP-00C: `app/usage/report.py`와 `scripts/cost_report.py`로 단계별 단가·관측률, 등록/운영 분리, LOW/BASE/HIGH 시나리오, D21 판정을 낸다. **현재 판정은 UNDETERMINED이고 이는 통과가 아니다** — 답변 단가·저장비·환율·요율표가 없다. 첫 실측은 호출 5회 100% 관측(prompt 28,084 / completion 4,542 / thought 9,502)이며 요율 미설정이라 금액은 없다.
-- [x] CP-01: `docs/C0_REVIEW_20260914.md`의 RV-01~10을 계약으로 닫았다. 중복/고아 사실·순환 선행·action 필드 배타·원문 공백 보존·불변 snapshot·occurrence 단위 판정·SHA-256/UTC/bigint 정규형·추출 `result_status` 분기. 모양만으로 권한을 볼 수 없어 `validate_answer_plan(plan, snapshot, store_id)`을 따로 뒀다. probe 19/19, GAP 0.
+- [x] CP-01: `docs/review/C0_REVIEW_20260914.md`의 RV-01~10을 계약으로 닫았다. 중복/고아 사실·순환 선행·action 필드 배타·원문 공백 보존·불변 snapshot·occurrence 단위 판정·SHA-256/UTC/bigint 정규형·추출 `result_status` 분기. 모양만으로 권한을 볼 수 없어 `validate_answer_plan(plan, snapshot, store_id)`을 따로 뒀다. probe 19/19, GAP 0.
 - [x] CP-02: 발행/색인/오류/채팅 DTO와 canonical JSON·snapshot hash를 구현했다. hash 대상에서 `snapshot_id`·`created_at`·hash 자신을 빼 같은 내용의 두 발행이 같은 hash를 갖게 했다. JSON schema 13종과 고정 test vector를 `api/schema/`에 내보내고 `--check`로 코드와의 불일치를 잡는다.
 - [x] CP-03: `api/tests/fixtures/contracts/v1/`에 snapshot·타 매장 snapshot·manifest를 JSON으로 얼리고 F01~F35 전부에 검사를 붙였다. 소비자는 파일에서 읽는다. fake renderer/indexer/outbox를 구현했다. fixture가 계약 구멍을 하나 잡았다 — `SelectedBlock`이 승인 RAW 원문을 인용할 수 없었다(F09).
 - [x] CP-04(W 몫): M0 operation/outbox/consumer dedupe/lease와 M1 fact revision/occurrence/raw span/version-block/publication manifest를 추가하고 트랜잭션 서비스를 구현했다. 실제 DB에서 12/12 확인(삭제 보존·물리 삭제 거절·원문 공백 왕복·멱등 재시도·키 충돌·STALE·동시 발행 1승 1패·타 매장 사실 차단·판/snapshot 불변), 빈 DB에 17개 migration 재구축 성공. **M2(색인 staging)·M3(v2 session/context)는 R 몫으로 남아 있다.**
@@ -136,15 +136,21 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](C0_R_IMPLEMENTATION_20260914.
 
 ## W0. 정답지 감사와 쓰기 기준선 — 구 13.1~13.2
 
-- [ ] 보유 자료의 매장·유형·해시·이용 범위·정답 수·판정자·판정일을 manifest로 확인한다. 실제·합성·점주 미확인(`TEST`)을 구분한다.
-- [ ] dev/holdout 분할 기록을 확인한다. 튜닝에 쓴 매장을 봉인 holdout으로 주장하지 않으며 부족한 자료는 부족하다고 기록한다.
+> 2026-09-15: 감사·기준선은 끝났고 **채점기 교정이 남았다.** 현재 채점기가 단위
+> 불일치·부정·정정 문장·규격 교차를 전부 `COVERED`로 통과시킨다. 교정 전에는 어떤
+> 개선도 주장하지 않는다. 순서와 근거는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md).
+
+- [x] 정답지 감사를 끝냈다 — **분모 278건**(dev 180·holdout 98), 판정자·판정일 기록됨, `owner_confirmed`는 전부 `TEST`(사람 라벨링이지 점주 확인이 아니다). 상호·브랜드 노출 0, 비어 있던 원본 해시 21건을 채웠다. `scripts/audit_truth.py`
+- [x] dev/holdout 분할을 확인했다. holdout 두 매장은 추출 실행 0회로 봉인이 유지되고 있다.
 - [ ] VIDEO·VOICE·SCAN(PDF·이미지)·KAKAO, 레시피·위치·규칙·공지, 같은 대상의 다중 자료·상충 규격을 포함한다.
 - [ ] 평가용 상용 자료의 브랜드명·상호·고유 메뉴명, 원본·백업은 Git·데모·공개 문서에서 제외하고 익명 ID로 관리한다.
 - [ ] 원문 근거, 대상·속성·규격·수량·단위·조건·부정·예외·순서를 사람이 라벨링한다. 실제 매장 사실은 점주 확인을 받는다.
-- [ ] `run_extract_eval.py`에서 원시 추출과 최종 카드 채점을 분리한다. `E-O0`는 원본→카드 종합 손실로 보존하고 단계별 지표를 추가한다.
-- [ ] `compare_runs.py`의 성공 run·교집합·안정 사실만 집계하는 처리를 전체 시도·고정 truth 분모로 바꾸고, `variance_report.py`도 자료/설정 hash·실패를 검증한다. 기존 CLI 성공을 새 평가 통과로 쓰지 않는다.
-- [ ] truth만 순회하는 채점을 보완해 출력 주장 precision·raw/ledger recall·문맥/규격 오연결·판정 불확실성을 따로 저장한다. holdout guard는 truth를 읽기 전에 실행하고 사전 캠페인 hash를 확인한다.
-- [ ] 최초 기준선을 고정 조건 최소 3회와 A/A 동일 조건 대조군으로 측정한다. 전체 분모·실행별 값·매장별·유형별 결과를 보존한다.
+- [x] `run_extract_eval.py`에서 원시 추출과 최종 카드 채점을 분리했다. `E-O0`는 원본→카드 종합 손실로 보존하고 `loss_stage`(OK/ASSEMBLY/CARD_ONLY/EXTRACTION)를 추가했다.
+- [x] `compare_runs.py`를 정답지 전체 고정 분모로 바꾸고 실패 실행·설정 지문·입력 자료 해시 불일치를 경고하게 했다. `variance_report.py`도 같다. 실험군 라벨이 대조군을 삼키던 문제(`like 'BASE-%'`가 `BASE-AA`까지 포함)를 반복 번호 한정으로 고쳤다.
+- [~] 출력 주장 precision·오연결·판정 불확실성을 따로 저장하고, holdout guard를 정답지 읽기 **전**으로 옮겨 사전등록 캠페인을 필수로 걸었다.
+      **남은 것: 채점기가 오답을 통과시킨다.** 단위 불일치·부정·정정 문장·규격 교차가 모두 `COVERED`로 통과한다. [계획 ①](plan/W1_MEASUREMENT_PLAN.md) 참조.
+- [x] 최초 기준선을 고정 조건 3회 + A/A 대조군으로 두 매장에서 측정했다. 전체 분모·실행별 값·유형별 결과를 보존했다. 결과는 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
+      **이 수치는 채점기 교정 후 재평가 대상이다.**
 - [ ] CP-00 계측 인수 후 기준선을 실행한다. extract/assemble/STT/embedding/분류·실패/재시도 비용과 원본/전송 bytes를 run에 연결하며 `reuse-sources/cards` 결과를 최초 등록 전체 비용으로 해석하지 않는다.
 - [ ] 숫자·문자 매칭 채점의 거짓 양성/음성과 `PARTIAL`을 사람 표본 판정으로 확인한다. 모델 confidence를 정답으로 쓰지 않는다.
 
@@ -152,11 +158,15 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](C0_R_IMPLEMENTATION_20260914.
 
 ## W1. 입력 분할과 사실 원장 선저장 — 구 13.3-1·13.4
 
+> 2026-09-15: 파이프라인을 `입력 → 사실 → 원장 → 조립 → 카드`로 바꿨다.
+> 원장이 더 이상 카드의 파생물이 아니며 `assembly_state`로 조립이 버린 사실이 남는다.
+> **측정 결과는 채점기 교정 후 재평가 전까지 판정 보류다.**
+
 - [ ] source segment를 페이지·표·블록·메시지·시간 구간으로 만들고 원본 위치·해시를 보존한다.
 - [ ] PDF는 페이지별 텍스트 품질과 표 행·열 관계를 확인하고 필요한 페이지 이미지를 전달한다. 일부 텍스트가 읽힌다고 모든 이미지를 생략하지 않는다.
 - [ ] 영상은 frame ID·시각과 STT 구간, 음성은 앞뒤 문맥·timestamp, 카톡은 화자·날짜·질문/답변과 번복 문맥을 보존한다.
-- [ ] `extract_facts` 전용 프롬프트·schema를 만든다. 카드 제목·2~3문장 요약을 먼저 만들지 않고 확인된 사실만 추출한다.
-- [ ] 원시 응답·파싱 결과를 카드 조립 전에 영속 저장한다. schema 오류·출력 잘림·부분 실패·`unresolved`를 구간별 기록한다.
+- [x] `extract_facts` 전용 프롬프트·schema를 만들었다. 카드가 아니라 사실만 뽑는다 — 카드 스키마로 뽑으면 "한 카드에 한 대상" 규칙 때문에 카드 1장이 사실 1개가 되어 조립이 합칠 것이 없었다.
+- [~] 파싱 결과를 카드 조립 **전에** 원장에 저장한다. 원장에 `original_assertion`·`unit`·`polarity`·`conditions`·`exceptions`·`step_order`·`requires`·`local_ref`·`segment_id`·`assembly_state`를 추가했다. **남은 것: 원시 응답 본문 보존과 출력 잘림 복구.**
 - [ ] 단위·규격·조건의 추정 채우기와 존재하지 않는 segment 참조를 거절한다. 텍스트 인용 존재 검사와 이미지/의미 정확도 평가를 구분한다.
 - [ ] 입력/출력 token 상한, 구간 크기·중첩, 동시 호출 수·timeout·retry를 제한한다. 잘린 출력은 재분할/이어받기로 복구하고 조용히 성공 처리하지 않는다.
 - [ ] 같은 요청 재시도는 중복을 만들지 않고 모델·프롬프트 변경 재추출은 별도 run으로 남긴다. 중복 canonical fact여도 각 evidence occurrence를 보존한다.
