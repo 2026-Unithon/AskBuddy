@@ -157,7 +157,7 @@ async def main() -> int:
         shown = f"{span * 100:.1f}%p" if as_pct else f"{span:.1f}"
         print(f"  {label} — 실험 간 차이가 {shown} 이하면 잡음으로 본다")
     print()
-    print("이 선보다 작은 차이로 설정을 바꾸지 않는다. 반복 횟수를 늘리면 선이 더 좁아진다.")
+    print("이 선보다 작은 차이로 설정을 바꾸지 않는다. 반복을 늘려도 관측 범위가 좁아진다는 보장은 없다.")
     return 0
 
 

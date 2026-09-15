@@ -23,7 +23,7 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (-not $ready) { throw "PostgreSQL did not become ready" }
-    foreach ($checkScript in @("verify_r_answer_usage.py", "verify_r_security.py", "verify_r_embedding_usage.py")) {
+    foreach ($checkScript in @("verify_r_answer_usage.py", "verify_r_security.py", "verify_r_embedding_usage.py", "verify_w_embedding_service.py", "verify_w_score_migration.py")) {
         & $Python -B (Join-Path $PSScriptRoot $checkScript)
         if ($LASTEXITCODE -ne 0) { throw "Verification failed: $checkScript" }
     }

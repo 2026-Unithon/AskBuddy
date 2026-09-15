@@ -2,6 +2,6 @@
 
 임베딩 생성 자체의 모델·차원은 app.config 가 단일 출처다 (D4).
 """
-from app.ingest.embed.service import embed_card
+from app.ingest.embed.service import embed_card, prepare_embedding
 
-__all__ = ["embed_card"]
+__all__ = ["embed_card", "prepare_embedding"]

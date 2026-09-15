@@ -43,3 +43,4 @@
 | [C0_R_STRICT_REVIEW_20260915.md](review/C0_R_STRICT_REVIEW_20260915.md) | R 엄밀 검토 |
 | [C0_WR_PULL_REVIEW_20260915.md](review/C0_WR_PULL_REVIEW_20260915.md) | W/R 합류 검토 |
 | `C0_W_HANDOFF_VALIDATION.json` | W 인계 검증 범위와 소스 해시 |
+| [W_MEASUREMENT_FIXES_20260915.md](review/W_MEASUREMENT_FIXES_20260915.md) | 채점·CLI·W 임베딩 연결/계측·반복 산술 교정과 미완료 재평가 |

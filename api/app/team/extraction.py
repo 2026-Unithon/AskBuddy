@@ -15,7 +15,30 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal
 
-Verdict = Literal["COVERED", "PARTIAL", "MISSING"]
+Verdict = Literal["COVERED", "PARTIAL", "MISSING", "UNDETERMINED"]
+
+SCORER_VERSION = "w_fact_score/v2"
+
+_ATTRIBUTE_ALIASES = {
+    "우유량": ("우유량", "우유 용량", "스팀우유량"),
+    "사용기한": ("사용기한", "사용 기한"),
+    "발주주기": ("발주주기", "발주 주기"),
+}
+
+
+def _attribute_key(text):
+    normalized = normalize(text or "")
+    for key, aliases in _ATTRIBUTE_ALIASES.items():
+        if normalized in [normalize(a) for a in aliases]:
+            return key
+    return normalized
+
+
+def applicability(fact, has_variant_axis):
+    scope = fact.get("applicability", "UNKNOWN" if has_variant_axis else "NOT_APPLICABLE")
+    if scope not in {"SPECIFIC", "COMMON", "NOT_APPLICABLE", "UNKNOWN"}:
+        raise ValueError("invalid fact applicability")
+    return scope
 
 _WORD = re.compile(r"[0-9A-Za-z가-힣]+")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
@@ -140,7 +163,9 @@ def variant_axis(truth_facts: list[dict[str, Any]]) -> dict[str, bool]:
             continue
         if "variant_axis" in fact:
             # 사람이 직접 적은 값은 추론을 이긴다
-            override[subject] = bool(fact["variant_axis"])
+            if type(fact["variant_axis"]) is not bool:
+                raise ValueError("variant_axis must be an explicit boolean")
+            override[subject] = fact["variant_axis"]
         variant = fact.get("variant")
         seen.setdefault(subject, set())
         if variant:
@@ -186,6 +211,37 @@ def _score_one(fact: dict[str, Any], card_text: str,
         value_hit = ratio >= 0.6
 
     if subject_hit and value_hit and variant_hit:
+        # 같은 카드에 있다는 이유로 관계·단위·부정을 확정하지 않는다.
+        uncertainty = None
+        attribute = fact.get("attribute") or ""
+        # 자유 문장에서는 속성의 생략/별칭을 확정할 수 없으면 보류한다.
+        roots = {"스팀우유량": ("스팀우유",), "우유량": ("우유",),
+                 "온수량": ("뜨거운물", "온수"), "침지시간": ("담가", "침지"),
+                 "약품 투입량": ("약품",), "처리주체": ("직원", "아르바이트"),
+                 "세척제": ("세제", "세척제"), "제조순서": ("순서", "추출")}
+        markers = roots.get(attribute, (attribute,))
+        if attribute and not any(normalize(marker) in normalize(card_text) for marker in markers):
+            uncertainty = "대상·값은 있으나 속성 관계 미확인"
+        if re.search(r"잘못|틀린|아니라|대신|넣지|않|금지|제외|not\b|never\b", card_text, re.I):
+            uncertainty = "부정·정정·예외 문맥은 사람 확인 필요"
+        quantities = re.findall(r"(\d+(?:\.\d+)?)\s*(ml|㎖|g|kg|일|분|초|days?|minutes?)", value, re.I)
+        for number, unit in quantities:
+            if not re.search(rf"(?<!\d){re.escape(number)}\s*{re.escape(unit)}(?![A-Za-z])", card_text, re.I):
+                uncertainty = "숫자는 있으나 값·단위 결합이 다름"
+            others = re.findall(rf"(\d+(?:\.\d+)?)\s*{re.escape(unit)}", card_text, re.I)
+            if any(n not in numbers_in(value) for n in others):
+                uncertainty = "같은 단위의 다른 값 혼재"
+        if variant and sum(variant_present(v, card_text) for v in ("HOT", "ICE")) > 1:
+            uncertainty = "복수 규격의 값 결합은 사람 확인 필요"
+        if fact.get("applicability") == "UNKNOWN":
+            uncertainty = "사실 적용 범위 미확인"
+        if any(normalize(c) not in normalize(card_text) for c in fact.get("conditions", [])):
+            uncertainty = "필수 조건 미확인"
+        if not want_numbers and not _tokens(value).issubset(_tokens(card_text)):
+            uncertainty = "일부 값 토큰만 일치: 전체 의미 확인 필요"
+        if uncertainty:
+            return FactMatch("UNDETERMINED", None, ratio, uncertainty,
+                             True, True, True, ratio)
         return FactMatch("COVERED", None, ratio, "subject·value·variant 일치",
                          True, True, True, ratio)
     if subject_hit and value_hit and not variant_hit:
@@ -202,7 +258,7 @@ def _score_one(fact: dict[str, Any], card_text: str,
                      False, False, variant_hit, ratio)
 
 
-_RANK = {"COVERED": 2, "PARTIAL": 1, "MISSING": 0}
+_RANK = {"COVERED": 3, "UNDETERMINED": 2, "PARTIAL": 1, "MISSING": 0}
 
 
 def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
@@ -213,6 +269,13 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
     여러 카드를 이어붙여 인정하면, 신입이 카드 하나만 읽고는 답을 못 얻는데도
     담았다고 세게 된다.
     """
+    scope = fact.get("applicability")
+    if scope in {"COMMON", "NOT_APPLICABLE"}:
+        require_variant = False
+    if scope == "SPECIFIC":
+        require_variant = True
+        if not fact.get("variant"):
+            return FactMatch("UNDETERMINED", None, 0.0, "SPECIFIC 규격 누락")
     best = FactMatch("MISSING", None, 0.0, "대조할 카드가 없음")
     for card in cards:
         text = f"{card.get('title') or ''} {card.get('content') or ''}"
@@ -235,9 +298,7 @@ def match_fact_in_ledger(
     """정답지 사실이 원장(source_facts)에 뽑혀 있는가.
 
     카드 본문 대조와 달리 **구조끼리** 맞춘다 — 대상과 값이 각각 필드로 있으므로
-    훨씬 정밀하다. 속성(attribute)은 요구하지 않는다: 정답지는 "스팀우유량" 인데
-    모델은 "우유 용량" 이라 쓰는 식으로 이름이 갈리기 때문이다. 대상과 값이 맞으면
-    같은 사실로 본다.
+    속성은 명시된 별칭만 허용하며 값은 단위까지 확인한다.
 
     규격(variant)은 정답지에 있을 때만 본다. 현재 추출은 규격을 채우지 않으므로
     (13.5 가 RECIPE 스키마로 채운다) 여기서 요구하면 전부 탈락한다.
@@ -247,21 +308,14 @@ def match_fact_in_ledger(
     if not subject or not value:
         return False, None
 
-    want_numbers = numbers_in(value)
-    want_tokens = _tokens(value)
-
     for row in ledger:
         if not _subject_in(subject, row.get("subject") or ""):
             continue
+        if fact.get("attribute") and not _same_attribute(fact["attribute"], row.get("attribute")):
+            continue
         have = row.get("value") or ""
-        if want_numbers:
-            # 숫자가 있는 값은 숫자가 전부 맞아야 한다 (275 → 27 왜곡 차단)
-            if all(n in set(numbers_in(have)) for n in want_numbers):
-                return True, row.get("fact_id")
-        elif want_tokens:
-            overlap = len(want_tokens & _tokens(have)) / len(want_tokens)
-            if overlap >= 0.6:
-                return True, row.get("fact_id")
+        if _value_key(value) == _value_key(have):
+            return True, row.get("fact_id")
     return False, None
 
 
@@ -325,11 +379,13 @@ def aggregate(rows: list[dict[str, Any]], card_count: int = 0) -> dict[str, Any]
             return {"fact_count": 0}
         covered = sum(1 for r in subset if r["verdict"] == "COVERED")
         partial = sum(1 for r in subset if r["verdict"] == "PARTIAL")
+        undetermined = sum(1 for r in subset if r["verdict"] == "UNDETERMINED")
         return {
             "fact_count": n,
             "covered": covered,
             "partial": partial,
-            "missing": n - covered - partial,
+            "missing": n - covered - partial - undetermined,
+            "undetermined": undetermined,
             "recall": round(covered / n, 4),
             # E-O0 — 원본에 있는데 카드에 없는 비율. 시스템 정확도의 천장
             "loss": round(1 - covered / n, 4),
@@ -398,16 +454,20 @@ def _same_attribute(a: str | None, b: str | None) -> bool:
     """같은 것을 묻고 있는가.
 
     이름은 갈린다 — 정답지가 "스팀우유량" 인데 모델은 "우유 용량" 이라 쓴다.
-    그래서 낱말이 겹치면 같은 속성으로 본다.
+    그래서 확인한 별칭만 같은 속성으로 본다. 공통 낱말만으로 확정하지 않는다.
 
     **이 판단이 오연결 검출의 전제다.** 속성을 보지 않으면 "원두 발주요일" 과
     "원두 사용기한" 처럼 둘 다 참인 별개 사실이 서로 모순이라고 잡힌다.
     """
     if not a or not b:
         return False
-    if normalize(a) == normalize(b):
-        return True
-    return bool(_tokens(a) & _tokens(b))
+    return _attribute_key(a) == _attribute_key(b)
+
+
+def _value_key(value):
+    # 소수점·부등호·부정 문구를 지우지 않는다. 숫자-단위 사이 공백만 허용한다.
+    value = " ".join((value or "").lower().split())
+    return re.sub(r"(?<=\d)\s+(?=ml\b|g\b|kg\b|일|분|초|days?\b|minutes?\b)", "", value)
 
 
 def classify_claim(
@@ -419,21 +479,30 @@ def classify_claim(
     같은 대상의 다른 속성은 모순이 아니라 추가 정보다.
     """
     subject = normalize(claim.get("subject") or "")
-    value = normalize(claim.get("value") or "")
+    value = _value_key(claim.get("value") or "")
     if not subject:
         return "UNVERIFIED", None, "대상이 비어 있어 대조할 수 없다"
 
     conflict: tuple[str, str] | None = None
+    same_attribute_seen = False
     for fact in truth_facts:
         t_subject = normalize(fact.get("subject") or "")
         if not (t_subject == subject or _near(t_subject, subject)):
             continue
-        value_hit = bool(value) and bool(_tokens(fact.get("value") or "") & _tokens(value))
+        if not _same_attribute(claim.get("attribute"), fact.get("attribute")):
+            continue
+        same_attribute_seen = True
+        # 공통 단어(days, 약)는 값 일치의 증거가 아니다. 숫자·단위·전체 값을 확인한다.
+        value_hit = bool(value) and value == _value_key(fact.get("value") or "")
         variant_hit = _same_variant(claim.get("variant"), fact.get("variant"))
         if value_hit and variant_hit:
-            return "MATCHED", fact["fact_id"], "대상·값·규격이 맞는다"
-        if not _same_attribute(claim.get("attribute"), fact.get("attribute")):
-            continue  # 같은 대상의 다른 속성. 모순이 아니다
+            if claim.get("polarity", "AFFIRM") != fact.get("polarity", "AFFIRM"):
+                return "CONFLICT", fact["fact_id"], "부정 극성이 다르다"
+            if any(claim.get(k, []) != fact.get(k, []) for k in ("conditions", "exceptions", "requires")):
+                return "UNVERIFIED", None, "조건·예외·선행 관계 확인 필요"
+            return "MATCHED", fact["fact_id"], "대상·속성·값·규격이 맞는다"
+        if variant_hit and not (numbers_in(value) or numbers_in(fact.get("value") or "")):
+            continue  # 다른 자유 문장은 자동으로 참/거짓 관계를 확정하지 않는다
         if conflict is None:
             conflict = (
                 fact["fact_id"],
@@ -444,6 +513,8 @@ def classify_claim(
         # 같은 것을 묻는데 다른 값을 실어 보내는 것이 누락보다 위험하다.
         # 신입은 그걸 읽고 그대로 따른다
         return "CONFLICT", conflict[0], conflict[1]
+    if same_attribute_seen:
+        return "UNVERIFIED", None, "같은 속성의 자유 문장 의미를 자동 확정할 수 없다"
     return "UNVERIFIED", None, "정답지에 같은 대상·속성이 없다"
 
 
@@ -536,7 +607,7 @@ def judge_run_health(
 # 그래서 만장일치를 기준으로 쓰되, **갈린 것을 버리지 않고 세어 보고한다.**
 # 엄격한 기준은 진짜 작은 악화도 함께 가리기 때문이다.
 
-VERDICT_RANK = {"MISSING": 0, "PARTIAL": 1, "COVERED": 2}
+VERDICT_RANK = {"MISSING": 0, "UNDETERMINED": 0, "PARTIAL": 1, "COVERED": 2}
 
 
 def decide_majority(verdicts: list[str]) -> tuple[str, bool]:

@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.learn.answering import AnswerComposition, compose_grounded_answer
 from app.learn.faq import list_faqs as list_faq_rows
 from app.learn.knowledge_apply import (
+    prepare_proposal,
     publish_existing_proposal,
     publish_new_proposal,
 )
@@ -703,9 +704,10 @@ async def answer_pending(
     knowledge_status = proposal_status
     if proposal_status == "ANALYZED":
         try:
+            preparation = await prepare_proposal(db, store_id, proposal_id)
             async with db.transaction():
                 card_id, version_id = await publish_new_proposal(
-                    db, store_id, proposal_id, user_id
+                    db, store_id, proposal_id, user_id, preparation=preparation
                 )
             knowledge_status = "PUBLISHED"
         except Exception as exc:
@@ -814,14 +816,15 @@ async def approve_knowledge_proposal(
     if relation is None:
         raise HTTPException(404, "knowledge proposal not found")
     try:
+        preparation = await prepare_proposal(db, store_id, proposal_id)
         async with db.transaction():
             if relation == "NEW":
                 card_id, version_id = await publish_new_proposal(
-                    db, store_id, proposal_id, user_id
+                    db, store_id, proposal_id, user_id, preparation=preparation
                 )
             else:
                 card_id, version_id = await publish_existing_proposal(
-                    db, store_id, proposal_id, user_id
+                    db, store_id, proposal_id, user_id, preparation=preparation
                 )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc

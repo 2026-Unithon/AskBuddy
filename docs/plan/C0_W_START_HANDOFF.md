@@ -1,5 +1,11 @@
 # W 착수 인계 — R 측 계측 접점
 
+2026-09-15 후속: [W 교정 검증](../review/W_MEASUREMENT_FIXES_20260915.md).
+W 승인/수정/OWNER_ANSWER 경로에 `prepare_embedding` → 짧은 DB 저장을 연결했다.
+원본 카드의 phase/purpose는 서버 원장의 EXTRACT/ASSEMBLE 귀속을 이어받으며,
+귀속 기록이 없는 원본 카드는 추정하지 않고 보류한다. 초기 승인 여부로 등록을 추정하지 않는다.
+`verify_r_handoff.ps1`에는 W 연결/CAS 6개와 판정 migration 4개 검증도 추가했다.
+
 > 최신 원격 합류 검토: [C0_WR_PULL_REVIEW_20260915.md](../review/C0_WR_PULL_REVIEW_20260915.md). e43c000 pull 후 374 tests / 73 subtests 및 R DB 29/29 통과. W/R 판정 규칙 차이와 W 코드 결함·실제 adapter 미연결은 별도로 남아 있다. 아래 359개 기록은 pull 이전 인수다.
 
 2026-09-15. 범위는 CP-00B/C의 W 등록/추가자료 계측 착수다. R 전체 완료나 W 공개·품질 승격 허가를 뜻하지 않는다. 이 문서에 나오는 API와 검증 파일을 포함한 **동일 변경 묶음**을 사용하는 checkout이 기준이다.

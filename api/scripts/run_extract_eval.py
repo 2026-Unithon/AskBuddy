@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import hashlib
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -48,7 +49,7 @@ from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
 from app.team.extraction import (  # noqa: E402
     ExtractionReport, aggregate, judge_run_health, match_fact,
-    match_fact_in_ledger, score_output, variant_axis,
+    match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
@@ -223,6 +224,7 @@ def score(
         in_ledger, ledger_fact_id = match_fact_in_ledger(fact, ledger)
         from app.team.extraction import normalize
         needs_variant = axis.get(normalize(fact.get("subject") or ""), False)
+        fact = {**fact, "applicability": applicability(fact, needs_variant)}
         report.add(
             fact, match_fact(fact, cards, require_variant=needs_variant), stype,
             in_ledger=in_ledger, ledger_fact_id=ledger_fact_id,
@@ -241,7 +243,9 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
     base.with_suffix(".json").write_text(
         json.dumps({"run_id": run_id, "store": slug, "label": label,
                     "truth_confidence": truth_confidence, "settings": snapshot,
-                    "metrics": metrics, "results": rows},
+                    "metrics": metrics, "results": rows,
+                    "scorer_version": SCORER_VERSION,
+                    "inputs": _PARTIAL.get("score_inputs")},
                    ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
@@ -449,6 +453,8 @@ async def main() -> int:
     s = get_settings()
     # 스윕하는 값은 반드시 여기 남아야 한다. 없으면 결과를 설정에 귀속시킬 수 없다
     snapshot = {
+        "scorer_version": SCORER_VERSION,
+        "truth_hash": "sha256:" + hashlib.sha256(json.dumps(truth, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         "code_version": code_version(),
         "prompt_version": prompt_digest("extract_cards.ko.txt"),
         "extract_model": s.gemini_model,
@@ -600,6 +606,9 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
 
     cards = await fetch_cards(conn, store_id)
     ledger = await fetch_ledger(conn, store_id)
+    _PARTIAL["score_inputs"] = {"cards": [dict(c) for c in cards],
+                                "ledger": [dict(r) for r in ledger],
+                                "truth": truth["facts"], "source_types": source_types}
     report = score(truth["facts"], cards, source_types, ledger)
     print(f"  원장 {len(ledger)}건 · 카드 {len(cards)}장")
     # 측정이 아닌 것을 측정으로 기록하지 않는다 (W0). 판정은 순수 함수에 있고

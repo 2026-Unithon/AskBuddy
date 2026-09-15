@@ -5,11 +5,25 @@ import json
 
 import asyncpg
 
-from app.ingest.embed import embed_card
+from app.ingest.embed import embed_card, prepare_embedding
+
+
+async def prepare_proposal(db, store_id: int, proposal_id: int):
+    proposal = await db.fetchrow(
+        "select * from knowledge_change_proposals where store_id = $1 and proposal_id = $2",
+        store_id, proposal_id)
+    if proposal is None:
+        raise LookupError("knowledge proposal not found")
+    if proposal["status"] not in ("ANALYZED", "PENDING_REVIEW", "FAILED"):
+        raise ValueError("proposal cannot be published")
+    prepared = await prepare_embedding(store_id, proposal["proposed_title"],
+                                       proposal["proposed_content"], cost_phase="OPERATING")
+    return dict(proposal), prepared
 
 
 async def _attach_owner_answer_citations(
     db: asyncpg.Connection,
+    store_id: int,
     answer_id: int,
     card_id: int,
     version_id: int,
@@ -19,7 +33,9 @@ async def _attach_owner_answer_citations(
         insert into message_citations (message_id, card_id, version_id, relevance)
         select m.message_id, $2, $3, 100.00
         from chat_messages m
+        join chat_sessions s on s.session_id=m.session_id
         where m.owner_answer_id = $1
+          and s.store_id = $4
           and not exists (
             select 1 from message_citations existing
             where existing.message_id = m.message_id
@@ -29,6 +45,7 @@ async def _attach_owner_answer_citations(
         answer_id,
         card_id,
         version_id,
+        store_id,
     )
 
 
@@ -37,6 +54,7 @@ async def publish_new_proposal(
     store_id: int,
     proposal_id: int,
     actor_id: int,
+    *, preparation,
 ) -> tuple[int, int]:
     proposal = await db.fetchrow(
         """
@@ -49,6 +67,9 @@ async def publish_new_proposal(
     )
     if proposal is None:
         raise LookupError("knowledge proposal not found")
+    expected, prepared = preparation
+    if dict(proposal) != expected:
+        raise ValueError("knowledge proposal changed during embedding")
     if proposal["relation_type"] != "NEW":
         raise ValueError("proposal is not NEW")
     if proposal["status"] not in ("ANALYZED", "PENDING_REVIEW", "FAILED"):
@@ -109,7 +130,7 @@ async def publish_new_proposal(
         version_id,
         actor_id,
     )
-    await embed_card(db, store_id, card_id)
+    await embed_card(db, store_id, card_id, prepared=prepared)
     await db.execute(
         "update owner_answers set card_id = $2 where answer_id = $1",
         int(proposal["answer_id"]),
@@ -137,7 +158,7 @@ async def publish_new_proposal(
         category_id,
     )
     await _attach_owner_answer_citations(
-        db, int(proposal["answer_id"]), card_id, version_id
+        db, store_id, int(proposal["answer_id"]), card_id, version_id
     )
     return card_id, version_id
 
@@ -147,6 +168,7 @@ async def publish_existing_proposal(
     store_id: int,
     proposal_id: int,
     actor_id: int,
+    *, preparation,
 ) -> tuple[int, int]:
     proposal = await db.fetchrow(
         """
@@ -159,6 +181,9 @@ async def publish_existing_proposal(
     )
     if proposal is None:
         raise LookupError("knowledge proposal not found")
+    expected, prepared = preparation
+    if dict(proposal) != expected:
+        raise ValueError("knowledge proposal changed during embedding")
     if proposal["relation_type"] not in ("SUPPLEMENT", "CONFLICT"):
         raise ValueError("proposal does not update an existing card")
     if proposal["status"] != "PENDING_REVIEW":
@@ -213,7 +238,7 @@ async def publish_existing_proposal(
         proposal["proposed_content"],
         version_id,
     )
-    await embed_card(db, store_id, card_id)
+    await embed_card(db, store_id, card_id, prepared=prepared)
     await db.execute(
         "update owner_answers set card_id = $2 where answer_id = $1",
         int(proposal["answer_id"]),
@@ -265,6 +290,6 @@ async def publish_existing_proposal(
         ),
     )
     await _attach_owner_answer_citations(
-        db, int(proposal["answer_id"]), card_id, version_id
+        db, store_id, int(proposal["answer_id"]), card_id, version_id
     )
     return card_id, version_id

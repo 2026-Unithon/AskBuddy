@@ -64,6 +64,20 @@ class OutputScoringTest(unittest.TestCase):
              "value": "225ml"}, self.TRUTH)
         self.assertEqual((verdict, fid), ("MATCHED", "t-1"))
 
+    def test_wrong_attribute_same_value_is_unverified(self):
+        verdict, _, _ = classify_claim(
+            {"subject": "재료 B", "attribute": "발주주기", "value": "14일"}, self.TRUTH)
+        self.assertEqual(verdict, "UNVERIFIED")
+
+    def test_shared_word_does_not_match_different_numbers(self):
+        for expected, actual in (("14 days", "90 days"), ("약 30분", "약 5분"),
+                                 ("225ml", "225g")):
+            with self.subTest(expected=expected, actual=actual):
+                truth = [{"fact_id": "t", "subject": "예시", "attribute": "시간", "value": expected}]
+                verdict, _, _ = classify_claim(
+                    {"subject": "예시", "attribute": "시간", "value": actual}, truth)
+                self.assertEqual(verdict, "CONFLICT")
+
     def test_same_subject_different_attribute_is_not_a_conflict(self):
         """"재료 B 발주요일" 과 "재료 B 사용기한" 은 둘 다 참이다.
 

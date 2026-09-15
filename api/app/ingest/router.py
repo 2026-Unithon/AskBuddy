@@ -24,7 +24,8 @@ from app.ingest.capabilities import get_capabilities
 from app.ingest.job_worker import process_ingest_job
 from app.ingest.preprocess import storage
 from app.ingest import repository as repo
-from app.ingest.embed import embed_card
+from app.ingest.embed import embed_card, prepare_embedding
+from app.ingest.embed.service import card_usage_context
 from app.ingest.schemas import (
     ApproveResult,
     BulkApproveRequest,
@@ -506,7 +507,20 @@ async def embed(
     관호님 승인 플로우(/reg/*)에서 이 엔드포인트를 호출하면 된다.
     """
     try:
-        chunks = await embed_card(db, store_id, card_id)
+        card = await repo.get_card(db, store_id, card_id)
+        if card is None:
+            raise LookupError("card not found")
+        if not card["is_verified"]:
+            raise ValueError("승인된 카드만 검색 대상이다")
+        context = await card_usage_context(db, store_id, card_id)
+        prepared = await prepare_embedding(store_id, card["title"], card["content"], cost_phase=context.cost_phase, context=context)
+        async with db.transaction():
+            current = await db.fetchrow(
+                "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
+                "where store_id=$1 and card_id=$2 for update",store_id,card_id)
+            if current is None or dict(current) != dict(card):
+                raise ValueError("임베딩 준비 중 카드 버전이 변경됐습니다")
+            chunks = await embed_card(db, store_id, card_id, prepared=prepared)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except ValueError as e:
@@ -603,10 +617,21 @@ async def _approve_one(db, store_id: int, card_id: int) -> ApproveResult:
     임베딩이 실패했는데 승인만 남으면 검색에 안 잡히는 유령 카드가 된다.
     그래서 실패하면 승인까지 되돌리고 점주에게 다시 누르게 한다.
     """
+    expected = await repo.get_card(db, store_id, card_id)
+    if expected is None:
+        raise LookupError("card not found")
+    context = await card_usage_context(db, store_id, card_id)
+    prepared = await prepare_embedding(store_id, expected["title"], expected["content"],
+                                       cost_phase=context.cost_phase, context=context)
     async with db.transaction():
+        current = await db.fetchrow(
+            "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
+            "where store_id = $1 and card_id = $2 for update", store_id, card_id)
+        if current is None or dict(current) != dict(expected):
+            raise ValueError("임베딩 준비 중 카드가 변경됐습니다")
         if not await repo.set_card_verified(db, store_id, card_id, True):
             raise LookupError(f"card {card_id} not found in store {store_id}")
-        chunks = await embed_card(db, store_id, card_id)
+        chunks = await embed_card(db, store_id, card_id, prepared=prepared)
     logger.info("승인 card=%s store=%s chunks=%d", card_id, store_id, chunks)
     return ApproveResult(card_id=card_id, is_verified=True, chunks=chunks)
 
@@ -649,13 +674,25 @@ async def update_card(
     if not title or not content:
         raise HTTPException(422, "제목과 내용은 비울 수 없다")
     try:
+        expected = await repo.get_card(db, store_id, card_id)
+        if expected is None:
+            raise LookupError("card not found")
+        context = await card_usage_context(db, store_id, card_id) if expected["is_verified"] else None
+        if context is not None:
+            context = context.model_copy(update={"cost_phase": "OPERATING"})
+        prepared = await prepare_embedding(store_id, title, content, cost_phase="OPERATING", context=context) if context else None
         async with db.transaction():
+            current = await db.fetchrow(
+                "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
+                "where store_id = $1 and card_id = $2 for update", store_id, card_id)
+            if current is None or dict(current) != dict(expected):
+                raise HTTPException(409, "카드가 변경됐습니다. 다시 확인해 주세요.")
             if not await repo.update_card(db, store_id, card_id, title, content):
                 raise LookupError(f"card {card_id} not found in store {store_id}")
             card = await repo.get_card(db, store_id, card_id)
             chunks = 0
             if card and card["is_verified"]:
-                chunks = await embed_card(db, store_id, card_id)
+                chunks = await embed_card(db, store_id, card_id, prepared=prepared)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except HTTPException:

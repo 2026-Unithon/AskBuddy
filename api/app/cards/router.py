@@ -23,7 +23,8 @@ from app.cards.schemas import (
 )
 from app.deps import Db
 from app.errors import ApiClaims, ApiError
-from app.ingest.embed import embed_card
+from app.ingest.embed import embed_card, prepare_embedding
+from app.ingest.embed.service import card_usage_context
 from app.ingest.preprocess.storage import create_signed_read_url
 
 logger = logging.getLogger(__name__)
@@ -269,12 +270,27 @@ async def approve_card(
 ) -> CardMutationResult:
     user_id, store_id, _ = _identity(claims, owner_only=True)
     try:
+        expected = await db.fetchrow(
+            "select draft_version_id, published_version_id, review_status from knowledge_cards "
+            "where store_id = $1 and card_id = $2", store_id, card_id)
+        if expected is None:
+            raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
+        if expected["draft_version_id"] is None:
+            raise ApiError(409, "CARD_DRAFT_MISSING", "승인할 초안이 없습니다.")
+        if expected["review_status"] == "EXCLUDED":
+            raise ApiError(409, "CARD_EXCLUDED", "제외된 카드를 먼저 복원해 주세요.")
+        draft = await repo.get_version(db, store_id, expected["draft_version_id"])
+        context = await card_usage_context(db, store_id, card_id)
+        prepared = await prepare_embedding(store_id, draft["title"], draft["content"],
+                                           cost_phase=context.cost_phase, context=context)
         async with db.transaction():
             card = await repo.get_card_for_update(db, store_id, card_id)
             if card is None:
                 raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
             if card["draft_version_id"] is None:
                 raise ApiError(409, "CARD_DRAFT_MISSING", "승인할 초안이 없습니다.")
+            if any(card[key] != expected[key] for key in expected.keys()):
+                raise ApiError(409, "CARD_VERSION_CONFLICT", "임베딩 준비 중 카드가 변경됐습니다.")
             action = (
                 "PUBLISH_EDIT"
                 if card["published_version_id"] is not None
@@ -291,7 +307,7 @@ async def approve_card(
                 store_id,
                 card_id,
             )
-            await embed_card(db, store_id, card_id)
+            await embed_card(db, store_id, card_id, prepared=prepared)
             await repo.add_event(
                 db,
                 store_id,

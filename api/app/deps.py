@@ -11,6 +11,7 @@ import jwt
 from fastapi import Depends, Header, HTTPException
 
 from app.config import get_settings
+from app.db_session import ShortSession
 
 _pool: asyncpg.Pool | None = None
 
@@ -35,14 +36,13 @@ def get_pool() -> asyncpg.Pool:
     return _pool
 
 
-async def get_db() -> AsyncIterator[asyncpg.Connection]:
+async def get_db() -> AsyncIterator[ShortSession]:
     if _pool is None:
         raise HTTPException(503, "db pool not initialized")
-    async with _pool.acquire() as conn:
-        yield conn
+    yield ShortSession(_pool)
 
 
-Db = Annotated[asyncpg.Connection, Depends(get_db)]
+Db = Annotated[ShortSession, Depends(get_db)]
 
 
 # ── JWT ────────────────────────────────────────────────────────────────────

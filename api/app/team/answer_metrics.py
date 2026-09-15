@@ -48,7 +48,7 @@ def validator_metrics(candidates):
 
 
 def paired_gate(pairs, *, control_width, must_have_regressions, ledger_recall_regressed,
-                cost_neutral=False, cost_gate_passed=False):
+                cost_neutral=False, cost_gate_passed=False, must_have_ids=()):
     """같은 사전 고정 질문 ID 집합의 최소 3회 짝비교. 실측 승격은 외부 인수다."""
     if len(pairs) < 3:
         raise ValueError("최소 3회 짝비교 필요")
@@ -58,14 +58,17 @@ def paired_gate(pairs, *, control_width, must_have_regressions, ledger_recall_re
     if not ids:
         raise ValueError("빈 분모")
     deltas = []
+    observed_regressions = set()
     for baseline, candidate in pairs:
         if set(baseline) != ids or set(candidate) != ids:
             raise ValueError("실행별 질문 분모 불일치")
         if any(type(v) is not bool for v in [*baseline.values(), *candidate.values()]):
             raise ValueError("성공/실패 판정 필요")
         deltas.append(sum(candidate.values())-sum(baseline.values()))
+        observed_regressions.update(q for q in must_have_ids if baseline.get(q) is True and candidate.get(q) is False)
     threshold = max(5, ceil(control_width * (1 if cost_neutral else 1.5)))
     eligible = median(deltas) >= threshold and sum(d>0 for d in deltas)*3 >= len(deltas)*2
-    eligible = eligible and must_have_regressions==0 and not ledger_recall_regressed and cost_gate_passed
+    eligible = eligible and must_have_regressions==0 and not observed_regressions and not ledger_recall_regressed and cost_gate_passed
     return dict(deltas=deltas, median_delta=median(deltas), threshold=threshold,
-                eligible=eligible, scope="ARITHMETIC_GATE_NOT_PRODUCTION_PROMOTION")
+                eligible=eligible, observed_must_have_regressions=sorted(observed_regressions),
+                scope="ARITHMETIC_GATE_NOT_PRODUCTION_PROMOTION")

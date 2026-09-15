@@ -360,7 +360,7 @@ async def get_card(
     conn: asyncpg.Connection, store_id: int, card_id: int
 ) -> asyncpg.Record | None:
     return await conn.fetchrow(
-        "select card_id, title, content, is_verified from knowledge_cards "
+        "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
         "where store_id = $1 and card_id = $2",
         store_id, card_id,
     )

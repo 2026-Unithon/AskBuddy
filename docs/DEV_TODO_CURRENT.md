@@ -1,5 +1,10 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-15 W 측정 교정 후속: [교정 검증 기록](review/W_MEASUREMENT_FIXES_20260915.md).
+출력/원장/카드 채점의 오통과 차단, `--detail`, W 임베딩 외부 준비·짧은 연결·계측,
+중앙값/안정성/전체반복 안전성 산술을 구현했다. 사람 표본 검토·실행별 입력이 없는
+과거 BASE/W1 재평가·전체 pgvector/publication 종단 및 D21 실측은 미완료다.
+
 > 개정일: 2026-09-14
 >
 > 확인 기준: `65c2403` pull의 C0 계약 타입·D18~D21을 반영했다. 기존 런타임 분석은 `0b8e1c4` 기준이며, C0 상세 결정·계획 검토는 아래 문서를 따른다.
@@ -136,9 +141,9 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 
 ## W0. 정답지 감사와 쓰기 기준선 — 구 13.1~13.2
 
-> 2026-09-15: 감사·기준선은 끝났고 **채점기 교정이 남았다.** 현재 채점기가 단위
-> 불일치·부정·정정 문장·규격 교차를 전부 `COVERED`로 통과시킨다. 교정 전에는 어떤
-> 개선도 주장하지 않는다. 순서와 근거는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md).
+> 2026-09-15 후속: 교정 코드와 합성/격리 DB 검증은 끝났다. 실제 사람 표본 검토와
+> 과거 실행의 입력 snapshot 복구·동일 기준 재평가는 남았다. 개선은 아직 주장하지 않는다.
+> 순서와 근거는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md).
 
 - [x] 정답지 감사를 끝냈다 — **분모 278건**(dev 180·holdout 98), 판정자·판정일 기록됨, `owner_confirmed`는 전부 `TEST`(사람 라벨링이지 점주 확인이 아니다). 상호·브랜드 노출 0, 비어 있던 원본 해시 21건을 채웠다. `scripts/audit_truth.py`
 - [x] dev/holdout 분할을 확인했다. holdout 두 매장은 추출 실행 0회로 봉인이 유지되고 있다.
@@ -148,7 +153,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [x] `run_extract_eval.py`에서 원시 추출과 최종 카드 채점을 분리했다. `E-O0`는 원본→카드 종합 손실로 보존하고 `loss_stage`(OK/ASSEMBLY/CARD_ONLY/EXTRACTION)를 추가했다.
 - [x] `compare_runs.py`를 정답지 전체 고정 분모로 바꾸고 실패 실행·설정 지문·입력 자료 해시 불일치를 경고하게 했다. `variance_report.py`도 같다. 실험군 라벨이 대조군을 삼키던 문제(`like 'BASE-%'`가 `BASE-AA`까지 포함)를 반복 번호 한정으로 고쳤다.
 - [~] 출력 주장 precision·오연결·판정 불확실성을 따로 저장하고, holdout guard를 정답지 읽기 **전**으로 옮겨 사전등록 캠페인을 필수로 걸었다.
-      **남은 것: 채점기가 오답을 통과시킨다.** 단위 불일치·부정·정정 문장·규격 교차가 모두 `COVERED`로 통과한다. [계획 ①](plan/W1_MEASUREMENT_PLAN.md) 참조.
+      **남은 것: 실제 사람 표본 검토와 과거 실행 재평가.** 알려진 단위·부정·정정·규격 교차 및 출력 속성/값 반례는 코드로 차단했다. [교정 검증](review/W_MEASUREMENT_FIXES_20260915.md) 참조.
 - [x] 최초 기준선을 고정 조건 3회 + A/A 대조군으로 두 매장에서 측정했다. 전체 분모·실행별 값·유형별 결과를 보존했다. 결과는 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
       **이 수치는 채점기 교정 후 재평가 대상이다.**
 - [ ] CP-00 계측 인수 후 기준선을 실행한다. extract/assemble/STT/embedding/분류·실패/재시도 비용과 원본/전송 bytes를 run에 연결하며 `reuse-sources/cards` 결과를 최초 등록 전체 비용으로 해석하지 않는다.
