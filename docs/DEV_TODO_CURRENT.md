@@ -48,9 +48,9 @@ W는 **원본 → 사실 JSON → 카드 초안 → 검수·공개**, R은 **질
 
 # C0. 공통 계약과 병렬 개발 준비 — W 주 작성, R 필수 검토
 
-R 전체 순차 진행 위임 이후 최신 상태: [C0_R_SEQUENTIAL_STATUS.md](C0_R_SEQUENTIAL_STATUS.md). QUERY 계측·읽기 원장 집계·36개 운영 계산·요청 제한/시간 예산·지표 산술을 구현했다. PG15 원장/보안/W 임베딩 인계 29/29 및 전체 회귀 359 tests / 73 subtests 통과. [W 착수 인계](C0_W_START_HANDOFF.md)에 호출 규약·fixture·재현 명령·첫 작업을 고정했다. M2/M3·R1~R5 전체 완료는 아니다.
+R 전체 순차 진행 위임 이후 최신 상태: [C0_R_SEQUENTIAL_STATUS.md](review/C0_R_SEQUENTIAL_STATUS.md). QUERY 계측·읽기 원장 집계·36개 운영 계산·요청 제한/시간 예산·지표 산술을 구현했다. PG15 원장/보안/W 임베딩 인계 29/29 및 전체 회귀 359 tests / 73 subtests 통과. [W 착수 인계](plan/C0_W_START_HANDOFF.md)에 호출 규약·fixture·재현 명령·첫 작업을 고정했다. M2/M3·R1~R5 전체 완료는 아니다.
 
-R 순차 구현: [답변 호출 계측 기록](C0_R_ANSWER_USAGE.md). adapter와 채팅/평가 API의 DB 연결 수명 정리·trusted context/sink 주입 구현 및 오프라인 검증 완료(2026-09-15). 격리 PostgreSQL 17의 실제 원장 DB 검증 14/14 통과; 정본 PostgreSQL 15 전체 schema/채팅 종단 인수는 별도다. 다음 코드 항목은 embed 단일 진입점 계측이며 CP-00B 전체 완료로 표시하지 않는다.
+R 순차 구현: [답변 호출 계측 기록](review/C0_R_ANSWER_USAGE.md). adapter와 채팅/평가 API의 DB 연결 수명 정리·trusted context/sink 주입 구현 및 오프라인 검증 완료(2026-09-15). 격리 PostgreSQL 17의 실제 원장 DB 검증 14/14 통과; 정본 PostgreSQL 15 전체 schema/채팅 종단 인수는 별도다. 다음 코드 항목은 embed 단일 진입점 계측이며 CP-00B 전체 완료로 표시하지 않는다.
 
 병합 후 1번 작업인 답변 검증 접점 통합과 합성 연결 검증 완료: [접점 인수 기록](review/C0_WR_ANSWER_BOUNDARY.md). 실제 R3 의미 판정·CP-00B/C·DB 통합 인수는 남아 있으며, 기존 R 진행 기록 이후 변경은 이 문서에서 확인한다.
 

@@ -1,10 +1,10 @@
 # W 착수 인계 — R 측 계측 접점
 
-> 최신 원격 합류 검토: [C0_WR_PULL_REVIEW_20260915.md](C0_WR_PULL_REVIEW_20260915.md). e43c000 pull 후 374 tests / 73 subtests 및 R DB 29/29 통과. W/R 판정 규칙 차이와 W 코드 결함·실제 adapter 미연결은 별도로 남아 있다. 아래 359개 기록은 pull 이전 인수다.
+> 최신 원격 합류 검토: [C0_WR_PULL_REVIEW_20260915.md](../review/C0_WR_PULL_REVIEW_20260915.md). e43c000 pull 후 374 tests / 73 subtests 및 R DB 29/29 통과. W/R 판정 규칙 차이와 W 코드 결함·실제 adapter 미연결은 별도로 남아 있다. 아래 359개 기록은 pull 이전 인수다.
 
 2026-09-15. 범위는 CP-00B/C의 W 등록/추가자료 계측 착수다. R 전체 완료나 W 공개·품질 승격 허가를 뜻하지 않는다. 이 문서에 나오는 API와 검증 파일을 포함한 **동일 변경 묶음**을 사용하는 checkout이 기준이다.
 
-검증 결과: PostgreSQL 15.19 실제 DB 29/29, 전체 회귀 359 tests / 73 subtests 통과. 검증 범위와 소스 해시는 [C0_W_HANDOFF_VALIDATION.json](C0_W_HANDOFF_VALIDATION.json)에 기록했다.
+검증 결과: PostgreSQL 15.19 실제 DB 29/29, 전체 회귀 359 tests / 73 subtests 통과. 검증 범위와 소스 해시는 [C0_W_HANDOFF_VALIDATION.json](../review/C0_W_HANDOFF_VALIDATION.json)에 기록했다.
 
 ## 준비한 산출물
 

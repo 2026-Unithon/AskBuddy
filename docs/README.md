@@ -26,6 +26,7 @@
 |---|---|
 | [C0_COST_MEASUREMENT_PLAN.md](plan/C0_COST_MEASUREMENT_PLAN.md) | CP-00A~C 원가 계측 |
 | [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md) | 채점기 교정과 측정 구조 (①~⑤) |
+| [C0_W_START_HANDOFF.md](plan/C0_W_START_HANDOFF.md) | R 계측 접점과 W 착수 인계 |
 
 ## docs/review/ — 검증 결과
 
@@ -37,3 +38,8 @@
 | [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20260914.md) | R 구현 인수 기록 |
 | [C0_WR_ANSWER_BOUNDARY.md](review/C0_WR_ANSWER_BOUNDARY.md) | W/R 답변 검증 접점 인수 기록 |
 | [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md) | W0 기준선 측정과 채점기 결함 |
+| [C0_R_SEQUENTIAL_STATUS.md](review/C0_R_SEQUENTIAL_STATUS.md) | R 순차 진행 상태 |
+| [C0_R_ANSWER_USAGE.md](review/C0_R_ANSWER_USAGE.md) | R 답변 호출 계측 기록 |
+| [C0_R_STRICT_REVIEW_20260915.md](review/C0_R_STRICT_REVIEW_20260915.md) | R 엄밀 검토 |
+| [C0_WR_PULL_REVIEW_20260915.md](review/C0_WR_PULL_REVIEW_20260915.md) | W/R 합류 검토 |
+| `C0_W_HANDOFF_VALIDATION.json` | W 인계 검증 범위와 소스 해시 |
