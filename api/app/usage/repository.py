@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -76,35 +77,42 @@ async def finalize_attempt(
     저장만 재시도하고 끝내 안 되면 STARTED 로 남아 UNKNOWN 으로 집계된다.
     """
     u, s = attempt.usage, attempt.scale
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                update ai_usage_attempts set
-                  status=$2, reported_model=$3, provider_request_id=$4,
-                  finished_at=$5, latency_ms=$6, error_code=$7, cache_state=$8,
-                  prompt_tokens=$9, completion_tokens=$10, cached_tokens=$11,
-                  thought_tokens=$12, billable_units=$13, billable_unit_name=$14,
-                  raw_usage=$15::jsonb,
-                  input_bytes=$16, media_duration_sec=$17, page_count=$18, frame_count=$19,
-                  usage_status=$20, missing_reason=$21,
-                  known_cost_usd=$22, cost_usd=$23, price_status=$24
-                where usage_attempt_id=$1
-                """,
-                usage_attempt_id, attempt.status, attempt.reported_model,
-                attempt.provider_request_id,
-                attempt.finished_at or datetime.now(timezone.utc),
-                attempt.latency_ms, attempt.error_code, attempt.cache_state,
-                u.prompt_tokens, u.completion_tokens, u.cached_tokens,
-                u.thought_tokens, u.billable_units, u.billable_unit_name,
-                json.dumps(u.raw, ensure_ascii=False) if u.raw else None,
-                s.input_bytes, s.media_duration_sec, s.page_count, s.frame_count,
-                attempt.usage_status, attempt.missing_reason,
-                known_cost, cost, price_status,
-            )
-    except Exception as exc:
-        # 돈은 이미 나갔다. 기록만 잃는다 — STARTED 로 남아 UNKNOWN 으로 집계된다
-        logger.error("원가 기록 확정 실패 id=%s: %s", usage_attempt_id, exc)
+    for retry in range(2):
+        try:
+            async with asyncio.timeout(0.2), pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    update ai_usage_attempts set
+                      status=$2, reported_model=$3, provider_request_id=$4,
+                      finished_at=$5, latency_ms=$6, error_code=$7, cache_state=$8,
+                      prompt_tokens=$9, completion_tokens=$10, cached_tokens=$11,
+                      thought_tokens=$12, billable_units=$13, billable_unit_name=$14,
+                      raw_usage=$15::jsonb,
+                      input_bytes=$16, media_duration_sec=$17, page_count=$18, frame_count=$19,
+                      usage_status=$20, missing_reason=$21,
+                      known_cost_usd=$22, cost_usd=$23, price_status=$24
+                    where usage_attempt_id=$1 and store_id=$25
+                      and logical_call_id=$26 and attempt_no=$27
+                      and status='STARTED'
+                    """,
+                    usage_attempt_id, attempt.status, attempt.reported_model,
+                    attempt.provider_request_id,
+                    attempt.finished_at or datetime.now(timezone.utc),
+                    attempt.latency_ms, attempt.error_code, attempt.cache_state,
+                    u.prompt_tokens, u.completion_tokens, u.cached_tokens,
+                    u.thought_tokens, u.billable_units, u.billable_unit_name,
+                    json.dumps(u.raw, ensure_ascii=False) if u.raw else None,
+                    s.input_bytes, s.media_duration_sec, s.page_count, s.frame_count,
+                    attempt.usage_status, attempt.missing_reason,
+                    known_cost, cost, price_status,
+                    int(attempt.context.store_id), attempt.context.logical_call_id,
+                    attempt.context.attempt_no,
+                )
+            return
+        except Exception as exc:
+            if retry == 1:
+                # DB 저장만 최대 2회. 원문/SQL/자격 증명을 로그에 넣지 않는다.
+                logger.error("원가 기록 확정 실패 id=%s type=%s", usage_attempt_id, type(exc).__name__)
 
 
 async def rollup_extraction_run(

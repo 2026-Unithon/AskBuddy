@@ -1,11 +1,24 @@
 """공용 — 환경변수 로딩. 수정 전 팀 합의."""
 from functools import lru_cache
 from typing import Literal
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # C0 §6: 조정 가능한 초기값. 프로세스마다 별도 카운터를 두지 않는다.
+    chat_deadline_seconds: float = Field(default=5.0, gt=0, le=5)
+    search_deadline_seconds: float = Field(default=1.0, gt=0, le=1)
+    answer_deadline_seconds: float = Field(default=3.0, gt=0, le=3)
+    embedding_timeout_seconds: float = Field(default=30.0, gt=0, le=30)
+    query_embedding_timeout_seconds: float = Field(default=0.8, gt=0, le=1)
+    llm_total_budget_seconds: float = Field(default=3.0, gt=0, le=3)
+    chat_save_reserve_seconds: float = Field(default=0.5, ge=0.5, lt=5)
+    request_member_per_minute: int = Field(default=20, ge=1)
+    request_store_per_minute: int = Field(default=120, ge=1)
+    request_member_concurrency: int = Field(default=2, ge=1)
+    request_store_concurrency: int = Field(default=8, ge=1)
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "askbuddy"

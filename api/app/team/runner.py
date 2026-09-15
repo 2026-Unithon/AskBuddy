@@ -14,6 +14,9 @@ from typing import Any
 import asyncpg
 
 from app.learn.answering import compose_grounded_answer
+from app.learn.answer_usage import AnswerUsageStartError
+from app.contracts.usage import UsageContext
+from app.usage import UsageSink
 from app.reg.retrieve import retrieve_question
 from app.team.metrics import NDCG_K, CaseOutcome, score_case
 
@@ -24,16 +27,19 @@ _MAX_QUESTION_LEN = 500
 
 
 async def run_case(
-    db: asyncpg.Connection,
+    db: asyncpg.Connection | asyncpg.Pool,
     store_id: int,
     case: dict[str, Any],
     *,
     top_k: int,
     cost_per_1k: dict[str, float] | None,
+    usage_context: UsageContext | None = None,
+    usage_sink: UsageSink | None = None,
 ) -> dict[str, Any]:
     """문항 하나를 실행하고 채점된 행을 돌려준다. 실패해도 예외를 올리지 않는다."""
     question = str(case["question"]).strip()[:_MAX_QUESTION_LEN]
-    outcome = await _execute(db, store_id, question, top_k=top_k, cost_per_1k=cost_per_1k)
+    outcome = await _execute(db, store_id, question, top_k=top_k, cost_per_1k=cost_per_1k,
+                             usage_context=usage_context, usage_sink=usage_sink)
 
     score = score_case(
         expected_kind=case["expected_kind"],
@@ -81,24 +87,32 @@ async def run_case(
 
 
 async def _execute(
-    db: asyncpg.Connection,
+    db: asyncpg.Connection | asyncpg.Pool,
     store_id: int,
     question: str,
     *,
     top_k: int,
     cost_per_1k: dict[str, float] | None,
+    usage_context: UsageContext | None = None,
+    usage_sink: UsageSink | None = None,
 ) -> CaseOutcome:
+    if usage_context is not None and usage_context.store_id != str(store_id):
+        raise ValueError("평가와 usage 매장 불일치")
     started = time.perf_counter()
     try:
-        result = await retrieve_question(db, store_id, question, top_k)
+        query_context = usage_context.model_copy(update={
+            "stage": "QUERY", "logical_call_id": usage_context.logical_call_id.removesuffix(":answer") + ":query"
+        }) if usage_context is not None else None
+        result = await retrieve_question(db, store_id, question, top_k,
+            **(dict(usage_context=query_context, usage_sink=usage_sink) if query_context else {}))
     except Exception as exc:  # 문항 하나의 실패가 실행 전체를 죽이지 않는다
-        logger.warning("evaluation retrieve failed: %s", exc)
+        logger.warning("evaluation retrieve failed: %s", type(exc).__name__)
         return CaseOutcome(
             actual_kind="ERROR",
             retrieve_latency_ms=_elapsed_ms(started),
             prompt_tokens=0, completion_tokens=0, cost_usd=Decimal(0),
             answer_usage_status="NOT_CALLED",
-            error=f"retrieve: {exc}",
+            error=f"retrieve: {type(exc).__name__}",
         )
     retrieve_ms = _elapsed_ms(started)
 
@@ -117,15 +131,22 @@ async def _execute(
 
     answer_started = time.perf_counter()
     try:
-        composition = await compose_grounded_answer(question, candidates)
+        composition = await compose_grounded_answer(
+            question, candidates, **(dict(usage_context=usage_context, usage_sink=usage_sink)
+                                    if usage_context is not None or usage_sink is not None else {}))
     except Exception as exc:
-        logger.warning("evaluation answer failed: %s", exc)
+        logger.warning("evaluation answer failed: %s", type(exc).__name__)
+        not_called = isinstance(exc, AnswerUsageStartError)
         return CaseOutcome(
             actual_kind="ERROR",
             retrieved_card_ids=retrieved_ids,
             retrieve_latency_ms=retrieve_ms,
             answer_latency_ms=_elapsed_ms(answer_started),
-            error=f"answer: {exc}",
+            prompt_tokens=0 if not_called else None,
+            completion_tokens=0 if not_called else None,
+            cost_usd=Decimal(0) if not_called else None,
+            answer_usage_status="NOT_CALLED" if not_called else "UNKNOWN",
+            error=f"answer: {type(exc).__name__}",
         )
     answer_ms = _elapsed_ms(answer_started)
 
@@ -156,6 +177,8 @@ def estimate_cost(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     cost_per_1k: dict[str, float] | None,
+    usage_context: UsageContext | None = None,
+    usage_sink: UsageSink | None = None,
 ) -> Decimal | None:
     """단가를 준 실행만 비용을 계산한다. 모르는 단가를 코드에 박아 추정하지 않는다."""
     if not cost_per_1k or prompt_tokens is None or completion_tokens is None:

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import asyncio
 import re
 from typing import Any
@@ -11,7 +12,9 @@ from typing import Any
 import asyncpg
 
 from app.config import get_settings
-from app.reg.embeddings import embed_text, vector_literal
+from app.reg.embeddings import embed_text, vector_literal, recorded_embeddings
+from app.contracts.usage import UsageContext
+from app.usage import UsageSink
 
 MISS_MESSAGE = "사장님께 확인 중"
 
@@ -72,12 +75,19 @@ def _grounded(anchors: set[str], card_text: str) -> bool:
 
 
 async def retrieve_question(
-    db: asyncpg.Connection,
+    db: asyncpg.Connection | asyncpg.Pool,
     store_id: int,
     question: str,
     top_k: int = 5,
+    *,
+    usage_context: UsageContext | None = None,
+    usage_sink: UsageSink | None = None,
 ) -> dict[str, Any]:
     """hit/miss 만 판정한다. miss 면 LLM 을 부르지 않는다."""
+    if (usage_context is None) != (usage_sink is None):
+        raise ValueError("검색 계측 context/sink는 함께 필요하다")
+    if usage_context is not None and usage_context.store_id != str(store_id):
+        raise ValueError("검색과 usage 매장 불일치")
     question = question.strip()
     if len(question) < 2:
         return {
@@ -96,29 +106,34 @@ async def retrieve_question(
             "candidates": [],
         }
 
-    query_vec = await asyncio.to_thread(embed_text, question)
-    rows = await db.fetch(
-        """
-        select
-          m.card_id as id,
-          m.content,
-          m.title,
-          c.published_version_id as version_id,
-          coalesce(tc.category_name, '') as category,
-          m.score
-        from match_cards($1, $2::vector, $3) m
-        join knowledge_cards c on c.card_id = m.card_id
-        left join task_categories tc on tc.category_id = c.category_id
-        where c.store_id = $1
-          and c.review_status = 'APPROVED'
-          and c.is_verified = true
-          and c.published_version_id is not null
-        order by m.score desc
-        """,
-        store_id,
-        vector_literal(query_vec),
-        top_k,
-    )
+    if usage_context is not None:
+        query_vec = (await recorded_embeddings([question], context=usage_context, sink=usage_sink))[0]
+    else:
+        query_vec = await asyncio.to_thread(embed_text, question)
+    # pool 경로는 임베딩 호출이 끝난 뒤 조회 동안만 연결을 빌린다.
+    async with (db.acquire() if hasattr(db, "acquire") else nullcontext(db)) as conn:
+        rows = await conn.fetch(
+            """
+            select
+              m.card_id as id,
+              m.content,
+              m.title,
+              c.published_version_id as version_id,
+              coalesce(tc.category_name, '') as category,
+              m.score
+            from match_cards($1, $2::vector, $3) m
+            join knowledge_cards c on c.card_id = m.card_id
+            left join task_categories tc on tc.category_id = c.category_id
+            where c.store_id = $1
+              and c.review_status = 'APPROVED'
+              and c.is_verified = true
+              and c.published_version_id is not null
+            order by m.score desc
+            """,
+            store_id,
+            vector_literal(query_vec),
+            top_k,
+        )
 
     settings = get_settings()
     threshold = settings.retrieval_threshold

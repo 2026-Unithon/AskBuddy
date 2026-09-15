@@ -136,7 +136,7 @@ async def attempt(
     status = "SUCCEEDED"
     try:
         yield rec
-    except Exception as exc:
+    except BaseException as exc:
         status = "FAILED"
         error_code = type(exc).__name__
         # 실패해도 과금될 수 있다. 기록은 남긴다

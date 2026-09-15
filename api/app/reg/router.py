@@ -8,11 +8,19 @@
 miss 면 LLM 을 호출하지 않는다.
 """
 from __future__ import annotations
+import asyncio
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.deps import CurrentStoreId, Db
+from app.deps import CurrentStoreId, Db, Claims, get_pool, get_store_id, _claim_id
+from app.contracts.usage import UsageContext
+from app.usage import DbUsageSink
+from app.usage.repository import UsageWriteError
+from app.learn.request_limits import request_lease
+from app.config import get_settings
+from app.errors import ApiError
 from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
@@ -25,14 +33,26 @@ class RetrieveRequest(BaseModel):
 
 
 @router.post("/retrieve")
-async def retrieve(req: RetrieveRequest, store_id: CurrentStoreId, db: Db):
+async def retrieve(req: RetrieveRequest, claims: Claims):
     """검색 게이트. hit/miss 만 판정한다. miss 면 LLM 호출 금지."""
     question = req.question.strip()
     if not question:
         raise HTTPException(400, "question is empty")
 
-    await _check_requested_store(db, store_id, req.store_id)
-    result = await retrieve_question(db, store_id, question, req.top_k)
+    pool = get_pool()
+    async with pool.acquire() as db:
+        store_id = await get_store_id(claims, db)
+        await _check_requested_store(db, store_id, req.store_id)
+    try:
+        async with request_lease(pool, store_id, _claim_id(claims, "user_id")):
+            result = await asyncio.wait_for(retrieve_question(pool, store_id, question, req.top_k,
+                usage_context=UsageContext(store_id=str(store_id), cost_phase="OPERATING", stage="QUERY",
+                    logical_call_id=f"retrieve:{uuid4().hex}"), usage_sink=DbUsageSink(pool)),
+                timeout=get_settings().search_deadline_seconds)
+    except TimeoutError as exc:
+        raise ApiError(504, "DEADLINE_EXCEEDED", "검색 시간이 초과되었습니다.", retryable=True) from exc
+    except UsageWriteError as exc:
+        raise ApiError(503, "USAGE_UNAVAILABLE", "검색 계측을 시작하지 못했습니다.", retryable=True) from exc
 
     if result["kind"] == "miss":
         return {

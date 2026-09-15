@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from app.deps import Db
+from app.deps import Db, get_pool
 from app.errors import ApiClaims, ApiError
+from app.contracts.usage import UsageContext
+from app.usage import DbUsageSink
 from app.team import repository as repo
 from app.team.metrics import aggregate
+from app.team.usage_metrics import read_run_usage
 from app.team.runner import run_case
 from app.team.schemas import (
     CaseBulkUpsertRequest,
@@ -166,48 +170,50 @@ async def get_cases(
 # ── 실행 ──────────────────────────────────────────────────────────────────
 
 @router.post("/evaluations", response_model=RunDetail, status_code=201)
-async def create_evaluation(req: RunCreateRequest, db: Db, claims: TeamClaims):
+async def create_evaluation(req: RunCreateRequest, claims: TeamClaims):
     """골든셋을 실행하고 결과를 남긴다. 이전 실행은 건드리지 않는다."""
     store_id = _store_id(claims)
-    cases = await repo.list_cases(db, store_id, active_only=True, case_keys=req.case_keys)
-    if req.case_keys:
-        # 지정한 문항이 하나라도 없으면 조용히 줄여서 돌리지 않는다.
-        # 문항 수가 달라진 실행끼리는 비교가 성립하지 않는다
-        missing = sorted(set(req.case_keys) - {c["case_key"] for c in cases})
-        if missing:
+    pool = get_pool()
+    async with pool.acquire() as db:
+        cases = await repo.list_cases(db, store_id, active_only=True, case_keys=req.case_keys)
+        if req.case_keys:
+            # 지정한 문항이 하나라도 없으면 조용히 줄여서 돌리지 않는다.
+            # 문항 수가 달라진 실행끼리는 비교가 성립하지 않는다
+            missing = sorted(set(req.case_keys) - {c["case_key"] for c in cases})
+            if missing:
+                raise ApiError(
+                    422,
+                    "UNKNOWN_EVALUATION_CASES",
+                    "등록되지 않았거나 비활성인 문항이 있습니다.",
+                    details={"case_keys": missing},
+                )
+        if not cases:
             raise ApiError(
                 422,
-                "UNKNOWN_EVALUATION_CASES",
-                "등록되지 않았거나 비활성인 문항이 있습니다.",
-                details={"case_keys": missing},
+                "NO_EVALUATION_CASES",
+                "실행할 골든셋 문항이 없습니다. 먼저 문항을 등록해 주세요.",
             )
-    if not cases:
-        raise ApiError(
-            422,
-            "NO_EVALUATION_CASES",
-            "실행할 골든셋 문항이 없습니다. 먼저 문항을 등록해 주세요.",
-        )
 
-    snapshot = settings_snapshot(req.feature_flags)
-    run = await repo.create_run(
-        db,
-        store_id,
-        {
-            "label": req.label,
-            "code_version": code_version(),
-            "prompt_version": prompt_version(),
-            "answer_model": snapshot["answer_model"],
-            "embedding_model": snapshot["embedding_model"],
-            "answer_mode": snapshot["answer_mode"],
-            "retrieval_threshold": snapshot["retrieval_threshold"],
-            "retrieval_strong_score": snapshot["retrieval_strong_score"],
-            "feature_flags": req.feature_flags,
-            "settings": snapshot,
-            "case_count": len(cases),
-            "notes": req.notes,
-            "created_by": claims.get("user_id"),
-        },
-    )
+        snapshot = settings_snapshot(req.feature_flags)
+        run = await repo.create_run(
+            db,
+            store_id,
+            {
+                "label": req.label,
+                "code_version": code_version(),
+                "prompt_version": prompt_version(),
+                "answer_model": snapshot["answer_model"],
+                "embedding_model": snapshot["embedding_model"],
+                "answer_mode": snapshot["answer_mode"],
+                "retrieval_threshold": snapshot["retrieval_threshold"],
+                "retrieval_strong_score": snapshot["retrieval_strong_score"],
+                "feature_flags": req.feature_flags,
+                "settings": snapshot,
+                "case_count": len(cases),
+                "notes": req.notes,
+                "created_by": claims.get("user_id"),
+            },
+        )
     run_id = int(run["run_id"])
     logger.info(
         "evaluation run started: run_id=%s store_id=%s label=%s cases=%s code=%s prompt=%s",
@@ -218,28 +224,42 @@ async def create_evaluation(req: RunCreateRequest, db: Db, claims: TeamClaims):
     for case in cases:
         rows.append(
             await run_case(
-                db,
+                pool,
                 store_id,
                 dict(case),
                 top_k=req.top_k,
                 cost_per_1k=req.cost_per_1k,
+                usage_sink=DbUsageSink(pool),
+                usage_context=UsageContext(
+                    store_id=str(store_id), cost_phase="OPERATING", cost_purpose="EVALUATION",
+                    stage="ANSWER", evaluation_run_id=str(run_id),
+                    operation_id=f"eval:{run_id}:case:{case['case_id']}",
+                    logical_call_id=f"eval:{run_id}:case:{case['case_id']}:answer"),
             )
         )
 
     metrics = aggregate(rows)
     status = "FAILED" if metrics.get("error_count", 0) == len(rows) else "SUCCEEDED"
-    async with db.transaction():
-        await repo.insert_results(db, run_id, store_id, rows)
-        finished = await repo.finish_run(
-            db, run_id, store_id, status=status, metrics=metrics, case_count=len(rows)
-        )
+    async with pool.acquire() as db:
+        async with db.transaction():
+            # 기존 답변 추정액에 더하지 않고 원장 관측을 독립 필드로 보존한다.
+            metrics["read_usage_receipts"] = await read_run_usage(db, store_id, run_id)
+            observed_total = metrics["read_usage_receipts"]["total_cost_usd"]
+            metrics["read_usage_receipts"]["question_count"] = len(rows)
+            metrics["read_usage_receipts"]["mean_read_cost_per_case_usd"] = (
+                str(Decimal(observed_total)/len(rows)) if observed_total is not None and rows else None)
+            await repo.insert_results(db, run_id, store_id, rows)
+            finished = await repo.finish_run(
+                db, run_id, store_id, status=status, metrics=metrics, case_count=len(rows)
+            )
 
     logger.info(
         "evaluation run finished: run_id=%s status=%s pass_rate=%s ungrounded=%s p95=%sms",
         run_id, status, metrics.get("pass_rate"),
         metrics.get("ungrounded_count"), metrics.get("latency_p95_ms"),
     )
-    results = await repo.list_results(db, store_id, run_id)
+    async with pool.acquire() as db:
+        results = await repo.list_results(db, store_id, run_id)
     return RunDetail(run=_run(finished), results=[_result(r) for r in results])
 
 

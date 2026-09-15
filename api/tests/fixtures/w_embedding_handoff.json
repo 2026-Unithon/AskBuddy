@@ -1,0 +1,18 @@
+{
+  "schema_version": "r_embedding_handoff/v1",
+  "mode": "SYNTHETIC_PROVIDER_ONLY",
+  "context": {
+    "store_id": "1",
+    "cost_phase": "REGISTRATION",
+    "cost_purpose": "DEVELOPMENT",
+    "stage": "EMBED",
+    "logical_call_id": "w-handoff-embedding",
+    "attempt_no": 1,
+    "registration_campaign_id": "synthetic-campaign"
+  },
+  "texts": ["합성 카드 하나", "합성 카드 둘"],
+  "provider_usage": {"prompt_tokens": 12, "total_tokens": 12},
+  "expected_provider_calls": 1,
+  "expected_receipts": 1,
+  "expected_vectors": [[1.0], [2.0]]
+}

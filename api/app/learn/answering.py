@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -11,6 +12,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+from app.contracts.usage import UsageContext
+from app.usage.recorder import UsageSink
+from app.learn.answer_usage import (
+    AnswerUsageStartError, answer_attempt, checked_context, observe_answer,
+)
 
 logger = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "grounded_answer.ko.txt"
@@ -140,10 +146,14 @@ def _fallback(
 async def compose_grounded_answer(
     question: str,
     candidates: list[dict],
+    *,
+    usage_context: UsageContext | None = None,
+    usage_sink: UsageSink | None = None,
 ) -> AnswerComposition:
     """구조화 생성 → 서버 검증. 어느 실패든 승인 카드 원문으로 폴백한다."""
     if not candidates:
         raise ValueError("at least one approved card candidate is required")
+    usage_context = checked_context(usage_context, usage_sink)
 
     settings = get_settings()
     if settings.answer_mode == "extractive":
@@ -169,20 +179,28 @@ async def compose_grounded_answer(
             question=question,
             cards_json=json.dumps(evidence, ensure_ascii=False),
         )
-        client = genai.Client(api_key=settings.gemini_api_key)
-        model_call_status = "UNKNOWN"
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=GroundedAnswerPayload,
-                temperature=0.0,
-            ),
-        )
-        model_call_status = "OBSERVED"
-        usage = _usage_of(response)
-        payload = GroundedAnswerPayload.model_validate_json(response.text or "")
+        # SDK 내부 재시도를 숨기지 않는다. 1 receipt는 실제 시도 1회다.
+        client = genai.Client(api_key=settings.gemini_api_key,
+                              http_options=types.HttpOptions(
+                                  retry_options=types.HttpRetryOptions(attempts=1)))
+        async with answer_attempt(usage_sink, usage_context, model=settings.gemini_model,
+                                  prompt_hash="sha256:" + hashlib.sha256(prompt.encode()).hexdigest()) as rec:
+            if rec is not None:
+                rec.measure_input(input_bytes=len(prompt.encode("utf-8")))
+            model_call_status = "UNKNOWN"
+            response = await client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=GroundedAnswerPayload,
+                    temperature=0.0,
+                ),
+            )
+            model_call_status = "OBSERVED"
+            usage = _usage_of(response)
+            observe_answer(rec, response)
+            payload = GroundedAnswerPayload.model_validate_json(response.text or "")
         valid, reason, selected = validate_grounded_payload(payload, candidates[:3])
         if not valid:
             return _fallback(candidates, reason, usage=usage, model_call_status=model_call_status)
@@ -194,6 +212,8 @@ async def compose_grounded_answer(
             usage=usage,
             model_call_status=model_call_status,
         )
+    except AnswerUsageStartError:
+        raise
     except Exception as exc:
         logger.warning("grounded answer generation failed: %s", type(exc).__name__)
         return _fallback(candidates, "generation_failed", usage=usage, model_call_status=model_call_status)

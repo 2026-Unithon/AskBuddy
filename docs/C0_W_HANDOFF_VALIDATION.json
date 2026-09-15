@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-15",
+  "base_commit": "691fe5eb7cf580ac9957615b268638499fff94a6",
+  "workspace_changes_included": true,
+  "postgres": "15.19",
+  "database_checks": {
+    "answer_usage": 14,
+    "request_security": 9,
+    "embedding_and_read_rollup": 6
+  },
+  "unit_tests": {
+    "passed": 359,
+    "subtests_passed": 73,
+    "warnings": 1
+  },
+  "db_isolation": "disposable localhost container; minimal dependency fixtures",
+  "external_provider": "synthetic only; no paid calls",
+  "container_cleanup_verified": true,
+  "not_validated": [
+    "full application migration rebuild",
+    "publication/chat end-to-end",
+    "production database deployment",
+    "actual model quality and billing"
+  ],
+  "source_sha256": {
+    "api/app/reg/embeddings.py": "f07d4e36912247f0f840ca1a2d8cf090906686d8c2b5d9cc7e3fdb5691230bc5",
+    "api/app/config.py": "c2eaff5236f4b5a7118948eff464adfd77cedd8e1db79c595adf2a8d1ec885bf",
+    "api/app/usage/recorder.py": "18ff194c13fb7d1d5520996e5f0d60691f2fedf93a819a638d203c2469acb35c",
+    "api/app/usage/repository.py": "3d70007d70782562bc7923ef9586ef4838b92fbbf0689426d0623c9edba05e21",
+    "api/app/learn/request_limits.py": "00511cf3958a24a1fc81c32ca81cccfd395b49982320faac1c69e50dfc88a36d",
+    "api/app/team/usage_metrics.py": "8b76c732e180dda7e2888f2bbab93e659e283992010647f7cbcaeed05395790c",
+    "api/scripts/verify_r_answer_usage.py": "cc50f4feeb42bea3f0b020ba75e1f154e01967f85904ad5636763414ecb07e6b",
+    "api/scripts/verify_r_security.py": "cfa7b6d0c02b3f359dc809756256e90b363b6dd5b53d0e70940df8d1698e0e8d",
+    "api/scripts/verify_r_embedding_usage.py": "ec6cd063c1bd7f6be8278f008d27b524ff82637183421d3e5e0866e67dd23f7c",
+    "api/scripts/verify_r_handoff.ps1": "f7590ecebd52b0b27c7ba6e9b7a4d44325af0aa101cf0069b389b4ce2f1fface",
+    "api/tests/fixtures/w_embedding_handoff.json": "0cc90769c386d408b4e225a1fe14d18333c745cb8fd3e130bceb0237e9497246",
+    "supabase/migrations/20260915090000_mc0_usage_ledger.sql": "30389f4ae082aa677b10a04b3114a1a138728b283d3f8e62116dca756bc2a89a",
+    "supabase/migrations/20260915170000_r_request_limits.sql": "c9b2b9e0e422dd859e06960a8803f67821c26674db696b60017fd86d97058268",
+    "api/app/learn/router.py": "da66e1952c3f4ec5277fdd6ef3c27d42458246e23791cdb28ec84312b0aface9",
+    "api/app/team/answer_metrics.py": "28d70c0e754453010765e817a6d39db108467ca1a83da0c7fd3d2616e4b679cb",
+    "api/tests/test_r_remaining_costs.py": "0218192494e8df3136049772be871bb6babfb8979da18a9e3205f0d0e47fe27d",
+    "api/tests/test_r_usage_routes.py": "d0fce1efce76bfc89a7b1bf7666f0d1e26f4f718b3aeb654fde18d9f2ead6176",
+    "api/tests/test_r_answer_metrics.py": "e5aa8f561fe252e92e18da7f6ee090027fc3fdafb5c4424990b895f80f8e6687"
+  },
+  "review_document": "docs/C0_R_STRICT_REVIEW_20260915.md"
+}

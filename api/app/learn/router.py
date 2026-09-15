@@ -8,14 +8,22 @@ store_id 는 JWT 에서만 해석한다 (불변식 4).
 from __future__ import annotations
 
 import json
+import asyncio
+from uuid import uuid4
 from dataclasses import replace
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.cards.router import _evidence_items
-from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
+from app.deps import Claims, CurrentStoreId, CurrentUserId, Db, get_pool, get_store_id
 from app.errors import ApiError
+from app.contracts.usage import UsageContext
+from app.usage import DbUsageSink
+from app.usage.repository import UsageWriteError
+from app.learn.answer_usage import AnswerUsageStartError
+from app.learn.request_limits import request_lease
+from app.config import get_settings
 from app.learn.answering import AnswerComposition, compose_grounded_answer
 from app.learn.faq import list_faqs as list_faq_rows
 from app.learn.knowledge_apply import (
@@ -109,16 +117,24 @@ async def _record_pending_occurrence(
     question_id: int,
     member_id: int,
     message_id: int | None,
+    *, store_id: int,
 ) -> None:
     await db.execute(
         """
         insert into pending_question_occurrences (question_id, member_id, message_id)
-        values ($1, $2, $3)
+        select $1, $2, $3
+        from pending_questions q
+        join store_members m on m.member_id=$2 and m.store_id=q.store_id
+        where q.question_id=$1 and q.store_id=$4
+          and ($3::bigint is null or exists (
+            select 1 from chat_messages cm join chat_sessions cs on cs.session_id=cm.session_id
+            where cm.message_id=$3 and cs.store_id=$4 and cs.member_id=$2))
         on conflict do nothing
         """,
         question_id,
         member_id,
         message_id,
+        store_id,
     )
 
 
@@ -185,7 +201,7 @@ async def create_pending(
         existing = await _waiting_same_question(db, store_id, question_key)
         if existing:
             await _record_pending_occurrence(
-                db, int(existing["question_id"]), member_id, req.message_id
+                db, int(existing["question_id"]), member_id, req.message_id, store_id=store_id
             )
             return {
                 "question_id": int(existing["question_id"]),
@@ -210,7 +226,7 @@ async def create_pending(
             req.miss_reason,
         )
         await _record_pending_occurrence(
-            db, int(row["question_id"]), member_id, req.message_id
+            db, int(row["question_id"]), member_id, req.message_id, store_id=store_id
         )
         notification_id = await create_pending_question_notification(
             db, store_id, int(row["question_id"]), question
@@ -922,142 +938,191 @@ def _iso(value) -> str:
 
 
 @router.post("/chat")
-async def ask_chat(
+async def ask_chat(req: ChatAskRequest, background: BackgroundTasks, claims: Claims, user_id: CurrentUserId):
+    deadline = asyncio.get_running_loop().time() + get_settings().chat_deadline_seconds
+    completed_response = None
+    try:
+        async with asyncio.timeout_at(deadline):
+            pool = get_pool()
+            async with pool.acquire() as db:
+                store_id = await get_store_id(claims, db)
+            async with request_lease(pool, store_id, user_id):
+                completed_response = await _ask_chat(req, background, claims, user_id, deadline=deadline)
+            return completed_response
+    except TimeoutError as exc:
+        # 저장을 마친 뒤 lease 정리가 취소되어도 저장 성공을 retryable 실패로 바꾸지 않는다.
+        if completed_response is not None:
+            return completed_response
+        raise ApiError(504, "DEADLINE_EXCEEDED", "답변 처리 시간이 초과되었습니다.", retryable=True) from exc
+    except UsageWriteError as exc:
+        raise ApiError(503, "USAGE_UNAVAILABLE", "검색 계측을 시작하지 못했습니다.", retryable=True) from exc
+
+
+async def _ask_chat(
     req: ChatAskRequest,
     background: BackgroundTasks,
-    db: Db,
-    store_id: CurrentStoreId,
+    claims: Claims,
     user_id: CurrentUserId,
+    *, deadline: float,
 ):
     """검색 게이트 → 근거 제한 생성/원문 폴백 → 대화·citation 원자 저장."""
     question = req.question.strip()
     if not question:
         raise HTTPException(400, "question is empty")
 
-    member_id = await _member_id(db, store_id, user_id)
-    result = await retrieve_question(db, store_id, question)
-    composition = (
-        await compose_grounded_answer(question, result["candidates"])
-        if result["kind"] == "hit"
-        else None
-    )
+    pool = get_pool()
+    async with pool.acquire() as db:
+        store_id = await get_store_id(claims, db)
+        member_id = await _member_id(db, store_id, user_id)
+    operation_id = uuid4().hex
+    loop = asyncio.get_running_loop()
+    settings = get_settings()
+    model_started = loop.time()
+    search_budget = min(settings.search_deadline_seconds, deadline-loop.time()-settings.chat_save_reserve_seconds)
+    if search_budget <= 0:
+        raise TimeoutError()
+    result = await asyncio.wait_for(retrieve_question(pool, store_id, question, usage_sink=DbUsageSink(pool),
+        usage_context=UsageContext(store_id=str(store_id), cost_phase="OPERATING",
+            cost_purpose="PRODUCT", stage="QUERY", operation_id=operation_id,
+            logical_call_id=f"chat:{operation_id}:query")), timeout=search_budget)
+    answer_budget = min(settings.answer_deadline_seconds,
+                        settings.llm_total_budget_seconds-(loop.time()-model_started),
+                        deadline-loop.time()-settings.chat_save_reserve_seconds)
+    if result["kind"] == "hit" and answer_budget <= 0:
+        raise TimeoutError()
+    try:
+        composition = (
+            await asyncio.wait_for(compose_grounded_answer(
+                question, result["candidates"], usage_sink=DbUsageSink(pool),
+                usage_context=UsageContext(
+                    store_id=str(store_id), cost_phase="OPERATING", cost_purpose="PRODUCT",
+                    stage="ANSWER", operation_id=operation_id,
+                    logical_call_id=f"chat:{operation_id}:answer")), timeout=answer_budget)
+            if result["kind"] == "hit" else None
+        )
+    except AnswerUsageStartError as exc:
+        raise ApiError(503, "USAGE_UNAVAILABLE", "답변 계측을 시작하지 못했습니다.",
+                       retryable=True) from exc
 
     notification_id: int | None = None
-    async with db.transaction():
-        session_id = await _open_session(db, store_id, member_id)
-        user_message_id = int(
-            await db.fetchval(
-                """
-                insert into chat_messages (session_id, sender_type, content)
-                values ($1, 'USER', $2)
-                returning message_id
-                """,
-                session_id,
-                question,
-            )
-        )
-
-        pending_question_id = None
-        citations: list[dict] = []
-
-        use_hit = (
-            composition is not None
-            and await _citations_are_current(db, store_id, composition)
-        )
-        if use_hit:
-            assert composition is not None
-            buddy_content = composition.content
-            buddy_id = int(
+    async with pool.acquire() as db:
+        # 외부 호출 중 탈퇴/권한 변경이 있었으면 대화를 저장하지 않는다.
+        await get_store_id(claims, db)
+        member_id = await _member_id(db, store_id, user_id)
+        async with db.transaction():
+            session_id = await _open_session(db, store_id, member_id)
+            user_message_id = int(
                 await db.fetchval(
                     """
-                    insert into chat_messages (
-                      session_id, sender_type, content, answer_type,
-                      answer_source, grounding_status
-                    )
-                    values ($1, 'BUDDY', $2, 'ANSWERED', $3, $4)
+                    insert into chat_messages (session_id, sender_type, content)
+                    values ($1, 'USER', $2)
                     returning message_id
                     """,
                     session_id,
-                    buddy_content,
-                    composition.source,
-                    composition.grounding_status,
+                    question,
                 )
             )
-            for card in composition.candidates:
-                relevance = round(float(card["score"]) * 100, 2)
-                await db.execute(
-                    """
-                    insert into message_citations (
-                      message_id, card_id, version_id, relevance
-                    )
-                    values ($1, $2, $3, $4)
-                    """,
-                    buddy_id,
-                    card["id"],
-                    card["version_id"],
-                    relevance,
-                )
-                citations.append(
-                    {
-                        "card_id": card["id"],
-                        "version_id": card["version_id"],
-                        "title": card["title"] or card["category"],
-                        "relevance": relevance,
-                    }
-                )
-            answer_type = "ANSWERED"
-            answer_source = composition.source
-            grounding_status = composition.grounding_status
-        else:
-            buddy_content = "아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏"
-            buddy_id = int(
-                await db.fetchval(
-                    """
-                    insert into chat_messages (
-                      session_id, sender_type, content, answer_type,
-                      answer_source, grounding_status
-                    )
-                    values ($1, 'BUDDY', $2, 'NO_ANSWER',
-                            'MISS', 'NOT_APPLICABLE')
-                    returning message_id
-                    """,
-                    session_id,
-                    buddy_content,
-                )
+
+            pending_question_id = None
+            citations: list[dict] = []
+
+            use_hit = (
+                composition is not None
+                and await _citations_are_current(db, store_id, composition)
             )
-            question_key = _question_key(question[:500])
-            await _lock_pending_question_key(db, store_id, question_key)
-            pending_row = await _waiting_same_question(db, store_id, question_key)
-            if pending_row:
-                pending_question_id = int(pending_row["question_id"])
-            else:
-                pending_question_id = int(
+            if use_hit:
+                assert composition is not None
+                buddy_content = composition.content
+                buddy_id = int(
                     await db.fetchval(
                         """
-                        insert into pending_questions (
-                          store_id, member_id, message_id,
-                          question_text, miss_reason, status
+                        insert into chat_messages (
+                          session_id, sender_type, content, answer_type,
+                          answer_source, grounding_status
                         )
-                        values ($1, $2, $3, $4, $5, 'WAITING')
-                        returning question_id
+                        values ($1, 'BUDDY', $2, 'ANSWERED', $3, $4)
+                        returning message_id
                         """,
-                        store_id,
-                        member_id,
-                        user_message_id,
-                        question[:500],
-                        result.get("reason", "no_match"),
-                        )
+                        session_id,
+                        buddy_content,
+                        composition.source,
+                        composition.grounding_status,
                     )
-                notification_id = await create_pending_question_notification(
-                    db, store_id, pending_question_id, question[:500]
                 )
-            await _record_pending_occurrence(
-                db, pending_question_id, member_id, user_message_id
-            )
-            answer_type = "NO_ANSWER"
-            answer_source = "MISS"
-            grounding_status = "NOT_APPLICABLE"
-
+                for card in composition.candidates:
+                    relevance = round(float(card["score"]) * 100, 2)
+                    await db.execute(
+                        """
+                        insert into message_citations (
+                          message_id, card_id, version_id, relevance
+                        )
+                        values ($1, $2, $3, $4)
+                        """,
+                        buddy_id,
+                        card["id"],
+                        card["version_id"],
+                        relevance,
+                    )
+                    citations.append(
+                        {
+                            "card_id": card["id"],
+                            "version_id": card["version_id"],
+                            "title": card["title"] or card["category"],
+                            "relevance": relevance,
+                        }
+                    )
+                answer_type = "ANSWERED"
+                answer_source = composition.source
+                grounding_status = composition.grounding_status
+            else:
+                buddy_content = "아직 확인된 내용이 없어요. 사장님께 확인 중이에요 🙏"
+                buddy_id = int(
+                    await db.fetchval(
+                        """
+                        insert into chat_messages (
+                          session_id, sender_type, content, answer_type,
+                          answer_source, grounding_status
+                        )
+                        values ($1, 'BUDDY', $2, 'NO_ANSWER',
+                                'MISS', 'NOT_APPLICABLE')
+                        returning message_id
+                        """,
+                        session_id,
+                        buddy_content,
+                    )
+                )
+                question_key = _question_key(question[:500])
+                await _lock_pending_question_key(db, store_id, question_key)
+                pending_row = await _waiting_same_question(db, store_id, question_key)
+                if pending_row:
+                    pending_question_id = int(pending_row["question_id"])
+                else:
+                    pending_question_id = int(
+                        await db.fetchval(
+                            """
+                            insert into pending_questions (
+                              store_id, member_id, message_id,
+                              question_text, miss_reason, status
+                            )
+                            values ($1, $2, $3, $4, $5, 'WAITING')
+                            returning question_id
+                            """,
+                            store_id,
+                            member_id,
+                            user_message_id,
+                            question[:500],
+                            result.get("reason", "no_match"),
+                            )
+                        )
+                    notification_id = await create_pending_question_notification(
+                        db, store_id, pending_question_id, question[:500]
+                    )
+                await _record_pending_occurrence(
+                    db, pending_question_id, member_id, user_message_id, store_id=store_id
+                )
+                answer_type = "NO_ANSWER"
+                answer_source = "MISS"
+                grounding_status = "NOT_APPLICABLE"
     if notification_id is not None:
         background.add_task(deliver_notification, store_id, notification_id)
 

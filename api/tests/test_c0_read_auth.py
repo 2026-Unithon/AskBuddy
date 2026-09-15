@@ -1,5 +1,6 @@
 """실제 JWT dependency와 라우터를 통과하는 매장 격리 API 테스트."""
 import unittest
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -46,6 +47,14 @@ class AuthTest(unittest.TestCase):
             yield self.db
 
         app.dependency_overrides[get_db] = fake_db
+        pool = SimpleNamespace(acquire=asynccontextmanager(fake_db))
+        @asynccontextmanager
+        async def lease(*args):
+            yield "synthetic"
+        for name, value in (("get_pool", lambda: pool), ("request_lease", lease)):
+            item = patch("app.reg.router." + name, value)
+            item.start()
+            self.addCleanup(item.stop)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
 
