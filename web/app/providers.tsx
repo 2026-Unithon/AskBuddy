@@ -3,6 +3,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { AppProvider } from "@/lib/store";
+import { ApiError } from "@/lib/api";
+import { SessionExpiryHandler } from "@/components/session-expiry-handler";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -13,11 +15,13 @@ export function Providers({ children }: { children: ReactNode }) {
             refetchOnWindowFocus: true,
             refetchOnReconnect: true,
             retry: (failureCount, error) => {
-              const status = error && typeof error === "object" && "status" in error
-                ? Number(error.status)
-                : 0;
-              return status >= 400 && status < 500 ? false : failureCount < 2;
+              if (error instanceof ApiError) return error.retryable && failureCount < 2;
+              return failureCount < 2;
             },
+            retryDelay: (attempt, error) =>
+              error instanceof ApiError && error.retryAfterMs !== null
+                ? Math.min(error.retryAfterMs, 30_000)
+                : Math.min(1_000 * 2 ** attempt, 8_000),
           },
           mutations: { retry: false },
         },
@@ -26,7 +30,10 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppProvider>{children}</AppProvider>
+      <AppProvider>
+        <SessionExpiryHandler />
+        {children}
+      </AppProvider>
     </QueryClientProvider>
   );
 }

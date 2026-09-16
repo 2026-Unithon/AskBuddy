@@ -20,9 +20,9 @@ router = APIRouter()
 def _default_destination(role: str, has_store: bool, guide_completed: bool) -> str:
     if role == "OWNER":
         if not has_store:
-            return "/owner/setup"
+            return "/owner/intent"
         return "/owner/questions" if guide_completed else "/owner/upload"
-    return "/staff/roadmap" if has_store else "/staff/join"
+    return "/staff/roadmap" if has_store else "/staff/auth"
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
@@ -87,7 +87,9 @@ async def get_bootstrap(
                where store_id = $1
                  and review_status <> 'EXCLUDED'
                  and (review_status in ('PENDING', 'NEEDS_REVIEW')
-                      or needs_review_reason is not null)) as pending_cards
+                      or needs_review_reason is not null))
+              + (select count(*) from knowledge_change_proposals
+                 where store_id = $1 and status = 'PENDING_REVIEW') as pending_cards
             """,
             store_id,
         )

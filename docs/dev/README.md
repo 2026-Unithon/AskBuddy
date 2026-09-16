@@ -31,6 +31,7 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 |---|---|
 | [C0_COST_MEASUREMENT_PLAN.md](plan/C0_COST_MEASUREMENT_PLAN.md) | CP-00A~C 원가 계측 |
 | [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md) | 채점기 교정과 측정 구조 (①~⑤) |
+| [W_EVAL_CAMPAIGN_V1.md](plan/W_EVAL_CAMPAIGN_V1.md) | W 평가 캠페인 사전등록·잠금 계약 |
 | [C0_W_START_HANDOFF.md](plan/C0_W_START_HANDOFF.md) | R 계측 접점과 W 착수 인계 |
 
 ## docs/dev/review/ — 검증 결과
@@ -49,3 +50,4 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 | [C0_WR_PULL_REVIEW_20260915.md](review/C0_WR_PULL_REVIEW_20260915.md) | W/R 합류 검토 |
 | `C0_W_HANDOFF_VALIDATION.json` | W 인계 검증 범위와 소스 해시 |
 | [W_MEASUREMENT_FIXES_20260915.md](review/W_MEASUREMENT_FIXES_20260915.md) | 채점·CLI·W 임베딩 연결/계측·반복 산술 교정과 미완료 재평가 |
+| [W_EVAL_CAMPAIGN_VALIDATION_20260916.md](review/W_EVAL_CAMPAIGN_VALIDATION_20260916.md) | split/hash/후보/실행표/예산·개봉 잠금 검증 |

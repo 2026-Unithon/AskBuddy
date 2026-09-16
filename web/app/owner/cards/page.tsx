@@ -72,8 +72,9 @@ export default function CardsPage() {
   const cardAction = useMutation({
     mutationFn: ({ cardId, action }: { cardId: number; action: "approve" | "exclude" | "restore" }) =>
       mutateProductCard(cardId, action, state.token!),
-    onSuccess: async (_, variables) => {
-      await Promise.all([
+    onSuccess: (_, variables) => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.card(state.storeId, variables.cardId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
@@ -86,8 +87,9 @@ export default function CardsPage() {
   const proposalAction = useMutation({
     mutationFn: ({ proposalId, action }: { proposalId: number; action: "approve" | "dismiss" }) =>
       resolveKnowledgeProposal(proposalId, action, state.token!),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.staff(state.storeId) }),

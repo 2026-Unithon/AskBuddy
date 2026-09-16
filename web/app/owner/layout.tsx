@@ -4,13 +4,16 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { OwnerJobMonitor } from "@/components/owner-job-monitor";
 import { OwnerBottomNav } from "@/components/owner/owner-bottom-nav";
+import { AuthGateState } from "@/components/auth-gate-state";
 import { useAuthGuard } from "@/lib/guard";
 
 export default function OwnerLayout({ children }: { children: ReactNode }) {
-  const { ready } = useAuthGuard("OWNER", "/owner/auth");
+  const auth = useAuthGuard("OWNER", "/owner/auth");
   const pathname = usePathname();
 
-  if (!ready) return null;
+  if (!auth.ready) {
+    return <AuthGateState state={auth.state} onRetry={auth.retry} />;
+  }
 
   const showBottomNav =
     pathname === "/owner/upload" ||

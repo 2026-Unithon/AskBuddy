@@ -180,9 +180,10 @@ export default function QuestionsPage() {
   const answerMutation = useMutation({
     mutationFn: ({ questionId, text }: { questionId: number; text: string }) =>
       answerPending(questionId, text, state.token!),
-    onSuccess: async () => {
+    onSuccess: () => {
       setSubmitError(null);
-      await Promise.all([
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.questions(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.pending(state.storeId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),

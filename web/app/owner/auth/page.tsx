@@ -7,16 +7,16 @@ import { useApp } from "@/lib/store";
 import { ApiError, createStore, login, signup } from "@/lib/api";
 
 type Tab = "login" | "signup";
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export default function OwnerAuthPage() {
   const router = useRouter();
   const { dispatch } = useApp();
   const [tab, setTab] = useState<Tab>("login");
 
-  // 심사·체험용 데모 계정을 미리 채워둔다. 처음 오는 사람이 가입부터 하지 않고
-  // 바로 눌러서 볼 수 있어야 한다. 지우고 자기 계정으로 로그인해도 된다.
-  const [loginId, setLoginId] = useState("owner@demo.cafe");
-  const [loginPw, setLoginPw] = useState("demo1234");
+  // 데모 자격 증명은 명시적으로 켠 환경에서만 노출한다.
+  const [loginId, setLoginId] = useState(DEMO_MODE ? "owner@demo.cafe" : "");
+  const [loginPw, setLoginPw] = useState(DEMO_MODE ? "demo1234" : "");
 
   const [name, setName] = useState("");
   const [storeName, setStoreName] = useState("");
@@ -56,7 +56,6 @@ export default function OwnerAuthPage() {
         type: "SET_AUTH",
         token,
         role: "OWNER",
-        displayName: user.name,
         userId: user.user_id,
         storeId: user.store_id ?? null,
       });
@@ -84,7 +83,6 @@ export default function OwnerAuthPage() {
         type: "SET_AUTH",
         token: created.token,
         role: "OWNER",
-        displayName: created.user.name,
         userId: created.user.user_id,
         storeId: created.user.store_id ?? null,
       });
@@ -98,8 +96,6 @@ export default function OwnerAuthPage() {
         type: "SET_STORE",
         token: store.token,
         storeId: store.store.store_id,
-        storeSlug: store.store.store_slug,
-        storeName: store.store.store_name,
       });
       router.push("/owner/intent");
     } catch (err) {
@@ -158,9 +154,11 @@ export default function OwnerAuthPage() {
             <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
               {busy ? "확인 중…" : "로그인"}
             </Button>
-            <p className="mt-3 text-center text-base font-bold text-brand-700">
-              로그인 버튼만 누르시면 이용 가능 하십니다~!
-            </p>
+            {DEMO_MODE && (
+              <p className="mt-3 text-center text-sm font-bold text-brand-700">
+                데모 계정이 입력되어 있습니다.
+              </p>
+            )}
           </form>
         ) : (
           <form onSubmit={handleSignup} className="flex flex-col gap-3">

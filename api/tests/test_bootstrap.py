@@ -18,13 +18,13 @@ class FakeDb:
 
 class BootstrapTest(unittest.IsolatedAsyncioTestCase):
     def test_destinations(self):
-        self.assertEqual(_default_destination("OWNER", False, False), "/owner/setup")
+        self.assertEqual(_default_destination("OWNER", False, False), "/owner/intent")
         self.assertEqual(_default_destination("OWNER", True, False), "/owner/upload")
         self.assertEqual(_default_destination("OWNER", True, True), "/owner/questions")
-        self.assertEqual(_default_destination("STAFF", False, False), "/staff/join")
+        self.assertEqual(_default_destination("STAFF", False, False), "/staff/auth")
         self.assertEqual(_default_destination("STAFF", True, False), "/staff/roadmap")
 
-    async def test_owner_without_store_goes_to_setup(self):
+    async def test_owner_without_store_goes_to_intent(self):
         db = FakeDb(
             {"user_id": 1, "name": "점주", "role": "OWNER"},
         )
@@ -32,7 +32,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         result = await get_bootstrap(db, {"user_id": 1, "role": "OWNER"})
 
         self.assertIsNone(result.store)
-        self.assertEqual(result.default_destination, "/owner/setup")
+        self.assertEqual(result.default_destination, "/owner/intent")
         self.assertEqual(result.badges.waiting_questions, 0)
 
     async def test_completed_owner_gets_store_scoped_badges(self):
@@ -57,6 +57,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.store.category_version, 4)
         self.assertEqual(result.badges.pending_cards, 7)
         self.assertEqual(db.calls[-1][1], (10,))
+        self.assertIn("knowledge_change_proposals", db.calls[-1][0])
 
     async def test_staff_with_store_goes_to_roadmap(self):
         db = FakeDb(

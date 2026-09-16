@@ -10,8 +10,8 @@
 
 - [x] 라우트·인증 hydration·bootstrap·Query 기본값·전역 navigation/조회·API 오류·공통 UI를 코드 검토했다.
 - [x] 현재 Web 정적 검사와 production build를 통과했다. 이는 실제 사용성/런타임 API 인수가 아니다.
-- [ ] 서버 `/app/bootstrap`을 Web 진입 정본으로 연결하고 실제 존재하는 목적지와 맞춘다. 로그인/새로고침/직접 링크의 목적지를 보존한다.
-- [ ] production에서 mock/로컬 기본값을 실제 서버 빈 상태·오류 대신 보여주는 경로를 제거하거나 명시적 데모 모드로 격리한다.
+- [x] 서버 `/app/bootstrap`을 Web 진입 정본으로 연결하고 실제 존재하는 목적지와 맞춘다. 로그인/새로고침/직접 링크의 목적지를 보존한다.
+- [x] production에서 mock/로컬 기본값을 실제 서버 빈 상태·오류 대신 보여주는 경로를 제거하고 데모 자격 증명은 `NEXT_PUBLIC_DEMO_MODE=true`에서만 노출한다.
 - [ ] 401/403/404/409/422/429/503/504·timeout·사용자 취소를 공통 API 오류로 분류하고 인증 만료 시 안전한 재로그인/목적지 복원을 제공한다.
 - [ ] Query별 freshness와 재조회 정책을 정하고, 하단 navigation의 대기 수 조회를 bootstrap/요약 응답으로 줄인다. mutation은 정확한 데이터만 갱신한다.
 - [ ] 공통 버튼/링크/입력에 최소 터치 크기, focus, pressed/loading/disabled, 중복 클릭 방지, inline 오류·재시도 계약을 적용한다.

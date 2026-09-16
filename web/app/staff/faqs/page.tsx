@@ -26,8 +26,8 @@ export default function FaqPage() {
 
   const ask = useMutation({
     mutationFn: (question: string) => askChat(question, state.token!),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.chat(state.storeId, state.userId),
       });
       router.push("/staff/chat");

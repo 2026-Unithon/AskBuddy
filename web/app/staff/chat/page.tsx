@@ -34,9 +34,9 @@ export default function ChatPage() {
 
   const ask = useMutation({
     mutationFn: (question: string) => askChat(question, state.token!),
-    onSuccess: async () => {
+    onSuccess: () => {
       setLastFailedQuestion(null);
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.chat(state.storeId, state.userId),
       });
     },

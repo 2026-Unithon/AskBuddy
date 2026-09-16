@@ -2,7 +2,9 @@
 
   python scripts/run_extract_eval.py --store store-a --label E-O0-baseline
   python scripts/run_extract_eval.py --store store-a --label rerun --reuse-cards
-  python scripts/run_extract_eval.py --store store-c --label final --allow-holdout
+  python scripts/run_extract_eval.py --store store-c --label sealed-BASE-1 \
+    --allow-holdout --campaign /git-excluded/campaign.json \
+    --campaign-candidate BASE --campaign-repeat 1
 
 측정하는 것: E-O0 추출 손실 = 원본에 있는데 카드에 없는 비율.
 **시스템 정확도의 천장이다.** 여기서 흘린 것은 검색을 고쳐도 복구되지 않는다.
@@ -13,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import pathlib
-import hashlib
 import asyncio
 import json
 import logging
@@ -52,6 +53,10 @@ from app.team.extraction import (  # noqa: E402
     match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION, score_expected_fact,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
+from app.team.eval_campaign import (  # noqa: E402
+    CampaignError, append_campaign_event, claim_campaign_run, enforce_observed_budget,
+    sha256_bytes, sha256_file, validate_campaign,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "eval" / "data"
 # manifest 의 authority 를 SCAN 문서 분류로 옮긴다
@@ -395,10 +400,35 @@ def _drifted_sources(store_dir: pathlib.Path, manifest: dict) -> list[str]:
     return drifted
 
 
+def _campaign_settings(s: Any, args: argparse.Namespace) -> dict[str, Any]:
+    """후보가 바뀌면 결과도 바뀌는 값만 비밀 없이 고정한다."""
+    return {
+        "scorer_version": SCORER_VERSION,
+        "code_version": code_version(),
+        "extract_prompt_version": prompt_digest("extract_facts.ko.txt"),
+        "assemble_prompt_version": prompt_digest("assemble_cards.ko.txt"),
+        "extraction_schema_hash": sha256_file(
+            Path(__file__).resolve().parents[1] / "app" / "ingest" / "schemas.py"
+        ),
+        "extract_model": s.gemini_model,
+        "stt_model": s.stt_model,
+        "embedding_model": s.embedding_model,
+        "ingest_mode": s.ingest_mode,
+        "extract_temperature": s.extract_temperature,
+        "video_input_mode": s.video_input_mode,
+        "video_max_frames_to_model": s.video_max_frames_to_model,
+        "frame_interval_sec": s.frame_interval_sec,
+        "video_segment_sec": s.video_segment_sec,
+        "pipeline_version": "facts_then_cards/v1",
+        "reuse_cards": bool(args.reuse_cards),
+        "reuse_sources": bool(args.reuse_sources),
+    }
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(description="추출 평가 (E-O0)")
-    ap.add_argument("--store", required=True, help="예: store-a")
-    ap.add_argument("--label", required=True)
+    ap.add_argument("--store", help="예: store-a")
+    ap.add_argument("--label")
     ap.add_argument("--allow-holdout", action="store_true",
                     help="holdout 매장을 연다. 한 번 열면 되돌릴 수 없다")
     ap.add_argument("--reuse-cards", action="store_true",
@@ -409,10 +439,26 @@ async def main() -> int:
     ap.add_argument("--notes", default=None)
     ap.add_argument("--campaign", default=None,
                     help="사전등록 캠페인 JSON. holdout 을 열 때는 필수다")
+    ap.add_argument("--campaign-candidate", default=None,
+                    help="캠페인에 등록한 후보 이름")
+    ap.add_argument("--campaign-repeat", type=int, default=None,
+                    help="후보의 사전등록 반복 번호")
+    ap.add_argument("--print-campaign-settings", action="store_true",
+                    help="현재 후보 settings JSON을 출력하고 종료한다")
     args = ap.parse_args()
+    _PARTIAL.clear()
+
+    if args.print_campaign_settings:
+        print(json.dumps(_campaign_settings(get_settings(), args), ensure_ascii=False,
+                         indent=2, sort_keys=True))
+        return 0
+    if not args.store or not args.label:
+        ap.error("--store와 --label이 필요하다")
 
     store_dir = DATA_DIR / args.store
-    manifest = json.loads((store_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest_path = store_dir / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
     slug = manifest["store_slug"]
 
     # ── holdout guard ────────────────────────────────────────────────────
@@ -431,25 +477,104 @@ async def main() -> int:
         return 2
 
     campaign = None
+    campaign_run = None
+    campaign_path = None
+    campaign_claimed = False
     if args.campaign:
         campaign_path = pathlib.Path(args.campaign)
-        campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
-        campaign["campaign_hash"] = hashlib.sha256(
-            campaign_path.read_bytes()).hexdigest()[:16]
+        try:
+            campaign_bytes = campaign_path.read_bytes()
+            campaign = json.loads(campaign_bytes)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"캠페인 파일을 읽을 수 없다: {exc}", file=sys.stderr)
+            return 2
+        if not args.campaign_candidate or args.campaign_repeat is None:
+            print("캠페인 실행에는 --campaign-candidate와 --campaign-repeat가 필요하다.",
+                  file=sys.stderr)
+            return 2
 
-    # 입력이 기록된 해시와 같은지 본다. 다르면 기준선과 비교할 수 없다
-    drifted = _drifted_sources(store_dir, manifest)
-    if drifted:
-        print(f"자료가 기록된 해시와 다르다: {', '.join(drifted)}\n"
-              f"기준선과 같은 입력이 아니다. scripts/backfill_source_hashes.py --check 로 확인한다.",
-              file=sys.stderr)
+    # dev는 즉시 확인한다. holdout 캠페인은 원본을 읽기 전에 먼저 권한/slot을 잠근다.
+    if campaign is None:
+        drifted = _drifted_sources(store_dir, manifest)
+        if drifted:
+            print(f"자료가 기록된 해시와 다르다: {', '.join(drifted)}\n"
+                  f"기준선과 같은 입력이 아니다. scripts/backfill_source_hashes.py --check 로 확인한다.",
+                  file=sys.stderr)
+            return 2
+
+    s = get_settings()
+    if campaign is not None:
+        try:
+            recorded_source_hashes = {}
+            for entry in manifest["sources"]:
+                digest = str(entry.get("sha256") or "")
+                recorded_source_hashes[entry["source_key"]] = (
+                    digest if digest.startswith("sha256:") else "sha256:" + digest
+                )
+            campaign_run = validate_campaign(
+                campaign,
+                campaign_bytes=campaign_bytes,
+                store=args.store,
+                split=str(manifest.get("split") or ""),
+                manifest_hash=sha256_bytes(manifest_bytes),
+                source_hashes=recorded_source_hashes,
+                source_bytes=None,
+                runtime_settings=_campaign_settings(s, args),
+                candidate=args.campaign_candidate,
+                repeat=args.campaign_repeat,
+                label=args.label,
+            )
+            claim_campaign_run(campaign_path, campaign_run)
+            campaign_claimed = True
+            # 여기서부터가 실제 개봉이다. 실패도 같은 slot의 시도로 남긴다.
+            source_paths = {entry["source_key"]: store_dir / entry["file"]
+                            for entry in manifest["sources"]}
+            missing = [key for key, path in source_paths.items() if not path.is_file()]
+            if missing:
+                raise CampaignError(f"원본 파일이 없다: {', '.join(missing)}")
+            actual_hashes = {key: sha256_file(path) for key, path in source_paths.items()}
+            if actual_hashes != campaign_run.source_hashes:
+                raise CampaignError("실제 원본 hash가 사전등록 값과 다르다")
+            source_bytes = sum(path.stat().st_size for path in source_paths.values())
+            if source_bytes > campaign_run.max_source_bytes:
+                raise CampaignError("입력 원본 크기가 실행당 byte 예산을 넘는다")
+        except (CampaignError, OSError, json.JSONDecodeError) as exc:
+            if campaign_claimed and campaign_run is not None and campaign_path is not None:
+                append_campaign_event(campaign_path, campaign_run, "FAILED", detail=str(exc),
+                                      ai_attempt_count=0, cost_usd="0")
+            print(f"캠페인 사전 검증 실패: {exc}", file=sys.stderr)
+            return 2
+
+    # holdout 정답은 캠페인 검증과 slot 잠금이 끝난 뒤에만 처음 읽는다.
+    truth_path = store_dir / "truth" / "facts.json"
+    try:
+        truth_bytes = truth_path.read_bytes()
+    except OSError as exc:
+        if campaign_run is not None:
+            append_campaign_event(campaign_path, campaign_run, "FAILED", detail=str(exc),
+                                  ai_attempt_count=0, cost_usd="0")
+        print(f"정답지 파일을 읽을 수 없다: {exc}", file=sys.stderr)
         return 2
-
-    truth = json.loads((store_dir / "truth" / "facts.json").read_text(encoding="utf-8"))
+    if campaign_run is not None:
+        if sha256_bytes(truth_bytes) != campaign_run.truth_hash:
+            append_campaign_event(campaign_path, campaign_run, "FAILED",
+                                  detail="truth hash mismatch",
+                                  ai_attempt_count=0, cost_usd="0")
+            print("캠페인 사전 검증 실패: truth hash가 등록값과 다르다", file=sys.stderr)
+            return 2
+        append_campaign_event(campaign_path, campaign_run, "OPENED")
+    try:
+        truth = json.loads(truth_bytes)
+    except json.JSONDecodeError as exc:
+        if campaign_run is not None:
+            append_campaign_event(campaign_path, campaign_run, "FAILED", detail=str(exc),
+                                  ai_attempt_count=0, cost_usd="0")
+        print(f"정답지 JSON이 잘못됐다: {exc}", file=sys.stderr)
+        return 2
+    args.campaign_run = campaign_run
     confirmed = truth.get("owner_confirmed")
     truth_confidence = "OWNER" if confirmed is True else "TEST"
 
-    s = get_settings()
     # 스윕하는 값은 반드시 여기 남아야 한다. 없으면 결과를 설정에 귀속시킬 수 없다
     snapshot = {
         "scorer_version": SCORER_VERSION,
@@ -468,7 +593,12 @@ async def main() -> int:
         "video_segment_sec": s.video_segment_sec,
         "pipeline_version": "facts_then_cards/v1",
         # 무엇을 검증하려고 돌렸는가. holdout 개봉은 이 기록 없이는 근거가 없다
-        "campaign": campaign,
+        "campaign": ({"campaign_id": campaign_run.campaign_id,
+                      "campaign_hash": campaign_run.campaign_hash,
+                      "slot": campaign_run.slot,
+                      "candidate": campaign_run.candidate,
+                      "repeat": campaign_run.repeat}
+                     if campaign_run else None),
         # 입력 자료의 지문. 같은 자료로 잰 것인지 나중에 대조한다
         "source_hashes": {x["source_key"]: (x.get("sha256") or "")[:16]
                           for x in manifest["sources"]},
@@ -504,6 +634,8 @@ async def main() -> int:
             print(f"run_id={run_id} {slug} · {args.label} · 정답지 {truth_confidence}")
             print(f"  코드 {snapshot['code_version']} · 프롬프트 {snapshot['prompt_version']}"
                   f" · ingest_mode={snapshot['ingest_mode']}")
+            if campaign_run is not None:
+                append_campaign_event(campaign_path, campaign_run, "STARTED", run_id=run_id)
 
             source_types: dict[str, str] = {
                 e["source_key"]: e["type"] for e in manifest["sources"]}
@@ -519,6 +651,12 @@ async def main() -> int:
                     "where run_id=$1 and status='RUNNING'",
                     run_id,
                 )
+                if campaign_run is not None:
+                    usage = _PARTIAL.get("campaign_usage") or {}
+                    append_campaign_event(campaign_path, campaign_run, "FAILED", run_id=run_id,
+                                          detail="evaluation failed",
+                                          ai_attempt_count=usage.get("ai_attempt_count"),
+                                          cost_usd=usage.get("cost_usd"))
                 raise
 
             row = await conn.fetchrow(
@@ -535,6 +673,11 @@ async def main() -> int:
 
     path = write_report(run_id, slug, args.label, metrics, report_rows,
                         truth_confidence, snapshot)
+    if campaign_run is not None:
+        usage = _PARTIAL.get("campaign_usage") or {}
+        append_campaign_event(campaign_path, campaign_run, "SUCCEEDED", run_id=run_id,
+                              ai_attempt_count=usage.get("ai_attempt_count"),
+                              cost_usd=usage.get("cost_usd"))
     mh = metrics["must_have"]
     print(f"\n  E-O0 추출 손실 {metrics['loss'] * 100:.1f}% "
           f"(재현율 {metrics['recall'] * 100:.1f}%, 카드 {cards_n}장)")
@@ -593,6 +736,7 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         _PARTIAL["source_states"] = counts
 
     # 원장에서 실행 단위 원가 summary 를 만든다 (CP-00B)
+    cost = None
     try:
         from app.deps import get_pool
         from app.usage.repository import rollup_extraction_run
@@ -603,6 +747,17 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
               f"· {cost['cost_status']}")
     except Exception as exc:
         print(f"  원가 집계 실패(측정은 원장에 남아 있다): {exc}")
+
+    campaign_run = getattr(args, "campaign_run", None)
+    if campaign_run is not None:
+        if cost is not None and cost.get("cost_usd") is not None:
+            _PARTIAL["campaign_usage"] = {
+                "ai_attempt_count": cost.get("ai_attempt_count"),
+                "cost_usd": str(cost.get("cost_usd")),
+            }
+        _PARTIAL["campaign_usage"] = enforce_observed_budget(
+            campaign_run, cost, pathlib.Path(args.campaign)
+        )
 
     cards = await fetch_cards(conn, store_id)
     ledger = await fetch_ledger(conn, store_id)

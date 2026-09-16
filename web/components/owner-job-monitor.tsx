@@ -23,10 +23,11 @@ export function OwnerJobMonitor() {
     previous.current = new Map(items.map((job) => [job.job_id, job.status]));
 
     if (completed) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) });
     }
-  }, [jobs.data?.items, queryClient, state.storeId]);
+  }, [jobs.data?.items, queryClient, state.userId, state.storeId]);
 
   return null;
 }
