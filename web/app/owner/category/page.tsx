@@ -27,12 +27,7 @@ export default function CategoryPage() {
   const queryClient = useQueryClient();
   const categories = useQuery(categoriesQuery(state.token, state.storeId));
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const rows = (categories.data?.length ? categories.data : state.categories.map((category, index) => ({
-    category_id: index,
-    category_name: category.key,
-    is_enabled: category.enabled,
-    sort_order: index,
-  }))).map((row) => ({
+  const rows = (categories.data ?? []).map((row) => ({
     ...row,
     is_enabled: overrides[row.category_name] ?? row.is_enabled,
   }));
@@ -41,8 +36,8 @@ export default function CategoryPage() {
       rows.map((row) => ({ category_name: row.category_name, is_enabled: row.is_enabled })),
       state.token!
     ),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.categories(state.storeId) });
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.categories(state.storeId) });
       router.push("/owner/upload");
     },
   });
@@ -95,6 +90,30 @@ export default function CategoryPage() {
             <p className="text-xs text-muted/80 mt-0.5">우리 매장에서 안 하는 항목은 꺼주세요</p>
 
             <div className="flex flex-col gap-2.5 pt-3">
+              {categories.isPending && (
+                <div className="space-y-2.5" aria-label="업무 카테고리 불러오는 중">
+                  {[0, 1, 2].map((item) => (
+                    <div key={item} className="h-14 rounded-2xl bg-surface-muted animate-pulse" />
+                  ))}
+                </div>
+              )}
+              {categories.isError && (
+                <div role="alert" className="rounded-2xl border border-danger-200 bg-danger-50 p-4">
+                  <p className="text-sm font-semibold text-danger-700">업무 카테고리를 불러오지 못했어요</p>
+                  <button
+                    type="button"
+                    className="mt-3 min-h-11 rounded-xl border border-danger-200 px-4 text-sm font-bold text-danger-700"
+                    onClick={() => void categories.refetch()}
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              )}
+              {categories.isSuccess && rows.length === 0 && (
+                <div className="rounded-2xl border border-border bg-surface p-4 text-sm leading-6 text-muted">
+                  등록된 업무 카테고리가 없습니다. 관리자에게 문의해주세요.
+                </div>
+              )}
               {rows.map((c) => (
                 <button
                   key={c.category_name}
@@ -127,7 +146,7 @@ export default function CategoryPage() {
         <Button
           size="lg"
           className="w-full"
-          disabled={!canContinue || save.isPending}
+          disabled={!canContinue || categories.isPending || categories.isError || rows.length === 0 || save.isPending}
           onClick={handleNext}
         >
           {save.isPending ? "저장 중…" : "다음으로 →"}

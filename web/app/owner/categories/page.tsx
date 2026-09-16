@@ -21,15 +21,15 @@ export default function CategoriesPage() {
   const queryClient = useQueryClient();
   const categories = useQuery(productCategoriesQuery(state.token, state.storeId));
   const [name, setName] = useState("");
-  const refresh = async () => {
-    await Promise.all([
+  const refresh = () => {
+    void Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.productCategories(state.storeId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
     ]);
   };
   const create = useMutation({
     mutationFn: (categoryName: string) => createProductCategory(categoryName, categories.data?.items.length ?? 0, state.token!),
-    onSuccess: async () => { setName(""); await refresh(); },
+    onSuccess: () => { setName(""); refresh(); },
   });
   const remove = useMutation({
     mutationFn: (categoryId: number) => deleteProductCategory(categoryId, state.token!),

@@ -1,5 +1,9 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-16 [W 평가 캠페인 강제 검증](review/W_EVAL_CAMPAIGN_VALIDATION_20260916.md):
+split/hash/후보 설정/최소 3회 실행표/예산을 사전 검증하고 캠페인·slot lock과 개봉 이력을 연결했다.
+실제 holdout 개봉·유료 호출·품질 승격은 하지 않았다.
+
 2026-09-16 [W 분류·관계 비용 계측](review/W_CLASSIFY_RELATION_USAGE_20260916.md):
 CLASSIFY/RELATION과 점주 답변 후보 EMBED를 기존 원장에 연결했다. 재분류 worker는 모델 호출 중 DB 연결을 반환한다.
 전체 회귀 450 tests / 84 subtests, PG15 W 검증 7/7·기존 원장 14/14 통과. 요율/Storage·전체 원가 인수는 별도다.
@@ -187,7 +191,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [x] 반복 성능 중앙값·별도 A/A 폭·항목별 만장일치 안정성·전체 반복 필수 안전성 산술과 `--detail`을 구현/검증했다.
 - [x] 새 평가의 입력 cards/ledger/truth/source_types 보존과 별도 재채점 도구를 구현했다. 과거 snapshot이 없던 실행을 복원한 것은 아니다.
 - [x] AI 표본 68건(보류 59·확신 9) 전부 대조, 사용자 표시 8개 판정 반영, A run 78/B run 86의 보존 입력 조건부 재평가를 완료했다. 독립 사람 전체 인수/원래 실행 snapshot 복구와 구분한다. [감사](review/W_REVIEW_AND_RECOVERY_20260915.md)·[v3](review/W_SCORER_V3_20260916.md).
-- [ ] 캠페인 강제 검증을 완성한다: 파일 존재를 넘어 split/hash/후보 설정/반복 실행표/예산 검증, 개봉 기록/lock, 반복 중 설정 동결. 현재 단순 JSON 로딩/해시 기록은 이 전체 요구의 완료가 아니다.
+- [x] 캠페인 강제 검증을 구현했다: split/manifest·truth·source hash, 후보 runtime 설정, CONTROL/CANDIDATE/CONTROL_REPEAT 각 최소 3회 실행표, 실행/bytes/호출/등록비 예산, 개봉 기록/캠페인·slot lock을 강제한다. 실제 holdout은 열지 않았고 캠페인 결과 인수는 별도다. [계약](plan/W_EVAL_CAMPAIGN_V1.md)·[검증](review/W_EVAL_CAMPAIGN_VALIDATION_20260916.md)
 - [x] 최초 기준선을 고정 조건 3회 + A/A 대조군으로 두 매장에서 측정했다. 전체 분모·실행별 값·유형별 결과를 보존했다. 결과는 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
       **이 수치는 채점기 교정 후 재평가 대상이다.**
 - [~] 최초 dev 기준선에서 extract/assemble/STT usage·실패/재시도·원본/전송 bytes를 run에 연결했고 이후 W EMBED 계측도 연결했다. 전 단계 원가 인수 후 교정된 채점/라벨·동결 입력으로 기준선을 확정하는 작업은 남았다. 재사용 실행을 최초 등록 전체 비용으로 쓰지 않는다.

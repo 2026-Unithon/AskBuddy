@@ -20,8 +20,8 @@ export default function JobDetailPage() {
   const job = useQuery(ingestJobQuery(state.token, state.storeId, jobId));
   const retry = useMutation({
     mutationFn: () => retryIngestJob(jobId, state.token!),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.ingestJob(state.storeId, jobId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) }),
       ]);

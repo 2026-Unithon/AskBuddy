@@ -8,104 +8,50 @@ import {
   useReducer,
   type ReactNode,
 } from "react";
-import {
-  MOCK_EMPTY_KNOWLEDGE,
-  MOCK_INVITE_CODE,
-  MOCK_ROADMAP,
-  MOCK_STORE_NAME,
-  MOCK_TASK_CATEGORIES,
-} from "./mock";
-import type {
-  BusinessType,
-  EmptyKnowledgeAlert,
-  Role,
-  RoadmapNode,
-  TaskCategory,
-} from "./types";
+import type { BusinessType, Role } from "./types";
 
 const STORAGE_KEY = "askbuddy_state";
 // 데이터 구조(roadmap/categories 등)를 바꿀 때마다 올린다.
 // 이전 버전 캐시가 새 코드와 섞이면 없는 필드를 읽다가(예: node.pos) 화면이 그대로 죽는다 — 반드시 올릴 것.
-const STATE_VERSION = 8;
+const STATE_VERSION = 9;
 
 type AppState = {
   hydrated: boolean;
   role: Role | null;
-  displayName: string | null;
   // 백엔드 JWT. store_id 가 이 안에만 있으므로 /ingest/* 호출에 반드시 필요하다.
-  // 없으면 화면은 mock 으로 동작한다 — 데모가 끊기지 않게.
+  // 없으면 보호 화면에 들어갈 수 없다.
   token: string | null;
   userId: number | null;
   storeId: number | null;
-  storeSlug: string;
-  storeName: string;
   businessType: BusinessType | null;
-  inviteCode: string;
-  // 카테고리/로드맵 배열은 화면 모양과 비로그인 fallback뿐이다.
-  // 로그인 뒤 서버 응답은 TanStack Query 캐시가 소유한다.
-  categories: TaskCategory[];
-  roadmap: RoadmapNode[];
-  emptyKnowledge: EmptyKnowledgeAlert[];
-  streakDays: number;
-  hearts: number;
 };
 
 const initialState: AppState = {
   hydrated: false,
   role: null,
-  displayName: null,
   token: null,
   userId: null,
   storeId: null,
-  storeSlug: "demo-cafe",
-  storeName: MOCK_STORE_NAME,
   businessType: null,
-  inviteCode: MOCK_INVITE_CODE,
-  categories: MOCK_TASK_CATEGORIES,
-  roadmap: MOCK_ROADMAP,
-  emptyKnowledge: MOCK_EMPTY_KNOWLEDGE,
-  streakDays: 3,
-  hearts: 3,
 };
 
 type Action =
   | { type: "HYDRATE"; payload: Partial<AppState> }
-  | { type: "LOGIN_OWNER"; name: string; storeName: string }
-  | { type: "LOGIN_STAFF"; name: string; inviteCode: string }
   | { type: "LOGOUT" }
   | {
       type: "SET_AUTH";
       token: string;
       role: Role;
-      displayName: string;
       userId: number;
       storeId: number | null;
-      storeSlug?: string;
-      storeName?: string;
-      inviteCode?: string;
     }
-  | { type: "SET_STORE"; storeId: number; storeSlug: string; storeName: string; token: string }
-  | { type: "SET_INVITE_CODE"; code: string }
+  | { type: "SET_STORE"; storeId: number; token: string }
   | { type: "SET_BUSINESS_TYPE"; value: BusinessType };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "HYDRATE":
       return { ...state, ...action.payload, hydrated: true };
-    case "LOGIN_OWNER":
-      return {
-        ...state,
-        role: "OWNER",
-        displayName: action.name,
-        storeName: action.storeName || state.storeName,
-      };
-    case "LOGIN_STAFF":
-      return {
-        ...state,
-        role: "STAFF",
-        displayName: action.name,
-        inviteCode: action.inviteCode || state.inviteCode,
-      };
     case "LOGOUT":
       return { ...initialState, hydrated: true };
     case "SET_AUTH":
@@ -119,12 +65,8 @@ function reducer(state: AppState, action: Action): AppState {
         hydrated: true,
         token: action.token,
         role: action.role,
-        displayName: action.displayName,
         userId: action.userId,
         storeId: action.storeId,
-        storeSlug: action.storeSlug ?? initialState.storeSlug,
-        storeName: action.storeName ?? initialState.storeName,
-        inviteCode: action.inviteCode ?? initialState.inviteCode,
       };
     case "SET_STORE":
       // 매장 생성 응답의 토큰에는 store_id 가 들어 있다. 옛 토큰을 반드시 버린다.
@@ -132,11 +74,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         token: action.token,
         storeId: action.storeId,
-        storeSlug: action.storeSlug,
-        storeName: action.storeName,
       };
-    case "SET_INVITE_CODE":
-      return { ...state, inviteCode: action.code };
     case "SET_BUSINESS_TYPE":
       return { ...state, businessType: action.value };
     default:
@@ -152,44 +90,26 @@ type AppContextValue = {
 type PersistedAppState = Pick<
   AppState,
   | "role"
-  | "displayName"
   | "token"
   | "userId"
   | "storeId"
-  | "storeSlug"
-  | "storeName"
   | "businessType"
-  | "inviteCode"
-  | "streakDays"
-  | "hearts"
 >;
 
 function persistedState(state: AppState): PersistedAppState {
   const {
     role,
-    displayName,
     token,
     userId,
     storeId,
-    storeSlug,
-    storeName,
     businessType,
-    inviteCode,
-    streakDays,
-    hearts,
   } = state;
   return {
     role,
-    displayName,
     token,
     userId,
     storeId,
-    storeSlug,
-    storeName,
     businessType,
-    inviteCode,
-    streakDays,
-    hearts,
   };
 }
 
@@ -200,16 +120,10 @@ function isBusinessType(value: unknown): value is BusinessType {
 function restorePersistedState(data: object): Partial<AppState> {
   const restored: Partial<AppState> = {};
   if ("role" in data && (data.role === "OWNER" || data.role === "STAFF" || data.role === null)) restored.role = data.role;
-  if ("displayName" in data && (typeof data.displayName === "string" || data.displayName === null)) restored.displayName = data.displayName;
   if ("token" in data && (typeof data.token === "string" || data.token === null)) restored.token = data.token;
   if ("userId" in data && (typeof data.userId === "number" || data.userId === null)) restored.userId = data.userId;
   if ("storeId" in data && (typeof data.storeId === "number" || data.storeId === null)) restored.storeId = data.storeId;
-  if ("storeSlug" in data && typeof data.storeSlug === "string") restored.storeSlug = data.storeSlug;
-  if ("storeName" in data && typeof data.storeName === "string") restored.storeName = data.storeName;
   if ("businessType" in data && (isBusinessType(data.businessType) || data.businessType === null)) restored.businessType = data.businessType;
-  if ("inviteCode" in data && typeof data.inviteCode === "string") restored.inviteCode = data.inviteCode;
-  if ("streakDays" in data && typeof data.streakDays === "number") restored.streakDays = data.streakDays;
-  if ("hearts" in data && typeof data.hearts === "number") restored.hearts = data.hearts;
   return restored;
 }
 
@@ -227,7 +141,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         parsed &&
         typeof parsed === "object" &&
         "v" in parsed &&
-        (parsed.v === STATE_VERSION || parsed.v === 7) &&
+        (parsed.v === STATE_VERSION || parsed.v === 8 || parsed.v === 7) &&
         "data" in parsed &&
         parsed.data &&
         typeof parsed.data === "object"

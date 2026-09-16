@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useApp } from "@/lib/store";
-import { cardsQuery, pendingQuery, proposalsQuery } from "@/lib/query";
+import { bootstrapQuery } from "@/lib/query";
 
 export type OwnerTabKey = "upload" | "questions" | "cards";
 
@@ -95,23 +95,10 @@ export function OwnerBottomNav() {
   const pathname = usePathname();
   const { state } = useApp();
 
-  // 미답변 질문 수 배지
-  const pending = useQuery(pendingQuery(state.token, state.storeId));
-  const waitingQuestionsCount = pending.data?.items.length ?? 0;
-
-  // 검토 대상 카드 수 배지 (미확인 + 검토필요)
-  const pendingCards = useQuery(
-    cardsQuery(state.token, state.storeId, { status: "pending", limit: 1 })
-  );
-  const reviewCards = useQuery(
-    cardsQuery(state.token, state.storeId, { status: "needs_review", limit: 1 })
-  );
-  const proposals = useQuery(proposalsQuery(state.token, state.storeId));
-
-  const totalPendingCards = pendingCards.data?.total ?? 0;
-  const totalReviewCards = reviewCards.data?.total ?? 0;
-  const totalProposals = proposals.data?.items.filter((p) => p.status === "PENDING_REVIEW").length ?? 0;
-  const cardsNeedAttentionCount = totalPendingCards + totalReviewCards + totalProposals;
+  // layout의 bootstrap 캐시를 공유한다. 배지 때문에 목록 API 네 개를 따로 호출하지 않는다.
+  const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId, 30_000));
+  const waitingQuestionsCount = bootstrap.data?.badges.waiting_questions ?? 0;
+  const cardsNeedAttentionCount = bootstrap.data?.badges.pending_cards ?? 0;
 
   return (
     <nav

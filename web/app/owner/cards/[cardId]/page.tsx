@@ -41,8 +41,9 @@ export default function CardDetailPage() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ title: "", content: "" });
 
-  async function refreshRelated() {
-    await Promise.all([
+  function refreshRelated() {
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.card(state.storeId, cardId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
@@ -56,9 +57,9 @@ export default function CardDetailPage() {
       if (!version) throw new Error("저장할 초안 버전을 찾지 못했어요.");
       return updateProductCardDraft(cardId, draft.title, draft.content, version, state.token!);
     },
-    onSuccess: async () => {
+    onSuccess: () => {
       setEditing(false);
-      await refreshRelated();
+      refreshRelated();
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) await detail.refetch();

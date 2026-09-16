@@ -928,6 +928,11 @@ AI 표본 68건 대조·사용자 표시 8개 판정 반영·마지막 A/B 각 1
 "구조 변경이 개선인가" 를 물을 수 있다. 순서는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md),
 측정 기록은 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
 
+평가 캠페인 v1은 split과 전체 입력 hash, 후보별 runtime 설정, 최소 3회+A/A 실행표,
+실행/bytes/호출/등록비 예산을 사전 검증한다. 첫 시도 전에 캠페인과 slot을 잠그고 이후
+원본/truth를 읽으며 개봉 상태를 append-only로 남긴다. 구현 검증만 완료했고 실제 holdout은
+계속 봉인 상태다. 계약은 [W_EVAL_CAMPAIGN_V1.md](plan/W_EVAL_CAMPAIGN_V1.md)를 따른다.
+
 ---
 
 # 23. 남은 12.5~15단계 요약

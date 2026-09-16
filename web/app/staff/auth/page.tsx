@@ -7,17 +7,16 @@ import { useApp } from "@/lib/store";
 import { ApiError, joinByInvite, login } from "@/lib/api";
 
 type Tab = "login" | "signup";
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export default function StaffAuthPage() {
   const router = useRouter();
   const { dispatch } = useApp();
   const [tab, setTab] = useState<Tab>("login");
 
-  // 심사·체험용 데모 계정을 미리 채워둔다. 처음 오는 사람이 가입부터 하지 않고
-  // 바로 눌러서 볼 수 있어야 한다. 지우고 자기 계정으로 로그인해도 된다.
-  const [loginId, setLoginId] = useState("jihyun@demo.cafe");
-  const [loginPw, setLoginPw] = useState("demo1234");
-  const [loginCode, setLoginCode] = useState("CAFE-DEMO");
+  // 데모 자격 증명은 명시적으로 켠 환경에서만 노출한다.
+  const [loginId, setLoginId] = useState(DEMO_MODE ? "jiho@demo.cafe" : "");
+  const [loginPw, setLoginPw] = useState(DEMO_MODE ? "demo1234" : "");
 
   const [name, setName] = useState("");
   const [signupId, setSignupId] = useState("");
@@ -50,10 +49,8 @@ export default function StaffAuthPage() {
         type: "SET_AUTH",
         token,
         role: "STAFF",
-        displayName: user.name,
         userId: user.user_id,
         storeId: user.store_id ?? null,
-        inviteCode: loginCode || undefined,
       });
       router.push("/staff/roadmap");
     } catch (err) {
@@ -79,10 +76,8 @@ export default function StaffAuthPage() {
         type: "SET_AUTH",
         token,
         role: "STAFF",
-        displayName: user.name,
         userId: user.user_id,
         storeId: user.store_id ?? null,
-        inviteCode: signupCode.trim().toUpperCase(),
       });
       router.push("/staff/roadmap");
     } catch (err) {
@@ -138,17 +133,14 @@ export default function StaffAuthPage() {
               autoComplete="current-password"
               required
             />
-            <Input
-              placeholder="초대코드 (이미 가입했다면 비워도 됩니다)"
-              value={loginCode}
-              onChange={(e) => setLoginCode(e.target.value.toUpperCase())}
-            />
             <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
               로그인
             </Button>
-            <p className="mt-3 text-center text-base font-bold text-brand-700">
-              로그인 버튼만 누르시면 이용 가능 하십니다~!
-            </p>
+            {DEMO_MODE && (
+              <p className="mt-3 text-center text-sm font-bold text-brand-700">
+                데모 계정이 입력되어 있습니다.
+              </p>
+            )}
           </form>
         ) : (
           <form onSubmit={handleSignup} className="flex flex-col gap-3">

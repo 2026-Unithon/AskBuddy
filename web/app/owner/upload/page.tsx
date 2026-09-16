@@ -64,9 +64,9 @@ export default function UploadPage() {
 
   const retryJob = useMutation({
     mutationFn: (jobId: number) => retryIngestJob(jobId, state.token!),
-    onSuccess: async () => {
+    onSuccess: () => {
       setErrorMessage(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
     },
     onError: (retryError) => {
       setErrorMessage(
@@ -190,7 +190,7 @@ export default function UploadPage() {
           }
         );
 
-        await queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
         batchIdempotencyKey.current = null;
 
         setSuccessMessage(

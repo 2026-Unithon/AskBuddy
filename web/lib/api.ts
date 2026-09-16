@@ -1,6 +1,5 @@
 // FastAPI 호출 래퍼. Supabase는 절대 직접 호출하지 않는다 (CLAUDE.md 불변식 1).
-// 백엔드가 아직 배포되지 않았거나 응답이 없으면, 호출한 쪽에서 mock 데이터로 대체할 수 있도록
-// 실패를 조용히 삼키지 않고 예외를 던진다 — 화면단에서 catch 해서 판단한다.
+// 실패를 조용히 삼키지 않고 종류와 복구 가능 여부를 보존해 올린다.
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const TIMEOUT_MS = 6000;
@@ -12,22 +11,71 @@ function authHeader(token?: string): Record<string, string> {
 
 type FetchJsonInit = RequestInit & { timeoutMs?: number };
 
+export const SESSION_EXPIRED_EVENT = "askbuddy:session-expired";
+export type ApiErrorKind = "http" | "timeout" | "offline" | "network" | "aborted";
+
+type ApiErrorMeta = {
+  kind?: ApiErrorKind;
+  code?: string;
+  retryable?: boolean;
+  requestId?: string | null;
+  retryAfterMs?: number | null;
+  details?: Record<string, unknown>;
+};
+
 // 상태 코드를 실어 던진다 — 화면단이 401(로그인 필요)과 네트워크 단절을 구분해야 한다.
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly detail: string,
-    path: string
+    readonly path: string,
+    readonly meta: ApiErrorMeta = {}
   ) {
     super(`${path} 실패: ${status}${detail ? ` — ${detail}` : ""}`);
     this.name = "ApiError";
   }
+
+  get kind(): ApiErrorKind { return this.meta.kind ?? "http"; }
+  get code(): string { return this.meta.code ?? (this.status ? `HTTP_${this.status}` : this.kind.toUpperCase()); }
+  get retryable(): boolean { return this.meta.retryable ?? [429, 503, 504].includes(this.status); }
+  get requestId(): string | null { return this.meta.requestId ?? null; }
+  get retryAfterMs(): number | null { return this.meta.retryAfterMs ?? null; }
+  get details(): Record<string, unknown> { return this.meta.details ?? {}; }
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
+function requestId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `web_${Date.now().toString(36)}`;
+}
+
+function emitSessionExpired(path: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: { path } }));
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return fallback;
+  if (error.kind === "timeout") return "응답이 늦어 요청을 멈췄어요. 다시 시도해주세요.";
+  if (error.kind === "offline") return "인터넷 연결이 끊겼어요. 연결 후 다시 시도해주세요.";
+  if (error.kind === "network") return "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.";
+  if (error.kind === "aborted") return "요청이 취소되었습니다.";
+  if (error.status === 429) return "요청이 많습니다. 잠시 후 다시 시도해주세요.";
+  if (error.status === 503 || error.status === 504) return "서비스가 잠시 지연되고 있습니다. 입력은 유지됩니다.";
+  return error.detail || fallback;
 }
 
 async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
   const { timeoutMs = TIMEOUT_MS, ...fetchInit } = init ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const clientRequestId = requestId();
   const signal = fetchInit.signal
     ? AbortSignal.any([fetchInit.signal, controller.signal])
     : controller.signal;
@@ -36,6 +84,7 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
       ...fetchInit,
       headers: {
         "Content-Type": "application/json",
+        "X-Request-ID": clientRequestId,
         ...(fetchInit.headers ?? {}),
       },
       signal,
@@ -43,20 +92,69 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
     if (!res.ok) {
       // FastAPI 는 오류를 { detail: ... } 로 준다. 사람이 읽을 문구를 살려서 올린다.
       let detail = "";
+      let code: string | undefined;
+      let retryable: boolean | undefined;
+      let responseRequestId: string | null = res.headers.get("x-request-id");
+      let details: Record<string, unknown> | undefined;
       try {
         const body = (await res.json()) as {
           detail?: unknown;
-          error?: { message?: unknown };
+          error?: {
+            code?: unknown;
+            message?: unknown;
+            retryable?: unknown;
+            request_id?: unknown;
+            details?: unknown;
+          };
         };
-        if (typeof body.error?.message === "string") detail = body.error.message;
+        if (typeof body.error?.message === "string") {
+          detail = body.error.message;
+          if (typeof body.error.code === "string") code = body.error.code;
+          if (typeof body.error.retryable === "boolean") retryable = body.error.retryable;
+          if (typeof body.error.request_id === "string") responseRequestId = body.error.request_id;
+          if (body.error.details && typeof body.error.details === "object") {
+            details = body.error.details as Record<string, unknown>;
+          }
+        }
         else detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? "");
       } catch {
         // 본문이 JSON 이 아니면 상태 코드만으로 판단한다
       }
-      throw new ApiError(res.status, detail, path);
+      if (res.status === 401 && new Headers(fetchInit.headers).has("Authorization")) {
+        emitSessionExpired(path);
+      }
+      throw new ApiError(res.status, detail, path, {
+        code,
+        retryable,
+        requestId: responseRequestId ?? clientRequestId,
+        retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+        details,
+      });
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (fetchInit.signal?.aborted) {
+      throw new ApiError(0, "요청이 취소되었습니다.", path, {
+        kind: "aborted",
+        retryable: false,
+        requestId: clientRequestId,
+      });
+    }
+    if (controller.signal.aborted) {
+      throw new ApiError(0, "요청 시간이 초과되었습니다.", path, {
+        kind: "timeout",
+        retryable: true,
+        requestId: clientRequestId,
+      });
+    }
+    const offline = typeof navigator !== "undefined" && !navigator.onLine;
+    throw new ApiError(0, offline ? "인터넷 연결이 끊겼습니다." : "서버에 연결할 수 없습니다.", path, {
+      kind: offline ? "offline" : "network",
+      retryable: true,
+      requestId: clientRequestId,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -98,6 +196,33 @@ export type AuthUser = {
 };
 
 export type AuthResponse = { token: string; user: AuthUser };
+
+export type BootstrapResponse = {
+  user: {
+    user_id: number;
+    role: "OWNER" | "STAFF";
+    name: string;
+  };
+  store: {
+    store_id: number;
+    store_name: string;
+    guide_completed: boolean;
+    category_version: number;
+  } | null;
+  badges: {
+    waiting_questions: number;
+    pending_cards: number;
+  };
+  default_destination: string;
+};
+
+export async function getBootstrap(token: string, signal?: AbortSignal) {
+  return fetchJson<BootstrapResponse>("/app/bootstrap", {
+    cache: "no-store",
+    headers: authHeader(token),
+    signal,
+  });
+}
 
 export async function login(email: string, password: string, role: "OWNER" | "STAFF") {
   return fetchJson<AuthResponse>("/auth/login", {

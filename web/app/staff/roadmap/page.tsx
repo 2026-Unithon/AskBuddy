@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Badge, Buddy, Button, Card } from "@/components/ui";
 import { ApiError, type RoadmapDto } from "@/lib/api";
-import { roadmapQuery } from "@/lib/query";
+import { bootstrapQuery, roadmapQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 function message(error: unknown) {
@@ -27,6 +27,7 @@ function findContinueTarget(roadmapData: RoadmapDto | undefined) {
 
 export default function RoadmapPage() {
   const { state } = useApp();
+  const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
   const roadmap = useQuery(roadmapQuery(state.token, state.storeId, state.userId));
   const counts = roadmap.data?.counts;
   const progress = counts?.total ? Math.round((counts.done / counts.total) * 100) : 0;
@@ -46,10 +47,10 @@ export default function RoadmapPage() {
             <Buddy size={40} className="drop-shadow-sm" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium text-white/75 truncate">
-                {state.displayName ?? "직원"}님의 업무 학습
+                {bootstrap.data?.user.name ?? "직원"}님의 업무 학습
               </p>
               <h1 className="text-lg font-bold truncate text-white">
-                {roadmap.data?.store.name ?? state.storeName}
+                {bootstrap.data?.store?.store_name ?? roadmap.data?.store.name ?? "매장"}
               </h1>
             </div>
           </div>

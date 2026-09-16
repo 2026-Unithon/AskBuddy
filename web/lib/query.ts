@@ -1,6 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
   getNotificationSupport,
+  getBootstrap,
   getPreflight,
   getLearnItem,
   getIngestJob,
@@ -31,6 +32,8 @@ export function preflightQuery() {
 }
 
 export const queryKeys = {
+  bootstrap: (userId: number | null, storeId: number | null) =>
+    ["bootstrap", userId, storeId] as const,
   categories: (storeId: number | null) => ["categories", storeId] as const,
   ingestJobs: (storeId: number | null) => ["ingest-jobs", storeId] as const,
   ingestJob: (storeId: number | null, jobId: number) => ["ingest-job", storeId, jobId] as const,
@@ -56,6 +59,21 @@ export const queryKeys = {
   notificationSupport: (storeId: number | null) => ["notification-support", storeId] as const,
 };
 
+export function bootstrapQuery(
+  token: string | null,
+  userId: number | null,
+  storeId: number | null,
+  badgePollInterval: number | false = false
+) {
+  return queryOptions({
+    queryKey: queryKeys.bootstrap(userId, storeId),
+    queryFn: ({ signal }) => getBootstrap(token!, signal),
+    enabled: Boolean(token && userId),
+    staleTime: 30_000,
+    refetchInterval: badgePollInterval,
+  });
+}
+
 export function ingestJobsQuery(token: string | null, storeId: number | null) {
   return queryOptions({
     queryKey: queryKeys.ingestJobs(storeId),
@@ -73,6 +91,7 @@ export function ingestJobQuery(token: string | null, storeId: number | null, job
     queryFn: ({ signal }) => getIngestJob(jobId, token!, signal),
     enabled: Boolean(token && storeId && jobId > 0),
     refetchInterval: (query) => query.state.data && isIngestJobActive(query.state.data.status) ? 2_000 : false,
+    staleTime: 2_000,
   });
 }
 
@@ -81,6 +100,7 @@ export function categoriesQuery(token: string | null, storeId: number | null) {
     queryKey: queryKeys.categories(storeId),
     queryFn: ({ signal }) => listCategories(token!, signal),
     enabled: Boolean(token && storeId),
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -89,6 +109,7 @@ export function cardsQuery(token: string | null, storeId: number | null, filters
     queryKey: queryKeys.cards(storeId, filters),
     queryFn: ({ signal }) => listProductCards(token!, filters, signal),
     enabled: Boolean(token && storeId),
+    staleTime: 15_000,
   });
 }
 
@@ -99,6 +120,7 @@ export function cardsInfiniteQuery(token: string | null, storeId: number | null,
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(token && storeId),
+    staleTime: 15_000,
   });
 }
 
@@ -107,6 +129,7 @@ export function cardQuery(token: string | null, storeId: number | null, cardId: 
     queryKey: queryKeys.card(storeId, cardId),
     queryFn: ({ signal }) => getProductCard(cardId, token!, signal),
     enabled: Boolean(token && storeId && cardId > 0),
+    staleTime: 15_000,
   });
 }
 
@@ -137,6 +160,7 @@ export function proposalsQuery(token: string | null, storeId: number | null) {
     queryKey: queryKeys.proposals(storeId),
     queryFn: ({ signal }) => listKnowledgeProposals(token!, signal),
     enabled: Boolean(token && storeId),
+    staleTime: 15_000,
   });
 }
 
@@ -145,6 +169,7 @@ export function faqsQuery(token: string | null, storeId: number | null) {
     queryKey: queryKeys.faqs(storeId),
     queryFn: ({ signal }) => listFaqs(token!, signal),
     enabled: Boolean(token && storeId),
+    staleTime: 60_000,
   });
 }
 
@@ -153,6 +178,7 @@ export function learnItemQuery(token: string | null, storeId: number | null, use
     queryKey: queryKeys.learnItem(storeId, userId, itemId),
     queryFn: ({ signal }) => getLearnItem(itemId, token!, signal),
     enabled: Boolean(token && storeId && userId && itemId > 0),
+    staleTime: 30_000,
   });
 }
 
@@ -162,6 +188,7 @@ export function questionsQuery(token: string | null, storeId: number | null) {
     queryFn: ({ signal }) => listQuestions(token!, signal),
     enabled: Boolean(token && storeId),
     refetchInterval: 5_000,
+    staleTime: 3_000,
   });
 }
 
@@ -171,6 +198,7 @@ export function pendingQuery(token: string | null, storeId: number | null) {
     queryFn: ({ signal }) => listPending(token!, "WAITING", signal),
     enabled: Boolean(token && storeId),
     refetchInterval: 5_000,
+    staleTime: 3_000,
   });
 }
 
@@ -179,7 +207,7 @@ export function staffQuery(token: string | null, storeId: number | null) {
     queryKey: queryKeys.staff(storeId),
     queryFn: ({ signal }) => listStaff(token!, signal),
     enabled: Boolean(token && storeId),
-    staleTime: 10_000,
+    staleTime: 30_000,
   });
 }
 
@@ -188,7 +216,8 @@ export function notificationsQuery(token: string | null, storeId: number | null)
     queryKey: queryKeys.notifications(storeId),
     queryFn: ({ signal }) => listNotifications(token!, { limit: 50 }, signal),
     enabled: Boolean(token && storeId),
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   });
 }
 
@@ -199,7 +228,9 @@ export function notificationPagesQuery(token: string | null, storeId: number | n
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(token && storeId),
-    refetchInterval: 5_000,
+    refetchInterval: (query) =>
+      query.state.data?.pages.length === 1 ? 15_000 : false,
+    staleTime: 10_000,
   });
 }
 
@@ -218,6 +249,7 @@ export function chatQuery(token: string | null, storeId: number | null, userId: 
     queryFn: ({ signal }) => listChat(token!, signal),
     enabled: Boolean(token && storeId && userId),
     refetchInterval: 5_000,
+    staleTime: 3_000,
   });
 }
 
@@ -226,5 +258,6 @@ export function roadmapQuery(token: string | null, storeId: number | null, userI
     queryKey: queryKeys.roadmap(storeId, userId),
     queryFn: ({ signal }) => getRoadmap(token!, signal),
     enabled: Boolean(token && storeId && userId),
+    staleTime: 15_000,
   });
 }

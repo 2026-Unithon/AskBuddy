@@ -6,7 +6,22 @@
 계획 작성·코드 존재·unit 통과를 실제 사용성 개선이나 출시 통과로 체크하지 않는다.
 범위/순서는 [계획](plan/USABILITY_RELEASE_PLAN.md), 측정은 [기준](plan/BASELINE_AND_ACCEPTANCE.md).
 
-## REL-00. 재현과 현재 기준선 — 먼저
+## REL-G. 페이지별 검토 전 전역 기반 — 먼저
+
+- [x] 라우트·인증 hydration·bootstrap·Query 기본값·전역 navigation/조회·API 오류·공통 UI를 코드 검토했다.
+- [x] 현재 Web 정적 검사와 production build를 통과했다. 이는 실제 사용성/런타임 API 인수가 아니다.
+- [x] 서버 `/app/bootstrap`을 Web 진입 정본으로 연결하고 실제 존재하는 목적지와 맞춘다. 로그인/새로고침/직접 링크의 목적지를 보존한다.
+- [x] production에서 mock/로컬 기본값을 실제 서버 빈 상태·오류 대신 보여주는 경로를 제거하고 데모 자격 증명은 `NEXT_PUBLIC_DEMO_MODE=true`에서만 노출한다.
+- [ ] 401/403/404/409/422/429/503/504·timeout·사용자 취소를 공통 API 오류로 분류하고 인증 만료 시 안전한 재로그인/목적지 복원을 제공한다.
+- [ ] Query별 freshness와 재조회 정책을 정하고, 하단 navigation의 대기 수 조회를 bootstrap/요약 응답으로 줄인다. mutation은 정확한 데이터만 갱신한다.
+- [ ] 공통 버튼/링크/입력에 최소 터치 크기, focus, pressed/loading/disabled, 중복 클릭 방지, inline 오류·재시도 계약을 적용한다.
+- [ ] 전역 타이포/간격/표면/상태 색/token을 정리하고 본문 16px·보조문구 가독성·safe area·reduced motion을 검증한다.
+- [ ] 업로드/추출 외부 작업의 DB connection 수명, 제한 동시성, 단계별 상태/시간, 재시작 회수의 구현 경계를 확정한다.
+- [ ] request/job/source/card ID를 잇는 운영 진단 로그와 실제 사용자 흐름 smoke를 만든다. 민감 원문은 일반 로그에 복제하지 않는다.
+
+상세 순서는 [전역 기반 계획](plan/GLOBAL_FOUNDATION_PLAN.md)을 따른다. 이 작업은 docs/dev의 모델·채점·fact/card 의미 설계를 변경하지 않는다.
+
+## REL-00. 재현과 현재 기준선
 
 - [x] 릴리스 문서 트랙·책임 경계·초기 코드 관찰을 작성했다.
 - [ ] 로컬 실행과 대상 배포의 코드/설정 차이, 실제 ingest mode/model, DB/Storage/권한을 확인한다. 비밀값은 기록하지 않는다.
@@ -60,5 +75,5 @@
 - [ ] 지원 범위/제한·데이터 접근/보존·배포 대상·백업/rollback을 문서화하고 별도 운영 실행 요청을 확인한다.
 - [ ] 파일럿 피드백으로 후보를 판정한다. 큰 AI 품질 개선/전체 MVP 완료로 확대 주장하지 않는다.
 
-현재 다음 작업은 REL-00 실제 기준선이다. 사용자 범위를 넓히기 전 REL-01/02/05의 P0를 통과해야 한다.
-
+현재 다음 작업은 REL-G1 진입/진실성 → REL-G2 조회/오류 → REL-G3 공통 상호작용 기반과 REL-00 실제 기준선이다.
+사용자 범위를 넓히기 전 REL-01/02/05의 P0를 통과해야 한다.
