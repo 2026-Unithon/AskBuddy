@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 # response_schema 를 쓰면 SDK 가 AFC 경고를 매 호출마다 찍는다. 우리는 함수 호출을 쓰지 않는다
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
-PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "extract_cards.ko.txt"
 ASSEMBLE_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "assemble_cards.ko.txt")
 FACTS_PROMPT_PATH = (
@@ -40,18 +39,6 @@ def _glossary_block(glossary: list[dict[str, str]]) -> str:
         + (f": {g['description']}" if g.get("description") else "")
         for g in glossary
     )
-
-
-def _render_prompt(*, source_type: str, text: str,
-                   category_names: list[str], glossary: list[dict[str, str]]) -> str:
-    template = PROMPT_PATH.read_text(encoding="utf-8")
-    categories = _category_block(category_names)
-    terms = _glossary_block(glossary)
-    return (template
-            .replace("{categories}", categories)
-            .replace("{glossary}", terms)
-            .replace("{source_type}", source_type)
-            .replace("{transcript}", text))
 
 
 _MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -163,39 +150,6 @@ def _usage_of(res: object) -> dict:
     return out
 
 
-async def extract(
-    *, source_id: int, source_type: str, text: str,
-    category_names: list[str], glossary: list[dict[str, str]],
-    media: list[Path] = (), usage_sink=None, usage_context=None,
-) -> ExtractionResult:
-    s = get_settings()
-    if not s.gemini_api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY 가 없다. 셸에 export 해둔 값이 .env 를 덮어쓰는 경우가 잦다. "
-            "unset GEMINI_API_KEY 후 다시 시도하라"
-        )
-
-    prompt = _render_prompt(source_type=source_type, text=text,
-                            category_names=category_names, glossary=glossary)
-
-    media = list(media)
-    started = time.perf_counter()
-    raw, usage = await _measured_call(prompt, media, usage_sink, usage_context,
-                                      prompt_hash=_hash(prompt))
-    elapsed = time.perf_counter() - started
-    logger.info("gemini model=%s elapsed=%.1fs in=%dchars media=%d out=%dchars usage=%s",
-                s.gemini_model, elapsed, len(prompt), len(media), len(raw),
-                usage or "미보고")
-
-    try:
-        result = ExtractionResult.model_validate_json(raw)
-    except Exception as e:
-        raise RuntimeError(f"추출 결과 JSON 파싱 실패: {e}") from e
-
-    # evidence.source_id 는 모델이 지어낼 수 있다. 항상 실제 값으로 덮어쓴다
-    for card in result.cards:
-        card.evidence.source_id = source_id
-    return result
 
 
 async def extract_facts(

@@ -49,7 +49,7 @@ from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
 from app.team.extraction import (  # noqa: E402
     ExtractionReport, aggregate, judge_run_health, match_fact,
-    match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION,
+    match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION, score_expected_fact,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
 
@@ -216,8 +216,7 @@ def score(
     """
     ledger = ledger or []
     report = ExtractionReport()
-    # 규격 축이 있는 대상에서만 규격을 요구한다. 아이스만 있는 음료에 ICE 표기를
-    # 요구하면 카드가 아니라 자가 틀린 것이다
+    # 규격 축과 별개로 얼음 레시피의 ICE 표시는 필수다.
     axis = variant_axis(facts)
     for fact in facts:
         stype = source_types.get(fact.get("source_key", ""), "UNKNOWN")
@@ -226,7 +225,7 @@ def score(
         needs_variant = axis.get(normalize(fact.get("subject") or ""), False)
         fact = {**fact, "applicability": applicability(fact, needs_variant)}
         report.add(
-            fact, match_fact(fact, cards, require_variant=needs_variant), stype,
+            fact, score_expected_fact(fact, cards, facts, require_variant=needs_variant), stype,
             in_ledger=in_ledger, ledger_fact_id=ledger_fact_id,
         )
     return report
@@ -257,7 +256,7 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         f"- 모델 `{snapshot['extract_model']}` · ingest_mode `{snapshot['ingest_mode']}`"
         f" · temp `{snapshot['extract_temperature']}`",
         f"- 구간 {snapshot['video_segment_sec'] or '분할없음'}초 · "
-        f"{snapshot['extract_passes']}패스",
+        f"흐름 {snapshot['pipeline_version']}",
         f"- 영상 `{snapshot['video_input_mode']}` · 프레임 상한 "
         f"`{snapshot['video_max_frames_to_model'] or '없음'}`"
         f" · 간격 {snapshot['frame_interval_sec']}초",
@@ -456,7 +455,8 @@ async def main() -> int:
         "scorer_version": SCORER_VERSION,
         "truth_hash": "sha256:" + hashlib.sha256(json.dumps(truth, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         "code_version": code_version(),
-        "prompt_version": prompt_digest("extract_cards.ko.txt"),
+        "prompt_version": prompt_digest("extract_facts.ko.txt"),
+        "assemble_prompt_version": prompt_digest("assemble_cards.ko.txt"),
         "extract_model": s.gemini_model,
         "stt_model": s.stt_model,
         "ingest_mode": s.ingest_mode,
@@ -466,7 +466,7 @@ async def main() -> int:
         "video_max_frames_to_model": s.video_max_frames_to_model,
         "frame_interval_sec": s.frame_interval_sec,
         "video_segment_sec": s.video_segment_sec,
-        "extract_passes": s.extract_passes,
+        "pipeline_version": "facts_then_cards/v1",
         # 무엇을 검증하려고 돌렸는가. holdout 개봉은 이 기록 없이는 근거가 없다
         "campaign": campaign,
         # 입력 자료의 지문. 같은 자료로 잰 것인지 나중에 대조한다

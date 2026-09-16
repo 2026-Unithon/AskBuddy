@@ -14,6 +14,7 @@ import asyncpg
 from dotenv import load_dotenv
 from app.config import get_settings
 from app.team.repeat_metrics import compare_repeats
+from app.team.extraction import SCORER_VERSION
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 
@@ -41,6 +42,7 @@ async def fetch_group(conn, slug: str, prefix: str):
             raise ValueError("중복 실행/사실 판정")
         run[row["fact_id"]] = row["verdict"]
     return sorted(per_run), dict(per_run=per_run,
+        scorer_versions=sorted({(json.loads(a["settings"]) if isinstance(a["settings"], str) else (a["settings"] or {})).get("scorer_version", "UNKNOWN") for a in attempts}),
         failed=[int(a["run_id"]) for a in attempts if a["status"] != "SUCCEEDED" or not a["card_count"]],
         settings_hashes=sorted({_settings_hash(a["settings"]) for a in attempts}))
 
@@ -79,7 +81,12 @@ async def main():
     print(f"안정성: {dict(Counter(result['transitions'].values()))}")
     print(f"안전성(모든 반복): 필수 악화 {result['must_have_regressions']} · 미판정 {result['must_have_unjudged']}")
     print(f"  안정 성공→변동 {result['stability_degraded']}")
-    invalid = a["failed"] or b["failed"] or len(a["settings_hashes"]) != 1 or len(b["settings_hashes"]) != 1
+    print(f"  이전 지시 제외 검사 {result['expected_exclusions']}건 · 실패/미판정 {result['expected_exclusions_failed_ids']}")
+    versions_a, versions_b = a.get("scorer_versions", ["UNKNOWN"]), b.get("scorer_versions", ["UNKNOWN"])
+    invalid = (a["failed"] or b["failed"] or len(a["settings_hashes"]) != 1 or len(b["settings_hashes"]) != 1
+               or versions_a != [SCORER_VERSION] or versions_b != [SCORER_VERSION])
+    if versions_a != [SCORER_VERSION] or versions_b != [SCORER_VERSION]:
+        print(f"채점 버전 불일치: A={versions_a} B={versions_b} 현재={SCORER_VERSION}; 재채점 필요")
     if args.control:
         print(f"A/A: 승패 없음 · 전체 반복 폭 {result['control_width']}건")
         if invalid or a["settings_hashes"] != b["settings_hashes"]:

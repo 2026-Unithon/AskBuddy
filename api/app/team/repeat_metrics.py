@@ -12,6 +12,9 @@ def compare_repeats(baseline, candidate, truth):
     if any(set(run) - ids for run in [*baseline, *candidate]):
         raise ValueError("정답지 밖 판정 ID")
     must = {f["fact_id"] for f in truth if f.get("must_have")}
+    exclusions = {f["fact_id"] for f in truth if f.get("expectation") == "ABSENT"}
+    active = ids - exclusions
+    must -= exclusions
     def values(runs, fid):
         return [r.get(fid, "UNDETERMINED") for r in runs]
     def stability(vs):
@@ -20,8 +23,8 @@ def compare_repeats(baseline, candidate, truth):
         if len(set(vs)) == 1 and vs[0] != "UNDETERMINED":
             return "FAILURE"
         return "VARIABLE"
-    counts_a = [sum(v == "COVERED" for v in r.values()) for r in baseline]
-    counts_b = [sum(v == "COVERED" for v in r.values()) for r in candidate]
+    counts_a = [sum(r.get(fid) == "COVERED" for fid in active) for r in baseline]
+    counts_b = [sum(r.get(fid) == "COVERED" for fid in active) for r in candidate]
     deltas = [b-a for a,b in zip(counts_a, counts_b)]
     transitions, regressions, unjudged = {}, [], []
     for fid in sorted(ids):
@@ -35,8 +38,11 @@ def compare_repeats(baseline, candidate, truth):
             if any(VERDICT_RANK[b] < VERDICT_RANK[a] for a,b in zip(va,vb)):
                 regressions.append(fid)
     degraded = [fid for fid in must if transitions[fid] == ("SUCCESS", "VARIABLE")]
-    return dict(denominator=len(ids), counts_a=counts_a, counts_b=counts_b,
+    exclusion_failures = sorted(fid for fid in exclusions if any(v != "COVERED" for v in values(candidate, fid)))
+    return dict(denominator=len(active), counts_a=counts_a, counts_b=counts_b,
                 deltas=deltas, median_delta=median(deltas), transitions=transitions,
                 must_have_regressions=sorted(regressions), must_have_unjudged=sorted(unjudged),
-                stability_degraded=sorted(degraded), safety_passed=not (regressions or unjudged or degraded),
+                stability_degraded=sorted(degraded), expected_exclusions=len(exclusions),
+                expected_exclusions_failed_ids=exclusion_failures,
+                safety_passed=not (regressions or unjudged or degraded or exclusion_failures),
                 control_width=max([*counts_a,*counts_b])-min([*counts_a,*counts_b]))

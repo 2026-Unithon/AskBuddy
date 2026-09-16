@@ -55,7 +55,7 @@ class MatchTest(unittest.TestCase):
         self.assertFalse(m.variant_hit)
 
     def test_two_stores_of_same_menu_do_not_cross_match(self):
-        m = match_fact(FACT_ICE, [_card(9, "아이스 카페라떼", "우유 225ml 를 넣습니다")])
+        m = match_fact(FACT_ICE, [_card(9, "카페라떼 ICE", "우유 225ml 를 넣습니다")])
         self.assertEqual(m.verdict, "COVERED")
         self.assertEqual(m.card_id, 9)
 
@@ -134,7 +134,7 @@ class RealWorldMissTest(unittest.TestCase):
         fact = {"fact_id": "b-0037", "subject": "아메리카노", "variant": "ICE",
                 "attribute": "제조순서", "value": "얼음 물 샷 순서",
                 "must_have": True, "source_key": "s"}
-        card = _card(1, "아이스 아메리카노 제조 순서",
+        card = _card(1, "아메리카노 ICE 제조 순서",
                      "아이스 아메리카노는 얼음, 물, 에스프레소 샷 순서로 컵에 담아 제조한다.")
         self.assertEqual(match_fact(fact, [card]).verdict, "COVERED")
 
@@ -145,7 +145,7 @@ class RealWorldMissTest(unittest.TestCase):
                 "must_have": False, "source_key": "s"}
         card = _card(1, "커피머신 추출 부품 세척",
                      "약 30분간 담가둡니다. 포타필터 홈과 가스켓은 미세한 솔로 닦아줍니다.")
-        self.assertEqual(match_fact(fact, [card]).verdict, "COVERED")
+        self.assertEqual(match_fact(fact, [card]).verdict, "UNDETERMINED")
 
     def test_card_with_value_beats_card_with_only_subject(self):
         """b-0032 — 대상 이름만 겹치는 카드가 값을 담은 카드를 밀어냈다."""

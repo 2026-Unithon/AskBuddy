@@ -3,7 +3,8 @@
     python scripts/extract_preview.py --file data/sample_transcript.ko.txt
     INGEST_MODE=real python scripts/extract_preview.py --file data/sample_transcript.ko.txt
 
-프롬프트를 고칠 때 이걸로 돌린다. `api/prompts/extract_cards.ko.txt` 만 고치면 된다.
+정식 등록과 같은 사실 추출→카드 조립을 사용한다. 실제 원장/카드 저장만 생략한다.
+프롬프트는 extract_facts.ko.txt / assemble_cards.ko.txt다.
 카드를 DB 에 넣어보려면 set_transcript.py 로 주입한 뒤 /ingest/process 를 친다.
 """
 import argparse
@@ -17,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import asyncpg  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
-from app.ingest.extract import extract_cards  # noqa: E402
+from app.ingest.extract import extract_facts  # noqa: E402
+from app.ingest.pipeline import assemble_assertions  # noqa: E402
 
 THRESHOLD_NOTE = "검수 우선 노출"
 
@@ -50,17 +52,20 @@ async def main() -> int:
     finally:
         await conn.close()
 
-    result = await extract_cards(
+    extracted = await extract_facts(
         source_id=0, source_type=args.source_type, text=text,
-        category_names=cats, glossary=gloss,
+        glossary=gloss,
     )
+    result = await assemble_assertions(source_id=0, assertions=extracted.assertions,
+                                       categories=cats, glossary=gloss)
+    result.unresolved.extend(extracted.unresolved)
 
     if args.json:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
         return 0
 
     print(f"모드 {s.ingest_mode} · 허용 카테고리 {cats} · 용어 {len(gloss)}건")
-    print(f"전사문 {len(text)}자 → 카드 {len(result.cards)}건\n")
+    print(f"전사문 {len(text)}자 → 사실 {len(extracted.assertions)}건 → 카드 {len(result.cards)}건\n")
 
     threshold = s.confidence_threshold
     for i, c in enumerate(result.cards, 1):

@@ -886,8 +886,8 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 ## 22-4. 이번 코드·인수인계 대조에서 확인한 AI 간극
 
-- `ingest/pipeline.py`는 `_extract_all`과 reduce 이후 `_persist`에서 최종 카드 facts를 `source_facts`에 넣는다. 따라서 현재 원장으로 map에서 추출된 뒤 reduce가 버린 사실을 복원할 수 없다.
-- `extract_passes=2`는 구간이 있는 영상 경로에만 적용된다. 일반 SCAN/VOICE/KAKAO까지 원자 사실 2패스가 구현됐다는 뜻이 아니다.
+- 2026-09-16 추출 경로 정리: `ingest/pipeline.py`는 원자 사실 추출→원장 선저장→카드 조립을 사용한다. 직접 카드 추출 프롬프트/레거시 함수는 제거했으며 조립이 버린 사실도 원장에 남는다.
+- 옛 1패스/2패스 선택 옵션은 제거했다. real/mock과 미리보기는 사실 추출→조립 흐름을 사용하고, 원본 구간 분할은 별도 설정으로 유지한다.
 - 읽을 수 있는 PDF 경로는 병합 텍스트 중심이며 표/페이지/이미지 위치 보존이 부족하다. 프레임 입력에도 장면 시각 provenance 보강이 필요하다.
 - `source_facts`, `card_facts`, `effective_facts` migration은 있다. 런타임의 원장 선저장·불변 수정 revision·버전별 블록·사실 색인·공유 렌더러는 없다.
 - 현행 검색은 카드 임베딩 top-k + 0.35 하한 + 일부 앵커 일치다. 설정의 0.62 strong_score는 현재 실행 게이트가 아니다.

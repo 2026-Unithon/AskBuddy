@@ -17,7 +17,71 @@ from typing import Any, Iterable, Literal
 
 Verdict = Literal["COVERED", "PARTIAL", "MISSING", "UNDETERMINED"]
 
-SCORER_VERSION = "w_fact_score/v2"
+SCORER_VERSION = "w_fact_score/v3"
+
+# 후보의 속성과 값을 같은 문장 안에서 확인한다. dev 사실 ID와 무관한 업무 표현이다.
+_CARD_ATTRIBUTE_MARKERS = {
+    "스팀우유량": ("스팀우유",), "우유량": ("우유",),
+    "온수량": ("뜨거운물", "온수"), "침지시간": ("담가", "담근", "침지"),
+    "샷 수": ("샷",), "소분 단위": ("소분", "나눠", "나누어"),
+    "보관위치": ("보관", "위치", "냉장고"),
+    "종료시각": ("영업 종료", "마감 시간", "마감 시각"),
+    "약품 투입량": ("약품",), "처리주체": ("직원", "아르바이트", "알바", "점주"),
+    "세척제": ("세제", "세척제"), "제조순서": ("순서", "추출"),
+}
+
+
+def _attribute_markers(fact):
+    attribute = fact.get("attribute") or ""
+    return _CARD_ATTRIBUTE_MARKERS.get(attribute, (attribute,))
+
+
+def _has_attribute(fact, text):
+    return any(normalize(marker) in normalize(text) for marker in _attribute_markers(fact) if marker)
+
+
+def _card_context(fact, card):
+    title, content = card.get("title") or "", card.get("content") or ""
+    # 소수점은 문장 경계로 자르지 않는다.
+    clauses = re.split(r"[.!?](?!\d)|[;\n]|이며|하며", content)
+    relevant = [c for c in clauses if _has_attribute(fact, c)]
+    if fact.get("attribute") == "종료시각":
+        # '영업 종료 전까지 20:00부터 주문'은 종료시각의 값 지정이 아니다.
+        assigned = [c for c in relevant if re.search(
+            r"(?:영업\s*종료(?:\s*(?:시각|시간))?|마감\s*(?:시각|시간))\s*(?:은|는|이|:)?\s*\d", c)]
+        if assigned:
+            relevant = assigned
+    subject_clauses = [c for c in relevant if _subject_in(fact.get("subject") or "", c)]
+    if subject_clauses:
+        relevant = subject_clauses
+    # 제목은 대상 연결에만 사용한다. 제목의 숫자는 본문 값을 대신하지 않는다.
+    return title + " " + " ".join(relevant or clauses)
+
+
+def requires_ice_label(fact):
+    if (fact.get("variant") or "").upper() == "ICE" or fact.get("recipe_uses_ice") is True:
+        return True
+    if fact.get("category_hint") != "음료제작" and fact.get("kind") != "RECIPE":
+        return False
+    assertion = fact.get("original_assertion") or ""
+    return bool(re.search(r"얼음.{0,12}(넣|투입|갈아|갈고|믹싱)", assertion)
+                and not re.search(r"얼음.{0,12}(않|말|금지|제외|없)", assertion))
+
+
+def apply_evaluation_policy(truth, overrides):
+    """별도 승인 라벨을 적용하며 원래 입력 snapshot은 변경하지 않는다."""
+    ids = {f["fact_id"] for f in truth}
+    if set(overrides) - ids:
+        raise ValueError("정답지 밖 정책 ID")
+    allowed = {"expectation", "superseded_by", "recipe_uses_ice"}
+    for update in overrides.values():
+        if set(update) - allowed:
+            raise ValueError("정책은 원본 대상·속성·값을 바꿀 수 없다")
+        if update.get("expectation", "PRESENT") not in {"PRESENT", "ABSENT"}:
+            raise ValueError("invalid fact expectation")
+        if "recipe_uses_ice" in update and type(update["recipe_uses_ice"]) is not bool:
+            raise ValueError("recipe_uses_ice must be boolean")
+    return [{**f, **overrides.get(f["fact_id"], {})} for f in truth]
 
 _ATTRIBUTE_ALIASES = {
     "우유량": ("우유량", "우유 용량", "스팀우유량"),
@@ -196,6 +260,12 @@ def _score_one(fact: dict[str, Any], card_text: str,
     # 규격 축이 없는 대상은 규격을 안 적어도 헷갈릴 것이 없다.
     # 축이 없는데 감점하면 자가 틀린 것이지 카드가 틀린 것이 아니다
     variant_hit = variant_present(variant, card_text) if require_variant else True
+    if requires_ice_label(fact):
+        variant_hit = bool(re.search(r"(?<![A-Za-z])ICE(?![A-Za-z])", card_text, re.I))
+    if variant and fact.get("applicability") != "COMMON":
+        opposite = "ICE" if variant.upper() == "HOT" else "HOT" if variant.upper() == "ICE" else None
+        if opposite and variant_present(opposite, card_text) and not variant_present(variant, card_text):
+            return FactMatch("PARTIAL", None, 0.0, "명시적인 반대 규격", subject_hit, False, False)
 
     want_numbers = numbers_in(value)
     if want_numbers:
@@ -215,13 +285,8 @@ def _score_one(fact: dict[str, Any], card_text: str,
         uncertainty = None
         attribute = fact.get("attribute") or ""
         # 자유 문장에서는 속성의 생략/별칭을 확정할 수 없으면 보류한다.
-        roots = {"스팀우유량": ("스팀우유",), "우유량": ("우유",),
-                 "온수량": ("뜨거운물", "온수"), "침지시간": ("담가", "침지"),
-                 "약품 투입량": ("약품",), "처리주체": ("직원", "아르바이트"),
-                 "세척제": ("세제", "세척제"), "제조순서": ("순서", "추출")}
-        markers = roots.get(attribute, (attribute,))
-        if attribute and not any(normalize(marker) in normalize(card_text) for marker in markers):
-            uncertainty = "대상·값은 있으나 속성 관계 미확인"
+        if attribute and not _has_attribute(fact, card_text):
+            return FactMatch("PARTIAL", None, ratio, "대상·값은 있으나 속성 관계 미확인", True, False, variant_hit, ratio)
         if re.search(r"잘못|틀린|아니라|대신|넣지|않|금지|제외|not\b|never\b", card_text, re.I):
             uncertainty = "부정·정정·예외 문맥은 사람 확인 필요"
         quantities = re.findall(r"(\d+(?:\.\d+)?)\s*(ml|㎖|g|kg|일|분|초|days?|minutes?)", value, re.I)
@@ -277,19 +342,66 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
         if not fact.get("variant"):
             return FactMatch("UNDETERMINED", None, 0.0, "SPECIFIC 규격 누락")
     best = FactMatch("MISSING", None, 0.0, "대조할 카드가 없음")
+    best_attribute = False
     for card in cards:
-        text = f"{card.get('title') or ''} {card.get('content') or ''}"
+        text = _card_context(fact, card)
+        subject = fact.get("subject") or ""
+        subject_matches = _subject_in(subject, text)
+        if subject == "영업" and fact.get("attribute") == "종료시각" and _has_attribute(fact, text):
+            subject_matches = _subject_in("매장", text)
+            if subject_matches:
+                text = "영업 " + text
+        if not subject_matches:
+            full_text = f"{card.get('title') or ''} {card.get('content') or ''}"
+            if _subject_in(subject, full_text) and _has_attribute(fact, text):
+                candidate = FactMatch("UNDETERMINED", int(card["card_id"]), 0.0,
+                                      "대상과 속성이 서로 다른 문장: 관계 미확인", True, False, False)
+                if _RANK[candidate.verdict] > _RANK[best.verdict]:
+                    best = candidate
+                    best_attribute = True
+            continue
         m = _score_one(fact, text, require_variant)
+        full_text = f"{card.get('title') or ''} {card.get('content') or ''}"
+        if m.verdict == "COVERED" and re.search(r"잘못|틀린|아니라|대신|넣지|않|금지|제외|not\b|never\b", full_text, re.I):
+            m = FactMatch("UNDETERMINED", None, m.score, "다른 문장의 부정·정정·예외 확인 필요",
+                          m.subject_hit, m.value_hit, m.variant_hit, m.number_ratio)
         # 같은 판정 안에서는 값이 든 카드를 먼저 집는다.
         # 대상 이름만 겹치는 카드가 값을 담은 카드를 밀어내면 진단이 뒤집힌다
-        if (_RANK[m.verdict], m.value_hit, m.score) > (
-            _RANK[best.verdict], best.value_hit, best.score
+        attribute_hit = _has_attribute(fact, text)
+        if (_RANK[m.verdict], attribute_hit, m.value_hit, m.score) > (
+            _RANK[best.verdict], best_attribute, best.value_hit, best.score
         ):
+            best_attribute = attribute_hit
             best = FactMatch(
                 m.verdict, int(card["card_id"]), m.score, m.reason,
                 m.subject_hit, m.value_hit, m.variant_hit, m.number_ratio,
             )
     return best
+
+
+def score_expected_fact(fact, cards, truth, require_variant=True):
+    """명시적 ABSENT 라벨만 최종 카드 제외 검사로 처리한다. 원장 이력은 삭제하지 않는다."""
+    if fact.get("expectation", "PRESENT") == "PRESENT":
+        return match_fact(fact, cards, require_variant)
+    if fact.get("expectation") != "ABSENT":
+        raise ValueError("invalid fact expectation")
+    successors = [f for f in truth if f.get("fact_id") == fact.get("superseded_by")]
+    if len(successors) != 1 or successors[0].get("expectation", "PRESENT") != "PRESENT":
+        return FactMatch("UNDETERMINED", None, 0.0, "최신 정정 사실 연결 미확인")
+    successor = successors[0]
+    if normalize(successor.get("subject")) != normalize(fact.get("subject")):
+        return FactMatch("UNDETERMINED", None, 0.0, "정정 대상 불일치")
+    old = {**fact, "attribute": (fact.get("attribute") or "").replace("(이전)", "")}
+    if _attribute_key(old["attribute"]) != _attribute_key(successor.get("attribute")):
+        return FactMatch("UNDETERMINED", None, 0.0, "정정 속성 불일치")
+    old_match = match_fact(old, cards, require_variant=False)
+    if old_match.verdict in {"COVERED", "UNDETERMINED"}:
+        return FactMatch("PARTIAL" if old_match.verdict == "COVERED" else "UNDETERMINED",
+                         old_match.card_id, 0.0, "이전 지시의 잔존 또는 정정 문맥 확인 필요")
+    latest = match_fact(successor, cards, require_variant=False)
+    if latest.verdict != "COVERED":
+        return FactMatch(latest.verdict, latest.card_id, latest.score, "최신 정정 지시 미확인")
+    return FactMatch("COVERED", latest.card_id, 1.0, "이전 지시 제외·최신 지시 확인")
 
 
 def match_fact_in_ledger(
@@ -347,6 +459,8 @@ class ExtractionReport:
             "ledger_fact_id": ledger_fact_id,
             "loss_stage": loss_stage(in_ledger, match.verdict),
             "fact_id": fact.get("fact_id"),
+            "expectation": fact.get("expectation", "PRESENT"),
+            "superseded_by": fact.get("superseded_by"),
             "subject": fact.get("subject"),
             "variant": fact.get("variant"),
             "attribute": fact.get("attribute"),
@@ -369,9 +483,13 @@ def aggregate(rows: list[dict[str, Any]], card_count: int = 0) -> dict[str, Any]
 
     전체 손실률만으로는 어느 프롬프트를 먼저 고칠지 정할 수 없다 (13.1).
     """
+    exclusions = [r for r in rows if r.get("expectation") == "ABSENT"]
+    rows = [r for r in rows if r.get("expectation", "PRESENT") == "PRESENT"]
     total = len(rows)
     if total == 0:
-        return {"fact_count": 0, "card_count": card_count}
+        return {"fact_count": 0, "card_count": card_count,
+                "expected_exclusions": len(exclusions),
+                "expected_exclusions_failed_ids": [r["fact_id"] for r in exclusions if r["verdict"] != "COVERED"]}
 
     def bucket(subset: list[dict[str, Any]]) -> dict[str, Any]:
         n = len(subset)
@@ -399,6 +517,8 @@ def aggregate(rows: list[dict[str, Any]], card_count: int = 0) -> dict[str, Any]
     overall = bucket(rows)
     return {
         **overall,
+        "expected_exclusions": len(exclusions),
+        "expected_exclusions_failed_ids": [r["fact_id"] for r in exclusions if r["verdict"] != "COVERED"],
         "card_count": card_count,
         # 치명 누락 — must_have 사실을 놓친 것. 여기가 0 이 아니면 서비스가 성립하지 않는다
         "must_have": bucket(must),

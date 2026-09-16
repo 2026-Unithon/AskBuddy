@@ -16,7 +16,6 @@ import asyncpg
 
 from app.deps import get_pool
 from app.ingest import repository as repo
-from app.ingest.extract import assemble_cards, extract_cards
 from app.ingest.preprocess import audio, document, kakao, storage, video
 from app.ingest.schemas import ExtractionResult
 
@@ -123,8 +122,8 @@ async def process_source(
             logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
 
             # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다
-            result = await _assemble_from_ledger(
-                source_id=source_id, assertions=assertions, ledger_ids=ledger_ids,
+            result = await assemble_assertions(
+                source_id=source_id, assertions=assertions,
                 categories=list(categories), glossary=glossary,
                 usage_sink=usage_sink, usage_base=usage_base,
             )
@@ -192,102 +191,6 @@ def _ctx_for(base: tuple | None, source_id: int, stage: str,
                           run_id, segment_id=segment_id)
 
 
-async def _extract_all(
-    *, source_id: int, source_type: str, text: str, media: list[Path],
-    categories: list[str], glossary: list[dict],
-    segments: list[tuple[str, list[Path]]],
-    usage_sink=None, usage_base: tuple | None = None,
-) -> ExtractionResult:
-    """구간이 있으면 구간마다 뽑고 합친다. 없으면 통째로 한 번 뽑는다.
-
-    38분을 한 호출에 담으면 모델이 요약하고 세부를 버린다 —
-    store-a 실측에서 영상 사실 62건 중 61건을 아예 못 뽑았다.
-    구간을 나누면 한 호출이 보는 범위가 줄어든다.
-
-    구간 하나가 실패해도 나머지는 살린다. 전부 실패했을 때만 예외를 올린다.
-    """
-    from app.config import get_settings
-
-    if not segments:
-        # native 영상이 실패하면 프레임으로 폴백한다 (이관경계 4절).
-        # 한 모드가 죽었다고 자료 전체를 버리지 않는다.
-        return await extract_cards(
-            source_id=source_id, source_type=source_type, text=text,
-            category_names=categories, glossary=glossary, media=media,
-            usage_sink=usage_sink,
-            usage_context=_ctx_for(usage_base, source_id, "EXTRACT"),
-        )
-
-    merged = ExtractionResult(cards=[], unresolved=[])
-    failed = 0
-    for index, (seg_text, seg_media) in enumerate(segments, start=1):
-        try:
-            part = await extract_cards(
-                source_id=source_id, source_type=source_type, text=seg_text,
-                category_names=categories, glossary=glossary, media=seg_media,
-                usage_sink=usage_sink,
-                usage_context=_ctx_for(usage_base, source_id, "EXTRACT",
-                                       segment_id=f"seg{index}"),
-            )
-        except Exception as exc:
-            failed += 1
-            logger.warning("구간 %d/%d 추출 실패 source=%s: %s",
-                           index, len(segments), source_id, exc)
-            continue
-        merged.cards.extend(part.cards)
-        merged.unresolved.extend(part.unresolved)
-        logger.info("구간 %d/%d 카드 %d장 (프레임 %d장)",
-                    index, len(segments), len(part.cards), len(seg_media))
-
-    if failed == len(segments):
-        raise RuntimeError(f"모든 구간({failed}개) 추출이 실패했다")
-    if failed:
-        logger.warning("구간 %d/%d 실패 — 나머지 결과로 진행한다", failed, len(segments))
-    logger.info("구간 %d개 합계 카드 %d장 source=%s",
-                len(segments), len(merged.cards), source_id)
-
-    if get_settings().extract_passes < 2:
-        return merged
-
-    # reduce — 구간별 사실을 모아 대상 단위로 다시 조립한다.
-    # 분할만 하면 같은 대상이 여러 카드로 쪼개져 신입이 카드 하나로는 답을 못 얻는다
-    # (store-a 실측: 분할만 켰을 때 ASSEMBLY 6 → 22건, 카드 33 → 72장).
-    flat = [
-        {
-            "대상": f.object_name,
-            "속성": f.attribute,
-            "값": f.value,
-            "확실함": round(f.confidence, 2),
-            "근거시각": card.evidence.timestamp_sec,
-            "구간카드": card.title,
-        }
-        for card in merged.cards
-        for f in card.facts
-    ]
-    if not flat:
-        logger.info("조립할 사실이 없다 — map 결과를 그대로 쓴다 source=%s", source_id)
-        return merged
-
-    try:
-        reduced = await assemble_cards(
-            source_id=source_id, facts=flat,
-            category_names=categories, glossary=glossary,
-            usage_sink=usage_sink,
-            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
-        )
-    except Exception as exc:
-        # 조립이 죽었다고 뽑아둔 것을 버리지 않는다. map 결과로 폴백한다
-        logger.warning("조립 실패 — map 결과로 폴백한다 source=%s: %s", source_id, exc)
-        return merged
-
-    if not reduced.cards:
-        logger.warning("조립 결과가 비었다 — map 결과로 폴백한다 source=%s", source_id)
-        return merged
-
-    reduced.unresolved.extend(merged.unresolved)
-    logger.info("조립 완료 source=%s 사실 %d건 · 카드 %d → %d장",
-                source_id, len(flat), len(merged.cards), len(reduced.cards))
-    return reduced
 
 
 async def _mark_failed(
@@ -613,16 +516,15 @@ async def _persist_ledger(
     return {a.local_ref: fid for a, fid in zip(assertions, fact_ids)}
 
 
-async def _assemble_from_ledger(
-    *, source_id: int, assertions: list, ledger_ids: dict[str, int],
+async def assemble_assertions(
+    *, source_id: int, assertions: list,
     categories: list[str], glossary: list[dict],
     usage_sink=None, usage_base: tuple | None = None,
 ):
-    """reduce — 원장에 적힌 사실을 대상 단위로 묶어 카드로 만든다.
+    """추출된 사실을 대상 단위로 묶어 카드로 만든다. 등록과 미리보기에서 공유한다.
 
     새 사실을 만들지 않는다. 고르고 문장으로 다듬는 일만 한다.
-    조립이 실패하면 예외를 올리지 않고 빈 결과를 돌려준다 — 원장은 이미 적혔으므로
-    뽑은 것이 사라지지 않는다. 그것이 순서를 뒤집은 이유다.
+    조립 실패는 unresolved에 남긴다. 등록 경로는 호출 전에 사실을 원장에 저장한다.
     """
     from app.ingest.extract import assemble_cards
     from app.ingest.schemas import ExtractionResult
