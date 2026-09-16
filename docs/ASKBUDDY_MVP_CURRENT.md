@@ -889,7 +889,7 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 - 2026-09-16 추출 경로 정리: `ingest/pipeline.py`는 원자 사실 추출→원장 선저장→카드 조립을 사용한다. 직접 카드 추출 프롬프트/레거시 함수는 제거했으며 조립이 버린 사실도 원장에 남는다.
 - 옛 1패스/2패스 선택 옵션은 제거했다. real/mock과 미리보기는 사실 추출→조립 흐름을 사용하고, 원본 구간 분할은 별도 설정으로 유지한다.
 - 읽을 수 있는 PDF 경로는 병합 텍스트 중심이며 표/페이지/이미지 위치 보존이 부족하다. 프레임 입력에도 장면 시각 provenance 보강이 필요하다.
-- `source_facts`, `card_facts`, `effective_facts` migration은 있다. 런타임의 원장 선저장·불변 수정 revision·버전별 블록·사실 색인·공유 렌더러는 없다.
+- 원장 선저장은 ingest runtime에 연결됐다. C0 M1의 불변 revision·버전별 블록·발행 기반은 구현됐으나 실제 ingest/OWNER_EDIT/OWNER_ANSWER를 이 경로와 참조 전용 조립·공유 렌더러·버전별 색인으로 연결하는 작업은 남았다.
 - 현행 검색은 카드 임베딩 top-k + 0.35 하한 + 일부 앵커 일치다. 설정의 0.62 strong_score는 현재 실행 게이트가 아니다.
 - 숫자·낱말 검사는 HOT/ICE 수치 교환, ‘보관하면 안 됩니다→됩니다’, 전원 차단 선행조건 삭제를 통과시킨다. 인용 존재만으로 무근거 여부를 세는 평가도 이 오류를 놓친다.
 - 채팅은 기록을 저장하지만 질문 검색·생성에 이전 대화 문맥을 사용하지 않는다. 현행 miss는 WAITING·알림 경로이므로 CLARIFY를 단순 추가할 수 없다.
@@ -904,7 +904,9 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 계약 밖으로 나온 것도 있다. canonical JSON과 snapshot hash, JSON schema·test vector export(`api/schema/`), F01~F35 공유 fixture(`api/tests/fixtures/contracts/v1/`), fake renderer/indexer/outbox, M0·M1 migration과 발행 트랜잭션 서비스다. 실제 DB에서 삭제 보존·멱등·동시 발행·매장 격리·불변성 12개 시나리오를 확인했고, 빈 DB에 17개 migration을 처음부터 쌓는 재구축도 확인했다.
 
-**아직 아닌 것을 분명히 한다.** 제품 runtime(`learn/router`, ingest 파이프라인)이 이 계약을 소비하는 경로는 아직 연결되지 않았다. 원가는 관측만 되고 요율표가 비어 있어 D21 판정이 UNDETERMINED이며 이는 통과가 아니다. R 몫인 embed/answer 계측과 M2·M3, 그리고 CP-05 품질 통합이 남아 있다. 계약·fixture·fake로 확인한 것을 실자료 캠페인 결과로 옮겨 적지 않는다.
+2026-09-16 [C0·W0 체크 감사](review/C0_W0_CHECK_AUDIT_20260916.md): R embed/answer/읽기 집계와 W 승인/수정/점주 답변 임베딩의 짧은 연결·usage 계측은 완료됐다. 계약 probe 19/19, schema export 15개와 공유 fixture 3개 최신, 전체 회귀 434 tests / 80 subtests를 이번에 재확인했다.
+
+**아직 아닌 것을 분명히 한다.** 제품 runtime 전체가 불변 revision/승인 snapshot 계약을 소비하는 경로는 미완료다. CP-00B/C 전 단계 원가·Storage/전송 귀속 인수, 요율/환율, CP-05 품질/원가 통합, M2·M3 및 PrepareIndex/OWNER_ANSWER 왕복, D20 원본 접근 해제/UI와 호환 플래그 검증이 남았다. D21은 UNDETERMINED이고 통과가 아니다. 과거 DB 12/12·재구축 기록, 현재 offline 회귀, 실제 캠페인 결과를 구분한다.
 
 ## 22-6. W0·W1 현황 (2026-09-15)
 
@@ -919,7 +921,8 @@ W1 에서 파이프라인을 `입력 → 사실 → 원장 → 조립 → 카드
 
 **아직 개선을 주장할 수 없다.** 채점기의 단위 불일치·부정·정정·규격 교차와 출력 속성/값
 반례는 코드 교정·합성/격리 DB 검증으로 차단했다([검증 기록](review/W_MEASUREMENT_FIXES_20260915.md)).
-실제 사람 표본 검토와 실행 당시 입력 snapshot 복구가 남았다. 기준선과 W1을 같은 기준으로 재평가해야
+AI 표본 68건 대조·사용자 표시 8개 판정 반영·마지막 A/B 각 1개 조건부 재평가는 완료했다.
+전체 독립 사람 검수와 나머지 16개 과거 실행 입력 복구는 남았다. 백업이 없으면 새 dev 캠페인을 별도 승인/사전등록해야 한다. 기준선과 W1을 같은 기준으로 재평가해야
 "구조 변경이 개선인가" 를 물을 수 있다. 순서는 [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md),
 측정 기록은 [W0_BASELINE_20260915.md](review/W0_BASELINE_20260915.md).
 
