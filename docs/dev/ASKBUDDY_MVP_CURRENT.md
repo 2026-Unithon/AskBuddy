@@ -906,6 +906,8 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 2026-09-16 [C0·W0 체크 감사](review/C0_W0_CHECK_AUDIT_20260916.md): R embed/answer/읽기 집계와 W 승인/수정/점주 답변 임베딩의 짧은 연결·usage 계측은 완료됐다. 계약 probe 19/19, schema export 15개와 공유 fixture 3개 최신, 전체 회귀 434 tests / 80 subtests를 이번에 재확인했다.
 
+후속 [W 분류·관계 계측](review/W_CLASSIFY_RELATION_USAGE_20260916.md)에서 CLASSIFY/RELATION과 점주 답변 후보 EMBED도 연결했다. 재분류 worker는 짧은 쿼리 세션을 사용한다. 전체 회귀 450 tests / 84 subtests, PG15 W 원장/호출 경계 7/7과 기존 원장 14/14를 확인했다. 실제 공급자는 fake이며 전체 원가/제품 발행 인수는 아니다.
+
 **아직 아닌 것을 분명히 한다.** 제품 runtime 전체가 불변 revision/승인 snapshot 계약을 소비하는 경로는 미완료다. CP-00B/C 전 단계 원가·Storage/전송 귀속 인수, 요율/환율, CP-05 품질/원가 통합, M2·M3 및 PrepareIndex/OWNER_ANSWER 왕복, D20 원본 접근 해제/UI와 호환 플래그 검증이 남았다. D21은 UNDETERMINED이고 통과가 아니다. 과거 DB 12/12·재구축 기록, 현재 offline 회귀, 실제 캠페인 결과를 구분한다.
 
 ## 22-6. W0·W1 현황 (2026-09-15)

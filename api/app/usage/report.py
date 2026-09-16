@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 SCENARIOS_PATH = (
-    Path(__file__).resolve().parents[3] / "docs" / "c0_cost_scenarios.json")
+    Path(__file__).resolve().parents[3] / "docs" / "dev" / "c0_cost_scenarios.json")
 
 # 판정 결과
 PASS = "PASS"

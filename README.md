@@ -209,8 +209,8 @@ curl -X POST localhost:8000/reg/retrieve -H 'Content-Type: application/json' \
 
 | 파일 | 내용 |
 |---|---|
-| [`docs/ASKBUDDY_MVP_CURRENT.md`](./docs/ASKBUDDY_MVP_CURRENT.md) | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
-| [`docs/DEV_TODO_CURRENT.md`](./docs/DEV_TODO_CURRENT.md) | 남은 12.5~15단계의 실행 순서와 완료 기준 |
+| [`docs/dev/ASKBUDDY_MVP_CURRENT.md`](./docs/dev/ASKBUDDY_MVP_CURRENT.md) | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
+| [`docs/dev/DEV_TODO_CURRENT.md`](./docs/dev/DEV_TODO_CURRENT.md) | 남은 12.5~15단계의 실행 순서와 완료 기준 |
 | [`db/001_init_schema.sql`](./db/001_init_schema.sql) | 스키마 원천 |
 | [`CLAUDE.md`](./CLAUDE.md) | AI 코딩 에이전트용 세션 컨텍스트 |
 

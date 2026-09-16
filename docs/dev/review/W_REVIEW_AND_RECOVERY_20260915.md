@@ -115,11 +115,11 @@ QA용 `pypdfium2`는 로컬 venv에만 설치했고 제품 의존성은 변경�
 
 Git 제외 로컬 산출물:
 
-- [행별 AI 검토 packet](../../api/eval/reports/w_review_20260915_final/reviewed_packet.json)
-- [실행별 복구 감사](../../api/eval/reports/w_review_20260915_final/recovery_audit.json)
-- [A run 78 조건부 재평가](../../api/eval/reports/w_review_20260915_final/rescore_78_eval-a.json)
-- [B run 86 조건부 재평가](../../api/eval/reports/w_review_20260915_final/rescore_86_eval-b.json)
-- [원본 PDF/영상 QA·보존 전사문](../../api/eval/reports/w_review_20260915/source_qa/source_text.json)
+- [행별 AI 검토 packet](../../../api/eval/reports/w_review_20260915_final/reviewed_packet.json)
+- [실행별 복구 감사](../../../api/eval/reports/w_review_20260915_final/recovery_audit.json)
+- [A run 78 조건부 재평가](../../../api/eval/reports/w_review_20260915_final/rescore_78_eval-a.json)
+- [B run 86 조건부 재평가](../../../api/eval/reports/w_review_20260915_final/rescore_86_eval-b.json)
+- [원본 PDF/영상 QA·보존 전사문](../../../api/eval/reports/w_review_20260915/source_qa/source_text.json)
 
 ```sh
 api/.venv/bin/python api/scripts/prepare_w_review.py --out api/eval/reports/NEW_UNUSED_DIR --compat-code aa49fa0

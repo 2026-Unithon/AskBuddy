@@ -1,11 +1,11 @@
 # CLAUDE.md
 
 > 이 파일은 Claude Code가 세션 시작 시 자동으로 읽는다.
-> **작업 전 반드시 `docs/ASKBUDDY_MVP_CURRENT.md`를 읽을 것.** 제품·데이터·API·운영 계약의 단일 정본이다.
-> 남은 작업과 실행 순서는 `docs/DEV_TODO_CURRENT.md`를 따른다.
+> **작업 전 반드시 `docs/dev/ASKBUDDY_MVP_CURRENT.md`를 읽을 것.** 제품·데이터·API·운영 계약의 단일 정본이다.
+> 남은 작업과 실행 순서는 `docs/dev/DEV_TODO_CURRENT.md`를 따른다.
 > 2026-09-14 동기화: 두 담당자 W/R 경계와 새 AI 계약은 MVP 30~31절, 평가 분모·승격은 실험설계가 정본이다. 아래 과거 요약은 현재 코드의 구현 완료나 새 작업의 운영 실행 권한을 대신하지 않는다.
-> pull `65c2403` 이후 C0 결정·담당·PR 선행 관계는 `docs/C0_DECISIONS_AND_PLAN.md`, 재현 검토는 `docs/review/C0_REVIEW_20260914.md`를 읽는다. 타입 기반·기존 22개 unit은 확인됐으나 C0 전체 완료는 아니다.
-> 사용자 원가 회신 반영: `docs/plan/C0_COST_MEASUREMENT_PLAN.md`의 CP-00A~C 원가 계측을 먼저 구현한다. 미래 사용량은 첫 달/안정기 시나리오로 다루며 실제 metadata·비용을 수집한다.
+> pull `65c2403` 이후 C0 결정·담당·PR 선행 관계는 `docs/dev/C0_DECISIONS_AND_PLAN.md`, 재현 검토는 `docs/dev/review/C0_REVIEW_20260914.md`를 읽는다. 타입 기반·기존 22개 unit은 확인됐으나 C0 전체 완료는 아니다.
+> 사용자 원가 회신 반영: `docs/dev/plan/C0_COST_MEASUREMENT_PLAN.md`의 CP-00A~C 원가 계측을 먼저 구현한다. 미래 사용량은 첫 달/안정기 시나리오로 다루며 실제 metadata·비용을 수집한다.
 
 ---
 
@@ -36,15 +36,17 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 
 ## 반드시 먼저 읽을 문서
 
-`docs/` 는 정본과 전체 계획, `docs/plan/` 은 구현 계획, `docs/review/` 는 검증 결과다.
-`docs/review/` 는 그때의 관찰 기록이라 나중에 고쳐 쓰지 않는다. 구조는 `docs/README.md`.
+W 개발은 `docs/dev/`의 문서만 기준으로 읽는다. `docs/release/`는 별도 작업 영역이며 사용자 요청 없이 읽거나 수정하지 않는다.
+
+`docs/dev/` 는 정본과 전체 계획, `docs/dev/plan/` 은 구현 계획, `docs/dev/review/` 는 검증 결과다.
+`docs/dev/review/` 는 그때의 관찰 기록이라 나중에 고쳐 쓰지 않는다. 구조는 `docs/dev/README.md`.
 
 | 파일 | 내용 |
 |---|---|
-| `docs/ASKBUDDY_MVP_CURRENT.md` | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
-| `docs/plan/W1_MEASUREMENT_PLAN.md` | 채점기 교정과 측정 구조 ①~⑤. **W1 이후 작업의 선행** |
-| `docs/DEV_TODO_CURRENT.md` | 남은 12.5~15단계의 실행 순서와 완료 기준 |
-| `docs/이관경계_실험설계.md` | 무엇을 모델에 넘기고 무엇을 우리가 쥐는가. 플래그·실험 순서·게이트 지표 |
+| `docs/dev/ASKBUDDY_MVP_CURRENT.md` | 제품·데이터·API·화면·배포 계약. **현재 단일 정본** |
+| `docs/dev/plan/W1_MEASUREMENT_PLAN.md` | 채점기 교정과 측정 구조 ①~⑤. **W1 이후 작업의 선행** |
+| `docs/dev/DEV_TODO_CURRENT.md` | 남은 12.5~15단계의 실행 순서와 완료 기준 |
+| `docs/dev/이관경계_실험설계.md` | 무엇을 모델에 넘기고 무엇을 우리가 쥐는가. 플래그·실험 순서·게이트 지표 |
 | `api/eval/progress/PROGRESS.md` | 품질 추이. 처음 대비 현재 수치. `scripts/track_progress.py` 로 갱신 |
 | `UI/` | 화면 목업 24장. 프론트 작업 전 반드시 볼 것 |
 | `db/001_init_schema.sql` | 초기 스키마(24 테이블). `users` 에 `email`·`password_hash` 포함 |
@@ -137,7 +139,7 @@ AskBuddy — 카페 등 소규모 매장의 업무 인수인계를 AI가 대신�
 | D20 | **자료를 지워도 사실과 카드는 남는다.** source tombstone·원본 파일 접근 해제, facts/card_versions/citations 보존. API의 occurrence별 source_availability와 UI `인용 끊김`으로 표시. 기존 CASCADE FK 보강 후 활성화; 개인정보 삭제는 별도 절차 |
 | D21 | **원가·지연 상한.** 월 운영 변동비 3,000원(AI 전 단계·Storage 저장/전송 포함, Railway/Vercel/DB 고정비 제외). 등록비는 별도 추적·예산환산/잔여 예산 보전 개월 보고. 첫 달/안정기 시나리오 검증, 미관측은 UNKNOWN. 답변 전체·저장 `p95` 5초, 카드 생성 지연 상한 보류. 계측 CP-00A~C 선행 |
 
-확정 결정의 변경은 `docs/ASKBUDDY_MVP_CURRENT.md`와 `docs/DEV_TODO_CURRENT.md`에 먼저 반영하고, 평가 결과와 migration 호환성을 함께 검토한다.
+확정 결정의 변경은 `docs/dev/ASKBUDDY_MVP_CURRENT.md`와 `docs/dev/DEV_TODO_CURRENT.md`에 먼저 반영하고, 평가 결과와 migration 호환성을 함께 검토한다.
 
 ---
 
@@ -226,7 +228,7 @@ W0 정답지 감사와 기준선 측정이 끝났고(**분모 278건**), W1 에�
 
 **다음은 채점기 교정이다.** 현재 채점기가 단위 불일치·부정·정정 문장·규격 교차를
 모두 `COVERED` 로 통과시킨다. 이 상태에서 나온 손실·재현율 수치로 개선을 주장하지
-않는다. 순서는 `docs/plan/W1_MEASUREMENT_PLAN.md` 의 ①~⑤ 를 따른다.
+않는다. 순서는 `docs/dev/plan/W1_MEASUREMENT_PLAN.md` 의 ①~⑤ 를 따른다.
 
 **구현이 통과는 아니다.** 원가 D21 판정은 요율표·답변 단가·저장비·환율이 없어
 UNDETERMINED 다. 제품 runtime 이 새 계약을 소비하는 경로는 아직 연결되지 않았다.

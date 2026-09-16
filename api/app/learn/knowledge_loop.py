@@ -1,19 +1,22 @@
 """점주 원문 답변을 기존 지식과 비교해 안전한 반영 계획으로 만든다."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 import asyncpg
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.reg.embeddings import embed_text, vector_literal
+from app.reg.embeddings import recorded_embeddings, vector_literal
+from app.contracts.usage import UsageContext
+from app.usage import DbUsageSink
+from app.usage.gemini import UsageStartError, checked_context, recorded_generate
 
 logger = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "owner_answer_relation.ko.txt"
@@ -68,9 +71,14 @@ async def find_owner_answer_candidates(
     question: str,
     answer: str,
     top_k: int = 5,
+    *, usage_context=None, usage_sink=None,
 ) -> list[dict]:
     """직원 질문과 점주 답변을 함께 임베딩해 현재 승인 카드만 찾는다."""
-    query_vec = await asyncio.to_thread(embed_text, f"{question}\n{answer}")
+    context = checked_context(usage_context, usage_sink, "RELATION", store_id=store_id)
+    embed_context = context.model_copy(update={"stage": "EMBED",
+        "logical_call_id": f"owner-plan:{context.operation_id}:embed"})
+    query_vec = (await recorded_embeddings([f"{question}\n{answer}"],
+        context=embed_context, sink=usage_sink))[0]
     rows = await db.fetch(
         """
         select m.card_id as id, m.title, m.content, m.score,
@@ -201,7 +209,19 @@ async def build_knowledge_plan(
     store_id: int,
     question: str,
     answer: str,
+    *, usage_context=None, usage_sink=None,
 ) -> KnowledgePlan:
+    if usage_context is None and usage_sink is None:
+        # 이 단계에는 owner_answer_id가 아직 없다. 서버 분석 operation으로 두 호출을 묶는다.
+        from app.deps import get_pool
+        operation = str(uuid4())
+        usage_context = UsageContext(store_id=str(store_id), cost_phase="OPERATING",
+            cost_purpose="PRODUCT", stage="RELATION", operation_id=operation,
+            logical_call_id=f"owner-plan:{operation}:relation")
+        usage_sink = DbUsageSink(get_pool())
+    context = checked_context(usage_context, usage_sink, "RELATION", store_id=store_id)
+    if context.operation_id is None:
+        raise ValueError("점주 답변 분석에는 서버 operation_id가 필요하다")
     rows = await db.fetch(
         """
         select category_id, category_name, is_system
@@ -216,7 +236,8 @@ async def build_knowledge_plan(
         raise RuntimeError("system Other category is missing")
 
     try:
-        candidates = await find_owner_answer_candidates(db, store_id, question, answer)
+        candidates = await find_owner_answer_candidates(db, store_id, question, answer,
+            usage_context=context, usage_sink=usage_sink)
     except Exception as exc:
         logger.warning("owner-answer candidate search failed: %s", exc)
         return _safe_fallback_plan(
@@ -278,23 +299,13 @@ async def build_knowledge_plan(
         cards_json=json.dumps(evidence, ensure_ascii=False),
     )
     try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=settings.gemini_api_key)
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=KnowledgeRelationPayload,
-                temperature=0.0,
-            ),
-        )
-        payload = KnowledgeRelationPayload.model_validate_json(response.text or "")
+        payload = await recorded_generate(prompt, KnowledgeRelationPayload, settings,
+                                          context=context, sink=usage_sink)
         return validate_knowledge_plan(payload, question, answer, categories, candidates)
+    except UsageStartError:
+        raise
     except Exception as exc:
-        logger.warning("owner-answer relation analysis failed: %s", exc)
+        logger.warning("owner-answer relation analysis failed type=%s", type(exc).__name__)
         fallback_candidates = [
             card
             for card in candidates

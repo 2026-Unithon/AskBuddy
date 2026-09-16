@@ -42,5 +42,5 @@
     "api/tests/test_r_usage_routes.py": "d0fce1efce76bfc89a7b1bf7666f0d1e26f4f718b3aeb654fde18d9f2ead6176",
     "api/tests/test_r_answer_metrics.py": "e5aa8f561fe252e92e18da7f6ee090027fc3fdafb5c4424990b895f80f8e6687"
   },
-  "review_document": "docs/C0_R_STRICT_REVIEW_20260915.md"
+  "review_document": "docs/dev/review/C0_R_STRICT_REVIEW_20260915.md"
 }

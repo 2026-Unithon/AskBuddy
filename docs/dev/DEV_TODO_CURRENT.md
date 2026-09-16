@@ -1,5 +1,9 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-16 [W 분류·관계 비용 계측](review/W_CLASSIFY_RELATION_USAGE_20260916.md):
+CLASSIFY/RELATION과 점주 답변 후보 EMBED를 기존 원장에 연결했다. 재분류 worker는 모델 호출 중 DB 연결을 반환한다.
+전체 회귀 450 tests / 84 subtests, PG15 W 검증 7/7·기존 원장 14/14 통과. 요율/Storage·전체 원가 인수는 별도다.
+
 2026-09-16 [C0·W0 완료 체크 감사](review/C0_W0_CHECK_AUDIT_20260916.md):
 현재 코드와 검증 기록을 대조해 계약/계측/평가 도구의 완료와 제품 연결/실자료 인수의 미완료를 분리했다.
 이번 재검증은 434 tests / 80 subtests, 계약 probe 19/19, schema 15개·공유 fixture 3개 최신 확인이다.
@@ -111,10 +115,11 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [x] 사용자 회신으로 U1 비용 범위를 확정하고 U2를 입력틀·첫 달/안정기 시나리오·메타데이터 수집 계획으로 전환했다.
 - [x] CP-00A: `UsageContext`/`UsageAttempt` 계약과 MC0 원장(`ai_usage_attempts`·`cost_assessments`·`extraction_runs` 요약)을 구현했다. 결측과 0을 구분하고, PARTIAL/UNKNOWN은 총액을 내지 않는다. 요율표는 `config/rate_card.json`에 전부 null로 두어 토큰만 쌓인다.
 - [x] CP-00B 호출 계측: extract/assemble/STT, W 승인/수정/점주 답변 EMBED와 R QUERY/ANSWER/runner/읽기 집계 연결 완료. 유료 호출 전 STARTED, 실패 비용·0/null 보존, 짧은 DB 연결을 검증했다. Storage 실제 bytes 수집 코드도 있다. [W 검증](review/W_MEASUREMENT_FIXES_20260915.md)·[R 검증](review/C0_R_SEQUENTIAL_STATUS.md).
-- [ ] CP-00B 전체 원가 인수: `categories/classifier.py`·`learn/knowledge_loop.py`의 CLASSIFY/RELATION 호출에 공통 durable receipt를 연결한다(현재 직접 모델 호출). 다중 source/card 배치 기여 링크, 실제 Storage byte-time/전송·매장 귀속, 전체 단계 누락 대조도 남았다. 위 extract/STT/embed/answer 계측 완료와 구분한다.
+- [x] CP-00B W 분류/관계 호출 계측: `categories/classifier.py`·`learn/knowledge_loop.py`의 CLASSIFY/RELATION 및 후보 EMBED에 공통 durable receipt를 연결했다. 호출 전 STARTED, 실패/잘못된 JSON의 usage 보존, 0/null 구분, SDK 숨은 재시도 차단, 매장/분석 operation 귀속을 검증했다. 재분류 worker의 연결 수명도 단축했다. [검증 기록](review/W_CLASSIFY_RELATION_USAGE_20260916.md).
+- [ ] CP-00B 전체 원가 인수: 다중 source/card 배치 기여 링크, 실제 Storage byte-time/전송·매장 귀속, 전체 단계 누락 대조가 남았다. 점주 분석 operation과 이후 owner_answer/outbox 연결은 W/R 제품 루프에서 마무리한다.
 - [x] CP-00C 계산 도구: `app/usage/report.py`·`scripts/cost_report.py`와 R 운영 시나리오 계산, 등록/운영 분리, 결측 시 미정 판정을 구현했다. 첫 추출 실측 5회 usage 100% 관측은 금액 증거가 아니다.
 - [ ] CP-00C 실자료 원가 인수: 관측된 등록/추가자료·R 질문 비용을 합치고 요율/환율·Storage 저장/전송을 확정한다. 현재 D21은 UNDETERMINED이며 PASS가 아니다. 등록비·월 운영비·평가 지출을 분리한다.
-- [x] CP-01: `docs/review/C0_REVIEW_20260914.md`의 RV-01~10을 계약으로 닫았다. 중복/고아 사실·순환 선행·action 필드 배타·원문 공백 보존·불변 snapshot·occurrence 단위 판정·SHA-256/UTC/bigint 정규형·추출 `result_status` 분기. 모양만으로 권한을 볼 수 없어 `validate_answer_plan(plan, snapshot, store_id)`을 따로 뒀다. probe 19/19, GAP 0.
+- [x] CP-01: `docs/dev/review/C0_REVIEW_20260914.md`의 RV-01~10을 계약으로 닫았다. 중복/고아 사실·순환 선행·action 필드 배타·원문 공백 보존·불변 snapshot·occurrence 단위 판정·SHA-256/UTC/bigint 정규형·추출 `result_status` 분기. 모양만으로 권한을 볼 수 없어 `validate_answer_plan(plan, snapshot, store_id)`을 따로 뒀다. probe 19/19, GAP 0.
 - [x] CP-02: 발행/색인/오류/채팅 DTO와 canonical JSON·snapshot hash를 구현했다. hash 대상에서 `snapshot_id`·`created_at`·hash 자신을 빼 같은 내용의 두 발행이 같은 hash를 갖게 했다. 현재 JSON schema 15종과 고정 test vector를 `api/schema/`에 내보내고 `--check`로 코드와의 불일치를 잡는다.
 - [x] CP-03: `api/tests/fixtures/contracts/v1/`에 snapshot·타 매장 snapshot·manifest를 JSON으로 얼리고 F01~F35 전부에 검사를 붙였다. 소비자는 파일에서 읽는다. fake renderer/indexer/outbox를 구현했다. fixture가 계약 구멍을 하나 잡았다 — `SelectedBlock`이 승인 RAW 원문을 인용할 수 없었다(F09).
 - [x] CP-04(W 몫): M0 operation/outbox/consumer dedupe/lease와 M1 fact revision/occurrence/raw span/version-block/publication manifest를 추가하고 트랜잭션 서비스를 구현했다. 실제 DB에서 12/12 확인(삭제 보존·물리 삭제 거절·원문 공백 왕복·멱등 재시도·키 충돌·STALE·동시 발행 1승 1패·타 매장 사실 차단·판/snapshot 불변), 빈 DB에 17개 migration 재구축 성공. **M2(색인 staging)·M3(v2 session/context)는 R 몫으로 남아 있다.**

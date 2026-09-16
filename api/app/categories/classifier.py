@@ -2,20 +2,23 @@
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 
 from app.categories.schemas import ClassificationBatch
 from app.config import get_settings
+from app.usage.gemini import checked_context, recorded_generate
 
 logger = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "classify_cards.ko.txt"
 
 
-async def classify_cards(cards: list[dict], category_names: list[str]) -> dict[int, str]:
+async def classify_cards(cards: list[dict], category_names: list[str], *,
+                         usage_context=None, usage_sink=None) -> dict[int, str]:
     settings = get_settings()
     other = "기타"
     allowed = set(category_names)
+    if not cards:
+        return {}
 
     if settings.ingest_mode == "mock":
         # 목 모드에서는 새 의미를 지어내지 않는다. 삭제된 분류만 기타로 보낸다.
@@ -29,8 +32,7 @@ async def classify_cards(cards: list[dict], category_names: list[str]) -> dict[i
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY가 없어 재분류를 실행할 수 없습니다.")
 
-    from google import genai
-    from google.genai import types
+    context = checked_context(usage_context, usage_sink, "CLASSIFY")
 
     template = PROMPT_PATH.read_text(encoding="utf-8")
     prompt = (
@@ -43,29 +45,8 @@ async def classify_cards(cards: list[dict], category_names: list[str]) -> dict[i
             ),
         )
     )
-    started = time.perf_counter()
-    client = genai.Client(api_key=settings.gemini_api_key)
-    response = await client.aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ClassificationBatch,
-            temperature=0.0,
-        ),
-    )
-    raw = response.text or ""
-    usage = response.usage_metadata
-    logger.info(
-        "gemini reclass model=%s elapsed=%.1fs cards=%d tokens_in=%s tokens_out=%s out=%dchars",
-        settings.gemini_model,
-        time.perf_counter() - started,
-        len(cards),
-        getattr(usage, "prompt_token_count", None),
-        getattr(usage, "candidates_token_count", None),
-        len(raw),
-    )
-    parsed = ClassificationBatch.model_validate_json(raw)
+    parsed = await recorded_generate(prompt, ClassificationBatch, settings,
+                                     context=context, sink=usage_sink)
     choices = {item.card_id: item.category_name for item in parsed.items}
     return {
         int(card["card_id"]): (

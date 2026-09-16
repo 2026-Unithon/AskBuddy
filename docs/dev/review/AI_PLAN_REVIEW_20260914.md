@@ -38,14 +38,14 @@ P0/P1은 발견 당시 영향도다. 이 표의 ‘해결’은 **계획 계약�
 
 | 근거 | 확인 내용 | 계획상 대응 |
 |---|---|---|
-| [ingest/pipeline.py](../../api/app/ingest/pipeline.py) 67·95·133·166·416·475행 | 추출/선택적 reduce 뒤 최종 결과의 사실 적재, 2패스는 구간 경로에 한정 | raw map 선저장과 유형별 구간 계약 |
-| [source_fact_ledger migration](../../supabase/migrations/20260914140000_source_fact_ledger.sql) 21·55행, [fact_correction migration](../../supabase/migrations/20260914190000_fact_correction.sql) 31행 | 사실 테이블·현재 연결·최신 수정 view 기반은 존재 | ‘원장 미구현’ 대신 기반 존재/런타임 미완료 구분, immutable publication 추가 |
-| [learn/answering.py](../../api/app/learn/answering.py) 77행 | 화이트리스트·숫자 집합·낱말 집합 검증 | 값-대상 결합·부정·조건 보존과 참조 렌더링 |
-| [reg/retrieve.py](../../api/app/reg/retrieve.py) 69·74행, [reg/router.py](../../api/app/reg/router.py) 28행 | 일부 anchor 일치와 vector 검색, 레거시 store ID 입력 | R0 인증 정리와 채널별 후보/충분성 계약 |
-| [cards/repository.py](../../api/app/cards/repository.py) 167행, [learn/knowledge_apply.py](../../api/app/learn/knowledge_apply.py) 35·145행 | 본문 초안·점주 답변 카드 버전 생성 경로 | W의 공통 revision/publication 서비스로 수렴 |
-| [learn/router.py](../../api/app/learn/router.py) 95·1028행 | 원문 question_key 기반 pending 묶음 | 문맥을 포함하는 의미 중복키 |
-| [team/metrics.py](../../api/app/team/metrics.py) 167행, [run_eval.py](../../api/scripts/run_eval.py) 139행 | citation 없는 HIT 위주 무근거 집계, 제한적 종료 코드 | 새 의미 오류/정책/종단 지표와 명시적 승격 게이트 |
-| [compare_runs.py](../../api/scripts/compare_runs.py) 47·102·109행 | 성공 run·교집합·안정 사실 중심 비교 | 전체 시도/고정 분모/비교 가능성 검사 |
+| [ingest/pipeline.py](../../../api/app/ingest/pipeline.py) 67·95·133·166·416·475행 | 추출/선택적 reduce 뒤 최종 결과의 사실 적재, 2패스는 구간 경로에 한정 | raw map 선저장과 유형별 구간 계약 |
+| [source_fact_ledger migration](../../../supabase/migrations/20260914140000_source_fact_ledger.sql) 21·55행, [fact_correction migration](../../../supabase/migrations/20260914190000_fact_correction.sql) 31행 | 사실 테이블·현재 연결·최신 수정 view 기반은 존재 | ‘원장 미구현’ 대신 기반 존재/런타임 미완료 구분, immutable publication 추가 |
+| [learn/answering.py](../../../api/app/learn/answering.py) 77행 | 화이트리스트·숫자 집합·낱말 집합 검증 | 값-대상 결합·부정·조건 보존과 참조 렌더링 |
+| [reg/retrieve.py](../../../api/app/reg/retrieve.py) 69·74행, [reg/router.py](../../../api/app/reg/router.py) 28행 | 일부 anchor 일치와 vector 검색, 레거시 store ID 입력 | R0 인증 정리와 채널별 후보/충분성 계약 |
+| [cards/repository.py](../../../api/app/cards/repository.py) 167행, [learn/knowledge_apply.py](../../../api/app/learn/knowledge_apply.py) 35·145행 | 본문 초안·점주 답변 카드 버전 생성 경로 | W의 공통 revision/publication 서비스로 수렴 |
+| [learn/router.py](../../../api/app/learn/router.py) 95·1028행 | 원문 question_key 기반 pending 묶음 | 문맥을 포함하는 의미 중복키 |
+| [team/metrics.py](../../../api/app/team/metrics.py) 167행, [run_eval.py](../../../api/scripts/run_eval.py) 139행 | citation 없는 HIT 위주 무근거 집계, 제한적 종료 코드 | 새 의미 오류/정책/종단 지표와 명시적 승격 게이트 |
+| [compare_runs.py](../../../api/scripts/compare_runs.py) 47·102·109행 | 성공 run·교집합·안정 사실 중심 비교 | 전체 시도/고정 분모/비교 가능성 검사 |
 
 현재 답변 검증기의 순수 함수만 AST로 분리해 다음 세 반례를 실제 실행했다. 모델·DB·앱 서버를 호출하지 않았고 소스 파일도 수정하지 않았다.
 

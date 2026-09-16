@@ -2,16 +2,26 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from app.categories.classifier import classify_cards
 from app.deps import get_pool
+from app.db_session import ShortSession
+from app.contracts.usage import UsageContext
+from app.usage import DbUsageSink
 
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def _job_session(pool):
+    # 쿼리 때만 연결을 빌린다. 모델/usage sink의 별도 쿼리가 풀을 굶기지 않는다.
+    yield ShortSession(pool)
+
+
 async def process_reclassification_job(store_id: int, job_id: int) -> None:
     pool = get_pool()
-    async with pool.acquire() as conn:
+    async with _job_session(pool) as conn:
         job = await conn.fetchrow(
             """
             update reclassification_jobs
@@ -67,7 +77,11 @@ async def process_reclassification_job(store_id: int, job_id: int) -> None:
                 dict(row) for row in rows if row["assignment_type"] == "AUTOMATIC"
             ]
             choices = (
-                await classify_cards(automatic, list(category_ids)) if automatic else {}
+                await classify_cards(automatic, list(category_ids),
+                    usage_context=UsageContext(store_id=str(store_id), cost_phase="OPERATING",
+                        cost_purpose="PRODUCT", stage="CLASSIFY",
+                        logical_call_id=f"reclass:{job_id}:classify", operation_id=f"reclass:{job_id}"),
+                    usage_sink=DbUsageSink(pool)) if automatic else {}
             )
 
             for row in rows:
