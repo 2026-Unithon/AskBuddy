@@ -87,6 +87,7 @@ export function UploadFilePicker({
       />
       <button
         type="button"
+        data-testid="upload-file-picker"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         className="w-full min-h-[56px] flex items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-brand-400 bg-brand-50/40 px-4 py-3.5 text-brand-700 font-bold text-sm shadow-2xs transition-all active:scale-[0.98] hover:bg-brand-50 hover:border-brand-500 disabled:opacity-50 disabled:pointer-events-none"
@@ -97,10 +98,9 @@ export function UploadFilePicker({
         </svg>
         <span>자료 파일 추가 (음성·영상·문서·카톡)</span>
       </button>
-      <p className="mt-1.5 text-center text-[11px] text-muted">
+      <p className="mt-1.5 text-center text-sm text-muted leading-relaxed">
         여러 개 파일을 한 번에 선택할 수 있으며 형식이 자동 판별됩니다.
       </p>
     </div>
   );
 }
-

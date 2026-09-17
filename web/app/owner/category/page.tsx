@@ -43,6 +43,7 @@ export default function CategoryPage() {
   });
 
   async function handleNext() {
+    if (save.isPending) return;
     // 토글은 화면에서 즉시 반영하고, 넘어갈 때 한 번만 저장한다.
     if (state.token) {
       save.mutate();
@@ -66,7 +67,9 @@ export default function CategoryPage() {
             return (
               <button
                 key={b.key}
+                type="button"
                 disabled={!ready}
+                aria-pressed={selected}
                 onClick={() => dispatch({ type: "SET_BUSINESS_TYPE", value: b.key })}
                 className={`flex flex-col items-center gap-1.5 rounded-2xl py-4 border transition-colors ${
                   selected
@@ -78,7 +81,7 @@ export default function CategoryPage() {
               >
                 <span className="text-2xl">{b.emoji}</span>
                 <span className="text-xs font-bold">{b.label}</span>
-                {!ready && <span className="text-[10px] text-muted/70">준비 중</span>}
+                {!ready && <span className="text-xs text-muted/70">준비 중</span>}
               </button>
             );
           })}
@@ -93,7 +96,7 @@ export default function CategoryPage() {
               {categories.isPending && (
                 <div className="space-y-2.5" aria-label="업무 카테고리 불러오는 중">
                   {[0, 1, 2].map((item) => (
-                    <div key={item} className="h-14 rounded-2xl bg-surface-muted animate-pulse" />
+                    <div key={item} className="h-14 rounded-2xl bg-surface-muted motion-safe:animate-pulse" />
                   ))}
                 </div>
               )}
@@ -104,6 +107,8 @@ export default function CategoryPage() {
                     type="button"
                     className="mt-3 min-h-11 rounded-xl border border-danger-200 px-4 text-sm font-bold text-danger-700"
                     onClick={() => void categories.refetch()}
+                    disabled={categories.isFetching}
+                    aria-busy={categories.isFetching || undefined}
                   >
                     다시 시도
                   </button>
@@ -117,6 +122,9 @@ export default function CategoryPage() {
               {rows.map((c) => (
                 <button
                   key={c.category_name}
+                  type="button"
+                  role="switch"
+                  aria-checked={c.is_enabled}
                   onClick={() => setOverrides((current) => ({
                     ...current,
                     [c.category_name]: !c.is_enabled,
@@ -146,13 +154,15 @@ export default function CategoryPage() {
         <Button
           size="lg"
           className="w-full"
-          disabled={!canContinue || categories.isPending || categories.isError || rows.length === 0 || save.isPending}
+          loading={save.isPending}
+          loadingLabel="카테고리 저장 중"
+          disabled={!canContinue || categories.isPending || categories.isError || rows.length === 0}
           onClick={handleNext}
         >
-          {save.isPending ? "저장 중…" : "다음으로 →"}
+          다음으로 →
         </Button>
         {save.error && (
-          <p className="mt-2 text-center text-xs font-medium text-danger-500">
+          <p role="alert" className="mt-2 text-center text-sm font-medium text-danger-500">
             {save.error instanceof ApiError ? save.error.detail || "저장에 실패했어요" : "서버에 연결할 수 없습니다"}
           </p>
         )}

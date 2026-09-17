@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Card, Input, TopBar } from "@/components/ui";
+import { Badge, Button, Card, Input, Select, Textarea, TopBar } from "@/components/ui";
 import {
   ApiError,
   moveProductCard,
@@ -70,6 +70,9 @@ export default function CardDetailPage() {
     mutationFn: (action: "approve" | "exclude" | "restore") =>
       mutateProductCard(cardId, action, state.token!),
     onSuccess: refreshRelated,
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) await detail.refetch();
+    },
   });
 
   const moveCategory = useMutation({
@@ -107,6 +110,7 @@ export default function CardDetailPage() {
         {errorMessage && (
           <InlineError
             message={errorMessage}
+            isRetrying={detail.isFetching}
             onRetry={() => void detail.refetch()}
           />
         )}
@@ -129,7 +133,7 @@ export default function CardDetailPage() {
                   {card.assignment_type === "MANUAL" ? "수동 분류" : "자동 분류"}
                 </Badge>
               </div>
-              <span className="text-[11px] text-muted">
+              <span className="text-xs text-muted">
                 최종 수정: {formatDate(card.updated_at)}
               </span>
             </div>
@@ -146,7 +150,7 @@ export default function CardDetailPage() {
                     value={draft.title}
                     onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
                     aria-label="카드 제목"
-                    className="min-h-[44px] text-xs font-bold"
+                    className="font-bold"
                   />
                 </div>
 
@@ -154,17 +158,17 @@ export default function CardDetailPage() {
                   <label htmlFor="card-content-input" className="text-xs font-bold text-foreground">
                     카드 내용
                   </label>
-                  <textarea
+                  <Textarea
                     id="card-content-input"
                     value={draft.content}
                     onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
                     rows={9}
                     aria-label="카드 내용"
-                    className="w-full rounded-xl border border-border bg-background p-3 text-xs leading-relaxed font-normal text-foreground outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    className="bg-background font-normal"
                   />
                 </div>
 
-                <p className="text-[11px] text-muted leading-relaxed">
+                <p className="text-sm text-muted leading-relaxed">
                   초안을 저장해도 직원에게 즉시 공개되지 않습니다. 하단 &apos;공개&apos; 버튼을 눌러야 직원의 로드맵과 채팅에 반영됩니다.
                 </p>
 
@@ -172,11 +176,13 @@ export default function CardDetailPage() {
                   <Button
                     size="md"
                     variant="primary"
-                    disabled={saveDraft.isPending || !draft.title.trim() || !draft.content.trim()}
+                    loading={saveDraft.isPending}
+                    loadingLabel="초안 저장 중"
+                    disabled={!draft.title.trim() || !draft.content.trim()}
                     onClick={() => saveDraft.mutate()}
                     className="flex-1 min-h-[44px] text-xs font-bold"
                   >
-                    {saveDraft.isPending ? "저장 중…" : "초안 저장"}
+                    초안 저장
                   </Button>
                   <Button
                     size="md"
@@ -226,12 +232,13 @@ export default function CardDetailPage() {
               <label htmlFor="card-category-select" className="text-xs font-bold text-foreground">
                 업무 카테고리 이동
               </label>
-              <select
+              <Select
                 id="card-category-select"
                 value={card.category?.category_id ?? ""}
                 disabled={moveCategory.isPending || card.review_status === "EXCLUDED"}
                 onChange={(e) => moveCategory.mutate(Number(e.target.value))}
-                className="w-full min-h-[44px] rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground outline-none focus:border-brand-500"
+                aria-busy={moveCategory.isPending || undefined}
+                className="w-full bg-background"
               >
                 <option value="" disabled>
                   카테고리 선택
@@ -241,8 +248,8 @@ export default function CardDetailPage() {
                     {cat.name}
                   </option>
                 ))}
-              </select>
-              <p className="text-[11px] text-muted">
+              </Select>
+              <p className="text-sm text-muted">
                 직접 이동하면 수동 분류로 기록되어 AI 자동 재분류가 덮어쓰지 않습니다.
               </p>
             </Card>
@@ -263,7 +270,7 @@ export default function CardDetailPage() {
                       📎 {evidence.source.title ?? `자료 #${evidence.source.source_id}`}
                     </strong>
                     {evidence.excerpt && (
-                      <blockquote className="border-l-2 border-brand-500 bg-brand-50/40 p-2 rounded-r text-[11px] leading-relaxed text-foreground/85 italic">
+                      <blockquote className="border-l-2 border-brand-500 bg-brand-50/40 p-2 rounded-r text-sm leading-relaxed text-foreground/85 italic">
                         &ldquo;{evidence.excerpt}&rdquo;
                       </blockquote>
                     )}
@@ -296,7 +303,7 @@ export default function CardDetailPage() {
                   {card.events.map((event) => (
                     <Card key={event.event_id} className="p-2.5 text-xs flex items-center justify-between border-border">
                       <span className="font-semibold text-foreground">{event.action}</span>
-                      <span className="text-[11px] text-muted">{formatDate(event.created_at)}</span>
+                      <span className="text-xs text-muted">{formatDate(event.created_at)}</span>
                     </Card>
                   ))}
                 </div>
@@ -326,13 +333,13 @@ export default function CardDetailPage() {
                   <Button
                     size="lg"
                     variant="primary"
+                    loading={statusMutation.isPending && statusMutation.variables === "approve"}
+                    loadingLabel="공개 처리 중"
                     disabled={statusMutation.isPending}
                     onClick={() => statusMutation.mutate("approve")}
                     className="flex-1 min-h-[50px] text-xs font-bold shadow-xs active:scale-[0.98]"
                   >
-                    {statusMutation.isPending
-                      ? "처리 중…"
-                      : card.review_status === "APPROVED"
+                    {card.review_status === "APPROVED"
                       ? "수정본 직원 공개"
                       : "직원에게 공개하기"}
                   </Button>
@@ -340,8 +347,14 @@ export default function CardDetailPage() {
                 <Button
                   size="lg"
                   variant="secondary"
+                  loading={statusMutation.isPending && statusMutation.variables === "exclude"}
+                  loadingLabel="제외 중"
                   disabled={statusMutation.isPending}
-                  onClick={() => statusMutation.mutate("exclude")}
+                  onClick={() => {
+                    if (window.confirm("이 카드를 직원 화면과 검색에서 제외할까요? 나중에 다시 복원할 수 있습니다.")) {
+                      statusMutation.mutate("exclude");
+                    }
+                  }}
                   className={`min-h-[50px] text-xs font-bold active:scale-[0.98] ${
                     card.review_status === "APPROVED" && !hasUnpublishedDraft ? "w-full" : "px-5"
                   }`}
@@ -355,11 +368,13 @@ export default function CardDetailPage() {
               <Button
                 size="lg"
                 variant="primary"
+                loading={statusMutation.isPending && statusMutation.variables === "restore"}
+                loadingLabel="복원 중"
                 disabled={statusMutation.isPending}
                 onClick={() => statusMutation.mutate("restore")}
                 className="w-full min-h-[50px] text-xs font-bold shadow-xs active:scale-[0.98]"
               >
-                {statusMutation.isPending ? "복원 중…" : "카드를 다시 복원하기"}
+                카드를 다시 복원하기
               </Button>
             )}
           </div>

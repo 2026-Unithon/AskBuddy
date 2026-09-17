@@ -8,7 +8,7 @@ import { JobStatusBadge } from "./status-badge";
 interface BackgroundJobStatusProps {
   jobs: IngestJobListItem[];
   onRetry: (jobId: number) => void;
-  isRetrying?: boolean;
+  retryingJobId?: number | null;
   isFetching?: boolean;
   isLoading?: boolean;
 }
@@ -37,7 +37,7 @@ function jobStatusDescription(status: IngestJobStatus) {
 export function BackgroundJobStatus({
   jobs,
   onRetry,
-  isRetrying = false,
+  retryingJobId = null,
   isFetching = false,
   isLoading = false,
 }: BackgroundJobStatusProps) {
@@ -58,7 +58,7 @@ export function BackgroundJobStatus({
           최근 처리 작업
         </h2>
         {isFetching && !isLoading && (
-          <span className="text-[10px] text-muted bg-surface-muted px-2 py-0.5 rounded-full">
+          <span className="text-xs text-muted bg-surface-muted px-2 py-0.5 rounded-full">
             갱신 중…
           </span>
         )}
@@ -70,7 +70,7 @@ export function BackgroundJobStatus({
           role="status"
           className="flex items-center gap-2.5 rounded-xl border border-brand-500/30 bg-brand-50/50 p-3 text-xs text-brand-800 shadow-2xs"
         >
-          <span className="h-2 w-2 rounded-full bg-brand-500 animate-ping shrink-0" />
+          <span className="h-2 w-2 rounded-full bg-brand-500 motion-safe:animate-ping shrink-0" />
           <p className="font-medium leading-relaxed">
             <strong>{activeJobs.length}개 작업</strong>을 정리하고 있어요. 다른 화면으로 가도 백그라운드에서 계속 처리돼요.
           </p>
@@ -83,6 +83,7 @@ export function BackgroundJobStatus({
           const isActive = isIngestJobActive(job.status);
           const isFailed = job.status === "FAILED" || job.status === "PARTIAL";
           const hasCards = job.card_count > 0;
+          const isRetrying = retryingJobId === job.job_id;
 
           return (
             <Card
@@ -100,7 +101,7 @@ export function BackgroundJobStatus({
                   <p className="text-xs font-bold text-foreground truncate">
                     {job.title ?? `작업 #${job.job_id}`}
                   </p>
-                  <p className="text-[11px] text-muted mt-0.5">
+                  <p className="text-xs text-muted mt-0.5">
                     {jobStatusDescription(job.status)}
                   </p>
                 </div>
@@ -109,7 +110,7 @@ export function BackgroundJobStatus({
 
               {/* 하단 세부 액션 및 카드 링크 */}
               <div className="flex items-center justify-between pt-1 border-t border-border/50 text-xs">
-                <span className="text-[11px] text-muted">
+                <span className="text-xs text-muted">
                   생성 카드: <strong className="text-brand-700">{job.card_count}개</strong>
                 </span>
 
@@ -119,7 +120,8 @@ export function BackgroundJobStatus({
                       type="button"
                       disabled={isRetrying}
                       onClick={() => onRetry(job.job_id)}
-                      className="min-h-[36px] px-2.5 rounded-lg font-bold text-danger-700 bg-danger-50 border border-danger-200 hover:bg-danger-100 active:scale-95 transition-all text-xs disabled:opacity-50"
+                      aria-busy={isRetrying || undefined}
+                      className="min-h-11 px-3 rounded-lg font-bold text-danger-700 bg-danger-50 border border-danger-200 hover:bg-danger-100 active:scale-95 transition-all text-sm disabled:opacity-50"
                     >
                       실패 재시도
                     </button>
@@ -128,7 +130,7 @@ export function BackgroundJobStatus({
                   {hasCards && (
                     <Link
                       href={`/owner/cards/review?job_id=${job.job_id}`}
-                      className="inline-flex min-h-[36px] items-center gap-1 px-3 rounded-lg font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 active:scale-95 transition-all text-xs"
+                      className="inline-flex min-h-11 items-center gap-1 px-3 rounded-lg font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 active:scale-95 transition-all text-sm"
                     >
                       <span>카드 검토하기</span>
                       <span>→</span>

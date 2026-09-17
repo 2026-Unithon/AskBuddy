@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui";
+import { Button, Textarea } from "@/components/ui";
 import type { AggregatedQuestionItem } from "./pending-question-card";
 
 interface AnswerQuestionSheetProps {
@@ -73,7 +73,7 @@ export function AnswerQuestionSheet({
             <h2 id="sheet-title" className="text-base font-bold text-foreground">
               직원 질문에 답변하기
             </h2>
-            <p className="text-xs text-muted mt-0.5">
+            <p className="text-sm text-muted mt-0.5 leading-relaxed">
               답변하신 내용은 직원의 Buddy 채팅에 전달되고 매장의 정식 지식 카드로 검토·등록됩니다.
             </p>
           </div>
@@ -90,10 +90,10 @@ export function AnswerQuestionSheet({
 
         {/* 질문 원문 박스 */}
         <div className="rounded-xl bg-surface-muted/50 p-3.5 space-y-1 border border-border shrink-0">
-          <div className="flex items-center justify-between text-[11px] text-muted font-medium">
+          <div className="flex items-center justify-between text-xs text-muted font-medium">
             <span>직원 {item.distinctStaffCount}명이 {item.occurrenceCount}회 질문</span>
           </div>
-          <p className="text-xs font-bold text-foreground leading-snug select-text">
+          <p className="text-base font-bold text-foreground leading-snug select-text">
             Q. {item.questionText}
           </p>
         </div>
@@ -101,6 +101,7 @@ export function AnswerQuestionSheet({
         {/* 오류 알림 (사라지지 않고 텍스트 보존) */}
         {effectiveError && (
           <div
+            id="answer-error"
             role="alert"
             className="rounded-xl border border-danger-500/30 bg-danger-50 p-3 text-xs text-danger-700 font-semibold"
           >
@@ -113,27 +114,33 @@ export function AnswerQuestionSheet({
           <label htmlFor="answer-input" className="text-xs font-bold text-foreground">
             답변 내용 <span className="text-brand-600">*</span>
           </label>
-          <textarea
+          <Textarea
             id="answer-input"
+            data-testid="answer-input"
             rows={4}
             value={answerText}
             onChange={(e) => setAnswerText(e.target.value)}
             disabled={isSubmitting}
             placeholder="직원이 바로 이해할 수 있도록 명확하게 설명해주세요 (예: 우유는 제빙기 아래 냉장고 두 번째 선반에 있습니다)"
-            className="w-full flex-1 rounded-xl border border-border bg-background p-3 text-xs font-medium text-foreground outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-muted resize-none leading-relaxed"
+            aria-invalid={Boolean(effectiveError)}
+            aria-describedby={effectiveError ? "answer-error" : undefined}
+            className="flex-1 resize-none bg-background font-medium"
           />
         </div>
 
         {/* 하단 동사형 CTA 버튼 그룹 */}
         <div className="space-y-2 shrink-0 pt-1">
           <Button
+            data-testid="answer-submit"
             size="lg"
             variant="primary"
-            disabled={isSubmitting || !answerText.trim()}
+            loading={isSubmitting}
+            loadingLabel="답변 전송 중"
+            disabled={!answerText.trim()}
             onClick={handleSubmit}
             className="w-full min-h-[48px] text-xs font-bold shadow-xs active:scale-[0.98]"
           >
-            {isSubmitting ? "답변 전송 중…" : "답변 보내기"}
+            답변 보내기
           </Button>
 
           <div className="flex items-center justify-between gap-2 pt-1">

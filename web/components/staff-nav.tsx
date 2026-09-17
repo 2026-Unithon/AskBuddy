@@ -97,7 +97,7 @@ export function StaffBottomNav() {
       aria-label="직원 하단 내비게이션"
       className="fixed bottom-0 left-0 right-0 z-30 mx-auto w-full max-w-[480px] border-t border-border bg-surface/95 backdrop-blur-md shadow-[0_-2px_10px_rgba(0,0,0,0.04)]"
     >
-      <div className="flex h-16 items-center justify-around px-2 pb-[calc(env(safe-area-inset-bottom,0px))]">
+      <div className="flex min-h-16 items-center justify-around px-2 pt-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))]">
         {TABS.map((tab) => {
           const active = tab.isActive(pathname);
           return (
@@ -132,4 +132,3 @@ export function StaffBottomNav() {
     </nav>
   );
 }
-

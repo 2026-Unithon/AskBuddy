@@ -48,26 +48,26 @@ export function UploadQueueItem({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone={badge.tone}>{badge.label}</Badge>
-          <span className="text-[11px] text-muted font-medium">
+          <span className="text-xs text-muted font-medium">
             {formatBytes(item.file.size)}
           </span>
           {item.status === "uploading" && (
-            <span className="text-[11px] text-brand-600 font-bold animate-pulse">
+            <span className="text-xs text-brand-600 font-bold motion-safe:animate-pulse">
               업로드 중…
             </span>
           )}
           {item.status === "registered" && (
-            <span className="text-[11px] text-brand-600 font-bold">
+            <span className="text-xs text-brand-600 font-bold">
               파일 등록 완료
             </span>
           )}
           {item.status === "error" && (
-            <span className="text-[11px] text-danger-600 font-bold">
+            <span className="text-xs text-danger-600 font-bold">
               {item.errorMessage ?? "실패"}
             </span>
           )}
         </div>
-        <p className="text-xs font-semibold text-foreground truncate select-text">
+        <p className="text-sm font-semibold text-foreground truncate select-text">
           {item.file.name}
         </p>
       </div>

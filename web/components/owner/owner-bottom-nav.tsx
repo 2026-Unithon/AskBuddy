@@ -105,7 +105,7 @@ export function OwnerBottomNav() {
       aria-label="사장님 하단 내비게이션"
       className="fixed bottom-0 left-0 right-0 z-30 mx-auto w-full max-w-[480px] border-t border-border bg-surface/95 backdrop-blur-md shadow-[0_-2px_10px_rgba(0,0,0,0.04)]"
     >
-      <div className="flex h-16 items-center justify-around px-2 pb-[calc(env(safe-area-inset-bottom,0px))]">
+      <div className="flex min-h-16 items-center justify-around px-2 pt-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))]">
         {TABS.map((tab) => {
           const active = tab.isActive(pathname);
 
@@ -132,7 +132,7 @@ export function OwnerBottomNav() {
                 {/* 배지 표시 */}
                 {badgeCount > 0 ? (
                   <span
-                    className="absolute -top-1 -right-1.5 flex min-h-[16px] min-w-[16px] items-center justify-center rounded-full bg-danger-500 px-1 text-[10px] font-extrabold text-white shadow-xs"
+                    className="absolute -top-1 -right-1.5 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger-500 px-1 text-xs font-extrabold text-white shadow-xs"
                     aria-label={`${badgeCount}개 대기`}
                   >
                     {badgeCount > 99 ? "99+" : badgeCount}

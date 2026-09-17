@@ -63,17 +63,17 @@ export function PendingQuestionCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap">
           {isWaiting && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-warn-50 px-2 py-0.5 text-[11px] font-bold text-warn-700 border border-warn-200/60">
-              <span className="h-1.5 w-1.5 rounded-full bg-warn-500 animate-pulse" />
+            <span className="inline-flex items-center gap-1 rounded-md bg-warn-50 px-2 py-0.5 text-xs font-bold text-warn-700 border border-warn-200/60">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn-500 motion-safe:animate-pulse" />
               {waitingDuration}
             </span>
           )}
           {item.occurrenceCount > 1 && (
-            <span className="rounded-md bg-accent-50 px-2 py-0.5 text-[11px] font-bold text-accent-700 border border-accent-200/60">
+            <span className="rounded-md bg-accent-50 px-2 py-0.5 text-xs font-bold text-accent-700 border border-accent-200/60">
               {item.occurrenceCount}회 반복
             </span>
           )}
-          <span className="text-[11px] font-medium text-muted">
+          <span className="text-xs font-medium text-muted">
             직원 {item.distinctStaffCount}명 질문
           </span>
         </div>
@@ -81,19 +81,19 @@ export function PendingQuestionCard({
       </div>
 
       {/* 질문 본문 */}
-      <p className="text-sm font-bold text-foreground leading-snug select-text">
+      <p className="text-base font-bold text-foreground leading-snug select-text">
         Q. {item.questionText}
       </p>
 
       {!isWaiting && item.answerText && (
-        <p className="rounded-xl bg-surface-muted/50 p-3 text-xs leading-relaxed text-foreground/80">
+        <p className="rounded-xl bg-surface-muted/50 p-3 text-base leading-relaxed text-foreground/80">
           A. {item.answerText}
         </p>
       )}
 
       {/* 하단 시각 및 원터치 답변 CTA */}
       <div className="flex items-center justify-between pt-1 border-t border-border/50 text-xs">
-        <span className="text-[11px] text-muted">
+        <span className="text-xs text-muted">
           최근: {formatTime(item.lastAskedAt)}
         </span>
         {isWaiting && (

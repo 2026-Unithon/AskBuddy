@@ -3,8 +3,8 @@ import Image from "next/image";
 
 export default function WelcomePage() {
   return (
-    <div className="min-h-dvh w-full flex justify-center bg-background">
-      <div className="w-full max-w-[480px] min-h-dvh flex flex-col relative overflow-hidden">
+    <div className="app-page">
+      <div className="app-mobile-frame">
         <Image
           src="/images/roadmap-bg.png"
           alt=""

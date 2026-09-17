@@ -14,9 +14,14 @@ C0/W0~W5 전체 AI 구조 완성을 릴리스 목표로 확대하지 않는다. 
 | [plan/USABILITY_RELEASE_PLAN.md](plan/USABILITY_RELEASE_PLAN.md) | 개선 범위·실행 순서·사용자 인수 기준 |
 | [plan/BASELINE_AND_ACCEPTANCE.md](plan/BASELINE_AND_ACCEPTANCE.md) | 속도/품질/화면의 실제 측정 방법과 비교 기준 |
 | [plan/GLOBAL_FOUNDATION_PLAN.md](plan/GLOBAL_FOUNDATION_PLAN.md) | 페이지별 수정 전 공통 진입·조회·상태·작업·UI 기반 계획 |
+| [plan/QUERY_AND_ERROR_POLICY.md](plan/QUERY_AND_ERROR_POLICY.md) | REL-G2 Query freshness·polling·오류·인증 만료 정책 |
+| [plan/INTERACTION_AND_VISUAL_POLICY.md](plan/INTERACTION_AND_VISUAL_POLICY.md) | REL-G3 버튼·입력·상태·타이포·모바일 계약 |
 | [PAGE_REVIEW_CURRENT.md](PAGE_REVIEW_CURRENT.md) | 페이지별 사용자 의견과 검토 진행 현황 |
 | [review/INITIAL_CODE_REVIEW_20260916.md](review/INITIAL_CODE_REVIEW_20260916.md) | 최초 코드 관찰과 아직 확인하지 않은 사항 |
 | [review/GLOBAL_FOUNDATION_REVIEW_20260916.md](review/GLOBAL_FOUNDATION_REVIEW_20260916.md) | 전역 구조 코드 검토와 선행 문제 |
+| [review/REL_G1_REVIEW_20260916.md](review/REL_G1_REVIEW_20260916.md) | REL-G1 진입·인증·서버 진실성 구현 검증 |
+| [review/REL_G2_REVIEW_20260917.md](review/REL_G2_REVIEW_20260917.md) | REL-G2 조회·캐시·오류·인증 만료 구현 검증 |
+| [review/REL_G3_REVIEW_20260917.md](review/REL_G3_REVIEW_20260917.md) | REL-G3 상호작용·모바일 기반 구현 검증 |
 
 `plan/`과 TODO는 진행에 맞춰 갱신한다. `review/`는 당시 관찰 기록이므로 수정하지 않고 새 기록을 추가한다.
 제품·승인·보안 계약은 상위 [MVP 정본](../ASKBUDDY_MVP_CURRENT.md),

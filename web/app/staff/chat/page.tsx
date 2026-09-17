@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Buddy } from "@/components/ui";
+import { Badge, Buddy, Input } from "@/components/ui";
 import { useApp } from "@/lib/store";
 import { ApiError, askChat, type LearnChatCitation, type LearnChatMessage } from "@/lib/api";
 import { chatQuery, queryKeys } from "@/lib/query";
@@ -79,7 +79,7 @@ export default function ChatPage() {
   const empty = !chat.isLoading && messages.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col w-full h-dvh bg-[#EEF4EF] relative">
+    <div className="flex-1 flex flex-col w-full h-dvh bg-background relative">
       {/* 상단 컴팩트 헤더 */}
       <header className="shrink-0 bg-surface border-b border-border px-4 py-3 flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-2.5">
@@ -87,14 +87,14 @@ export default function ChatPage() {
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-sm font-bold text-brand-700">Buddy</h1>
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 motion-safe:animate-pulse" />
             </div>
-            <p className="text-[11px] text-muted">승인된 매장 지식 기반 답변</p>
+            <p className="text-xs text-muted">승인된 매장 지식 기반 답변</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {chat.isFetching && !chat.isLoading && !typing && (
-            <span className="text-[10px] text-muted bg-surface-muted px-2 py-0.5 rounded-full">
+            <span className="text-xs text-muted bg-surface-muted px-2 py-0.5 rounded-full">
               새 답변 확인 중…
             </span>
           )}
@@ -116,10 +116,10 @@ export default function ChatPage() {
             <Buddy size={34} className="shrink-0 mt-0.5" />
             <div className="max-w-[78%] space-y-1">
               <div className="rounded-[4px_20px_20px_20px] px-4 py-3 bg-accent-100 text-foreground shadow-xs">
-                <p className="text-xs font-semibold leading-relaxed">
+                <p className="text-base font-semibold leading-relaxed">
                   안녕하세요! 저는 매장 업무 도우미 Buddy예요. 🐥
                 </p>
-                <p className="mt-1 text-xs text-foreground/80 leading-relaxed">
+                <p className="mt-1 text-base text-foreground/80 leading-relaxed">
                   레시피, 마감 절차, 손님 응대 등 궁금한 점을 언제든 물어보세요. 승인된 매장 매뉴얼만 바탕으로 정확하게 알려드릴게요!
                 </p>
               </div>
@@ -139,7 +139,7 @@ export default function ChatPage() {
               {!isUser && <Buddy size={32} className="shrink-0 mb-1" />}
               <div className={`space-y-1.5 max-w-[78%] ${isUser ? "items-end" : "items-start"}`}>
                 <div
-                  className={`px-4 py-2.5 text-xs leading-relaxed shadow-xs ${
+                  className={`px-4 py-2.5 text-base leading-relaxed shadow-xs ${
                     isUser
                       ? "bg-brand-500 text-white rounded-[20px_20px_4px_20px] font-medium"
                       : "bg-accent-100 text-foreground rounded-[4px_20px_20px_20px]"
@@ -162,8 +162,8 @@ export default function ChatPage() {
                 {/* 점주 확인 대기 상태 */}
                 {m.pending && (
                   <div className="flex items-center gap-1.5 px-1 py-0.5">
-                    <span className="h-2 w-2 rounded-full bg-accent-500 animate-pulse" />
-                    <span className="text-[11px] font-bold text-brand-700">
+                    <span className="h-2 w-2 rounded-full bg-accent-500 motion-safe:animate-pulse" />
+                    <span className="text-xs font-bold text-brand-700">
                       사장님께 확인 중이에요
                     </span>
                   </div>
@@ -176,7 +176,7 @@ export default function ChatPage() {
         {/* 전송 중인 질문 (낙관적 사용자 버블) */}
         {ask.isPending && ask.variables && (
           <div className="flex items-end gap-2 justify-end">
-            <div className="max-w-[78%] rounded-[20px_20px_4px_20px] bg-brand-500 px-4 py-2.5 text-xs text-white shadow-xs font-medium">
+            <div className="max-w-[78%] rounded-[20px_20px_4px_20px] bg-brand-500 px-4 py-2.5 text-base text-white shadow-xs font-medium">
               <p className="whitespace-pre-wrap">{ask.variables}</p>
             </div>
           </div>
@@ -188,11 +188,11 @@ export default function ChatPage() {
             <Buddy size={32} className="shrink-0 mb-1" />
             <div className="rounded-[4px_20px_20px_20px] px-4 py-3 bg-accent-100 shadow-xs">
               <div className="flex gap-1.5 items-center">
-                <span className="text-[11px] text-brand-700 font-medium mr-1">답변 찾는 중</span>
+                <span className="text-xs text-brand-700 font-medium mr-1">답변 찾는 중</span>
                 {[0, 1, 2].map((i) => (
                   <span
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-brand-500 inline-block animate-bounce"
+                    className="w-1.5 h-1.5 rounded-full bg-brand-500 inline-block motion-safe:animate-bounce"
                     style={{ animationDelay: `${i * 0.15}s` }}
                   />
                 ))}
@@ -205,16 +205,16 @@ export default function ChatPage() {
       </div>
 
       {/* 하단 질문 입력 영역 (하단 3탭 바 바로 위에 배치되도록 mb-16 적용) */}
-      <div className="shrink-0 mb-16 bg-surface border-t border-border px-3 py-2.5 shadow-sm">
+      <div className="shrink-0 mb-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-surface border-t border-border px-3 py-2.5 shadow-sm">
         {/* 에러 및 질문 복원 배너 */}
         {errorText && (
-          <div className="mb-2 flex items-center justify-between rounded-lg bg-danger-50 px-3 py-1.5 text-xs text-danger-700">
+          <div className="mb-2 flex items-center justify-between rounded-lg bg-danger-50 px-3 py-1.5 text-sm text-danger-700">
             <span className="font-medium truncate">{errorText}</span>
             {lastFailedQuestion && (
               <button
                 type="button"
                 onClick={handleRestoreFailed}
-                className="ml-2 shrink-0 font-bold underline hover:text-danger-900 active:scale-95"
+                className="ml-2 min-h-11 shrink-0 rounded-lg px-3 font-bold underline hover:bg-danger-100 hover:text-danger-900 active:scale-95"
               >
                 질문 복구
               </button>
@@ -223,17 +223,20 @@ export default function ChatPage() {
         )}
 
         <form onSubmit={handleSubmit} className="flex items-center gap-2">
-          <input
+          <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="업무에 대해 질문해보세요..."
             disabled={typing}
-            className="flex-1 min-h-[44px] bg-background rounded-full px-4 text-xs font-medium text-foreground outline-none border border-border focus:border-brand-500 focus:ring-1 focus:ring-brand-400 transition-all placeholder:text-muted"
+            aria-label="Buddy에게 보낼 질문"
+            aria-invalid={Boolean(errorText)}
+            className="min-w-0 flex-1 rounded-full bg-background font-medium"
           />
           <button
             type="submit"
             disabled={!input.trim() || typing || chat.isLoading || !state.token}
             aria-label="질문 전송"
+            aria-busy={typing || undefined}
             className={`min-h-[44px] min-w-[44px] rounded-full flex items-center justify-center shrink-0 transition-all active:scale-90 ${
               input.trim() && !typing && !chat.isLoading
                 ? "bg-brand-500 text-white shadow-xs hover:bg-brand-600"

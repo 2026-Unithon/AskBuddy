@@ -24,7 +24,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ko" className={`${pretendard.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-background text-foreground">
+      <body className="min-h-dvh w-full overflow-hidden bg-background text-foreground">
         <Providers>{children}</Providers>
       </body>
     </html>

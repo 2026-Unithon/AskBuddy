@@ -22,10 +22,10 @@
 
 | ID | 범위 | 상태 | 연결 |
 |---|---|---|---|
-| GLOBAL-01 | 진입/bootstrap/auth/mock 진실성 | 계획 완료·구현 대기 | REL-G1 |
-| GLOBAL-02 | query/refetch/배지/오류 | 계획 완료·구현 대기 | REL-G2 |
-| GLOBAL-03 | 버튼/입력/loading/error | 계획 완료·구현 대기 | REL-G3 |
-| GLOBAL-04 | typography/layout/safe area | 계획 완료·구현 대기 | REL-G3 |
+| GLOBAL-01 | 진입/bootstrap/auth/mock 진실성 | 구현·브라우저 검증 완료 | REL-G1 |
+| GLOBAL-02 | query/refetch/배지/오류 | 구현·브라우저·요청 수 검증 완료 | REL-G2 |
+| GLOBAL-03 | 버튼/입력/loading/error | 구현·현재 데이터 브라우저 검증 완료 | REL-G3 |
+| GLOBAL-04 | typography/layout/safe area | 구현·390/360 브라우저 검증 완료 | REL-G3 |
 | GLOBAL-05 | 긴 job/DB 연결/복구/관측 | 계획 완료·구현 대기 | REL-G4 |
 
 ## 페이지 목록
@@ -42,4 +42,3 @@
 
 페이지를 검토할 때 대표 행동, 첫/재방문, loading/empty/error/partial/success, 느린 응답,
 뒤로가기/새로고침/재연결/연타, 360/390 모바일, 접근성을 함께 확인한다.
-

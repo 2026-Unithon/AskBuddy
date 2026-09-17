@@ -21,7 +21,7 @@ export function TaskCardDetail({
         <span className="text-xs font-bold text-foreground/80 bg-surface-muted px-2 py-0.5 rounded-full">
           📋 {categoryName}
         </span>
-        <span className="text-[11px] text-muted font-medium">업무 지침</span>
+        <span className="text-xs text-muted font-medium">업무 지침</span>
       </div>
 
       <div>
@@ -34,7 +34,7 @@ export function TaskCardDetail({
         <h3 className="text-xs font-bold text-muted uppercase tracking-wider">
           업무 상세 내용
         </h3>
-        <div className="space-y-2 text-xs leading-relaxed text-foreground/90 select-text">
+        <div className="space-y-2 text-base leading-relaxed text-foreground/90 select-text">
           {paragraphs.map((para, idx) => (
             <p key={idx} className="whitespace-pre-wrap">
               {para}
@@ -45,4 +45,3 @@ export function TaskCardDetail({
     </Card>
   );
 }
-

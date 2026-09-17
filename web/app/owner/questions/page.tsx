@@ -222,12 +222,13 @@ export default function QuestionsPage() {
       />
 
       {/* 메인 콘텐츠 (하단 탭 바 높이 고려 pb-24) */}
-      <main className="flex-1 space-y-3.5 px-4 py-3.5 pb-24 overflow-y-auto">
+      <main className="flex-1 space-y-3.5 px-4 py-3.5 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-y-auto">
         {/* 필터 세그먼트 (대기 중 / 전체 질문) */}
         <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-surface-muted p-1.5 border border-border/50">
           <button
             type="button"
             onClick={() => setActiveTab("waiting")}
+            aria-pressed={activeTab === "waiting"}
             className={`min-h-[44px] rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
               activeTab === "waiting"
                 ? "bg-surface text-brand-700 shadow-xs"
@@ -236,7 +237,7 @@ export default function QuestionsPage() {
           >
             <span>답변 대기</span>
             <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+              className={`px-1.5 py-0.5 rounded-full text-xs font-extrabold ${
                 waitingItems.length > 0
                   ? "bg-warn-500 text-white"
                   : "bg-surface-muted text-muted"
@@ -248,6 +249,7 @@ export default function QuestionsPage() {
           <button
             type="button"
             onClick={() => setActiveTab("all")}
+            aria-pressed={activeTab === "all"}
             className={`min-h-[44px] rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
               activeTab === "all"
                 ? "bg-surface text-brand-700 shadow-xs"
@@ -255,7 +257,7 @@ export default function QuestionsPage() {
             }`}
           >
             <span>전체 질문</span>
-            <span className="text-[10px] font-medium text-muted">
+            <span className="text-xs font-medium text-muted">
               ({aggregated.length})
             </span>
           </button>
@@ -265,6 +267,7 @@ export default function QuestionsPage() {
         {queryErrorMessage && (
           <InlineError
             message={queryErrorMessage}
+            isRetrying={pending.isFetching || questions.isFetching}
             onRetry={() => {
               void Promise.all([pending.refetch(), questions.refetch()]);
             }}

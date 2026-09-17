@@ -20,8 +20,8 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
     pathname === "/staff/faqs";
 
   return (
-    <div className="min-h-dvh w-full flex justify-center bg-background text-foreground">
-      <div className="w-full max-w-[480px] min-h-dvh bg-background flex flex-col relative">
+    <div className="app-page text-foreground">
+      <div className="app-mobile-frame">
         {children}
         {showBottomNav && <StaffBottomNav />}
       </div>

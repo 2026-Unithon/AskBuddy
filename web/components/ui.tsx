@@ -3,7 +3,16 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from "react";
+
+const focusRing =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 // Buddy 마스코트(러브버드) — 누끼딴 투명 PNG라 배경 없이 바로 얹으면 된다.
 // unoptimized 필수: Next/Image 최적화 파이프라인이 포맷 협상 과정에서
@@ -36,7 +45,7 @@ export function BuddyBubble({
     <div className={`flex items-end gap-2 ${className}`}>
       <Buddy size={size} />
       <div className="rounded-2xl rounded-bl-sm px-4 py-2.5 shadow-sm max-w-[80%] bg-accent-100">
-        <p className="text-sm font-medium text-foreground leading-snug">{text}</p>
+        <p className="text-base font-medium text-foreground leading-relaxed">{text}</p>
       </div>
     </div>
   );
@@ -45,8 +54,8 @@ export function BuddyBubble({
 // 온보딩·로드맵·채팅처럼 손에 든 화면은 모바일 폭으로 가운데 정렬한다 (레퍼런스가 폰 목업 기준).
 export function Shell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh w-full flex justify-center bg-background">
-      <div className="w-full max-w-[480px] min-h-dvh bg-background flex flex-col relative">
+    <div className="app-page">
+      <div className="app-mobile-frame">
         {children}
       </div>
     </div>
@@ -56,8 +65,8 @@ export function Shell({ children }: { children: ReactNode }) {
 // 대시보드처럼 데이터가 많은 화면은 데스크탑에서 넓게 쓴다.
 export function WideShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh w-full bg-background flex justify-center">
-      <div className="w-full max-w-5xl px-5 sm:px-8 py-6 flex flex-col gap-6">{children}</div>
+    <div className="app-page">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-6 overflow-y-auto px-5 py-6 sm:px-8">{children}</div>
     </div>
   );
 }
@@ -77,7 +86,7 @@ export function TopBar({
 }) {
   const router = useRouter();
   const backButtonClass =
-    "w-9 h-9 rounded-full flex items-center justify-center text-foreground hover:bg-surface-muted transition-colors";
+    `min-h-11 min-w-11 rounded-xl flex items-center justify-center text-foreground hover:bg-surface-muted active:bg-surface-muted active:scale-[0.96] transition ${focusRing}`;
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 bg-background/90 backdrop-blur">
       {backHref ? (
@@ -86,6 +95,7 @@ export function TopBar({
         </Link>
       ) : (
         <button
+          type="button"
           aria-label="뒤로가기"
           onClick={onBack ?? (() => router.back())}
           className={backButtonClass}
@@ -96,7 +106,7 @@ export function TopBar({
       {/* -ml-9 로 화살표 위까지 겹쳐 가운데 정렬을 맞춘다. 그대로 두면 제목이 클릭을
           가로채 뒤로가기가 눌리지 않는다 — 제목은 누를 일이 없으니 통과시킨다. */}
       {title && (
-        <h1 className="text-base font-semibold flex-1 text-center -ml-9 pointer-events-none">
+        <h1 className="text-base font-semibold flex-1 text-center -ml-11 pointer-events-none">
           {title}
         </h1>
       )}
@@ -125,13 +135,20 @@ export function Button({
   variant = "primary",
   size = "md",
   className = "",
+  loading = false,
+  loadingLabel,
+  disabled,
+  type = "button",
+  children,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "md" | "lg";
+  loading?: boolean;
+  loadingLabel?: string;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-2xl font-semibold transition-colors disabled:opacity-40 disabled:pointer-events-none";
+    `inline-flex min-w-11 items-center justify-center gap-2 rounded-2xl font-semibold select-none touch-manipulation transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 ${focusRing}`;
   const sizes = {
     md: "h-11 px-5 text-sm",
     lg: "h-13 px-6 text-base",
@@ -144,9 +161,21 @@ export function Button({
   };
   return (
     <button
+      type={type}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      data-loading={loading || undefined}
       className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
       {...props}
-    />
+    >
+      {loading && (
+        <span
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent"
+        />
+      )}
+      <span>{loading && loadingLabel ? loadingLabel : children}</span>
+    </button>
   );
 }
 
@@ -162,7 +191,7 @@ export function LinkButton({
   className?: string;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-2xl font-semibold transition-colors h-11 px-5 text-sm";
+    `inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-2xl font-semibold select-none touch-manipulation transition active:scale-[0.97] h-11 px-5 text-sm ${focusRing}`;
   const variants = {
     primary: "bg-brand-600 text-white hover:bg-brand-700",
     secondary: "bg-brand-50 text-brand-700 hover:bg-brand-100",
@@ -178,7 +207,25 @@ export function LinkButton({
 export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`w-full h-12 px-4 rounded-[var(--radius-md)] border border-border bg-surface text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition-shadow ${className}`}
+      className={`w-full min-h-12 px-4 rounded-[var(--radius-md)] border border-border bg-surface text-base text-foreground placeholder:text-muted transition-shadow hover:border-brand-300 focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70 aria-invalid:border-danger-500 aria-invalid:ring-danger-500 ${focusRing} ${className}`}
+      {...props}
+    />
+  );
+}
+
+export function Textarea({ className = "", ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={`w-full rounded-[var(--radius-md)] border border-border bg-surface p-3 text-base leading-relaxed text-foreground placeholder:text-muted transition-shadow hover:border-brand-300 focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70 aria-invalid:border-danger-500 aria-invalid:ring-danger-500 ${focusRing} ${className}`}
+      {...props}
+    />
+  );
+}
+
+export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      className={`min-h-12 rounded-[var(--radius-md)] border border-border bg-surface px-3 text-base text-foreground transition-shadow hover:border-brand-300 focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-70 aria-invalid:border-danger-500 aria-invalid:ring-danger-500 ${focusRing} ${className}`}
       {...props}
     />
   );
@@ -218,7 +265,7 @@ export function Badge({
 
 export function BottomCta({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-0 mt-auto px-4 py-4 bg-gradient-to-t from-background via-background to-transparent">
+    <div className="sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background to-transparent px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
       {children}
     </div>
   );

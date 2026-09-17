@@ -28,7 +28,7 @@ export function OwnerPageHeader({
         <Buddy size={34} className="shrink-0" />
         <div className="min-w-0">
           <h1 className="truncate text-sm font-bold text-foreground">{title}</h1>
-          <p className="truncate text-[11px] text-muted">{subtitle}</p>
+          <p className="truncate text-xs text-muted">{subtitle}</p>
         </div>
       </div>
 
@@ -45,14 +45,14 @@ export function OwnerPageHeader({
         >
           🔔
           {unreadCount > 0 && (
-            <span className="absolute right-0.5 top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-danger-500 px-1 text-[9px] font-bold text-white">
+            <span className="absolute right-0 top-0 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger-500 px-1 text-xs font-bold text-white">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
         </Link>
         <Link
           href="/role"
-          className="flex min-h-[44px] items-center justify-center rounded-xl px-2 text-[11px] font-bold text-muted transition-colors hover:bg-surface-muted hover:text-foreground active:scale-[0.95]"
+          className="flex min-h-[44px] items-center justify-center rounded-xl px-2 text-sm font-bold text-muted transition-colors hover:bg-surface-muted hover:text-foreground active:scale-[0.95]"
         >
           나가기
         </Link>

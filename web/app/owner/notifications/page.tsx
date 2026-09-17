@@ -52,6 +52,7 @@ export default function NotificationsPage() {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [openingId, setOpeningId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -104,7 +105,7 @@ export default function NotificationsPage() {
       const saved = await savePushSubscription(current.toJSON(), state.token);
       setSubscription(current);
       setSubscriptionId(saved.subscription_id);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.notificationSupport(state.storeId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notificationSupport(state.storeId) });
     } catch (requestError) {
       setError(messageForError(requestError));
     } finally {
@@ -129,7 +130,8 @@ export default function NotificationsPage() {
   }
 
   async function openNotification(item: NotificationItem) {
-    if (!state.token) return;
+    if (!state.token || openingId !== null) return;
+    setOpeningId(item.notification_id);
     if (!item.read_at) {
       try {
         const result = await markNotificationRead(item.notification_id, state.token);
@@ -148,9 +150,10 @@ export default function NotificationsPage() {
               }
             : current
         );
-        await queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) });
       } catch (requestError) {
         setError(messageForError(requestError));
+        setOpeningId(null);
         return;
       }
     }
@@ -185,12 +188,12 @@ export default function NotificationsPage() {
             <p className="text-xs rounded-xl bg-surface-muted px-3 py-2">서버의 Push 키 설정이 아직 준비되지 않았어요. 앱 내부 알림은 정상 작동합니다.</p>
           )}
           {pushReady && (subscription ? (
-            <Button variant="secondary" onClick={disablePush} disabled={busy} className="w-full">
-              {busy ? "처리 중" : "휴대폰 알림 끄기"}
+            <Button variant="secondary" onClick={disablePush} loading={busy} loadingLabel="알림 설정 처리 중" className="w-full">
+              휴대폰 알림 끄기
             </Button>
           ) : (
-            <Button onClick={enablePush} disabled={busy || (isIOS && !isStandalone)} className="w-full">
-              {busy ? "처리 중" : "휴대폰 알림 받기"}
+            <Button onClick={enablePush} loading={busy} loadingLabel="알림 설정 처리 중" disabled={isIOS && !isStandalone} className="w-full">
+              휴대폰 알림 받기
             </Button>
           ))}
         </Card>
@@ -198,16 +201,16 @@ export default function NotificationsPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-brand-700">앱 알림</h2>
-            <button onClick={() => void notifications.refetch()} className="text-xs font-semibold text-brand-500">새로고침</button>
+            <button type="button" onClick={() => void notifications.refetch()} disabled={notifications.isFetching} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-brand-600 disabled:opacity-50">새로고침</button>
           </div>
-          {(error || supportQuery.error || notifications.error) && <p role="alert" className="text-xs font-medium text-[#E57373]">{error ?? messageForError(supportQuery.error ?? notifications.error)}</p>}
-          {notifications.isLoading && <div className="space-y-3" aria-label="알림 불러오는 중">{[0, 1, 2].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-surface-muted" />)}</div>}
-          {notifications.isFetching && !notifications.isLoading && !notifications.isFetchingNextPage && <p className="text-[11px] text-muted">최신 알림 확인 중…</p>}
+          {(error || supportQuery.error || notifications.error) && <p role="alert" className="text-sm font-medium text-danger-600">{error ?? messageForError(supportQuery.error ?? notifications.error)}</p>}
+          {notifications.isLoading && <div className="space-y-3" aria-label="알림 불러오는 중">{[0, 1, 2].map((item) => <div key={item} className="h-24 motion-safe:animate-pulse rounded-2xl bg-surface-muted" />)}</div>}
+          {notifications.isFetching && !notifications.isLoading && !notifications.isFetchingNextPage && <p className="text-xs text-muted">최신 알림 확인 중…</p>}
           {!notifications.isLoading && items.length === 0 && !error && !notifications.error && (
             <Card className="p-6 text-center text-sm text-muted">아직 도착한 알림이 없어요.</Card>
           )}
           {items.map((item) => (
-            <button key={item.notification_id} onClick={() => void openNotification(item)} className="block w-full text-left">
+            <button key={item.notification_id} type="button" onClick={() => void openNotification(item)} disabled={openingId === item.notification_id} aria-busy={openingId === item.notification_id || undefined} className="block min-h-11 w-full rounded-2xl text-left disabled:opacity-60">
               <Card className={`p-4 ${item.read_at ? "opacity-65" : "border-brand-500/40"}`}>
                 <div className="flex items-start gap-3">
                   <span className="text-xl" aria-hidden>{item.event_type === "PENDING_QUESTION" ? "❓" : "✨"}</span>
@@ -216,8 +219,8 @@ export default function NotificationsPage() {
                       <p className="text-sm font-bold">{item.title}</p>
                       {!item.read_at && <span className="w-2 h-2 rounded-full bg-brand-500" aria-label="읽지 않음" />}
                     </div>
-                    <p className="text-xs text-muted mt-1 break-words">{item.body}</p>
-                    <p className="text-[11px] text-muted mt-2">{formatTime(item.created_at)}</p>
+                    <p className="text-sm text-muted mt-1 break-words leading-relaxed">{item.body}</p>
+                    <p className="text-xs text-muted mt-2">{formatTime(item.created_at)}</p>
                   </div>
                   {item.action_completed && <Badge tone="neutral">처리 완료</Badge>}
                 </div>
@@ -225,8 +228,8 @@ export default function NotificationsPage() {
             </button>
           ))}
           {notifications.hasNextPage && (
-            <Button variant="secondary" className="w-full" disabled={notifications.isFetchingNextPage} onClick={() => void notifications.fetchNextPage()}>
-              {notifications.isFetchingNextPage ? "불러오는 중…" : "이전 알림 더 보기"}
+            <Button variant="secondary" className="w-full" loading={notifications.isFetchingNextPage} loadingLabel="이전 알림 불러오는 중" onClick={() => void notifications.fetchNextPage()}>
+              이전 알림 더 보기
             </Button>
           )}
         </section>
