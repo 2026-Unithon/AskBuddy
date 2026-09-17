@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm lint && pnpm typecheck && pnpm build"
+    "check": "next typegen && pnpm lint && pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

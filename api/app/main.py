@@ -54,6 +54,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Answer-Receipt-Id", "X-Answer-Replayed", "X-Context-Revision"],
 )
 
 app.include_router(preflight_router)

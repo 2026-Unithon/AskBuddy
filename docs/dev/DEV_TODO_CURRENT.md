@@ -1,8 +1,19 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-17 R/W pull 통합: [W 인계](plan/R_TO_W_HANDOFF_20260917.md). 원격 `a20f2b6`와 누적 R 구현을 통합하고 751 tests/119 subtests, 프론트 check, 합성 브라우저 27 checks를 통과했다. 최신 Docker/W 종단 및 실자료 품질은 별도 인수다.
+
 2026-09-16 [W 평가 캠페인 강제 검증](review/W_EVAL_CAMPAIGN_VALIDATION_20260916.md):
 split/hash/후보 설정/최소 3회 실행표/예산을 사전 검증하고 캠페인·slot lock과 개봉 이력을 연결했다.
 실제 holdout 개봉·유료 호출·품질 승격은 하지 않았다.
+2026-09-16 최신 R: [RAW 평가 누락·의미 묶음 측정](review/R_RAW_GROUPING_EVALUATION_20260916.md). RAW-only 정답 수입, RAW/typed 혼합 회수·oracle, 미판정을 보존하는 의미 묶음 평가 CLI를 구현했다. 685 tests/119 subtests 및 AST 통과. Docker/W/외부 모델 호출 없이 합성 실제 planner 출력까지 연결했다. 제품 지원 범위는 앞선 [예외·승인 Q/A·묶음 확장](review/R_EXCEPTION_QA_GROUPING_20260916.md)을 따르며 일반 의미 판단 전체·최신 DB 통합·실자료 성능·W 공동 인수는 미완료다.
+
+2026-09-16 R 단독 후속: [평가·조회 보완](review/R_SOLO_EVALUATION_AND_ACCESS_20260916.md). 관련성 판정 연결, 검색/근거 지표, oracle 진단, 필수 비답변 검토, 다회 평가, 용어 검토 입력, usage 연결, 점주 승인 지식 내보내기/감사를 구현했다. 단위 575 tests/119 subtests. 전체 R 완료와 실자료 성능 인수는 별도이며 상세 잔여 범위는 링크의 마지막 표를 따른다.
+
+2026-09-16 R0 반복 캠페인 연결: [검증·사용법](review/R_V2_CAMPAIGN_20260916.md). 고정 manifest와 arm별 설정/소스 대조, A/A 변동 폭, 기존 paired gate 및 비용/원장 미확인 차단을 연결했다. 단위 535 tests/116 subtests, 실제 DB/API 230 PASS. 실제 정답·비용 인수와 제품 승격은 별도다.
+
+2026-09-16 R0 단일 질문 평가 수집·보고: [검증 기록과 사용법](review/R_V2_EVALUATION_20260916.md). 5행동/ERROR를 v2 API에서 수집하고 DB receipt와 대조했다. 사람 판정 없는 ANSWER는 미판정, 오류도 분모에 남긴다. 회귀 525 tests/110 subtests, 실제 DB/API 205 PASS. 실제 품질 승격·반복 캠페인·비용 귀속은 미완료다.
+
+2026-09-16 R/W pull 통합: `4212fec` 기준으로 R 로컬 구현을 복원하고 문서를 `docs/dev`로 옮겼다. 개발과 출시 인수의 경계는 [R 구현 계획](plan/R_IMPLEMENTATION_PLAN.md), 검증은 [pull 통합 기록](review/R_PULL_DEV_RELEASE_20260916.md)을 따른다. 통합 회귀 515 tests/106 subtests, migration 26개, 격리 DB/API 198 PASS. 전체 R 또는 출시 완료 판정은 아니다.
 
 2026-09-16 [W 분류·관계 비용 계측](review/W_CLASSIFY_RELATION_USAGE_20260916.md):
 CLASSIFY/RELATION과 점주 답변 후보 EMBED를 기존 원장에 연결했다. 재분류 worker는 모델 호출 중 DB 연결을 반환한다.
@@ -32,6 +43,11 @@ C0 전체·W0 전체 완료는 아니다. 과거 review 기록은 수정하지 �
 후속 [AI 표본 검토·복구 감사](review/W_REVIEW_AND_RECOVERY_20260915.md):
 보류 59건/확신 9건 대조 완료, 마지막 A/B 각 1개 실행 조건부 재평가 완료.
 사람 인수와 나머지 16개 유효 실행 입력 복구는 남아 있으며, W1 개선/전체 재평가 완료를 주장하지 않는다.
+2026-09-16 R 후속 범위: [정책 명시 확인·직원 앱 알림](review/R_POLICY_NOTIFICATIONS_20260916.md). SAFE_ROUTE 후 사용자 확인 요청의 원자 이관, 직원 알림 목록·읽음·대화 이동을 구현했다. Push worker·FAQ·실제 평가·DB 브라우저 E2E 등은 남아 있어 R 전체 완료로 표시하지 않는다.
+
+2026-09-16 R 후속 완료: [재정렬 계측·장애 처리](review/R_RERANK_USAGE_20260916.md). 호출 전 원장 저장과 오류/취소 기록, 정리 시간 제한, v2 API 503·문의 미생성을 확인했다. 최신 회귀는 API 434 tests/95 subtests, PG17 migration 25개, DB/API 172 PASS. SDK 응답은 합성이며 실제 모델 품질 검증과 R 전체 완료는 아니다.
+
+2026-09-16 R 최신 상태: [v2 실행·점주 전달 검증](review/R_RUNTIME_IMPLEMENTATION_20260916.md). M2/hybrid·승인 사전·선택형 reranker·v2 API/인용·점주 원문/직원 이력·W lease 인계·v2 화면을 추가했다. API 432 tests/95 subtests, PG17 migration 25개와 DB/API 153 PASS. 브라우저는 합성 API 12개 체크이며 전체 DB E2E는 아니다. 미완료 R 항목과 W 공동 연결을 해당 기록에 분리했으며 전체 checkbox는 아직 닫지 않는다.
 
 > 개정일: 2026-09-14
 >
@@ -80,6 +96,10 @@ W는 **원본 → 사실 JSON → 카드 초안 → 검수·공개**, R은 **질
 현재 저장소 설정의 `gemini-3.6-flash`, Whisper, 임베딩을 기준으로 구조를 비교한다. 실제 실험에서는 요청 모델 ID·응답 식별값·설정·코드·프롬프트·스키마·자료 해시를 기록한다. 모델 가용성이나 절대 성능 향상을 계획만으로 확정하지 않는다. 모델·벤더 교체, 별도 벡터/그래프 DB, 파인튜닝, LangChain·LangGraph·RAGAS 도입은 이번 구조 개선의 선행조건이 아니다.
 
 # C0. 공통 계약과 병렬 개발 준비 — W 주 작성, R 필수 검토
+
+2026-09-16 R DB 재개: [검증 기록](review/R_DB_RESUME_20260916.md). Docker 장애 해소. PG15/17 각각 실제 DB 50/50, 저장소 설정인 PG17 전체 migration 21/21, 단위 406/하위 사례 95 통과. 이전 기록의 PG15 전체 재구축 전제를 PG17로 정정했다. M3 문맥 첫 단위의 DB 검증을 닫았으며 M2·M3 전체·v2 실행 연결은 남아 있다.
+
+2026-09-15 R 후속 상태: [E0·stale·M3 문맥 기록](review/R_E0_STALE_CONTEXT_20260915.md). 고정 후보 extractive 기준선, 실제 v1 stale 1회 재검색, M3 session/context 첫 단위를 구현했다. 단위 406/하위 사례 95 통과. Docker 엔진 장애로 새 DB 인수는 실행되지 않았고, M2·M3 전체·v2 runtime·R2~R5 완료로 표시하지 않는다. 상세 순서와 W 준비 manifest 접점은 [R 실행 계획](plan/R_IMPLEMENTATION_PLAN.md)을 따른다.
 
 R 전체 순차 진행 위임 이후 최신 상태: [C0_R_SEQUENTIAL_STATUS.md](review/C0_R_SEQUENTIAL_STATUS.md). QUERY 계측·읽기 원장 집계·36개 운영 계산·요청 제한/시간 예산·지표 산술을 구현했다. PG15 원장/보안/W 임베딩 인계 29/29 및 전체 회귀 359 tests / 73 subtests 통과. [W 착수 인계](plan/C0_W_START_HANDOFF.md)에 호출 규약·fixture·재현 명령·첫 작업을 고정했다. M2/M3·R1~R5 전체 완료는 아니다.
 
@@ -273,12 +293,14 @@ W 완료: 계약·검증 테스트, 전체 분모 반복 결과·원시 기록·
 
 ## R0. 기준선·인증·평가 — 구 14.1~14.3·14.7
 
+항목별 실행 기준: [R_IMPLEMENTATION_PLAN.md](plan/R_IMPLEMENTATION_PLAN.md). 2026-09-15 c73549a 합류 후 첫 항목으로 반복별 필수 질문 악화·미판정 차단과 안정성 보고를 산술 모듈에 구현했다. R0 E0 기준선·v2 실행/저장 하네스·CP-05 전체 완료는 아니다.
+
 - [ ] C0 fixture로 기존 읽기 경로의 `E0`를 먼저 저장한다. W 추출 완료를 기다리지 않는다.
 - [ ] `/reg/*`를 포함한 제품 카드·검색 경로에 JWT 매장 권한을 강제하거나 레거시 공개 경로를 제거한다. 요청 `store_id`를 권한으로 신뢰하지 않는다.
 - [ ] 사용자·매장별 질문/조회 rate limit, timeout·retry 예산·감사 로그를 구현한다. 인증·격리 보완은 C0 준비와 동시에 시작할 수 있고 품질 실험 때문에 미루지 않는다.
 - [ ] 질문 정답은 안정적인 사실 의미 ID·규격·필요 조건·기대 행동으로 작성하고 snapshot별 카드/version 매핑을 붙인다.
 - [ ] 기대 행동 5종, 필수 사실·금지 주장·근거를 사람이 판정한다. 매장 사실은 점주, 검색 관련성은 팀이 확인한다.
-- [ ] vector·lexical·oracle 후보 합집합으로 pooling하고 미검색 표본도 검토한다. 현재 검색기의 top 10만 정답 공간으로 한정하지 않는다.
+- [ ] vector·lexical·oracle 후보 합집합으로 pooling하고 미검색 표본도 검토한다. 현재 검색기의 top 10만 정답 공간으로 한정하지 않는다. [오프라인 자료 생성](review/R_RETRIEVAL_POOL_20260916.md), [실제 독립 채널 수집](review/R_RETRIEVAL_COLLECTION_20260916.md), [승인 블록/색인 모집단 대조](review/R_INDEX_UNIVERSE_AUDIT_20260916.md) 구현. 사람 검토·정답 매핑·지표 연결은 남아 있다.
 - [ ] 인용 없는 응답만 세던 `ungrounded`와 실제 의미적 오답을 분리하고 새 지표 버전을 기록한다. 최종 질문의 `false_abstention_rate`·`block_precision`과 후보 답변의 `validator_*`는 서로 다른 분모다.
 - [ ] `run_eval.py`·team runner/metrics의 REFUSE/SAFE_ROUTE→MISS 축약과 retrieve/compose 직접 호출만으로 v2를 평가하던 한계를 고친다. v2 API/DB 계약 테스트로 TTL·pending·알림·ERROR·저장 상태도 검사한다.
 - [ ] X-R-O1 검색만, X-R-O2 정답 근거 주입, X-R-O3 검증 전후(기존 E-O1~3)를 평가 전용 환경에서 분해한다. 운영 검증을 끄지 않는다.

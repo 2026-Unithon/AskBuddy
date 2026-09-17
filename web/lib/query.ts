@@ -1,4 +1,50 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { rSessions, rHistory, rPendingList, rPendingDetail, rCitation, rNotifications } from "./r-v2-api";
+
+export function rCitationQuery(token: string | null, store: number | null, user: number | null, receipt: string, order: number, open: boolean) {
+  return queryOptions({ queryKey: ["r-citation", store, user, receipt, order],
+    queryFn: ({ signal }) => rCitation(token!, receipt, order, signal), enabled: Boolean(token && store && user && open) });
+}
+
+export const rKeys = {
+  root: (storeId: number | null, userId: number | null) => ["r-v2", storeId, userId] as const,
+  sessions: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "sessions"] as const,
+  notifications: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "notifications"] as const,
+  history: (storeId: number | null, userId: number | null, session: string | null) => [...rKeys.root(storeId, userId), "history", session] as const,
+  pending: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "pending"] as const,
+  detail: (storeId: number | null, userId: number | null, id: string | null) => [...rKeys.pending(storeId, userId), id] as const,
+};
+export function rNotificationsQuery(token: string | null, store: number | null, user: number | null) {
+  return infiniteQueryOptions({ queryKey: rKeys.notifications(store, user),
+    queryFn: ({ signal, pageParam }) => rNotifications(token!, pageParam, signal),
+    initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
+    enabled: Boolean(token && store && user),
+  });
+}
+export function rSessionsQuery(token: string | null, store: number | null, user: number | null) {
+  return queryOptions({ queryKey: rKeys.sessions(store, user), queryFn: ({ signal }) => rSessions(token!, signal), enabled: Boolean(token && store && user) });
+}
+export function rHistoryQuery(token: string | null, store: number | null, user: number | null, session: string | null) {
+  return infiniteQueryOptions({ queryKey: rKeys.history(store, user, session),
+    queryFn: ({ signal, pageParam }) => rHistory(token!, session!, pageParam, signal),
+    initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
+    enabled: Boolean(token && store && user && session),
+    refetchInterval: (query) => query.state.data?.pages.at(-1)?.messages.at(-1)?.response?.action === "ESCALATE" ? 5_000 : false,
+  });
+}
+export function rPendingQuery(token: string | null, store: number | null, user: number | null) {
+  return infiniteQueryOptions({ queryKey: rKeys.pending(store, user),
+    queryFn: ({ signal, pageParam }) => rPendingList(token!, pageParam, signal),
+    initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
+    enabled: Boolean(token && store && user),
+  });
+}
+export function rDetailQuery(token: string | null, store: number | null, user: number | null, id: string | null) {
+  return queryOptions({ queryKey: rKeys.detail(store, user, id), queryFn: ({ signal }) => rPendingDetail(token!, id!, signal),
+    enabled: Boolean(token && store && user && id),
+    refetchInterval: (query) => query.state.data?.answers.at(-1)?.knowledge_status === "PENDING" ? 5_000 : false,
+  });
+}
 import {
   getNotificationSupport,
   getBootstrap,

@@ -5,6 +5,14 @@
       "properties": {
         "code": {
           "enum": [
+            "AUTH_REQUIRED",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "V2_UNAVAILABLE",
+            "INDEX_UNAVAILABLE",
+            "DEADLINE_EXCEEDED",
+            "USAGE_UNAVAILABLE",
+            "INTERNAL_ERROR",
             "INVALID_CONTRACT",
             "UNSUPPORTED_SCHEMA",
             "INVALID_REFERENCE",

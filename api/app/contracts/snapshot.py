@@ -117,21 +117,8 @@ class PublishedCard(FrozenContract):
         return self
 
 
-class PublishedKnowledgeSnapshot(FrozenContract):
-    """R 이 소비하는 전부. 이 밖의 것은 답변 근거가 될 수 없다."""
-
-    schema_version: Literal["published_knowledge/v1"] = SCHEMA_PUBLISHED
-    store_id: EntityId
-    # 매장 범위에서 단조 증가한다. 캐시 키와 재현에 쓴다
-    knowledge_revision: RevisionId
-    snapshot_id: EntityId
-    snapshot_hash: HashRef
-    created_at: UtcDatetime
-    glossary_version: str = Field(max_length=40)
-    renderer_version: str = Field(max_length=40)
-    cards: tuple[PublishedCard, ...] = ()
-    fact_revisions: tuple[FactRevision, ...] = ()
-    raw_spans: tuple[RawSpan, ...] = ()
+class _ContentChecks:
+    """발행 전후 같은 내용 검사를 사용하되 공개 wire 필드 순서는 유지한다."""
 
     @model_validator(mode="after")
     def _ids_unique(self) -> "PublishedKnowledgeSnapshot":
@@ -227,3 +214,28 @@ class PublishedKnowledgeSnapshot(FrozenContract):
 
     def card(self, card_id: str) -> PublishedCard | None:
         return next((c for c in self.cards if c.card_id == card_id), None)
+
+
+class KnowledgeContent(_ContentChecks, FrozenContract):
+    """불변 승인 preview 내용. 이 타입 자체는 공개 권한을 부여하지 않는다."""
+    store_id: EntityId
+    glossary_version: str = Field(max_length=40)
+    renderer_version: str = Field(max_length=40)
+    cards: tuple[PublishedCard, ...] = ()
+    fact_revisions: tuple[FactRevision, ...] = ()
+    raw_spans: tuple[RawSpan, ...] = ()
+
+
+class PublishedKnowledgeSnapshot(_ContentChecks, FrozenContract):
+    """R 이 소비하는 전부. 이 밖의 것은 답변 근거가 될 수 없다."""
+    schema_version: Literal["published_knowledge/v1"] = SCHEMA_PUBLISHED
+    store_id: EntityId
+    knowledge_revision: RevisionId
+    snapshot_id: EntityId
+    snapshot_hash: HashRef
+    created_at: UtcDatetime
+    glossary_version: str = Field(max_length=40)
+    renderer_version: str = Field(max_length=40)
+    cards: tuple[PublishedCard, ...] = ()
+    fact_revisions: tuple[FactRevision, ...] = ()
+    raw_spans: tuple[RawSpan, ...] = ()

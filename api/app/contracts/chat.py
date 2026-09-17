@@ -67,7 +67,7 @@ class QuestionContext(Contract):
     # 섞으면 모델의 짐작이 다음 턴에 '확정' 으로 굳는다
     confirmed_slots: dict[str, str] = Field(default_factory=dict)
     proposed_slots: dict[str, str] = Field(default_factory=dict)
-    original_question: str = Field(min_length=1, max_length=1000)
+    original_question: RawText = Field(min_length=1, max_length=1000)
     clarify_turns: int = Field(default=0, ge=0, le=2)
 
     @model_validator(mode="after")
@@ -120,6 +120,15 @@ class ChatResponse(Contract):
 
     @model_validator(mode="after")
     def _fields_match_action(self) -> "ChatResponse":
+        if self.action != "CLARIFY" and (self.context_id is not None
+                or self.clarification_slot is not None or self.allowed_options):
+            raise ValueError("CLARIFY 전용 필드는 다른 action에 허용하지 않는다")
+        if self.action != "ESCALATE" and self.pending_id is not None:
+            raise ValueError("pending 식별자는 ESCALATE에만 허용한다")
+        keys = [(c.card_id, c.card_version_id, c.block_id, c.fact_revision_id,
+                 c.raw_span_id, c.source_id) for c in self.citations]
+        if len(keys) != len(set(keys)):
+            raise ValueError("중복 인용 행")
         if self.action == "ANSWER":
             if not self.citations:
                 raise ValueError("ANSWER 는 인용 없이 나갈 수 없다 (불변식 3·6)")
@@ -132,6 +141,10 @@ class ChatResponse(Contract):
             if not (self.context_id and self.allowed_options
                     and self.clarification_slot):
                 raise ValueError("CLARIFY 에는 문맥·슬롯·고를 값이 필요하다")
+            if (not self.clarification_slot.strip()
+                    or any(not option.strip() for option in self.allowed_options)
+                    or len(set(self.allowed_options)) != len(self.allowed_options)):
+                raise ValueError("빈 슬롯·선택지 또는 중복 선택지")
             if self.pending_id:
                 raise ValueError(
                     "CLARIFY 는 점주에게 넘기지 않는다. 불필요한 알림이 쌓인다")

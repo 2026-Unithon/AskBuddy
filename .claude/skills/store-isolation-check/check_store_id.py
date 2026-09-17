@@ -29,7 +29,11 @@ from pathlib import Path
 #      from information_schema.columns
 #      where table_schema='public' and column_name='store_id';"
 TENANT_TABLES = {
-    "r_request_leases",
+    "r_request_leases", "r_question_contexts", "r_index_preparations",
+    "r_index_documents", "r_index_publications",
+    "r_answer_receipts", "r_answer_citations",
+    "r_owner_answer_revisions", "r_owner_answer_deliveries", "r_owner_knowledge_states",
+    "r_search_lexicons",
     "access_logs", "card_embeddings", "card_evidence", "card_review_events",
     "card_versions", "chat_sessions", "evaluation_cases", "evaluation_results",
     "evaluation_runs", "ingest_job_sources", "ingest_jobs", "invite_codes",

@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # 신규 v2 API는 DB/의미 인수 후 별도 활성화한다. v1 동작을 암묵 전환하지 않는다.
+    r_v2_enabled: bool = False
+    r_reranker_enabled: bool = False
     # C0 §6: 조정 가능한 초기값. 프로세스마다 별도 카운터를 두지 않는다.
     chat_deadline_seconds: float = Field(default=5.0, gt=0, le=5)
     search_deadline_seconds: float = Field(default=1.0, gt=0, le=1)

@@ -24,8 +24,8 @@ C0/W0~W5 전체 AI 구조 완성을 릴리스 목표로 확대하지 않는다. 
 | [review/REL_G3_REVIEW_20260917.md](review/REL_G3_REVIEW_20260917.md) | REL-G3 상호작용·모바일 기반 구현 검증 |
 
 `plan/`과 TODO는 진행에 맞춰 갱신한다. `review/`는 당시 관찰 기록이므로 수정하지 않고 새 기록을 추가한다.
-제품·승인·보안 계약은 상위 [MVP 정본](../ASKBUDDY_MVP_CURRENT.md),
-장기 개발은 [개발 TODO](../DEV_TODO_CURRENT.md)를 따른다. release는 별도 제품 정본이 아니다.
+제품·승인·보안 계약은 상위 [MVP 정본](../dev/ASKBUDDY_MVP_CURRENT.md),
+장기 개발은 [개발 TODO](../dev/DEV_TODO_CURRENT.md)를 따른다. release는 별도 제품 정본이 아니다.
 같은 결함을 양쪽에서 구현할 때 담당/코드/검증을 연결하고 중복 작업하지 않는다.
 
 이번 작업은 문서 구조와 계획 작성이다. 운영 데이터 변경·실제 과금 호출·배포는 하지 않았다.

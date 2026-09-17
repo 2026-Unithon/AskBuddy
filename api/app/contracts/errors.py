@@ -16,6 +16,8 @@ from pydantic import Field, model_validator
 from app.contracts.common import Contract
 
 ErrorCode = Literal[
+    "AUTH_REQUIRED", "FORBIDDEN", "NOT_FOUND", "V2_UNAVAILABLE", "INDEX_UNAVAILABLE",
+    "DEADLINE_EXCEEDED", "USAGE_UNAVAILABLE", "INTERNAL_ERROR",
     "INVALID_CONTRACT",
     "UNSUPPORTED_SCHEMA",
     "INVALID_REFERENCE",
@@ -34,6 +36,14 @@ ErrorCode = Literal[
 
 # code → (HTTP 상태, 자동 재시도 가능)
 ERROR_TABLE: dict[str, tuple[int, bool]] = {
+    "AUTH_REQUIRED": (401, False),
+    "FORBIDDEN": (403, False),
+    "NOT_FOUND": (404, False),
+    "V2_UNAVAILABLE": (503, False),
+    "INDEX_UNAVAILABLE": (503, True),
+    "DEADLINE_EXCEEDED": (504, True),
+    "USAGE_UNAVAILABLE": (503, True),
+    "INTERNAL_ERROR": (500, False),
     "INVALID_CONTRACT": (422, False),
     "UNSUPPORTED_SCHEMA": (422, False),
     "INVALID_REFERENCE": (422, False),

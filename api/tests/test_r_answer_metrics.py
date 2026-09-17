@@ -39,7 +39,8 @@ class MetricsTest(unittest.TestCase):
     def test_paired_fixed_denominator_and_cost_gate(self):
         a = {str(i):False for i in range(10)}
         pairs = [(a, {str(i):i<n for i in range(10)}) for n in (5,6,7)]
-        options = dict(control_width=4,must_have_regressions=0,ledger_recall_regressed=False)
+        options = dict(control_width=4,must_have_regressions=0,ledger_recall_regressed=False,
+                       must_have_ids=[])
         result = paired_gate(pairs, **options, cost_gate_passed=True)
         self.assertEqual(result['median_delta'],6)
         self.assertTrue(result['eligible'])

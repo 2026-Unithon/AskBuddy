@@ -68,12 +68,10 @@ def _by_id(items, key):
     return sorted(items, key=lambda x: int(getattr(x, key)))
 
 
-def snapshot_payload(snapshot) -> dict:
-    """hash 를 계산할 대상. 발행의 '내용' 만 담는다."""
+def knowledge_content_payload(snapshot) -> dict:
+    """발행 전후 공통 승인 내용. 임시 snapshot/revision을 발급하지 않는다."""
     return {
-        "schema_version": snapshot.schema_version,
         "store_id": snapshot.store_id,
-        "knowledge_revision": snapshot.knowledge_revision,
         "glossary_version": snapshot.glossary_version,
         "renderer_version": snapshot.renderer_version,
         "cards": [
@@ -137,6 +135,12 @@ def snapshot_payload(snapshot) -> dict:
             for r in _by_id(snapshot.raw_spans, "raw_span_id")
         ],
     }
+
+
+def snapshot_payload(snapshot) -> dict:
+    return {"schema_version": snapshot.schema_version,
+            "knowledge_revision": snapshot.knowledge_revision,
+            **knowledge_content_payload(snapshot)}
 
 
 def snapshot_digest(snapshot) -> str:

@@ -82,6 +82,7 @@ async def create_pending_question_notification(
     store_id: int,
     question_id: int,
     question_text: str,
+    *, contract_version: str = 'v1',
 ) -> int | None:
     owner_id = await db.fetchval(
         "select owner_id from stores where store_id = $1", store_id
@@ -98,7 +99,7 @@ async def create_pending_question_notification(
         dedupe_key=f"pending-question:{store_id}:{question_id}",
         title="새 질문이 도착했어요",
         body=question_text,
-        destination=f"/owner/questions?question_id={question_id}",
+        destination=f"/owner/questions{'/v2' if contract_version=='v2' else ''}?question_id={question_id}",
     )
 
 
@@ -231,10 +232,11 @@ async def deliver_notification(store_id: int, notification_id: int) -> None:
                         update notification_deliveries
                         set status = 'REQUESTED', provider_message = $2,
                             requested_at = now(), failed_at = null
-                        where delivery_id = $1
+                        where delivery_id = $1 and store_id = $3
                         """,
                         int(delivery["delivery_id"]),
                         provider_message,
+                        store_id,
                     )
                     await db.execute(
                         """
@@ -252,10 +254,11 @@ async def deliver_notification(store_id: int, notification_id: int) -> None:
                         update notification_deliveries
                         set status = 'FAILED', provider_message = $2,
                             failed_at = now()
-                        where delivery_id = $1
+                        where delivery_id = $1 and store_id = $3
                         """,
                         int(delivery["delivery_id"]),
                         str(exc)[:1000],
+                        store_id,
                     )
                     await db.execute(
                         """
@@ -280,10 +283,11 @@ async def deliver_notification(store_id: int, notification_id: int) -> None:
                         update notification_deliveries
                         set status = 'FAILED', provider_message = $2,
                             failed_at = now()
-                        where delivery_id = $1
+                        where delivery_id = $1 and store_id = $3
                         """,
                         int(delivery["delivery_id"]),
                         str(exc)[:1000],
+                        store_id,
                     )
                     await db.execute(
                         """

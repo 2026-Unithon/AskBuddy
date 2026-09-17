@@ -81,6 +81,7 @@ class ChatRouteTest(unittest.TestCase):
             return AnswerComposition("승인 원문", [], "CARD_ORIGINAL", "FALLBACK")
         for target, value in (("get_pool", lambda: self.pool), ("request_lease", lease), ("retrieve_question", retrieve),
                               ("compose_grounded_answer", compose),
+                              ("_lock_chat_publication", AsyncMock()),
                               ("_citations_are_current", AsyncMock(return_value=True)),
                               ("_open_session", AsyncMock(return_value=4))):
             item = patch("app.learn.router." + target, value)
@@ -135,6 +136,42 @@ class ChatRouteTest(unittest.TestCase):
             self.assertEqual(self.post().status_code, 429)
             retrieve.assert_not_awaited()
 
+    def test_stale_requeries_once_and_records_distinct_calls(self):
+        with patch("app.learn.router._citations_are_current", AsyncMock(side_effect=[False, True])) as current:
+            result = self.post()
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(current.await_count, 2)
+        self.assertEqual(len(self.contexts), 2)
+        self.assertEqual(self.contexts[0].operation_id, self.contexts[1].operation_id)
+        self.assertNotEqual(self.contexts[0].logical_call_id, self.contexts[1].logical_call_id)
+        self.assertEqual(sum("'USER'" in sql for sql in self.pool.writes), 1)
+
+    def test_persistent_stale_never_creates_messages_or_pending(self):
+        with patch("app.learn.router._citations_are_current", AsyncMock(return_value=False)) as current:
+            result = self.post()
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "STALE_KNOWLEDGE")
+        self.assertEqual(current.await_count, 2)
+        self.assertFalse(self.pool.writes)
+
+    def test_stale_then_miss_is_error_not_pending(self):
+        retrieve = AsyncMock(side_effect=[dict(kind="hit", candidates=[]), dict(kind="miss", reason="removed")])
+        with patch("app.learn.router.retrieve_question", retrieve), \
+             patch("app.learn.router._citations_are_current", AsyncMock(return_value=False)):
+            result = self.post()
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "STALE_KNOWLEDGE")
+        self.assertFalse(self.pool.writes)
+
+    def test_requery_timeout_is_stale_error(self):
+        retrieve = AsyncMock(side_effect=[dict(kind="hit", candidates=[]), TimeoutError()])
+        with patch("app.learn.router.retrieve_question", retrieve), \
+             patch("app.learn.router._citations_are_current", AsyncMock(return_value=False)):
+            result = self.post()
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "STALE_KNOWLEDGE")
+        self.assertFalse(self.pool.writes)
+
     def test_deadline_during_cleanup_preserves_completed_response(self):
         @asynccontextmanager
         async def slow_cleanup(*args):
@@ -146,6 +183,17 @@ class ChatRouteTest(unittest.TestCase):
             result = self.post()
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json(), {"saved": True})
+
+    def test_outer_deadline_after_stale_remains_stale_error(self):
+        async def expired(*args, attempt_state, **kwargs):
+            attempt_state["stale"] = True
+            await asyncio.sleep(1)
+        with patch("app.learn.router.get_settings", return_value=NS(chat_deadline_seconds=.02)), \
+             patch("app.learn.router._ask_chat", expired):
+            result = self.post()
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "STALE_KNOWLEDGE")
+        self.assertFalse(self.pool.writes)
 
 
 class PoolSearchTest(unittest.IsolatedAsyncioTestCase):

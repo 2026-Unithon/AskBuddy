@@ -50,6 +50,8 @@ from app.learn.schemas import (
 from app.reg.retrieve import retrieve_question
 
 router = APIRouter()
+from app.learn.v2_router import router as v2_router
+router.include_router(v2_router)
 
 class CreatePendingRequest(BaseModel):
     question_text: str = Field(min_length=1, max_length=500)
@@ -91,6 +93,7 @@ async def _waiting_same_question(db: Db, store_id: int, question: str):
         select question_id, status, miss_reason, created_at, member_id
         from pending_questions
         where store_id = $1
+          and contract_version = 'v1'
           and status = 'WAITING'
           and lower(regexp_replace(trim(question_text), '\\s+', ' ', 'g')) = $2
         order by created_at asc
@@ -148,6 +151,8 @@ async def _citations_are_current(
     expected = {
         int(card["id"]): int(card["version_id"]) for card in composition.candidates
     }
+    if not expected or len(expected) != len(composition.candidates):
+        return False
     rows = await db.fetch(
         """
         select card_id, published_version_id
@@ -157,6 +162,7 @@ async def _citations_are_current(
           and review_status = 'APPROVED'
           and is_verified = true
           and published_version_id is not null
+        order by card_id
         for share
         """,
         store_id,
@@ -164,6 +170,18 @@ async def _citations_are_current(
     )
     actual = {int(row["card_id"]): int(row["published_version_id"]) for row in rows}
     return actual == expected
+
+
+class _StaleChatKnowledge(Exception):
+    """현재 공개본 검증 실패. pending을 만드는 지식 miss와 구분한다."""
+
+
+async def _lock_chat_publication(db: Db, store_id: int) -> None:
+    """W 발행과 같은 행을 먼저 잠근다. 외부 모델 호출 후 저장 트랜잭션 안에서만 사용."""
+    await db.execute("""insert into knowledge_publications(store_id) values($1)
+                        on conflict(store_id) do nothing""", store_id)
+    await db.fetchrow("""select knowledge_revision from knowledge_publications
+                         where store_id=$1 for share""", store_id)
 
 
 @router.post("/pending")
@@ -188,9 +206,11 @@ async def create_pending(
             join chat_sessions s on s.session_id = m.session_id
             where m.message_id = $1
               and s.store_id = $2
+              and s.member_id = $3 and s.contract_version = 'v1'
             """,
             req.message_id,
             store_id,
+            member_id,
         )
         if not msg:
             raise HTTPException(404, "message not found in this store")
@@ -272,10 +292,12 @@ async def list_pending(
           join pending_question_occurrences o
             on o.question_id = same_q.question_id
           where same_q.store_id = q.store_id
+            and same_q.contract_version = 'v1'
             and same_q.normalized_question = q.normalized_question
             and same_q.status = q.status
         ) occurrence on true
         where q.store_id = $1
+          and q.contract_version = 'v1'
           and q.status = $2
         order by q.normalized_question, q.created_at asc, q.question_id asc
         """,
@@ -321,6 +343,7 @@ async def get_pending(
         join users u on u.user_id = m.user_id
         left join owner_answers a on a.question_id = q.question_id
         where q.store_id = $1 and q.question_id = $2
+          and q.contract_version = 'v1'
         """,
         store_id,
         question_id,
@@ -431,6 +454,7 @@ async def list_questions(
         join chat_sessions s
           on s.session_id = um.session_id
          and s.store_id = $1
+         and s.contract_version = 'v1'
         join store_members sm
           on sm.member_id = s.member_id
          and sm.store_id = s.store_id
@@ -446,6 +470,7 @@ async def list_questions(
         ) bm on true
         left join pending_questions pq
           on pq.store_id = $1
+         and pq.contract_version = 'v1'
          and pq.message_id = um.message_id
         left join owner_answers oa_direct
           on oa_direct.question_id = pq.question_id
@@ -454,6 +479,7 @@ async def list_questions(
           from pending_questions q
           join owner_answers a on a.question_id = q.question_id
           where q.store_id = $1
+            and q.contract_version = 'v1'
             and trim(q.question_text) = trim(um.content)
           order by a.answered_at desc
           limit 1
@@ -462,6 +488,7 @@ async def list_questions(
           select question_id
           from pending_questions
           where store_id = $1
+            and contract_version = 'v1'
             and status = 'WAITING'
             and trim(question_text) = trim(um.content)
           order by created_at desc, question_id desc
@@ -529,6 +556,7 @@ async def answer_pending(
         from pending_questions
         where question_id = $1
           and store_id = $2
+          and contract_version = 'v1'
         """,
         question_id,
         store_id,
@@ -550,6 +578,7 @@ async def answer_pending(
             select question_id, status
             from pending_questions
             where store_id = $1 and question_id = $2
+              and contract_version = 'v1'
             for update
             """,
             store_id,
@@ -593,6 +622,7 @@ async def answer_pending(
             join pending_question_occurrences occurrence
               on occurrence.question_id = q.question_id
             where q.store_id = $1 and q.status = 'WAITING'
+              and q.contract_version = 'v1'
               and q.normalized_question = $2
             """,
             store_id,
@@ -663,6 +693,7 @@ async def answer_pending(
             """
             update pending_questions set status = 'ANSWERED'
             where store_id = $1 and status = 'WAITING'
+              and contract_version = 'v1'
               and normalized_question = $2
             """,
             store_id,
@@ -915,7 +946,7 @@ async def _open_session(db: Db, store_id: int, member_id: int) -> int:
         """
         select session_id
         from chat_sessions
-        where store_id = $1 and member_id = $2
+        where store_id = $1 and member_id = $2 and contract_version = 'v1'
         order by started_at desc
         limit 1
         """,
@@ -944,18 +975,22 @@ def _iso(value) -> str:
 async def ask_chat(req: ChatAskRequest, background: BackgroundTasks, claims: Claims, user_id: CurrentUserId):
     deadline = asyncio.get_running_loop().time() + get_settings().chat_deadline_seconds
     completed_response = None
+    attempt_state = {"stale": False}
     try:
         async with asyncio.timeout_at(deadline):
             pool = get_pool()
             async with pool.acquire() as db:
                 store_id = await get_store_id(claims, db)
             async with request_lease(pool, store_id, user_id):
-                completed_response = await _ask_chat(req, background, claims, user_id, deadline=deadline)
+                completed_response = await _ask_chat(req, background, claims, user_id, deadline=deadline,
+                                                     attempt_state=attempt_state)
             return completed_response
     except TimeoutError as exc:
         # 저장을 마친 뒤 lease 정리가 취소되어도 저장 성공을 retryable 실패로 바꾸지 않는다.
         if completed_response is not None:
             return completed_response
+        if attempt_state["stale"]:
+            raise ApiError(409, "STALE_KNOWLEDGE", "변경된 내용을 확인할 시간이 부족합니다. 다시 질문해 주세요.", retryable=True) from exc
         raise ApiError(504, "DEADLINE_EXCEEDED", "답변 처리 시간이 초과되었습니다.", retryable=True) from exc
     except UsageWriteError as exc:
         raise ApiError(503, "USAGE_UNAVAILABLE", "검색 계측을 시작하지 못했습니다.", retryable=True) from exc
@@ -966,7 +1001,7 @@ async def _ask_chat(
     background: BackgroundTasks,
     claims: Claims,
     user_id: CurrentUserId,
-    *, deadline: float,
+    *, deadline: float, attempt_state: dict | None = None,
 ):
     """검색 게이트 → 근거 제한 생성/원문 폴백 → 대화·citation 원자 저장."""
     question = req.question.strip()
@@ -981,13 +1016,45 @@ async def _ask_chat(
     loop = asyncio.get_running_loop()
     settings = get_settings()
     model_started = loop.time()
+    for requery in range(2):
+        try:
+            result, composition = await _search_and_compose_chat(
+                pool, store_id, question, operation_id=operation_id,
+                model_started=model_started, deadline=deadline, requery=requery)
+            # 공개 변경으로 사라진 근거를 지식 부족의 pending으로 바꾸지 않는다.
+            if requery and composition is None:
+                raise _StaleChatKnowledge()
+            return await _save_chat_response(
+                pool, store_id, user_id, claims, background, question, result, composition)
+        except _StaleChatKnowledge:
+            if attempt_state is not None:
+                attempt_state["stale"] = True
+            if requery == 0 and min(deadline-loop.time()-settings.chat_save_reserve_seconds,
+                                    settings.llm_total_budget_seconds-(loop.time()-model_started)) > 0:
+                continue
+            raise ApiError(409, "STALE_KNOWLEDGE", "승인된 내용이 변경됐습니다. 다시 질문해 주세요.", retryable=True)
+        except TimeoutError:
+            if requery:
+                raise ApiError(409, "STALE_KNOWLEDGE", "변경된 내용을 확인할 시간이 부족합니다. 다시 질문해 주세요.", retryable=True)
+            raise
+    raise AssertionError("unreachable")
+
+
+async def _search_and_compose_chat(pool, store_id: int, question: str, *,
+                                   operation_id: str, model_started: float,
+                                   deadline: float, requery: int):
+    loop = asyncio.get_running_loop()
+    settings = get_settings()
+    # stale 재검색은 새 질문 계획이지 공급자 오류 재시도가 아니다. 시도별 원장을 분리한다.
+    call_scope = f"chat:{operation_id}" + (f":stale:{requery}" if requery else "")
     search_budget = min(settings.search_deadline_seconds, deadline-loop.time()-settings.chat_save_reserve_seconds)
+    search_budget = min(search_budget, settings.llm_total_budget_seconds-(loop.time()-model_started))
     if search_budget <= 0:
         raise TimeoutError()
     result = await asyncio.wait_for(retrieve_question(pool, store_id, question, usage_sink=DbUsageSink(pool),
         usage_context=UsageContext(store_id=str(store_id), cost_phase="OPERATING",
             cost_purpose="PRODUCT", stage="QUERY", operation_id=operation_id,
-            logical_call_id=f"chat:{operation_id}:query")), timeout=search_budget)
+            logical_call_id=f"{call_scope}:query")), timeout=search_budget)
     answer_budget = min(settings.answer_deadline_seconds,
                         settings.llm_total_budget_seconds-(loop.time()-model_started),
                         deadline-loop.time()-settings.chat_save_reserve_seconds)
@@ -1000,19 +1067,26 @@ async def _ask_chat(
                 usage_context=UsageContext(
                     store_id=str(store_id), cost_phase="OPERATING", cost_purpose="PRODUCT",
                     stage="ANSWER", operation_id=operation_id,
-                    logical_call_id=f"chat:{operation_id}:answer")), timeout=answer_budget)
+                    logical_call_id=f"{call_scope}:answer")), timeout=answer_budget)
             if result["kind"] == "hit" else None
         )
     except AnswerUsageStartError as exc:
         raise ApiError(503, "USAGE_UNAVAILABLE", "답변 계측을 시작하지 못했습니다.",
                        retryable=True) from exc
+    return result, composition
 
+
+async def _save_chat_response(pool, store_id: int, user_id: int, claims, background,
+                              question: str, result: dict, composition):
     notification_id: int | None = None
     async with pool.acquire() as db:
         # 외부 호출 중 탈퇴/권한 변경이 있었으면 대화를 저장하지 않는다.
         await get_store_id(claims, db)
         member_id = await _member_id(db, store_id, user_id)
         async with db.transaction():
+            await _lock_chat_publication(db, store_id)
+            if composition is not None and not await _citations_are_current(db, store_id, composition):
+                raise _StaleChatKnowledge()
             session_id = await _open_session(db, store_id, member_id)
             user_message_id = int(
                 await db.fetchval(
@@ -1029,10 +1103,7 @@ async def _ask_chat(
             pending_question_id = None
             citations: list[dict] = []
 
-            use_hit = (
-                composition is not None
-                and await _citations_are_current(db, store_id, composition)
-            )
+            use_hit = composition is not None
             if use_hit:
                 assert composition is not None
                 buddy_content = composition.content
@@ -1156,7 +1227,7 @@ async def list_chat(
         """
         select session_id, started_at
         from chat_sessions
-        where store_id = $1 and member_id = $2
+        where store_id = $1 and member_id = $2 and contract_version = 'v1'
         order by started_at desc
         limit 1
         """,
