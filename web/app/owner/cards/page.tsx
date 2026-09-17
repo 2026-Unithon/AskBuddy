@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, Input, Select } from "@/components/ui";
 import {
   ApiError,
   mutateProductCard,
@@ -82,6 +82,11 @@ export default function CardsPage() {
         queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) }),
       ]);
     },
+    onError: (actionError) => {
+      if (actionError instanceof ApiError && actionError.status === 409) {
+        void cards.refetch();
+      }
+    },
   });
 
   const proposalAction = useMutation({
@@ -148,16 +153,18 @@ export default function CardsPage() {
       />
 
       {/* 메인 콘텐츠 (하단 탭 바 높이 고려 pb-24) */}
-      <main className="flex-1 space-y-3 px-4 py-3.5 pb-24 overflow-y-auto">
+      <main className="flex-1 space-y-3 px-4 py-3.5 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-y-auto">
         {/* 검색 폼 */}
         <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
           <div className="relative flex-1">
-            <input
+            <Input
+              data-testid="card-search-input"
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="카드 제목 또는 내용 검색…"
-              className="w-full min-h-[44px] rounded-xl border border-border bg-surface px-3.5 text-xs text-foreground placeholder:text-muted outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 shadow-2xs"
+              aria-label="카드 검색어"
+              className="pr-12 shadow-2xs"
             />
             {searchInput && (
               <button
@@ -168,19 +175,19 @@ export default function CardsPage() {
                   params.delete("query");
                   router.replace(`/owner/cards?${params.toString()}`);
                 }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-foreground p-1"
+                className="absolute right-0 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-xl text-sm text-muted hover:bg-surface-muted hover:text-foreground active:scale-95"
                 aria-label="검색어 지우기"
               >
                 ✕
               </button>
             )}
           </div>
-          <button
+          <Button
             type="submit"
-            className="min-h-[44px] px-3.5 rounded-xl bg-brand-500 text-white font-bold text-xs active:scale-95 shadow-2xs hover:bg-brand-600 transition-all shrink-0"
+            className="shrink-0 shadow-2xs"
           >
             검색
-          </button>
+          </Button>
         </form>
 
         {/* 카테고리 필터 셀렉트 */}
@@ -189,11 +196,11 @@ export default function CardsPage() {
             <label htmlFor="category-select" className="text-xs font-bold text-muted shrink-0">
               분류:
             </label>
-            <select
+            <Select
               id="category-select"
               value={categoryId ? String(categoryId) : ""}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="flex-1 min-h-[44px] rounded-xl border border-border bg-surface px-3 text-xs font-medium text-foreground outline-none focus:border-brand-500"
+              className="min-w-0 flex-1"
             >
               <option value="">전체 카테고리</option>
               {categories.data.items.map((cat) => (
@@ -201,7 +208,7 @@ export default function CardsPage() {
                   {cat.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Link
               href="/owner/categories"
               className="inline-flex min-h-[44px] shrink-0 items-center px-2 text-xs font-bold text-brand-700 active:scale-[0.95]"
@@ -237,6 +244,7 @@ export default function CardsPage() {
         {errorMessage && (
           <InlineError
             message={errorMessage}
+            isRetrying={cards.isFetching || categories.isFetching || proposals.isFetching}
             onRetry={() => {
               void Promise.all([cards.refetch(), categories.refetch(), proposals.refetch()]);
             }}
@@ -269,7 +277,7 @@ export default function CardsPage() {
               </strong>
               <Link
                 href="/owner/cards/review"
-                className="text-xs font-bold text-brand-700 underline hover:text-brand-800"
+                className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-bold text-brand-700 underline hover:bg-brand-50 hover:text-brand-800"
               >
                 일괄 검토 →
               </Link>
@@ -289,22 +297,41 @@ export default function CardsPage() {
                     {proposal.proposed_content}
                   </p>
                   <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={proposalAction.isPending}
+                    <Button
+                      size="md"
+                      loading={
+                        proposalAction.isPending &&
+                        proposalAction.variables?.proposalId === proposal.proposal_id &&
+                        proposalAction.variables.action === "approve"
+                      }
+                      disabled={
+                        proposalAction.isPending &&
+                        proposalAction.variables?.proposalId === proposal.proposal_id
+                      }
+                      loadingLabel="반영 중"
                       onClick={() => proposalAction.mutate({ proposalId: proposal.proposal_id, action: "approve" })}
-                      className="px-2.5 py-1 rounded-lg bg-brand-500 text-white font-bold text-[11px] active:scale-95 disabled:opacity-50"
+                      className="px-3 text-sm"
                     >
                       승인·반영
-                    </button>
-                    <button
-                      type="button"
-                      disabled={proposalAction.isPending}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      loading={
+                        proposalAction.isPending &&
+                        proposalAction.variables?.proposalId === proposal.proposal_id &&
+                        proposalAction.variables.action === "dismiss"
+                      }
+                      disabled={
+                        proposalAction.isPending &&
+                        proposalAction.variables?.proposalId === proposal.proposal_id
+                      }
+                      loadingLabel="기각 중"
                       onClick={() => proposalAction.mutate({ proposalId: proposal.proposal_id, action: "dismiss" })}
-                      className="px-2.5 py-1 rounded-lg bg-surface-muted text-muted font-bold text-[11px] active:scale-95 disabled:opacity-50"
+                      className="px-3 text-sm"
                     >
                       기각
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -341,6 +368,11 @@ export default function CardsPage() {
               isActing={
                 cardAction.isPending && cardAction.variables?.cardId === card.card_id
               }
+              actingAction={
+                cardAction.isPending && cardAction.variables?.cardId === card.card_id
+                  ? cardAction.variables.action
+                  : null
+              }
             />
           ))}
         </div>
@@ -351,11 +383,12 @@ export default function CardsPage() {
             <Button
               variant="secondary"
               size="md"
-              disabled={cards.isFetchingNextPage}
+              loading={cards.isFetchingNextPage}
+              loadingLabel="추가 카드 불러오는 중"
               onClick={() => void cards.fetchNextPage()}
-              className="w-full min-h-[44px] text-xs font-bold active:scale-98"
+              className="w-full"
             >
-              {cards.isFetchingNextPage ? "추가 카드 불러오는 중…" : "다음 카드 더보기 ↓"}
+              다음 카드 더보기 ↓
             </Button>
           </div>
         )}

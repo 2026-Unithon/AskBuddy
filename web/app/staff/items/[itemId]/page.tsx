@@ -24,8 +24,8 @@ export default function LearnItemPage() {
   const completion = useMutation({
     mutationFn: (completed: boolean) =>
       setLearnItemCompletion(itemId, item.data!.published_version_id, completed, state.token!),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         queryClient.invalidateQueries({
           queryKey: queryKeys.learnItem(state.storeId, state.userId, itemId),
         }),
@@ -57,7 +57,7 @@ export default function LearnItemPage() {
         backHref="/staff/roadmap"
         right={
           item.isFetching && !item.isLoading ? (
-            <span className="text-[10px] font-medium text-muted bg-surface-muted px-2 py-0.5 rounded-full">
+            <span className="text-xs font-medium text-muted bg-surface-muted px-2 py-0.5 rounded-full">
               갱신 중
             </span>
           ) : undefined
@@ -69,9 +69,9 @@ export default function LearnItemPage() {
         {/* 로딩 스켈레톤 */}
         {item.isLoading && (
           <div className="space-y-4" aria-label="학습 내용 불러오는 중">
-            <div className="h-10 w-24 animate-pulse rounded-lg bg-surface-muted/70" />
-            <div className="h-64 animate-pulse rounded-3xl bg-surface-muted/60" />
-            <div className="h-32 animate-pulse rounded-2xl bg-surface-muted/50" />
+            <div className="h-10 w-24 motion-safe:animate-pulse rounded-lg bg-surface-muted/70" />
+            <div className="h-64 motion-safe:animate-pulse rounded-3xl bg-surface-muted/60" />
+            <div className="h-32 motion-safe:animate-pulse rounded-2xl bg-surface-muted/50" />
           </div>
         )}
 
@@ -103,7 +103,7 @@ export default function LearnItemPage() {
                 {isDone && (
                   <Badge tone="brand">✅ 학습 완료됨</Badge>
                 )}
-                <span className="ml-auto text-[11px] font-medium text-muted">
+                <span className="ml-auto text-xs font-medium text-muted">
                   버전 #{data.published_version_id}
                 </span>
               </div>
@@ -115,7 +115,7 @@ export default function LearnItemPage() {
 
               {/* 카드 핵심 업무 본문 */}
               <div className="border-t border-border/60 pt-3">
-                <p className="whitespace-pre-wrap text-[15px] font-normal leading-relaxed text-foreground/90 select-text">
+                <p className="whitespace-pre-wrap text-base font-normal leading-relaxed text-foreground/90 select-text">
                   {data.content}
                 </p>
               </div>
@@ -127,7 +127,7 @@ export default function LearnItemPage() {
                 <h2 id="evidence-heading" className="text-xs font-bold text-muted uppercase tracking-wider">
                   매장 원본 근거
                 </h2>
-                <span className="text-[11px] text-muted">
+                <span className="text-xs text-muted">
                   {data.evidence.length}건
                 </span>
               </div>
@@ -147,14 +147,14 @@ export default function LearnItemPage() {
                         📎 {evidence.source.title ?? "매장 등록 업무 자료"}
                       </strong>
                       {evidence.source.source_type && (
-                        <span className="text-[10px] text-muted shrink-0 bg-surface-muted px-1.5 py-0.5 rounded">
+                        <span className="text-xs text-muted shrink-0 bg-surface-muted px-1.5 py-0.5 rounded">
                           {evidence.source.source_type}
                         </span>
                       )}
                     </div>
 
                     {evidence.excerpt && (
-                      <blockquote className="border-l-2 border-brand-400 bg-brand-50/40 p-2.5 rounded-r text-[11px] leading-relaxed text-foreground/80 italic">
+                      <blockquote className="border-l-2 border-brand-400 bg-brand-50/40 p-2.5 rounded-r text-sm leading-relaxed text-foreground/80 italic">
                         &ldquo;{evidence.excerpt}&rdquo;
                       </blockquote>
                     )}
@@ -194,16 +194,13 @@ export default function LearnItemPage() {
               size="lg"
               variant={isDone ? "secondary" : "primary"}
               className="w-full min-h-[50px] font-bold text-sm shadow-sm transition-transform active:scale-[0.98]"
-              disabled={completion.isPending}
+              loading={completion.isPending}
+              loadingLabel="학습 상태 저장 중"
               onClick={() => completion.mutate(!isDone)}
             >
-              {completion.isPending
-                ? "저장 중…"
-                : isDone
-                ? "완료 취소"
-                : "이해했어요"}
+              {isDone ? "완료 취소" : "이해했어요"}
             </Button>
-            <p className="text-center text-[10px] text-muted">
+            <p className="text-center text-xs text-muted">
               이 업무를 학습한 것으로 기록됩니다.
             </p>
           </div>

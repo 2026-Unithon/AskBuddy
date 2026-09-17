@@ -48,6 +48,7 @@ export default function OwnerAuthPage() {
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -70,6 +71,7 @@ export default function OwnerAuthPage() {
 
   async function handleSignup(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -113,8 +115,10 @@ export default function OwnerAuthPage() {
           {(["login", "signup"] as const).map((t) => (
             <button
               key={t}
+              type="button"
               onClick={() => setTab(t)}
-              className={`flex-1 h-10 rounded-full text-sm font-semibold transition-colors ${
+              aria-pressed={tab === t}
+              className={`flex-1 min-h-11 rounded-full text-sm font-semibold transition-colors ${
                 tab === t ? "bg-surface text-brand-700 shadow-sm" : "text-muted"
               }`}
             >
@@ -125,6 +129,7 @@ export default function OwnerAuthPage() {
 
         {error && (
           <div
+            id="owner-auth-error"
             role="alert"
             className="mb-4 flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-danger-700"
           >
@@ -137,6 +142,9 @@ export default function OwnerAuthPage() {
           <form onSubmit={handleLogin} className="flex flex-col gap-3">
             <Input
               placeholder="이메일 (예: owner@demo.cafe)"
+              aria-label="이메일"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "owner-auth-error" : undefined}
               value={loginId}
               onChange={(e) => setLoginId(e.target.value)}
               autoComplete="email"
@@ -145,14 +153,17 @@ export default function OwnerAuthPage() {
             />
             <Input
               placeholder="비밀번호"
+              aria-label="비밀번호"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "owner-auth-error" : undefined}
               type="password"
               value={loginPw}
               onChange={(e) => setLoginPw(e.target.value)}
               autoComplete="current-password"
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
-              {busy ? "확인 중…" : "로그인"}
+            <Button type="submit" size="lg" className="w-full mt-3" loading={busy} loadingLabel="로그인 확인 중">
+              로그인
             </Button>
             {DEMO_MODE && (
               <p className="mt-3 text-center text-sm font-bold text-brand-700">
@@ -164,18 +175,23 @@ export default function OwnerAuthPage() {
           <form onSubmit={handleSignup} className="flex flex-col gap-3">
             <Input
               placeholder="사장님 이름"
+              aria-label="사장님 이름"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
             <Input
               placeholder="매장명 (예: 데모 카페)"
+              aria-label="매장명"
               value={storeName}
               onChange={(e) => setStoreName(e.target.value)}
               required
             />
             <Input
               placeholder="이메일 (예: owner@demo.cafe)"
+              aria-label="이메일"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "owner-auth-error" : undefined}
               value={signupId}
               onChange={(e) => setSignupId(e.target.value)}
               autoComplete="email"
@@ -184,14 +200,17 @@ export default function OwnerAuthPage() {
             />
             <Input
               placeholder="비밀번호"
+              aria-label="비밀번호"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "owner-auth-error" : undefined}
               type="password"
               value={signupPw}
               onChange={(e) => setSignupPw(e.target.value)}
               autoComplete="new-password"
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
-              {busy ? "만드는 중…" : "가입하고 시작하기"}
+            <Button type="submit" size="lg" className="w-full mt-3" loading={busy} loadingLabel="계정 만드는 중">
+              가입하고 시작하기
             </Button>
           </form>
         )}

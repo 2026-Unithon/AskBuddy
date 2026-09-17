@@ -46,7 +46,7 @@ export default function RoadmapPage() {
           <div className="flex items-center gap-2.5 min-w-0">
             <Buddy size={40} className="drop-shadow-sm" />
             <div className="min-w-0">
-              <p className="text-[11px] font-medium text-white/75 truncate">
+              <p className="text-xs font-medium text-white/80 truncate">
                 {bootstrap.data?.user.name ?? "직원"}님의 업무 학습
               </p>
               <h1 className="text-lg font-bold truncate text-white">
@@ -56,7 +56,7 @@ export default function RoadmapPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {roadmap.isFetching && !roadmap.isLoading && (
-              <span className="text-[10px] bg-white/15 px-2 py-0.5 rounded-full text-white/90">
+              <span className="text-xs bg-white/15 px-2 py-0.5 rounded-full text-white/90">
                 갱신 중
               </span>
             )}
@@ -75,7 +75,7 @@ export default function RoadmapPage() {
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-white/90">전체 학습 진도</span>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-white/75">
+              <span className="text-xs text-white/80">
                 {counts ? `${counts.done}/${counts.total} 완료` : "-"}
               </span>
               <span className="font-extrabold text-white text-sm">{progress}%</span>
@@ -96,15 +96,15 @@ export default function RoadmapPage() {
       </header>
 
       {/* 메인 학습 콘텐츠 (하단 탭 높이 64px + 여백 고려 pb-24) */}
-      <main className="flex-1 space-y-4 px-4 py-4 pb-24 overflow-y-auto">
+      <main className="flex-1 space-y-4 px-4 py-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-y-auto">
         {/* 최우선 CTA: 오늘 이어서 학습할 카드 (Resume Card) */}
         {continueTarget && (
           <div className="rounded-2xl border-2 border-brand-500 bg-gradient-to-b from-brand-50/50 to-surface p-4 shadow-sm">
             <div className="flex items-center justify-between gap-2 mb-1.5">
-              <span className="text-[11px] font-bold text-brand-700 bg-brand-100/70 px-2 py-0.5 rounded-full">
+              <span className="text-xs font-bold text-brand-700 bg-brand-100/70 px-2 py-0.5 rounded-full">
                 {continueTarget.stageName}
               </span>
-              <span className="text-[11px] font-medium text-brand-600">오늘의 추천 학습</span>
+              <span className="text-xs font-medium text-brand-600">오늘의 추천 학습</span>
             </div>
             <h2 className="text-base font-bold text-foreground line-clamp-2">
               {continueTarget.item.title}
@@ -137,7 +137,7 @@ export default function RoadmapPage() {
             {[0, 1, 2].map((item) => (
               <div
                 key={item}
-                className="h-24 animate-pulse rounded-2xl bg-surface-muted/60"
+                className="h-24 motion-safe:animate-pulse rounded-2xl bg-surface-muted/60"
               />
             ))}
           </div>
@@ -185,7 +185,7 @@ export default function RoadmapPage() {
               >
                 {stage.name}
               </h2>
-              <span className="text-[11px] text-muted font-medium">
+              <span className="text-xs text-muted font-medium">
                 {stage.items.filter((i) => i.status === "DONE").length}/{stage.items.length}
               </span>
             </div>

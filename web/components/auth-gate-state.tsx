@@ -19,7 +19,7 @@ export function AuthGateState({ state, onRetry }: Props) {
       <div className="w-full max-w-[360px] rounded-3xl border border-border bg-surface p-6 text-center shadow-sm">
         <div
           className={`mx-auto mb-4 h-10 w-10 rounded-full ${
-            isError ? "bg-danger-50" : "bg-brand-100 animate-pulse"
+            isError ? "bg-danger-50" : "bg-brand-100 motion-safe:animate-pulse"
           }`}
           aria-hidden
         />

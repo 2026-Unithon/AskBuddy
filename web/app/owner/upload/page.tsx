@@ -229,7 +229,7 @@ export default function UploadPage() {
       />
 
       {/* 메인 스크롤 콘텐츠 (하단 탭 높이 고려 pb-24) */}
-      <main className="flex-1 space-y-4 px-4 py-4 pb-24 overflow-y-auto">
+      <main className="flex-1 space-y-4 px-4 py-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-y-auto">
         {/* 파일 추가 단일 주 CTA */}
         <section aria-label="파일 선택">
           <UploadFilePicker
@@ -278,7 +278,7 @@ export default function UploadPage() {
                     batchIdempotencyKey.current = null;
                     setQueue([]);
                   }}
-                  className="text-[11px] text-muted hover:text-danger-600 font-semibold active:scale-95"
+                  className="min-h-11 rounded-lg px-3 text-sm text-muted hover:bg-danger-50 hover:text-danger-600 font-semibold active:scale-95"
                 >
                   전체 취소
                 </button>
@@ -299,15 +299,16 @@ export default function UploadPage() {
             {/* 업로드 및 분석 시작 CTA 버튼 */}
             <div className="pt-2">
               <Button
+                data-testid="upload-start"
                 size="lg"
                 variant="primary"
-                disabled={isUploading || queue.length === 0}
+                loading={isUploading}
+                loadingLabel="파일 전송 및 서버 접수 중"
+                disabled={queue.length === 0}
                 onClick={handleStartBatchUpload}
                 className="w-full min-h-[50px] text-xs font-bold shadow-xs active:scale-[0.98]"
               >
-                {isUploading
-                  ? "파일 전송 및 서버 접수 중…"
-                  : queue.some((item) => item.status === "registered")
+                {queue.some((item) => item.status === "registered")
                   ? "분석 작업 다시 접수하기"
                   : `${queue.length}개 파일 업로드 및 분석 시작`}
               </Button>
@@ -327,7 +328,7 @@ export default function UploadPage() {
         <BackgroundJobStatus
           jobs={jobs}
           onRetry={(jobId) => retryJob.mutate(jobId)}
-          isRetrying={retryJob.isPending}
+          retryingJobId={retryJob.isPending ? retryJob.variables ?? null : null}
           isFetching={jobsQuery.isFetching}
           isLoading={jobsQuery.isLoading}
         />

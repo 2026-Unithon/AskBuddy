@@ -41,6 +41,7 @@ export default function StaffAuthPage() {
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -62,6 +63,7 @@ export default function StaffAuthPage() {
 
   async function handleSignup(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -95,8 +97,10 @@ export default function StaffAuthPage() {
           {(["login", "signup"] as const).map((t) => (
             <button
               key={t}
+              type="button"
               onClick={() => setTab(t)}
-              className={`flex-1 h-10 rounded-full text-sm font-semibold transition-colors ${
+              aria-pressed={tab === t}
+              className={`flex-1 min-h-11 rounded-full text-sm font-semibold transition-colors ${
                 tab === t ? "bg-surface text-brand-700 shadow-sm" : "text-muted"
               }`}
             >
@@ -107,6 +111,7 @@ export default function StaffAuthPage() {
 
         {error && (
           <div
+            id="staff-auth-error"
             role="alert"
             className="mb-4 flex items-start gap-2.5 rounded-2xl bg-danger-50 px-4 py-3 text-danger-700"
           >
@@ -119,6 +124,9 @@ export default function StaffAuthPage() {
           <form onSubmit={handleLogin} className="flex flex-col gap-3">
             <Input
               placeholder="이메일"
+              aria-label="이메일"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "staff-auth-error" : undefined}
               value={loginId}
               onChange={(e) => setLoginId(e.target.value)}
               autoComplete="email"
@@ -127,13 +135,16 @@ export default function StaffAuthPage() {
             />
             <Input
               placeholder="비밀번호"
+              aria-label="비밀번호"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "staff-auth-error" : undefined}
               type="password"
               value={loginPw}
               onChange={(e) => setLoginPw(e.target.value)}
               autoComplete="current-password"
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
+            <Button type="submit" size="lg" className="w-full mt-3" loading={busy} loadingLabel="로그인 확인 중">
               로그인
             </Button>
             {DEMO_MODE && (
@@ -146,12 +157,16 @@ export default function StaffAuthPage() {
           <form onSubmit={handleSignup} className="flex flex-col gap-3">
             <Input
               placeholder="이름"
+              aria-label="이름"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
             <Input
               placeholder="이메일"
+              aria-label="이메일"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "staff-auth-error" : undefined}
               value={signupId}
               onChange={(e) => setSignupId(e.target.value)}
               autoComplete="email"
@@ -160,6 +175,9 @@ export default function StaffAuthPage() {
             />
             <Input
               placeholder="비밀번호"
+              aria-label="비밀번호"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "staff-auth-error" : undefined}
               type="password"
               value={signupPw}
               onChange={(e) => setSignupPw(e.target.value)}
@@ -168,11 +186,14 @@ export default function StaffAuthPage() {
             />
             <Input
               placeholder="초대코드 (예: CAFE-DEMO)"
+              aria-label="초대코드"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "staff-auth-error" : undefined}
               value={signupCode}
               onChange={(e) => setSignupCode(e.target.value.toUpperCase())}
               required
             />
-            <Button type="submit" size="lg" className="w-full mt-3" disabled={busy}>
+            <Button type="submit" size="lg" className="w-full mt-3" loading={busy} loadingLabel="계정 만드는 중">
               가입하고 시작하기
             </Button>
           </form>
