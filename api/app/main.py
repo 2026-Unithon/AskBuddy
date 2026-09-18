@@ -3,8 +3,9 @@
 셋 다 손대는 유일한 파일이라 충돌이 제일 잦다.
 라우터 세 줄이 이미 등록돼 있으므로, 각자 자기 폴더의 router.py 만 채우면 된다.
 """
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +18,11 @@ from app.categories.router import (
     router as categories_router,
 )
 from app.config import get_settings
-from app.deps import close_pool, init_pool
+from app.deps import close_pool, init_pool, get_pool
 from app.errors import install_error_handlers
 from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
+from app.learn.metadata_retention import retention_loop
 from app.notifications.router import router as notifications_router
 from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
@@ -41,8 +43,14 @@ logging.getLogger("app").setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
-    yield
-    await close_pool()
+    retention = asyncio.create_task(retention_loop(get_pool()))
+    try:
+        yield
+    finally:
+        retention.cancel()
+        with suppress(asyncio.CancelledError):
+            await retention
+        await close_pool()
 
 
 app = FastAPI(title="AskBuddy", lifespan=lifespan)

@@ -159,4 +159,4 @@ async def attempt(
         try:
             await sink.finalize(attempt_id, final, known, cost, price_status)
         except Exception as exc:
-            logger.error("원가 기록 확정 실패: %s", exc)
+            logger.error("원가 기록 확정 실패 type=%s", type(exc).__name__)

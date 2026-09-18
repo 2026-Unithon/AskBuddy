@@ -49,6 +49,8 @@ async def main():
             await verify_api(pool,fresh,seed)
             from verify_r_owner_delivery import verify as verify_owner
             await verify_owner(pool,fresh,seed)
+            from verify_r_metadata_retention import verify as verify_retention
+            await verify_retention(pool,fresh,seed)
         finally:
             await pool.close()
     finally:

@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const channel = process.env.R_UI_BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : undefined);
+  const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true });
   const passed = [];
   const check = (name, value) => { assert.ok(value, name); passed.push(name); console.log('PASS UI', name); };
   const state = { sessions: [], messages: [], answers: [], notices: [], failNotices: false, failRead: false, calls: 0, failNext: false, pending: false, next: 1 };

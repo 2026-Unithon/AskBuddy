@@ -433,7 +433,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     rerank_logical_call_id=usage.logical_call_id+':rank' if usage and getattr(settings,'r_reranker_enabled',False) else None,
                                     elapsed_before_save_ms=round((loop.time()-(deadline-settings.chat_deadline_seconds))*1000,3),
                                     rrf_version=RRF_VERSION,lexical_query_version=LEXICAL_QUERY_VERSION,
-                                    glossary_version=search.snapshot.glossary_version,alias_terms=search.alias_terms,
+                                    glossary_version=search.snapshot.glossary_version,alias_terms_hash=digest(search.alias_terms),
                                     index_revision=search.index_revision,rerank_status=search.rerank_status,
                                     candidates=[asdict(c) for c in search.candidates]))
                             break

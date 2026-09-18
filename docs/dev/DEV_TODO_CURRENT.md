@@ -1,5 +1,12 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-18 main `1d49133` pull로 결정론적 planner/chat v2 기준 구현을 확보했다.
+이전 [지원 경계 감사](review/R_SUPPORT_BOUNDARIES_20260918.md)는 pull 전 legacy 관찰 기록이다.
+후속 [R 잔여 구현·검증](review/R_MAIN_REMAINING_20260918.md): 평가 전용 모델 제안/비교,
+30일 진단 보존·정리 루프·접근 제어, CI, 사람 검토 자료를 추가했다.
+PG17 migration 28개·DB/API 회귀, 프론트 check, 합성 브라우저 27 checks 통과.
+실자료 정답/승인 snapshot/실제 W v2 worker 부재로 품질 및 공동 인수는 미완료다.
+
 2026-09-17 R/W pull 통합: [W 인계](plan/R_TO_W_HANDOFF_20260917.md). 원격 `a20f2b6`와 누적 R 구현을 통합하고 751 tests/119 subtests, 프론트 check, 합성 브라우저 27 checks를 통과했다. 최신 Docker/W 종단 및 실자료 품질은 별도 인수다.
 
 2026-09-16 [W 평가 캠페인 강제 검증](review/W_EVAL_CAMPAIGN_VALIDATION_20260916.md):
