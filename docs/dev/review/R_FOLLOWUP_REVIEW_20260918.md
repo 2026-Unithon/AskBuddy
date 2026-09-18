@@ -18,7 +18,7 @@
 | A14 평가 보고 | shadow JSONL의 정확한 row hash에 사람 판정 결합. 미검토·실패·오답·과차단·오병합·인용 오류·지연을 분리. 비용은 원장 미확인 상태 유지 | 기존 v2 campaign/A-A와 실자료 비교 인수는 미완료. shadow 보고 단독은 승격 허가가 아님 |
 | A15 자동화 | 기존 GitHub Actions unit/DB/browser/r-required 유지. 신규 테스트와 확장 브라우저 검사가 자동 포함 | 아래 실행 근거와 원격 상태로 확인 |
 | C04 v1 안전 전환 | `POST /learn/chat`, `POST /learn/pending`은 JWT/매장 회원 확인 후 `409 V2_REQUIRED`. 생성·신규 문의 저장 없음. legacy 회귀 함수는 라우팅하지 않음. GET 이력은 유지 | v2 기본 flag OFF일 때 안전하게 이용 불가 안내. v1 자유 생성으로 rollback 금지 |
-| R 화면 진입 | 직원 Buddy·점주 질문 메뉴와 점주 bootstrap을 v2로 변경. 이전 대화 페이지는 읽기 전용, v2 미활성 시 새 대화 버튼 차단 | v2 활성화는 승인 snapshot 준비/제품 인수와 함께 결정 |
+| R 화면 진입 | 직원 Buddy·점주 질문 메뉴와 점주 bootstrap을 v2로 변경하고 v2 공통 레이아웃의 하단 메뉴도 복원. 이전 대화 페이지는 읽기 전용, v2 미활성 시 새 대화 버튼 차단 | v2 활성화는 승인 snapshot 준비/제품 인수와 함께 결정 |
 
 ## 사용 방법
 
@@ -31,7 +31,7 @@
 ## 검증
 
 - 순수 R stage 트리: **780 passed, 4 xfailed, 119 subtests**. PG17 **27개 migration** 재구축과 DB/API 전체 회귀 통과. v2 API **104 checks**에는 실제 HTTP shadow baseline 보존·동일 요청 재생이 포함된다. `pnpm check`도 통과했다.
-- 브라우저: 기존 27개에 재처리 실패/중복 차단/동일 body/새로고침, legacy 읽기 전용, v2 OFF 차단을 추가해 34개 통과.
+- 브라우저: 기존 27개에 재처리 실패/중복 차단/동일 body/새로고침, legacy 읽기 전용, v2 OFF 차단을 추가해 40개 통과. 하단 메뉴와 마지막 버튼 간격도 360/390px에서 검사했다.
 - 기존 legacy strict xfail 4개는 평가용 생성기의 알려진 한계이며 제거하지 않았다. 제품 POST 차단은 별도 통과 테스트로 검증한다.
 - 기존 W 미커밋 파일 포함 worktree와 순수 R 커밋을 구분한다. DB worktree에는 W lease migration을 포함해 28개가 있다.
 - main 보호 설정: `r-required`를 필수 검사로 지정하고 최신 base 요구(`strict=true`)를 켰다. 관리자의 우회 권한은 유지하며 관리자 강제·리뷰 인원 제한은 추가하지 않았다.
@@ -44,3 +44,5 @@ B01~B08: 두 매장 각각 40개 초안/37개 서로 다른 문구, 사람 검�
 C02/C03/C05/C06: 실제 W producer·owner-answer worker 및 점주 1명/직원 2명 종단 연결은 없다. R 인계 계약 검증을 실제 W E2E 완료라고 표시하지 않는다. C01의 최신 R 회귀와 C04의 R 소비부 전환을 먼저 검증한다.
 
 **판정: R의 이번 독립 구현·검증 묶음은 수행했지만, 일반 의미 판단의 제품 채택까지 포함한 R 전체 완료는 아니다.** 미검증 의미를 자동 답변으로 승격하는 구현은 추가하지 않았다.
+
+후속 화면 검토: `902399d` 원격 Actions [35312962202](https://github.com/2026-Unithon/AskBuddy/actions/runs/35312962202)는 unit/database/browser/r-required 모두 통과했다. 캡처 검토에서 확인한 v2 하단 메뉴 누락은 추가 수정하고 `pnpm check`와 브라우저 40개를 재검증했다. 이 공통 layout 변경의 주 편집자는 R이다.

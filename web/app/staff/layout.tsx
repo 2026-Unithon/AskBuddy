@@ -16,7 +16,7 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
 
   const showBottomNav =
     pathname === "/staff/roadmap" ||
-    pathname === "/staff/chat" ||
+    pathname === "/staff/chat" || pathname === "/staff/chat/v2" ||
     pathname === "/staff/faqs";
 
   return (

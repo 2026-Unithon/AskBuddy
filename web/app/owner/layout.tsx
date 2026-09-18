@@ -17,7 +17,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
 
   const showBottomNav =
     pathname === "/owner/upload" ||
-    pathname === "/owner/questions" ||
+    pathname === "/owner/questions" || pathname === "/owner/questions/v2" ||
     pathname === "/owner/cards";
 
   return (

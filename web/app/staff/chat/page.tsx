@@ -9,7 +9,7 @@ import { RError, RLoading } from "@/components/r-v2-chat";
 export default function ChatHistoryPage() {
   const { state } = useApp();
   const history = useQuery(chatQuery(state.token, state.storeId, state.userId));
-  return <main className="space-y-4 p-4">
+  return <main className="space-y-4 p-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
     <h1 className="text-xl font-bold">이전 대화 이력</h1>
     <p>새 질문은 새 Buddy 화면에서 할 수 있습니다.</p>
     <Link href="/staff/chat/v2" className="inline-flex min-h-11 items-center rounded-xl border px-4">Buddy에서 질문하기</Link>

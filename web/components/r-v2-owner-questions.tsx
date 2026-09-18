@@ -70,7 +70,7 @@ export default function RV2OwnerQuestions() {
   const id = useSearchParams().get("question_id");
   const pending = useInfiniteQuery(rPendingQuery(state.token, state.storeId, state.userId));
   const questions = pending.data?.pages.flatMap((page) => page.questions) ?? [];
-  return <main className="space-y-4 p-4 text-base" data-testid="r-owner-questions">
+  return <main className="space-y-4 p-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] text-base" data-testid="r-owner-questions">
     <h1 className="text-xl font-bold">직원 질문 확인</h1>
     <Link href="/owner/questions" className="underline">이전 질문 보기</Link>
     {pending.isLoading && <RLoading />}
