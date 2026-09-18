@@ -34,7 +34,7 @@
 |---|---|---|
 | W 승인 snapshot | 실제 승인/원장/revision/색인이 일치하는 snapshot, 매장별 내부 ID와 익명 slug 대응 | W 공개 서비스에서 내보내고 구조·현재 공개 상태를 대조 |
 | W owner-answer worker | claim/heartbeat/재시도/원자 finish를 호출하는 실제 소비자 | 현재 `claim_owner_event`/`finish_owner_event`는 존재하지만 제품 호출자는 없음. 구현 담당·연결 배포 단위 확정 후 실제 producer와 인수 |
-| 일반 의미 판단 제품 adapter | 평가로 채택한 해석/참조 제안과 서버 suitability·문맥·저장 검증 연결 | 현재 shadow는 평가 전용. 모델 자기평가를 승인으로 바꾸지 않고 제품 adapter 구현 및 활성화를 별도 완료해야 함 |
+| 일반 의미 판단 제품 adapter | 평가로 채택한 해석/참조 제안과 서버 suitability·문맥·저장 검증 연결 | 검토된 정확한 입력을 기존 v2 저장으로 연결하는 adapter 구현. 기본 OFF. 실제 검토 catalog·일반화 품질 인수·활성화는 대기. 상세: `../review/R_ADAPTER_BUDGET_20260918.md` |
 | 제품 종단 | 점주 1명·직원 2명, 원문 전달→검토/발행→FAQ/학습/재질문, 구/신 전환·복구 | 합성 DB 검증과 구분해 실제 W 연결 후 실행 |
 | 운영 로그 | 호스팅 일반 로그 원문 중복 OFF, 30일 metadata 보존, 조회 권한 | 저장소 구현 외에 실제 배포 서비스의 설정 증거 확인 |
 

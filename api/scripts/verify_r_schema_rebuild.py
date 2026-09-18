@@ -41,6 +41,8 @@ async def main():
         pool = await asyncpg.create_pool(DSN.rsplit("/",1)[0]+"/"+name,min_size=1,max_size=3)
         try:
             seed=await verify(pool,fresh)
+            from verify_r_evaluation_budget import verify as verify_budget
+            await verify_budget(pool,fresh,seed)
             from verify_r_reranker_usage import verify as verify_reranker
             await verify_reranker(pool,fresh,seed)
             from verify_r_answer_storage import verify as verify_answers

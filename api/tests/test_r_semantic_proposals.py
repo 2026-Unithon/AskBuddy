@@ -122,6 +122,10 @@ async def test_sdk_call_follows_durable_usage_start(monkeypatch, start_fails):
             assert receipt.usage.prompt_tokens == 12
             assert receipt.context.evaluation_run_id == '1'
     client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=response), aclose=AsyncMock()))
+    client.aio.models.count_tokens=AsyncMock(return_value=SimpleNamespace(total_tokens=12))
+    budget=SimpleNamespace(policy=SimpleNamespace(max_prompt_bytes=200000,max_input_tokens=1000,max_output_tokens=100),
+        reserve=AsyncMock(return_value='reservation'),finish=AsyncMock())
+    monkeypatch.setattr('app.learn.semantic_proposals.current_budget',lambda *args:budget)
     monkeypatch.setattr(genai, 'Client', lambda **kw: client)
     monkeypatch.setattr('app.learn.semantic_proposals.get_settings', lambda: SimpleNamespace(gemini_api_key='synthetic', gemini_model='synthetic'))
     if start_fails:

@@ -277,6 +277,47 @@ async def verify(pool,admin,seed):
                 len(shadow_rows)==1 and shadow_rows[0]['proposal']['plan']['action']=='ESCALATE' and
                 shadow_rows[0]['baseline_plan']['action']=='ANSWER' and not shadow_rows[0]['production_eligible'])
             check('semantic shadow replay does not call provider again',replay.headers.get('x-answer-replayed')=='true')
+            # Product admission uses the actual HTTP search, then the normal DB save path.
+            from dataclasses import asdict
+            from pathlib import Path
+            from tempfile import TemporaryDirectory
+            from app.contracts.hashing import digest
+            from app.learn.planner import decide
+            from app.learn.semantic_proposals import proposal_input
+            from app.learn.reviewed_semantics import ReviewedCatalog, product_decision
+            with TemporaryDirectory() as directory:
+                catalog_path=Path(directory)/'synthetic-catalog.json'
+                def reviewed(search,**kw):
+                    raw_decision=decide(search,store_id=seed['store_id'],question=title+' 승인 원문 보여줘')
+                    assessment=asdict(raw_decision.resolved.assessment)
+                    interpretation={k:assessment[k] for k in ('entity_id','predicate','variants','target_fact_ids','facts','raw_blocks')}
+                    payload=proposal_input(search,store_id=seed['store_id'],question=kw['question'])
+                    catalog=ReviewedCatalog(acceptance_reference='synthetic only',entries=[dict(
+                        approval_id='http-synthetic-review',store_id=str(seed['store_id']),question=kw['question'],
+                        user_turns=[],confirmed_slots={},reviewer='synthetic',review_reference='synthetic only',
+                        interpretation=interpretation,proposal=dict(input_hash=payload['input_hash'],
+                        snapshot_hash=search.snapshot.snapshot_hash,plan=raw_decision.plan.model_dump(mode='json')))])
+                    data=catalog.model_dump(mode='json')
+                    catalog_path.write_text(json.dumps(data),encoding='utf-8')
+                    settings.r_reviewed_semantics_enabled=True
+                    settings.r_reviewed_semantics_path=str(catalog_path)
+                    settings.r_reviewed_semantics_hash=digest(data)
+                    return product_decision(search,**kw)
+                pending_before=await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])
+                with patch('app.learn.reviewed_semantics.product_decision',side_effect=reviewed):
+                    reviewed_answer=await chat('api-reviewed-semantic','이 매장의 해당 준비 절차를 설명해주세요')
+                check('reviewed semantics uses ordinary answer persistence',reviewed_answer.status_code==200 and reviewed_answer.json()['action']=='ANSWER')
+                rid=int(reviewed_answer.headers['x-answer-receipt-id'])
+                check('semantic approval audit persisted',await admin.fetchval("select execution_metadata->>'semantic_approval_id' from r_answer_receipts where receipt_id=$1",rid)=='http-synthetic-review')
+                check('reviewed answer creates no pending',await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])==pending_before)
+                cited=await client.get(f'/learn/v2/receipts/{rid}/citations/1',headers=headers)
+                check('reviewed answer citation available',cited.status_code==200)
+                replay=await chat('api-reviewed-semantic','이 매장의 해당 준비 절차를 설명해주세요')
+                check('reviewed answer replay',replay.headers.get('x-answer-replayed')=='true')
+                catalog_path.write_text('{}',encoding='utf-8')
+                invalid=await chat('api-reviewed-invalid','새로운 질문')
+                check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
+                settings.r_reviewed_semantics_enabled=False
             settings.r_v2_enabled=False
             disabled=await chat("api-disabled-key",question)
             check("rollout flag disables v2 explicitly",disabled.status_code==503 and disabled.json()["error"]["code"]=="V2_UNAVAILABLE")

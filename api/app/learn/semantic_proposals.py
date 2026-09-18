@@ -25,6 +25,7 @@ from app.reg.hybrid import SearchResult
 from app.reg.reranker import _BoundedSink
 from app.usage.recorder import NullSink, attempt
 from app.usage.repository import UsageWriteError
+from app.team.evaluation_budget import BudgetDenied, current_budget
 
 VERSION = 'r-semantic-proposal/v1'
 
@@ -133,22 +134,45 @@ async def _generate(prompt, *, context, sink, cleanup_budget):
     from google import genai
     from google.genai import types
     settings = get_settings()
-    client = genai.Client(api_key=settings.gemini_api_key,
-        http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
+    budget = current_budget(context, settings.gemini_model)
+    # Count exactly the supplied text, including schema, rather than relying on hidden
+    # response-schema prompt overhead. JSON is still strictly validated after generation.
+    prompt = prompt + '\nJSON schema:\n' + json.dumps(SemanticProposal.model_json_schema(), ensure_ascii=False)
+    if len(prompt.encode('utf-8')) > budget.policy.max_prompt_bytes:
+        raise BudgetDenied('prompt exceeds approved byte limit')
+    reservation = await budget.reserve(context, settings.gemini_model)
+    input_tokens = output_tokens = None
+    client = None
     try:
+        client = genai.Client(api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
         async with attempt(_BoundedSink(sink, cleanup_budget), context, model=settings.gemini_model,
-                prompt_hash=digest(prompt), config_hash=digest(dict(version=VERSION, temperature=0))) as rec:
+                prompt_hash=digest(prompt), config_hash=digest(dict(version=VERSION, temperature=0,
+                    max_output_tokens=budget.policy.max_output_tokens))) as rec:
             rec.measure_input(input_bytes=len(prompt.encode('utf-8')))
+            counted = await client.aio.models.count_tokens(model=settings.gemini_model, contents=prompt)
+            if type(counted.total_tokens) is not int or not 0 <= counted.total_tokens <= budget.policy.max_input_tokens:
+                raise BudgetDenied('input token count exceeds approved limit or is unknown')
             response = await client.aio.models.generate_content(model=settings.gemini_model, contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type='application/json',
-                    response_schema=SemanticProposal, temperature=0))
+                    max_output_tokens=budget.policy.max_output_tokens, temperature=0))
             observe_answer(rec, response)
+            usage = getattr(response, 'usage_metadata', None)
+            input_tokens = getattr(usage, 'prompt_token_count', None)
+            visible = getattr(usage, 'candidates_token_count', None)
+            thoughts = getattr(usage, 'thoughts_token_count', None)
+            if type(visible) is int and type(thoughts) is int:
+                output_tokens = visible + thoughts
             return json.loads(response.text or '')
     finally:
         try:
-            await asyncio.wait_for(client.aio.aclose(), cleanup_budget)
-        except Exception:
-            pass
+            await asyncio.wait_for(budget.finish(reservation, input_tokens=input_tokens, output_tokens=output_tokens), cleanup_budget)
+        finally:
+            try:
+                if client is not None:
+                    await asyncio.wait_for(client.aio.aclose(), cleanup_budget)
+            except Exception:
+                pass
 
 
 async def propose(search, *, store_id, question, context, sink, timeout=2.0,
@@ -177,7 +201,7 @@ async def propose(search, *, store_id, question, context, sink, timeout=2.0,
         raw = await asyncio.wait_for((provider or _generate)(prompt, context=context, sink=sink,
             cleanup_budget=cleanup), budget - 2 * cleanup)
         return compare_proposal(search, payload=payload, raw=raw)
-    except UsageWriteError:
+    except (UsageWriteError, BudgetDenied):
         raise
     except TimeoutError:
         return result('TIMEOUT')

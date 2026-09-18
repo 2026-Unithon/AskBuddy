@@ -418,6 +418,14 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
                                 knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
+                        from app.learn.reviewed_semantics import product_decision
+                        semantic_approval=None
+                        if req.policy_receipt_id is None:
+                            decision,semantic_approval=product_decision(search,settings=settings,
+                                store_id=store_id,question=question,baseline=decision,
+                                user_turns=(context.context.original_question,req.question) if context else (),
+                                context_id=choice.context_id if choice else None,context_verified=context is not None,
+                                clarify_turns=context.context.clarify_turns if context else 0)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
                         from app.team.semantic_shadow import observe_decision
@@ -433,6 +441,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 semantic_context=decision.semantic_context,choice=choice,
                                 policy_receipt_id=req.policy_receipt_id,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
+                                    semantic_approval_id=semantic_approval,
+                                    semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,
                                     usage_operation_id=usage.operation_id if usage else None,
                                     query_logical_call_id=usage.logical_call_id if usage else None,
                                     rerank_logical_call_id=usage.logical_call_id+':rank' if usage and getattr(settings,'r_reranker_enabled',False) else None,
