@@ -104,7 +104,8 @@ async def collect_v2_run(client,manifest:EvaluationManifest,*,headers:dict,confi
     root=Path(__file__).resolve().parents[2]
     sources=('app/team/v2_evaluation.py','app/learn/v2_router.py','app/learn/planner.py','app/learn/semantic_grouping.py','app/learn/conditional_scope.py',
              'app/learn/raw_quantity.py','app/learn/answer_storage.py','app/learn/answer_validation.py','app/reg/hybrid.py',
-             'app/reg/reranker.py','app/learn/approved_renderer.py','app/team/evaluation_usage.py','app/learn/numeric_scope.py')
+             'app/reg/reranker.py','app/learn/approved_renderer.py','app/team/evaluation_usage.py','app/learn/numeric_scope.py',
+             'app/team/semantic_shadow.py','app/learn/semantic_proposals.py')
     source_hashes={p:digest((root/p).read_text(encoding='utf-8')) for p in sources}
     run_id=uuid4().hex
     rows=[]

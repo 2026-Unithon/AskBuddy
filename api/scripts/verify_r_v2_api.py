@@ -259,6 +259,24 @@ async def verify(pool,admin,seed):
             wrong=await client.post(
                 "/learn/v2/chat",headers=headers,json=dict(request_id="api-wrong-session",session_id="999999",question="질문"))
             check("unknown session returns 404",wrong.status_code==404)
+            from app.team.evaluation_usage import evaluation_usage_scope
+            from app.team.semantic_shadow import semantic_shadow_scope
+            shadow_rows=[]
+            async def record_shadow(row): shadow_rows.append(row)
+            async def proposal_provider(prompt,**kwargs):
+                data=json.loads(prompt.split('\n',1)[1])
+                return dict(input_hash=data['input_hash'],snapshot_hash=data['snapshot_hash'],
+                    plan=dict(snapshot_id=data['snapshot_id'],knowledge_revision=data['knowledge_revision'],
+                        action='ESCALATE',escalation_reason='SYNTHETIC_UNCERTAINTY'))
+            with evaluation_usage_scope(store_id=seed['store_id'],evaluation_run_id='1'):
+                with semantic_shadow_scope(store_id=seed['store_id'],record=record_shadow,provider=proposal_provider):
+                    observed=await chat('api-semantic-shadow',title+' 승인 원문 보여줘')
+                    replay=await chat('api-semantic-shadow',title+' 승인 원문 보여줘')
+            check('semantic shadow observes actual HTTP baseline without changing answer',
+                observed.status_code==200 and observed.json()['action']=='ANSWER' and
+                len(shadow_rows)==1 and shadow_rows[0]['proposal']['plan']['action']=='ESCALATE' and
+                shadow_rows[0]['baseline_plan']['action']=='ANSWER' and not shadow_rows[0]['production_eligible'])
+            check('semantic shadow replay does not call provider again',replay.headers.get('x-answer-replayed')=='true')
             settings.r_v2_enabled=False
             disabled=await chat("api-disabled-key",question)
             check("rollout flag disables v2 explicitly",disabled.status_code==503 and disabled.json()["error"]["code"]=="V2_UNAVAILABLE")

@@ -1,5 +1,7 @@
 # main 통합 후 R 잔여 작업 — 2026-09-18
 
+2026-09-18 추가 구현·검토: [R 후속 현재 판정](R_FOLLOWUP_REVIEW_20260918.md). v1 새 질문 차단·v2 진입, 점주 재처리 UI·발행 갱신, 실제 v2 격리 모델 비교·사람 판정 보고, 용어 불변 수입을 추가했다. 일반 의미 판단의 제품 승격·실자료 품질·실제 W 종단 인수는 미완료다. 아래는 이전 시점 기록이다.
+
 ## 기준과 판정
 
 `codex/r-semantic-support-boundaries`에서 `git pull --no-rebase origin main`을 실행해 `44a6a9d` → `1d49133`으로 fast-forward했다. 기존 미커밋 파일은 stash에 보존 후 복원했다. TODO 충돌은 양쪽 기록을 보존해 해결했다. stash 백업은 삭제하지 않았다.
@@ -12,7 +14,7 @@
 | 2 일반 의미 판단 | `semantic_proposals.py`: 자유 질문·사용자 턴·서술형 RAW·조건/예외·묶음 후보를 받는 모델 제안 경로와 오프라인 비교 CLI 구현. 기존 planner 유지, 평가 전용 | 사람 평가 전 제품 활성화 금지. 모델의 의미 정확도 미검증 |
 | 3 사전·검색 | 두 매장 내부에 출처 사실과 연결된 용어 검토 틀 생성, 실제 관찰 변형 입력칸 준비. query expansion은 효과 근거가 없어 보류 | 실제 별칭/오타/STT 관찰과 승인, 짝비교 |
 | 4 캐시·로그 | 검색 캐시 없음 확인. 별칭 원문 메타데이터를 hash로 교체, 예외 로그 원문 제거. 30일 메타데이터 삭제·DB 접근 제어·서버 정리 루프·CLI 구현 | 호스팅 stdout 보존/접근 설정은 배포 환경에서 확인 |
-| 5 자동화 | `.github/workflows/r-validation.yml`: unit/계약, PG17 전체 재구축·DB, 프론트 check·브라우저와 실패 집계 `r-required` 연결 | 원격 push/Actions 실행 및 main 필수 상태 검사 지정은 아직 하지 않음 |
+| 5 자동화 | `.github/workflows/r-validation.yml`: unit/계약, PG17 전체 재구축·DB, 프론트 check·브라우저와 실패 집계 `r-required` 연결 | 초기 push Actions 35311008713 전 job 통과. 후속에서 main 필수 r-required/strict 설정 완료 |
 | 6 실자료 정답 | 두 매장 각 40개 초안/37개 서로 다른 문구 재확인. 읽기 쉬운 worksheet와 검토 JSON 준비 | 각 매장 사람 검토 0개. 매장 사실을 자동 승인하지 않음 |
 | 7 최신 DB | 최신 R migration 포함 28개 재구축, 기존 DB/API 검사와 보존 검사 13개 통과 | 운영 DB 적용은 하지 않음 |
 | 8 실제 성능 | 기존 고정 snapshot·정답·반복·A/A 평가 하네스 보존, 합성 회귀 재검증 | 승인 snapshot/정답 부재로 실제 검색·의미·비용/지연 성능 평가 미실행 |
@@ -80,7 +82,7 @@
 - `pnpm check`: lint 경고 0, typecheck, production build 통과.
 - 실제 Edge 브라우저 + 합성 API: 27 checks 통과. DB와 W worker를 연결한 브라우저 E2E는 아니다.
 - 합성 snapshot의 모델 제안 비교 CLI 실제 실행: `REVIEW_REQUIRED`, `production_eligible=false`; 기존/제안 plan 출력 확인.
-- CI 세 job의 결과가 모두 success여야 `r-required`가 통과한다. GitHub에서 실제 실행하거나 branch protection을 변경한 것은 아니다.
+- CI 세 job의 결과가 모두 success여야 `r-required`가 통과한다. 초기 원격 실행 35311008713 전 job 통과, 후속에서 main 필수 r-required/strict 설정 완료. 최신 결과는 후속 기록 참조.
 - 유료 모델 호출·실자료 품질 실험·운영 DB 변경·원격 push는 하지 않았다.
 
 ## Push 대상 분리 검증

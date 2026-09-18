@@ -420,6 +420,11 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
+                        from app.team.semantic_shadow import observe_decision
+                        await observe_decision(pool=pool,store_id=store_id,search=search,question=question,
+                            user_turns=(context.context.original_question,req.question) if context else (),
+                            baseline=decision,request_id=req.request_id,
+                            timeout=max(0,deadline-loop.time()-settings.chat_save_reserve_seconds))
                         await scope(pool,claims,user_id)
                         try:
                             completed=await save_answer(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),

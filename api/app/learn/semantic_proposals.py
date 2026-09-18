@@ -1,6 +1,7 @@
 """Evaluation-only model proposals. Structural validity never grants answer authority.
 
-No HTTP route imports this module. The returned proposal cannot be passed to
+The trusted evaluation shadow hook may observe HTTP requests. No public switch enables it.
+The returned proposal cannot be passed to
 save_answer: it contains neither a Decision nor a SuitabilityAssessment.
 """
 from __future__ import annotations

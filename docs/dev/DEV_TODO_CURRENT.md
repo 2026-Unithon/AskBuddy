@@ -1,5 +1,7 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-18 추가 구현·검토: [R 후속 현재 판정](review/R_FOLLOWUP_REVIEW_20260918.md). v1 새 질문 차단·v2 진입, 점주 재처리 UI·발행 갱신, 실제 v2 격리 모델 비교·사람 판정 보고, 용어 불변 수입을 추가했다. 일반 의미 판단의 제품 승격·실자료 품질·실제 W 종단 인수는 미완료다. 아래는 이전 시점 기록이다.
+
 2026-09-18 main `1d49133` pull로 결정론적 planner/chat v2 기준 구현을 확보했다.
 이전 [지원 경계 감사](review/R_SUPPORT_BOUNDARIES_20260918.md)는 pull 전 legacy 관찰 기록이다.
 후속 [R 잔여 구현·검증](review/R_MAIN_REMAINING_20260918.md): 평가 전용 모델 제안/비교,

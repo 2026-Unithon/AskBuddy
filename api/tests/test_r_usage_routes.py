@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.deps import create_token
 from app.errors import install_error_handlers
-from app.learn.router import router
+from app.learn.router import router, legacy_chat_regression
 from app.learn.answering import AnswerComposition
 from app.learn.answer_usage import AnswerUsageStartError
 from app.reg.retrieve import retrieve_question
@@ -55,11 +55,13 @@ class Pool:
         return []
 
 
-class ChatRouteTest(unittest.TestCase):
+class LegacyChatRegressionTest(unittest.TestCase):
     def setUp(self):
         self.pool = Pool()
         app = FastAPI()
         app.include_router(router, prefix="/learn")
+        # Explicitly isolated legacy baseline, absent from the product router.
+        app.post("/evaluation/legacy-chat")(legacy_chat_regression)
         install_error_handlers(app)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -92,7 +94,25 @@ class ChatRouteTest(unittest.TestCase):
             store_id=store, user_id=10, role="STAFF",
             exp=datetime.now(timezone.utc)+timedelta(minutes=5)))}
     def post(self, store=1):
-        return self.client.post("/learn/chat", json=dict(question="합성 질문"), headers=self.headers(store))
+        return self.client.post("/evaluation/legacy-chat", json=dict(question="합성 질문"), headers=self.headers(store))
+
+    def test_product_chat_requires_v2_without_generation_or_writes(self):
+        with patch("app.learn.router._ask_chat", AsyncMock()) as generate:
+            result = self.client.post("/learn/chat", json=dict(question="합성 질문"), headers=self.headers())
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "V2_REQUIRED")
+        generate.assert_not_awaited()
+        self.assertFalse(self.pool.writes)
+        self.pool.role = None
+        self.assertEqual(self.client.post("/learn/chat", json=dict(question="질문"), headers=self.headers()).status_code, 403)
+
+    def test_legacy_pending_cannot_bypass_v2_decision(self):
+        body = dict(question_text="조건이 빠진 합성 질문", miss_reason="no_match")
+        self.assertEqual(self.client.post("/learn/pending", json=body).status_code, 401)
+        result = self.client.post("/learn/pending", json=body, headers=self.headers())
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "V2_REQUIRED")
+        self.assertFalse(self.pool.writes)
     def test_product_scope_and_no_request_connection_held(self):
         self.assertEqual(self.post(2).status_code, 200)
         self.assertEqual(self.pool.active, 0)

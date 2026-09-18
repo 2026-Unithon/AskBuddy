@@ -8,6 +8,7 @@ import { useApp } from "@/lib/store";
 import { ApiError } from "@/lib/api";
 import { rAsk, rCreateSession, type RChatInput } from "@/lib/r-v2-api";
 import { rCitationQuery, rHistoryQuery, rKeys, rSessionsQuery } from "@/lib/query";
+import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
 
 const button = "min-h-11 rounded-xl border px-4 py-2 disabled:opacity-50";
 function Citation({ receipt, order, broken }: { receipt: string; order: number; broken: boolean }) {
@@ -42,13 +43,14 @@ export default function RV2Chat() {
     onSuccess: async (_data, body) => { if (!body.policy_receipt_id) setInput(""); await client.invalidateQueries({ queryKey: rKeys.history(state.storeId, state.userId, body.session_id) }); },
   });
   const messages = history.data?.pages.flatMap((page) => page.messages) ?? [];
+  useRPublicationRefresh(state.storeId, messages.filter((m) => m.knowledge_status && ["PUBLISHED", "LINKED"].includes(m.knowledge_status)).map((m) => `${m.owner_answer_id}:${m.revision}:${m.knowledge_status}`).join("|"));
   const last = messages.at(-1);
   const busy = ask.isPending || create.isPending;
   return <main className="w-full space-y-4 p-4 text-base" data-testid="r-chat">
     <h1 className="text-xl font-bold">확인된 매장 지식으로 질문하기</h1>
     <Link className="underline" href="/staff/chat">이전 대화 보기</Link>
     <Link className="inline-block min-h-11 px-3 py-2 underline" href="/staff/notifications/v2">답변 알림</Link>
-    <button className={button} disabled={busy || !state.token} onClick={() => create.mutate(crypto.randomUUID())}>새 대화</button>
+    <button className={button} disabled={busy || !state.token || !sessions.data || Boolean(sessions.error)} onClick={() => create.mutate(crypto.randomUUID())}>새 대화</button>
     {sessions.isLoading && <RLoading />}
     {sessions.error && <RError error={sessions.error} retry={() => void sessions.refetch()} />}
     {create.error && <RError error={create.error} retry={() => create.variables && create.mutate(create.variables)} />}

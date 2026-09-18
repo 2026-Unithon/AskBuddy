@@ -6,6 +6,15 @@ from contextvars import ContextVar
 _evaluation_scope=ContextVar('r_evaluation_usage',default=None)
 
 
+def evaluation_run_for_store(store_id: int):
+    scope = _evaluation_scope.get()
+    if scope is None:
+        return None
+    if scope[0] != store_id:
+        raise ValueError('evaluation request store mismatch')
+    return scope[1]
+
+
 @contextmanager
 def evaluation_usage_scope(*,store_id:int,evaluation_run_id:str):
     """Trusted in-process isolated harness only; never accept this from HTTP headers.
