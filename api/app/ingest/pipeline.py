@@ -11,6 +11,7 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import asyncpg
 
@@ -87,7 +88,18 @@ async def process_source(
             # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
             # 사실은 원장에도 안 남아, 못 뽑은 것과 뽑고 버린 것을 구분할 수
             # 없었다. 이제 뽑는 즉시 전부 원장에 적고 조립이 그중에서 고른다.
-            assertions, unresolved = await _extract_facts_all(
+            # 구간을 뽑는 즉시 원장에 적는다 (checkpoint). 전부 끝난 뒤 한 번에
+            # 적으면 뒤쪽 구간에서 죽을 때 앞서 뽑은 것까지 같이 사라진다.
+            # 트랜잭션은 구간 하나만큼만 열어 모델 호출 중 DB 를 점유하지 않는다.
+            ledger_ids: dict[str, int] = {}
+
+            async def _checkpoint(seg_assertions, segment_id):
+                async with conn.transaction():
+                    ledger_ids.update(await _persist_ledger(
+                        conn, store_id, source_id, src["source_type"],
+                        seg_assertions))
+
+            outcome = await _extract_facts_all(
                 source_id=source_id,
                 source_type=src["source_type"],
                 text=text,
@@ -96,7 +108,9 @@ async def process_source(
                 segments=segments,
                 usage_sink=usage_sink,
                 usage_base=usage_base,
+                checkpoint=_checkpoint,
             )
+            assertions, unresolved = outcome.assertions, outcome.unresolved
 
             # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
             categories = await repo.enabled_categories(conn, store_id)
@@ -115,10 +129,7 @@ async def process_source(
                     store_id,
                     f"legacy-source-{source_id}",
                 )
-            # 원장 선저장 — 조립 전에, 뽑은 것을 전부 적는다
-            async with conn.transaction():
-                ledger_ids = await _persist_ledger(
-                    conn, store_id, source_id, src["source_type"], assertions)
+            # 원장 선저장은 위 checkpoint 에서 구간마다 이미 끝났다
             logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
 
             # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다
@@ -141,9 +152,15 @@ async def process_source(
                     ledger_ids=ledger_ids,
                 )
 
+            # 잃은 구간을 먼저 적는다. 그래야 뒤에서 상태를 PARTIAL 로 가른다
+            await _record_segment_failures(
+                conn, store_id, job_id, source_id, outcome=outcome)
+
             await repo.set_status(conn, store_id, source_id, "DONE")
-            logger.info("ingest DONE source=%s cards=%d unresolved=%d %.1fs",
+            logger.info("ingest DONE source=%s cards=%d unresolved=%d "
+                        "구간 %d/%d 실패 %.1fs",
                         source_id, saved, len(result.unresolved),
+                        outcome.segments_failed, outcome.segments_total,
                         time.perf_counter() - started)
 
         except Exception as e:
@@ -406,16 +423,39 @@ async def _preprocess_voice(
 
 # ── W1: 입력 → 사실 → 원장 → 카드 ────────────────────────────────────────
 
+class ExtractionOutcome(NamedTuple):
+    """추출이 무엇을 건졌고 무엇을 버렸는지 함께 전한다.
+
+    실패 구간 수를 돌려주지 않으면 호출부가 부분 성공을 완전 성공과 구분할 수
+    없다. 10구간 중 3구간을 잃고도 자료가 `DONE` 으로 끝나면 점주는 전부
+    처리됐다고 믿는다.
+    """
+
+    assertions: list
+    unresolved: list
+    segments_total: int
+    segments_failed: int
+    failed_segment_ids: list[str]
+
+
 async def _extract_facts_all(
     *, source_id: int, source_type: str, text: str, media: list[Path],
     glossary: list[dict], segments: list[tuple[str, list[Path]]],
     usage_sink=None, usage_base: tuple | None = None,
-):
+    checkpoint=None,
+) -> ExtractionOutcome:
     """map — 구간마다 **사실**을 뽑아 모은다. 카드를 만들지 않는다.
 
     구간 하나가 실패해도 나머지는 살린다. 전부 실패했을 때만 예외를 올린다.
+    살린 결과와 함께 **버린 구간**을 돌려준다 — 그래야 호출부가 부분 성공을
+    성공으로 위장하지 않는다.
     `local_ref` 는 구간 안에서만 유일하므로 구간 번호를 붙여 전역에서 갈라준다 —
     안 그러면 2구간의 `f1` 이 1구간의 `f1` 을 덮어쓴다.
+
+    `checkpoint(assertions, segment_id)` 를 주면 구간을 뽑는 **즉시** 부른다.
+    전부 끝난 뒤 한 번에 적으면 8구간에서 죽을 때 앞 7구간도 같이 사라진다.
+    모델 호출은 비싸고 느리다. 이미 뽑은 것은 지킨다.
+    적지 못한 구간은 뽑았더라도 잃은 것으로 센다 — 원장에 없으면 없는 것이다.
     """
     from app.ingest.extract import extract_facts
 
@@ -433,9 +473,12 @@ async def _extract_facts_all(
             glossary=glossary, media=media, usage_sink=usage_sink,
             usage_context=_ctx_for(usage_base, source_id, "EXTRACT"),
         )
-        return _tag(result.assertions, None), list(result.unresolved)
+        tagged = _tag(result.assertions, None)
+        if checkpoint is not None:
+            await checkpoint(tagged, None)
+        return ExtractionOutcome(tagged, list(result.unresolved), 1, 0, [])
 
-    merged, unresolved, failed = [], [], 0
+    merged, unresolved, failed_ids = [], [], []
     for index, (seg_text, seg_media) in enumerate(segments, start=1):
         segment = f"seg{index}"
         try:
@@ -446,19 +489,54 @@ async def _extract_facts_all(
                                        segment_id=segment),
             )
         except Exception as exc:
-            failed += 1
+            failed_ids.append(segment)
             logger.warning("구간 %d/%d 사실 추출 실패 source=%s: %s",
                            index, len(segments), source_id, exc)
             continue
-        merged.extend(_tag(part.assertions, segment))
+
+        tagged = _tag(part.assertions, segment)
+        if checkpoint is not None:
+            # 뽑은 즉시 적는다. 적지 못하면 그 구간은 잃은 것으로 센다
+            try:
+                await checkpoint(tagged, segment)
+            except Exception as exc:
+                failed_ids.append(segment)
+                logger.warning("구간 %d/%d 원장 저장 실패 source=%s: %s",
+                               index, len(segments), source_id, exc)
+                continue
+        merged.extend(tagged)
         unresolved.extend(part.unresolved)
         logger.info("구간 %d/%d 사실 %d건", index, len(segments), len(part.assertions))
 
+    failed = len(failed_ids)
     if failed == len(segments):
         raise RuntimeError(f"모든 구간({failed}개) 사실 추출이 실패했다")
     if failed:
         logger.warning("구간 %d/%d 실패 — 나머지로 진행한다", failed, len(segments))
-    return merged, unresolved
+    return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids)
+
+
+async def _record_segment_failures(
+    conn: asyncpg.Connection, store_id: int, job_id: int | None, source_id: int,
+    *, outcome: "ExtractionOutcome",
+) -> None:
+    """잃은 구간을 작업 자료 행에 적는다. 뒤에서 상태를 PARTIAL 로 가른다.
+
+    D1 — store_id 는 필수 인자다. job 없이 도는 레거시 경로에는 적을 행이 없다.
+    """
+    if job_id is None or not outcome.segments_failed:
+        return
+    await conn.execute(
+        """
+        update ingest_job_sources
+        set segments_total = $4, segments_failed = $5,
+            failed_segment_ids = $6, updated_at = now()
+        where store_id = $1 and job_id = $2 and source_id = $3
+        """,
+        store_id, job_id, source_id,
+        outcome.segments_total, outcome.segments_failed,
+        list(outcome.failed_segment_ids),
+    )
 
 
 async def _persist_ledger(

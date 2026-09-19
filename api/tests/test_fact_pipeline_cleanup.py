@@ -13,8 +13,9 @@ from app.ingest.schemas import Evidence, ExtractedAssertion, ExtractionResult
 @pytest.mark.asyncio
 async def test_mock_uses_fact_extraction_and_assembly_with_refs():
     with patch.object(extract, "get_settings", return_value=NS(ingest_mode="mock")):
-        assertions, unresolved = await _extract_facts_all(source_id=9, source_type="VOICE", text="mock",
-                                                        media=[], glossary=[], segments=[])
+        outcome = await _extract_facts_all(source_id=9, source_type="VOICE", text="mock",
+                                           media=[], glossary=[], segments=[])
+        assertions, unresolved = outcome.assertions, outcome.unresolved
         result = await assemble_assertions(source_id=9, assertions=assertions, categories=["준비"], glossary=[])
     assert len(assertions) == 4 and len(result.cards) == 3 and unresolved
     assert {f.ref for c in result.cards for f in c.facts} == {a.local_ref for a in assertions}
