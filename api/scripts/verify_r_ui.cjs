@@ -5,10 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const channel = process.env.R_UI_BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : undefined);
+  const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true });
   const passed = [];
   const check = (name, value) => { assert.ok(value, name); passed.push(name); console.log('PASS UI', name); };
-  const state = { sessions: [], messages: [], answers: [], notices: [], failNotices: false, failRead: false, calls: 0, failNext: false, pending: false, next: 1 };
+  const state = { sessions: [], messages: [], answers: [], notices: [], failNotices: false, failRead: false, calls: 0, failNext: false, pending: false, next: 1, retryBodies: [], failRetry: true, unavailable: false };
   function message(content, sender, response = null, extra = {}) {
     return { message_id: String(state.next++), sender, content, response, receipt_id: response ? '1' : null,
       context_revision: response?.action === 'CLARIFY' ? 1 : null, owner_answer_id: null, knowledge_status: null, ...extra };
@@ -39,6 +40,7 @@ const path = require('node:path');
         const remaining = state.notices.filter((n) => Number(n.notification_id) > Number(url.searchParams.get('after') ?? 0));
         payload = { notifications: remaining.slice(0, 1), next_after: remaining.length > 1 ? remaining[0].notification_id : null };
       } else if (p === '/learn/v2/sessions') {
+        if (state.unavailable) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'V2_UNAVAILABLE', message: '새 답변 경로가 아직 활성화되지 않았습니다.' } }) }); return; }
         if (body) { state.sessions = [{ session_id: '1' }]; payload = { session_id: '1' }; }
         else payload = { sessions: state.sessions };
       } else if (p.includes('/history')) payload = { messages: state.messages, next_after: null };
@@ -55,13 +57,20 @@ const path = require('node:path');
         else payload = response('CLARIFY', '어느 경우인지 선택해 주세요.');
         state.messages.push(message(body.question, 'USER'), message(payload.message, 'BUDDY', payload, { original_question: body.question }));
       } else if (p === '/learn/v2/pending') payload = { questions: state.pending ? [{ pending_id: '1', question: '미확인 업무', status: state.answers.length ? 'ANSWERED' : 'WAITING' }] : [], next_after: null };
-      else if (p.endsWith('/answers')) {
-        state.answers.push({ owner_answer_id: '1', answer: body.answer, revision: 1, knowledge_status: 'PENDING' });
+      else if (p.endsWith('/retry')) {
+        state.retryBodies.push(body);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        if (state.failRetry) { state.failRetry = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: '재처리 요청 실패' } }) }); return; }
+        state.answers[0].knowledge_status = 'PENDING'; state.answers[0].retry_available = false;
+        payload = { event_id: '5', status: 'PENDING' };
+      } else if (p.endsWith('/answers')) {
+        state.answers.push({ owner_answer_id: '1', answer: body.answer, revision: 1, knowledge_status: 'PENDING', event_id: '5', attempts: 0, retry_available: false });
         state.notices.push({ notification_id: '1', title: '사장님 답변 도착', body: '요청한 질문에 답변이 도착했어요.', destination: '/staff/chat/v2?session_id=1', read: false });
         state.messages.push(message(body.answer, 'BUDDY', null, { owner_answer_id: '1', revision: 1, knowledge_status: 'PENDING' }));
         payload = { owner_answer_id: '1', knowledge_status: 'PENDING' };
       } else if (p === '/learn/v2/pending/1') payload = { pending_id: '1', status: 'WAITING',
         occurrences: [{ receipt_id: '1', original_question: '미확인 업무', resolved_query: { confirmed_slots: { entity: '합성 라테' } }, context_snapshot: null }], answers: state.answers };
+      else if (p === '/learn/chat' && req.method() === 'GET') payload = { messages: [], session_id: null };
       else if (p.includes('/ingest/')) payload = { items: [] };
       else { await route.fulfill({ status: 404, body: '{}' }); return; }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
@@ -74,6 +83,7 @@ const path = require('node:path');
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto('http://127.0.0.1:3011/staff/chat/v2');
     await page.getByText('새 대화를 시작해 업무를 질문해 보세요.').waitFor();
+    check('v2 staff navigation remains available', await page.getByRole('navigation', { name: '직원 하단 내비게이션' }).isVisible());
     check('empty state distinct', true);
     await page.getByRole('link', { name: '답변 알림', exact: true }).click();
     await page.getByText('아직 도착한 답변 알림이 없습니다.', { exact: false }).waitFor();
@@ -102,10 +112,26 @@ const path = require('node:path');
     const owner = await context('OWNER'), ownerPage = await owner.newPage();
     ownerPage.on('pageerror', (e) => errors.push(e.message));
     await ownerPage.goto('http://127.0.0.1:3011/owner/questions/v2?question_id=1');
+    await ownerPage.getByLabel('직원에게 보낼 답변').waitFor();
+    check('v2 owner navigation remains available', await ownerPage.getByRole('navigation', { name: '사장님 하단 내비게이션' }).isVisible());
     await ownerPage.getByLabel('직원에게 보낼 답변').fill('  점주 원문\n그대로  ');
     await ownerPage.getByRole('button', { name: '답변 저장', exact: true }).click();
     await ownerPage.getByText('답변이 저장됐습니다.', { exact: true }).waitFor();
     check('owner raw submission preserved', state.answers[0].answer === '  점주 원문\n그대로  ');
+    check('retry hidden before terminal failure', await ownerPage.getByLabel('지식 반영 재처리 사유').count() === 0);
+    state.answers[0].knowledge_status = 'FAILED'; state.answers[0].retry_available = true;
+    await ownerPage.reload();
+    await ownerPage.getByLabel('지식 반영 재처리 사유').fill('합성 장애 확인 후 재처리');
+    await ownerPage.getByRole('button', { name: '지식 반영 재처리', exact: true }).click();
+    check('retry prevents duplicate click', await ownerPage.getByRole('button', { name: '재처리 요청 중…', exact: true }).isDisabled());
+    await ownerPage.getByText('재처리 요청 실패', { exact: true }).waitFor();
+    check('retry error preserves reason', await ownerPage.getByLabel('지식 반영 재처리 사유').inputValue() === '합성 장애 확인 후 재처리');
+    await ownerPage.getByRole('button', { name: '다시 확인', exact: true }).click();
+    await ownerPage.getByText('재처리 요청이 접수됐습니다. 지식 반영 상태를 확인해 주세요.', { exact: true }).waitFor();
+    check('retry preserves idempotency body', JSON.stringify(state.retryBodies[0]) === JSON.stringify(state.retryBodies[1]));
+    await ownerPage.reload();
+    await ownerPage.getByText('지식 반영: 대기', { exact: true }).waitFor();
+    check('retry state restores from server', await ownerPage.getByLabel('지식 반영 재처리 사유').count() === 0);
     await page.reload();
     await page.getByText('사장님 답변', { exact: true }).waitFor();
     check('staff original delivery survives reload', (await page.locator('ol').innerText()).includes('점주 원문'));
@@ -172,11 +198,27 @@ const path = require('node:path');
       await ownerPage.setViewportSize({ width, height: 844 });
       check(`staff width ${width} no overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       check(`owner width ${width} no overflow`, await ownerPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      // Scroll the page to its final control: browser visibility alone ignores fixed nav overlap.
+      await page.getByRole('button', { name: '질문하기', exact: true }).evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await ownerPage.getByRole('button', { name: '최신 상태 확인', exact: true }).evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      const staffCta = await page.getByRole('button', { name: '질문하기', exact: true }).boundingBox();
+      const staffNav = await page.getByRole('navigation', { name: '직원 하단 내비게이션' }).boundingBox();
+      const ownerCta = await ownerPage.getByRole('button', { name: '최신 상태 확인', exact: true }).boundingBox();
+      const ownerNav = await ownerPage.getByRole('navigation', { name: '사장님 하단 내비게이션' }).boundingBox();
+      check(`staff width ${width} CTA clear of nav`, staffCta.y + staffCta.height <= staffNav.y);
+      check(`owner width ${width} CTA clear of nav`, ownerCta.y + ownerCta.height <= ownerNav.y);
     }
     const out = path.resolve(__dirname, '../tmp/r-ui'); fs.mkdirSync(out, { recursive: true });
     await page.screenshot({ path: path.join(out, 'staff.png'), fullPage: true });
     await ownerPage.screenshot({ path: path.join(out, 'owner.png'), fullPage: true });
     check('no browser runtime exceptions', errors.length === 0);
+    await page.goto('http://127.0.0.1:3011/staff/chat');
+    await page.getByText('이전 대화 이력', { exact: true }).waitFor();
+    check('legacy history has no question submit', await page.getByRole('button', { name: '질문하기', exact: true }).count() === 0);
+    state.unavailable = true;
+    await page.getByRole('link', { name: 'Buddy에서 질문하기', exact: true }).click();
+    await page.getByText('새 답변 경로가 아직 활성화되지 않았습니다.', { exact: true }).waitFor();
+    check('disabled v2 cannot start legacy generation', await page.getByRole('button', { name: '새 대화', exact: true }).isDisabled());
     fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ fixture: 'synthetic API browser walkthrough', passed }, null, 2));
     console.log(`Verified ${passed.length} browser checks`);
   } finally { await browser.close(); }

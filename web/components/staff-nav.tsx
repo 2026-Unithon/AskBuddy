@@ -41,8 +41,8 @@ const TABS: TabItem[] = [
   {
     key: "chat",
     label: "Buddy",
-    href: "/staff/chat",
-    isActive: (pathname: string) => pathname === "/staff/chat",
+    href: "/staff/chat/v2",
+    isActive: (pathname: string) => pathname.startsWith("/staff/chat"),
     renderIcon: (active: boolean) => (
       <svg
         width="22"

@@ -29,7 +29,10 @@ export function rHistoryQuery(token: string | null, store: number | null, user: 
     queryFn: ({ signal, pageParam }) => rHistory(token!, session!, pageParam, signal),
     initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
     enabled: Boolean(token && store && user && session),
-    refetchInterval: (query) => query.state.data?.pages.at(-1)?.messages.at(-1)?.response?.action === "ESCALATE" ? 5_000 : false,
+    refetchInterval: (query) => {
+      const messages = query.state.data?.pages.flatMap((page) => page.messages) ?? [];
+      return messages.some((m) => m.knowledge_status === "PENDING") || messages.at(-1)?.response?.action === "ESCALATE" ? 5_000 : false;
+    },
   });
 }
 export function rPendingQuery(token: string | null, store: number | null, user: number | null) {

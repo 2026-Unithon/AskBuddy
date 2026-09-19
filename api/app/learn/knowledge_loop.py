@@ -239,7 +239,7 @@ async def build_knowledge_plan(
         candidates = await find_owner_answer_candidates(db, store_id, question, answer,
             usage_context=context, usage_sink=usage_sink)
     except Exception as exc:
-        logger.warning("owner-answer candidate search failed: %s", exc)
+        logger.warning("owner-answer candidate search failed type=%s", type(exc).__name__)
         return _safe_fallback_plan(
             question, answer, categories, [], "유사 카드 검색 실패로 수동 검토 필요"
         )

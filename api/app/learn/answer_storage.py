@@ -189,6 +189,9 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                         original_question=question,confirmed_slots=confirmed_slots,proposed_slots={},
                         knowledge_revision=int(snapshot.knowledge_revision),slot=plan.clarification_slot,
                         options=plan.allowed_options,issued_context_id=plan.context_id)
+            # Per-store opportunistic cleanup; idle stores use the maintenance CLI.
+            # Only expired diagnostics may change, never answers or policy links.
+            await conn.fetchval('select purge_r_execution_metadata($1)', store_id)
             user_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content)
                 values($1,'USER',$2) returning message_id""",session_id,question)
             await conn.execute("""insert into access_logs(store_id,user_id,action_type)

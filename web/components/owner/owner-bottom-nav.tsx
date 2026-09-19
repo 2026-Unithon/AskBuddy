@@ -44,7 +44,7 @@ const TABS: OwnerTabItem[] = [
   {
     key: "questions",
     label: "답변 대기",
-    href: "/owner/questions",
+    href: "/owner/questions/v2",
     isActive: (pathname: string) => pathname.startsWith("/owner/questions"),
     renderIcon: (active: boolean) => (
       <svg

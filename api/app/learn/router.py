@@ -185,6 +185,14 @@ async def _lock_chat_publication(db: Db, store_id: int) -> None:
 
 
 @router.post("/pending")
+async def require_v2_pending(req: CreatePendingRequest, claims: Claims, user_id: CurrentUserId):
+    async with get_pool().acquire() as db:
+        store_id = await get_store_id(claims, db)
+        await _member_id(db, store_id, user_id)
+    raise ApiError(409, "V2_REQUIRED", "새 질문은 새 Buddy 화면에서 확인해 주세요.",
+                   details={"destination": "/staff/chat/v2"})
+
+
 async def create_pending(
     req: CreatePendingRequest,
     background: BackgroundTasks,
@@ -972,7 +980,16 @@ def _iso(value) -> str:
 
 
 @router.post("/chat")
-async def ask_chat(req: ChatAskRequest, background: BackgroundTasks, claims: Claims, user_id: CurrentUserId):
+async def ask_chat(req: ChatAskRequest, claims: Claims, user_id: CurrentUserId):
+    async with get_pool().acquire() as db:
+        store_id = await get_store_id(claims, db)
+        await _member_id(db, store_id, user_id)
+    raise ApiError(409, "V2_REQUIRED", "새 질문은 새 Buddy 화면에서 확인해 주세요.",
+                   details={"destination": "/staff/chat/v2"})
+
+
+async def legacy_chat_regression(req: ChatAskRequest, background: BackgroundTasks, claims: Claims, user_id: CurrentUserId):
+    """Unrouted legacy regression fixture. Never mount in the product application."""
     deadline = asyncio.get_running_loop().time() + get_settings().chat_deadline_seconds
     completed_response = None
     attempt_state = {"stale": False}

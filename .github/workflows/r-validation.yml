@@ -1,0 +1,81 @@
+name: R validation
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+permissions:
+  contents: read
+concurrency:
+  group: r-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r api/requirements.txt pytest pytest-asyncio pytest-subtests
+      - working-directory: api
+        run: |
+          mkdir -p tmp
+          python -m pytest tests -q --basetemp=tmp/ci-pytest
+          python scripts/export_contract_schemas.py --check
+          python scripts/build_contract_fixtures.py --check
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r api/requirements.txt
+      - shell: pwsh
+        run: ./api/scripts/verify_r_handoff.ps1 -Python python -IncludeSchemaRebuild
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - working-directory: web
+        run: pnpm install --frozen-lockfile
+      - working-directory: web
+        run: pnpm check
+      - run: |
+          npm install --prefix api/tmp/browser playwright@1.62.1
+          api/tmp/browser/node_modules/.bin/playwright install --with-deps chromium
+      - run: |
+          pnpm --dir web exec next start -p 3011 > /tmp/askbuddy-next.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3011/staff/chat/v2 > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3011/staff/chat/v2 > /dev/null
+          NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_r_ui.cjs
+  r-required:
+    if: always()
+    needs: [contracts-unit, database, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          UNIT_RESULT: ${{ needs.contracts-unit.result }}
+          DATABASE_RESULT: ${{ needs.database.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: |
+          test "$UNIT_RESULT" = success
+          test "$DATABASE_RESULT" = success
+          test "$BROWSER_RESULT" = success

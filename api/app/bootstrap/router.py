@@ -21,7 +21,7 @@ def _default_destination(role: str, has_store: bool, guide_completed: bool) -> s
     if role == "OWNER":
         if not has_store:
             return "/owner/intent"
-        return "/owner/questions" if guide_completed else "/owner/upload"
+        return "/owner/questions/v2" if guide_completed else "/owner/upload"
     return "/staff/roadmap" if has_store else "/staff/auth"
 
 

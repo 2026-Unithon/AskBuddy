@@ -50,7 +50,9 @@ async def verify(pool,admin,seed):
                             sink=sink or DbUsageSink(pool),timeout=timeout)
     async def row():
         return await admin.fetchrow('select * from ai_usage_attempts where store_id=$1 and logical_call_id=$2',seed['store_id'],key)
-    with patch('app.reg.reranker.get_settings',return_value=settings),patch('google.genai.Client',return_value=client) as factory:
+    # This verifier isolates usage behavior; the integrated budget verifier uses real reservations.
+    with patch('app.reg.reranker.get_settings',return_value=settings),patch('google.genai.Client',return_value=client) as factory, \
+            patch('app.reg.reranker.provider_budget',side_effect=lambda context,model:(context,None)):
         result=await run('success')
         saved=await row()
         check('committed before SDK and connection released',len(calls)==1)

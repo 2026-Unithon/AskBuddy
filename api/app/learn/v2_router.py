@@ -32,6 +32,7 @@ from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
 from app.reg.embeddings import recorded_embeddings
+from app.team.evaluation_budget import BudgetDenied
 from app.reg.hybrid import SearchResult,hybrid_search,read_current_index,NORMALIZATION_VERSION,RRF_VERSION,LEXICAL_QUERY_VERSION
 from app.reg.reranker import rerank
 from app.reg.lexicon import LexiconEntry,approve_lexicon
@@ -395,7 +396,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             try:
                                 vectors=await asyncio.wait_for(recorded_embeddings([question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
                                     timeout=min(settings.search_deadline_seconds,remaining))
-                            except TimeoutError:raise
+                            except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:
                                 raise ApiError(503,"USAGE_UNAVAILABLE","검색 계측을 시작하지 못했습니다.",retryable=True) from exc
                             except Exception as exc:
@@ -418,8 +419,32 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
                                 knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
+                        from app.learn.reviewed_semantics import product_decision
+                        semantic_approval=None
+                        if req.policy_receipt_id is None:
+                            decision,semantic_approval=product_decision(search,settings=settings,
+                                store_id=store_id,question=question,baseline=decision,
+                                user_turns=(context.context.original_question,req.question) if context else (),
+                                context_id=choice.context_id if choice else None,context_verified=context is not None,
+                                clarify_turns=context.context.clarify_turns if context else 0)
+                        from app.learn.general_semantics import general_decision
+                        general_audit=None
+                        if req.policy_receipt_id is None and usage is not None:
+                            decision,general_audit=await general_decision(search,settings=settings,
+                                store_id=store_id,question=question,user_turns=(context.context.original_question,req.question) if context else (),
+                                baseline=decision,context=usage.model_copy(update={'stage':'ANSWER'}),
+                                sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
+                                    deadline-loop.time()-settings.chat_save_reserve_seconds,
+                                    settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))),
+                                context_verified=context is not None,context_id=choice.context_id if choice else None,
+                                clarify_turns=context.context.clarify_turns if context else 0)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
+                        from app.team.semantic_shadow import observe_decision
+                        await observe_decision(pool=pool,store_id=store_id,search=search,question=question,
+                            user_turns=(context.context.original_question,req.question) if context else (),
+                            baseline=decision,request_id=req.request_id,
+                            timeout=max(0,deadline-loop.time()-settings.chat_save_reserve_seconds))
                         await scope(pool,claims,user_id)
                         try:
                             completed=await save_answer(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
@@ -428,12 +453,15 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 semantic_context=decision.semantic_context,choice=choice,
                                 policy_receipt_id=req.policy_receipt_id,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
+                                    semantic_approval_id=semantic_approval,
+                                    general_semantics=general_audit,
+                                    semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,
                                     usage_operation_id=usage.operation_id if usage else None,
                                     query_logical_call_id=usage.logical_call_id if usage else None,
                                     rerank_logical_call_id=usage.logical_call_id+':rank' if usage and getattr(settings,'r_reranker_enabled',False) else None,
                                     elapsed_before_save_ms=round((loop.time()-(deadline-settings.chat_deadline_seconds))*1000,3),
                                     rrf_version=RRF_VERSION,lexical_query_version=LEXICAL_QUERY_VERSION,
-                                    glossary_version=search.snapshot.glossary_version,alias_terms=search.alias_terms,
+                                    glossary_version=search.snapshot.glossary_version,alias_terms_hash=digest(search.alias_terms),
                                     index_revision=search.index_revision,rerank_status=search.rerank_status,
                                     candidates=[asdict(c) for c in search.candidates]))
                             break
@@ -442,6 +470,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             stale=True
                             if requery:raise
                 # commit한 응답은 lease 정리 timeout 때문에 실패로 뒤집지 않는다.
+    except BudgetDenied as exc:
+        raise ApiError(429,'EVALUATION_BUDGET_DENIED','평가 예산을 확인하거나 추가 실행 승인이 필요합니다.',retryable=False) from exc
     except TimeoutError as exc:
         if completed is None:
             raise ApiError(409 if stale else 504,"STALE_KNOWLEDGE" if stale else "DEADLINE_EXCEEDED",

@@ -259,6 +259,76 @@ async def verify(pool,admin,seed):
             wrong=await client.post(
                 "/learn/v2/chat",headers=headers,json=dict(request_id="api-wrong-session",session_id="999999",question="질문"))
             check("unknown session returns 404",wrong.status_code==404)
+            from app.team.evaluation_usage import evaluation_usage_scope
+            from app.team.semantic_shadow import semantic_shadow_scope
+            shadow_rows=[]
+            async def record_shadow(row): shadow_rows.append(row)
+            async def proposal_provider(prompt,**kwargs):
+                data=json.loads(prompt.split('\n',1)[1])
+                return dict(input_hash=data['input_hash'],snapshot_hash=data['snapshot_hash'],
+                    plan=dict(snapshot_id=data['snapshot_id'],knowledge_revision=data['knowledge_revision'],
+                        action='ESCALATE',escalation_reason='SYNTHETIC_UNCERTAINTY'))
+            with evaluation_usage_scope(store_id=seed['store_id'],evaluation_run_id='1'):
+                with semantic_shadow_scope(store_id=seed['store_id'],record=record_shadow,provider=proposal_provider):
+                    observed=await chat('api-semantic-shadow',title+' 승인 원문 보여줘')
+                    replay=await chat('api-semantic-shadow',title+' 승인 원문 보여줘')
+            check('semantic shadow observes actual HTTP baseline without changing answer',
+                observed.status_code==200 and observed.json()['action']=='ANSWER' and
+                len(shadow_rows)==1 and shadow_rows[0]['proposal']['plan']['action']=='ESCALATE' and
+                shadow_rows[0]['baseline_plan']['action']=='ANSWER' and not shadow_rows[0]['production_eligible'])
+            check('semantic shadow replay does not call provider again',replay.headers.get('x-answer-replayed')=='true')
+            # Product admission uses the actual HTTP search, then the normal DB save path.
+            from dataclasses import asdict
+            from pathlib import Path
+            from tempfile import TemporaryDirectory
+            from app.contracts.hashing import digest
+            from app.learn.planner import decide
+            from app.learn.semantic_proposals import proposal_input
+            from app.learn.reviewed_semantics import ReviewedCatalog, product_decision
+            with TemporaryDirectory() as directory:
+                catalog_path=Path(directory)/'synthetic-catalog.json'
+                def reviewed(search,**kw):
+                    raw_decision=decide(search,store_id=seed['store_id'],question=title+' 승인 원문 보여줘')
+                    assessment=asdict(raw_decision.resolved.assessment)
+                    interpretation={k:assessment[k] for k in ('entity_id','predicate','variants','target_fact_ids','facts','raw_blocks')}
+                    payload=proposal_input(search,store_id=seed['store_id'],question=kw['question'])
+                    catalog=ReviewedCatalog(acceptance_reference='synthetic only',entries=[dict(
+                        approval_id='http-synthetic-review',store_id=str(seed['store_id']),question=kw['question'],
+                        user_turns=[],confirmed_slots={},reviewer='synthetic',review_reference='synthetic only',
+                        interpretation=interpretation,proposal=dict(input_hash=payload['input_hash'],
+                        snapshot_hash=search.snapshot.snapshot_hash,plan=raw_decision.plan.model_dump(mode='json')))])
+                    data=catalog.model_dump(mode='json')
+                    catalog_path.write_text(json.dumps(data),encoding='utf-8')
+                    settings.r_reviewed_semantics_enabled=True
+                    settings.r_reviewed_semantics_path=str(catalog_path)
+                    settings.r_reviewed_semantics_hash=digest(data)
+                    return product_decision(search,**kw)
+                pending_before=await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])
+                with patch('app.learn.reviewed_semantics.product_decision',side_effect=reviewed):
+                    reviewed_answer=await chat('api-reviewed-semantic','이 매장의 해당 준비 절차를 설명해주세요')
+                check('reviewed semantics uses ordinary answer persistence',reviewed_answer.status_code==200 and reviewed_answer.json()['action']=='ANSWER')
+                rid=int(reviewed_answer.headers['x-answer-receipt-id'])
+                check('semantic approval audit persisted',await admin.fetchval("select execution_metadata->>'semantic_approval_id' from r_answer_receipts where receipt_id=$1",rid)=='http-synthetic-review')
+                check('reviewed answer creates no pending',await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])==pending_before)
+                cited=await client.get(f'/learn/v2/receipts/{rid}/citations/1',headers=headers)
+                check('reviewed answer citation available',cited.status_code==200)
+                replay=await chat('api-reviewed-semantic','이 매장의 해당 준비 절차를 설명해주세요')
+                check('reviewed answer replay',replay.headers.get('x-answer-replayed')=='true')
+                catalog_path.write_text('{}',encoding='utf-8')
+                invalid=await chat('api-reviewed-invalid','새로운 질문')
+                check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
+                settings.r_reviewed_semantics_enabled=False
+            from verify_r_general_api import verify as verify_general
+            await verify_general(chat,client,headers,pool,admin,seed,settings,title)
+            from app.team.evaluation_budget import BudgetDenied
+            async def denied_embedding(*args,**kwargs):raise BudgetDenied('synthetic budget limit')
+            before=await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])
+            with patch('app.learn.v2_router.recorded_embeddings',side_effect=denied_embedding):
+                denied=await chat('api-evaluation-budget-denied','이 질문은 예산 제한 검사입니다')
+            check('budget denial is nonretryable HTTP error',denied.status_code==429 and
+                denied.json()['error']['code']=='EVALUATION_BUDGET_DENIED' and denied.json()['error']['retryable'] is False)
+            check('budget denial creates no answer or pending',not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-evaluation-budget-denied')") and
+                before==await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id']))
             settings.r_v2_enabled=False
             disabled=await chat("api-disabled-key",question)
             check("rollout flag disables v2 explicitly",disabled.status_code==503 and disabled.json()["error"]["code"]=="V2_UNAVAILABLE")

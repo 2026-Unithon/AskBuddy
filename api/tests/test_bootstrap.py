@@ -20,7 +20,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
     def test_destinations(self):
         self.assertEqual(_default_destination("OWNER", False, False), "/owner/intent")
         self.assertEqual(_default_destination("OWNER", True, False), "/owner/upload")
-        self.assertEqual(_default_destination("OWNER", True, True), "/owner/questions")
+        self.assertEqual(_default_destination("OWNER", True, True), "/owner/questions/v2")
         self.assertEqual(_default_destination("STAFF", False, False), "/staff/auth")
         self.assertEqual(_default_destination("STAFF", True, False), "/staff/roadmap")
 
@@ -52,7 +52,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             db, {"user_id": 1, "role": "OWNER", "store_id": 10}
         )
 
-        self.assertEqual(result.default_destination, "/owner/questions")
+        self.assertEqual(result.default_destination, "/owner/questions/v2")
         self.assertTrue(result.store.guide_completed)
         self.assertEqual(result.store.category_version, 4)
         self.assertEqual(result.badges.pending_cards, 7)
