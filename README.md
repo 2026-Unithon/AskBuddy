@@ -18,7 +18,7 @@
 <img src="https://img.shields.io/badge/Gemini-8E75B2?style=flat-square&logo=googlegemini&logoColor=white"/>
 <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=openai&logoColor=white"/>
 
-<sub>2026 유니톤(Unithon) 해커톤 · 5인 팀 프로젝트</sub>
+<sub>소규모 매장 업무 인수인계 서비스 · 창업 준비 중</sub>
 
 </div>
 
@@ -122,7 +122,7 @@ if score < strong and anchors and not _grounded(anchors, card_text):
 
 ### 4. RLS를 쓰지 않고 매장 격리를 API 코드가 전담한다
 
-Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 두 곳에 흩어지면 해커톤 일정에서 어느 쪽이 진짜인지 추적이 안 된다고 판단했다. 대신 규칙을 좁게 못 박았다 — 모든 DB 함수는 `store_id`를 **필수 인자**로 받고(기본값·`Optional` 금지), `store_id`는 요청 본문이 아니라 **JWT에서 꺼낸 값**만 쓴다.
+Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 두 곳에 흩어지면 어느 쪽이 진짜인지 추적이 안 된다고 판단했다. 대신 규칙을 좁게 못 박았다 — 모든 DB 함수는 `store_id`를 **필수 인자**로 받고(기본값·`Optional` 금지), `store_id`는 요청 본문이 아니라 **JWT에서 꺼낸 값**만 쓴다.
 
 ### 5. '신뢰도 %'를 사용자에게 보여주지 않는다
 

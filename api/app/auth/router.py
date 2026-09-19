@@ -208,7 +208,7 @@ async def join(req: JoinRequest, db: Db):
             store_id,
             int(user["user_id"]),
         )
-        # 해커톤: 코드 재사용 허용 여부가 미결(N1). 일단 is_used 는 건드리지 않는다.
+        # 코드 재사용 허용 여부가 미결(N1). 일단 is_used 는 건드리지 않는다.
 
     token = _token_for(int(user["user_id"]), store_id, user["role"])
     return {
