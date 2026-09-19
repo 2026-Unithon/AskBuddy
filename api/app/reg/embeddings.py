@@ -12,6 +12,7 @@ from openai import OpenAI
 from app.config import get_settings
 from app.contracts.usage import UsageContext
 from app.usage import UsageSink, NullSink, attempt
+from app.team.evaluation_budget import BudgetDenied, provider_budget
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +75,33 @@ async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: 
         raise ValueError("임베딩에는 EMBED/QUERY context와 저장 sink가 필요하다")
     if not texts:
         return []
+    context, budget = provider_budget(context,get_settings().embedding_model)
     if not get_settings().openai_api_key:
         raise RuntimeError("OPENAI_API_KEY 가 비어 있다")
     payload = json.dumps(texts, ensure_ascii=False, separators=(",", ":"))
-    async with attempt(sink, context, model=get_settings().embedding_model,
-                       prompt_hash="sha256:" + content_hash(payload)) as rec:
-        rec.measure_input(input_bytes=sum(len(t.encode("utf-8")) for t in texts))
-        settings = get_settings()
-        # W 등록 준비와 R 질문 검색의 시간 예산을 섞지 않는다.
-        timeout = settings.query_embedding_timeout_seconds if context.stage == "QUERY" else settings.embedding_timeout_seconds
-        return await asyncio.to_thread(embed_texts, texts, recording=rec, timeout_seconds=timeout)
+    size = sum(len(t.encode('utf-8')) for t in texts)
+    reservation = None
+    rec = None
+    if budget is not None:
+        # D4's fixed model uses byte BPE: UTF-8 bytes bound input tokens from above.
+        # Do not silently generalize this bound to another tokenizer/model.
+        if (get_settings().embedding_model != 'text-embedding-3-small'
+                or size > min(budget.policy.max_input_tokens,budget.policy.max_prompt_bytes)):
+            raise BudgetDenied('embedding model or conservative byte/token bound not approved')
+        reservation = await budget.reserve(context,get_settings().embedding_model)
+    try:
+        async with attempt(sink, context, model=get_settings().embedding_model,
+                           prompt_hash="sha256:" + content_hash(payload)) as rec:
+            rec.measure_input(input_bytes=size)
+            settings = get_settings()
+            # W 등록 준비와 R 질문 검색의 시간 예산을 섞지 않는다.
+            timeout = settings.query_embedding_timeout_seconds if context.stage == "QUERY" else settings.embedding_timeout_seconds
+            return await asyncio.to_thread(embed_texts, texts, recording=rec, timeout_seconds=timeout)
+    finally:
+        if reservation is not None:
+            await asyncio.wait_for(budget.finish(reservation,
+                input_tokens=rec.usage.prompt_tokens if rec is not None and rec.usage_status=='COMPLETE' else None,
+                output_tokens=0),.2)
 
 
 def embed_text(text: str) -> list[float]:

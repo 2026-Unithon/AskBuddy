@@ -13,6 +13,7 @@ from app.learn.answer_usage import observe_answer
 from app.reg.hybrid import SearchResult
 from app.usage.recorder import attempt,NullSink
 from app.usage.repository import UsageWriteError
+from app.team.evaluation_budget import BudgetDenied, provider_budget
 
 PROMPT_VERSION='r-rerank/v1'
 
@@ -49,6 +50,14 @@ async def _model(prompt, *, context, sink, candidate_ids,cleanup_budget):
     from google import genai
     from google.genai import types
     settings=get_settings()
+    context, evaluation = provider_budget(context,settings.gemini_model)
+    if evaluation is not None:
+        from app.learn.semantic_proposals import _generate
+        ranking = Ranking.model_validate(await _generate(prompt,context=context,sink=sink,
+            cleanup_budget=cleanup_budget,schema=Ranking))
+        if len(ranking.ids)!=len(candidate_ids) or set(ranking.ids)!=set(candidate_ids):
+            raise ValueError('invalid candidate permutation')
+        return ranking
     client=genai.Client(api_key=settings.gemini_api_key,
         http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
     try:
@@ -94,7 +103,7 @@ async def rerank(search:SearchResult, *, store_id:int,question:str,context,sink,
             candidate_ids=tuple(candidate_id(c) for c in search.candidates),cleanup_budget=cleanup_budget),
             timeout=budget-2*cleanup_budget)
         return apply_ranking(search,Ranking.model_validate(ranking.model_dump()))
-    except UsageWriteError:
+    except (UsageWriteError, BudgetDenied):
         raise
     except TimeoutError:
         return replace(search,rerank_status='TIMEOUT')

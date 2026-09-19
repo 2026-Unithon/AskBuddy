@@ -32,6 +32,7 @@ from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
 from app.reg.embeddings import recorded_embeddings
+from app.team.evaluation_budget import BudgetDenied
 from app.reg.hybrid import SearchResult,hybrid_search,read_current_index,NORMALIZATION_VERSION,RRF_VERSION,LEXICAL_QUERY_VERSION
 from app.reg.reranker import rerank
 from app.reg.lexicon import LexiconEntry,approve_lexicon
@@ -395,7 +396,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             try:
                                 vectors=await asyncio.wait_for(recorded_embeddings([question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
                                     timeout=min(settings.search_deadline_seconds,remaining))
-                            except TimeoutError:raise
+                            except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:
                                 raise ApiError(503,"USAGE_UNAVAILABLE","검색 계측을 시작하지 못했습니다.",retryable=True) from exc
                             except Exception as exc:
@@ -457,6 +458,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             stale=True
                             if requery:raise
                 # commit한 응답은 lease 정리 timeout 때문에 실패로 뒤집지 않는다.
+    except BudgetDenied as exc:
+        raise ApiError(429,'EVALUATION_BUDGET_DENIED','평가 예산을 확인하거나 추가 실행 승인이 필요합니다.',retryable=False) from exc
     except TimeoutError as exc:
         if completed is None:
             raise ApiError(409 if stale else 504,"STALE_KNOWLEDGE" if stale else "DEADLINE_EXCEEDED",

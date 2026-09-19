@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 from uuid import UUID
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from app.contracts.common import Contract, EntityId
@@ -31,11 +32,19 @@ def units(value):
     return result
 
 
+class BudgetCall(Contract):
+    stage: Literal['QUERY', 'EMBED', 'RERANK']
+    model: str = Field(min_length=1, max_length=100)
+
+
 class BudgetPolicy(Contract):
     campaign_id: UUID
     store_id: EntityId
     evaluation_run_ids: tuple[EntityId, ...] = Field(min_length=1, max_length=1000)
     model: str = Field(min_length=1, max_length=100)
+    # All allowed calls reserve the SAME conservative token/rate ceiling, including
+    # embeddings (unused output allowance is not refunded). One campaign, one cap.
+    additional_calls: tuple[BudgetCall, ...] = Field(default=(), max_length=10)
     max_calls: int = Field(strict=True, gt=0, le=100000)
     max_krw: str
     max_input_tokens: int = Field(strict=True, gt=0, le=1000000)
@@ -63,6 +72,8 @@ class BudgetPolicy(Contract):
             raise ValueError('budget cap supports at most six decimal KRW places')
         if self.call_units > units(self.max_krw):
             raise ValueError('one worst-case call exceeds campaign budget')
+        if len({(c.stage,c.model) for c in self.additional_calls}) != len(self.additional_calls):
+            raise ValueError('duplicate stage/model allowance')
         return self
 
     @property
@@ -79,9 +90,10 @@ class EvaluationBudget:
 
     def check_scope(self, context, model):
         p = self.policy
-        if (context.cost_purpose != 'EVALUATION' or context.stage != 'ANSWER'
+        allowed = {('ANSWER',p.model), *((c.stage,c.model) for c in p.additional_calls)}
+        if (context.cost_purpose != 'EVALUATION' or (context.stage,model) not in allowed
                 or context.store_id != p.store_id or context.evaluation_run_id not in p.evaluation_run_ids
-                or model != p.model or datetime.now(timezone.utc) >= p.valid_until):
+                or datetime.now(timezone.utc) >= p.valid_until):
             raise BudgetDenied('budget scope/model/run expired or mismatched')
 
     async def reserve(self, context, model):
@@ -149,3 +161,18 @@ def current_budget(context, model):
         raise BudgetDenied('explicit evaluation budget is required before live provider access')
     budget.check_scope(context,model)
     return budget
+
+
+def provider_budget(context, model):
+    """Resolve trusted HTTP evaluation scope before provider access, not just at sink.start."""
+    from app.team.evaluation_usage import evaluation_run_for_store
+    run = evaluation_run_for_store(int(context.store_id))
+    if run is not None:
+        if context.evaluation_run_id not in (None,run):
+            raise BudgetDenied('evaluation run conflict')
+        context = context.model_copy(update=dict(cost_purpose='EVALUATION',evaluation_run_id=run))
+    if context.cost_purpose == 'EVALUATION':
+        return context, current_budget(context,model)
+    if _budget.get() is not None:
+        raise BudgetDenied('budgeted execution must have evaluation attribution')
+    return context, None

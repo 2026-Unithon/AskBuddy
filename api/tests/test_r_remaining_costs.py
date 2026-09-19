@@ -22,7 +22,8 @@ class EmbeddingTest(unittest.IsolatedAsyncioTestCase):
         with patch("app.reg.embeddings.get_settings", return_value=NS(
                 openai_api_key="fake", embedding_model="synthetic", embedding_dim=1,
                 embedding_timeout_seconds=30, query_embedding_timeout_seconds=.8)), \
-             patch("app.reg.embeddings.OpenAI", return_value=client) as factory:
+             patch("app.reg.embeddings.OpenAI", return_value=client) as factory, \
+             patch("app.reg.embeddings.provider_budget", side_effect=lambda context,model:(context,None)):
             try:
                 result = await recorded_embeddings(["합성 하나", "합성 둘"],
                     context=CONTEXT.model_copy(update=dict(stage=stage)), sink=sink)

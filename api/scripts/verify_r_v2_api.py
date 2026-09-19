@@ -318,6 +318,15 @@ async def verify(pool,admin,seed):
                 invalid=await chat('api-reviewed-invalid','새로운 질문')
                 check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
                 settings.r_reviewed_semantics_enabled=False
+            from app.team.evaluation_budget import BudgetDenied
+            async def denied_embedding(*args,**kwargs):raise BudgetDenied('synthetic budget limit')
+            before=await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])
+            with patch('app.learn.v2_router.recorded_embeddings',side_effect=denied_embedding):
+                denied=await chat('api-evaluation-budget-denied','이 질문은 예산 제한 검사입니다')
+            check('budget denial is nonretryable HTTP error',denied.status_code==429 and
+                denied.json()['error']['code']=='EVALUATION_BUDGET_DENIED' and denied.json()['error']['retryable'] is False)
+            check('budget denial creates no answer or pending',not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-evaluation-budget-denied')") and
+                before==await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id']))
             settings.r_v2_enabled=False
             disabled=await chat("api-disabled-key",question)
             check("rollout flag disables v2 explicitly",disabled.status_code==503 and disabled.json()["error"]["code"]=="V2_UNAVAILABLE")

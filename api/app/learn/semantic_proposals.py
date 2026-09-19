@@ -130,14 +130,14 @@ def compare_proposal(search, *, payload, raw) -> ProposalComparison:
                               validate_proposal(raw, search, payload), baseline_plan=baseline.plan)
 
 
-async def _generate(prompt, *, context, sink, cleanup_budget):
+async def _generate(prompt, *, context, sink, cleanup_budget, schema=None):
     from google import genai
     from google.genai import types
     settings = get_settings()
     budget = current_budget(context, settings.gemini_model)
     # Count exactly the supplied text, including schema, rather than relying on hidden
     # response-schema prompt overhead. JSON is still strictly validated after generation.
-    prompt = prompt + '\nJSON schema:\n' + json.dumps(SemanticProposal.model_json_schema(), ensure_ascii=False)
+    prompt = prompt + '\nJSON schema:\n' + json.dumps((schema or SemanticProposal).model_json_schema(), ensure_ascii=False)
     if len(prompt.encode('utf-8')) > budget.policy.max_prompt_bytes:
         raise BudgetDenied('prompt exceeds approved byte limit')
     reservation = await budget.reserve(context, settings.gemini_model)
