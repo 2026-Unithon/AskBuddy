@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     r_reviewed_semantics_enabled: bool = False
     r_reviewed_semantics_path: str = ''
     r_reviewed_semantics_hash: str = ''
+    r_general_semantics_enabled: bool = False
+    r_general_semantics_path: str = ''
+    r_general_semantics_hash: str = ''
     # C0 §6: 조정 가능한 초기값. 프로세스마다 별도 카운터를 두지 않는다.
     chat_deadline_seconds: float = Field(default=5.0, gt=0, le=5)
     search_deadline_seconds: float = Field(default=1.0, gt=0, le=1)

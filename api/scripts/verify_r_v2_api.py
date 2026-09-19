@@ -318,6 +318,8 @@ async def verify(pool,admin,seed):
                 invalid=await chat('api-reviewed-invalid','새로운 질문')
                 check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
                 settings.r_reviewed_semantics_enabled=False
+            from verify_r_general_api import verify as verify_general
+            await verify_general(chat,client,headers,pool,admin,seed,settings,title)
             from app.team.evaluation_budget import BudgetDenied
             async def denied_embedding(*args,**kwargs):raise BudgetDenied('synthetic budget limit')
             before=await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id'])
