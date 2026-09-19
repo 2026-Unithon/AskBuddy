@@ -164,6 +164,18 @@ def test_clarification_uses_snapshot_options_and_runtime_context():
     with pytest.raises(ValueError):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
 
 
+def test_null_variant_cannot_implicitly_become_not_applicable():
+    from tests.test_r_planner import PlannerTest
+    from app.learn.planner import decide
+    search=PlannerTest().search(temperature=None);q='이 음료에 들어가는 양을 설명해주세요'
+    payload=proposal_input(search,store_id=1,question=q);baseline=decide(search,store_id=1,question=q)
+    raw=dict(input_hash=payload['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
+        plan=dict(snapshot_id='1',knowledge_revision='1',action='ANSWER',selected_blocks=[dict(card_id='1',card_version_id='1',block_id='b',fact_revision_ids=['1'])]),
+        interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=['1']),
+        slots=[dict(slot=k,value=v,question_quote=q) for k,v in [('entity','1'),('predicate','milk_amount')]])
+    with pytest.raises(ValueError,match='null variant'):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+
+
 @pytest.mark.asyncio
 async def test_provider_requires_eval_budget_and_honors_token_caps(tmp_path,monkeypatch):
     from app.learn.general_provider import generate
