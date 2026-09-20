@@ -373,15 +373,40 @@ async def _preprocess_scan(
     path = await _download(conn, store_id, src)
 
     if path.suffix.lower() == ".pdf":
-        text, pages = document.read_pdf(path)
-        if text:
-            await repo.update_scan_result(conn, source_id, page_count=pages,
-                                          ocr_text=text, ocr_engine="pypdf")
-            return text, [], []
-        # 텍스트 레이어가 없는 스캔본 — PDF 를 그대로 모델에 넘긴다
-        await repo.update_scan_result(conn, source_id, page_count=pages,
-                                      ocr_text=None, ocr_engine=None)
-        return "(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)", [path], []
+        from app.config import get_settings
+
+        read = document.read_pdf(path)
+        mode = getattr(get_settings(), "pdf_input_mode", "TEXT")
+
+        # 글이 아예 없는 스캔본은 arm 과 무관하게 문서를 넘긴다. 안 넘기면 빈손이다
+        if not read.text:
+            await repo.update_scan_result(conn, source_id,
+                                          page_count=read.page_count,
+                                          ocr_text=None, ocr_engine=None)
+            return ("(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)",
+                    [path], [])
+
+        await repo.update_scan_result(conn, source_id,
+                                      page_count=read.page_count,
+                                      ocr_text=read.text, ocr_engine="pypdf")
+
+        if mode == "FILE":
+            # 텍스트 레이어를 쓰지 않는 arm. 추출한 본문을 붙이지 않는다
+            return "(첨부한 문서를 읽고 판단할 것)", [path], []
+
+        if mode == "BOTH":
+            return f"{read.text}\n\n(첨부한 문서도 함께 읽고 판단할 것)", [path], []
+
+        # HYBRID — 글로 읽힌 부분을 쓰되, 표·사진 페이지가 남았을 때만 문서를
+        # 함께 넘긴다. 첨부하지 않으면 그 페이지는 통째로 사라진다.
+        if mode == "HYBRID" and read.visual_pages:
+            pages = ", ".join(f"{n}쪽" for n in read.visual_pages)
+            return (f"{read.text}\n\n"
+                    f"(위 글에 없는 내용이 {pages} 에 그림·표로 있다. "
+                    f"첨부한 문서의 해당 쪽을 읽고 판단할 것)"), [path], []
+
+        # TEXT — 대조군. 글로 읽힌 것만 쓴다
+        return read.text, [], []
 
     await repo.update_scan_result(conn, source_id, page_count=1,
                                   ocr_text=None, ocr_engine=None)
