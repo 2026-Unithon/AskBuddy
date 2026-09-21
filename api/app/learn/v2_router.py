@@ -228,13 +228,17 @@ async def pending_detail(question_id:EntityId,claims:Claims,user_id:CurrentUserI
 
 @router.get("/v2/sessions/{session_id}/history")
 async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
-                  after:EntityId|None=None,limit:int=Query(default=100,ge=1,le=100)):
+                  after:EntityId|None=None,limit:int=Query(default=100,ge=1,le=100),
+                  latest:bool=False,before:EntityId|None=None):
     enabled()
+    if (before is not None and not latest) or (latest and after is not None):
+        raise ApiError(422,'INVALID_CONTRACT','대화 조회 방향과 커서를 확인해 주세요.')
     pool=get_pool()
     store_id,member_id=await scope(pool,claims,user_id)
     from app.learn.question_contexts import _lock_session
     async with pool.acquire() as conn:
-        async with conn.transaction():
+        # 메시지와 대기 요약 사이에 점주 답변이 커밋돼도 같은 판을 반환한다.
+        async with conn.transaction(isolation='repeatable_read'):
             await _lock_session(conn,store_id=store_id,member_id=member_id,session_id=int(session_id))
             rows=await conn.fetch("""select m.message_id,m.sender_type,m.content,m.owner_answer_id,
                 r.response,r.receipt_id,r.original_question,r.context_snapshot,k.status as knowledge_status,rev.revision_no
@@ -242,9 +246,37 @@ async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
                 left join r_answer_receipts r on r.store_id=s.store_id and r.buddy_message_id=m.message_id
                 left join r_owner_knowledge_states k on k.store_id=s.store_id and k.owner_answer_id=m.owner_answer_id
                 left join r_owner_answer_revisions rev on rev.store_id=s.store_id and rev.owner_answer_id=m.owner_answer_id
-                where s.store_id=$1 and s.member_id=$2 and s.session_id=$3 and m.message_id>$4
-                order by m.message_id limit $5""",
-                store_id,member_id,int(session_id),int(after) if after else 0,limit)
+                where s.store_id=$1 and s.member_id=$2 and s.session_id=$3
+                  and ($4::bigint is null or m.message_id>$4)
+                  and ($5::bigint is null or m.message_id<$5)
+                order by case when not $6 then m.message_id end asc,
+                         case when $6 then m.message_id end desc limit $7""",
+                store_id,member_id,int(session_id),int(after) if after else None,
+                int(before) if before else None,latest,limit+1)
+            has_more=len(rows)>limit
+            rows=rows[:limit]
+            if latest:rows=list(reversed(rows))
+            # 표시 중인 페이지와 무관하게 현재 세션 전체의 대기를 확인한다.
+            # 오래된 점주 답변 revision의 PENDING은 새 답변의 완료를 가리지 않는다.
+            has_pending_updates=await conn.fetchval("""select
+                exists(select 1 from r_answer_receipts r join pending_questions q
+                    on q.store_id=r.store_id and q.question_id=r.pending_id
+                    where r.store_id=$1 and r.member_id=$2 and r.session_id=$3 and q.status='WAITING')
+                or exists(select 1 from r_owner_answer_deliveries d
+                    join r_owner_answer_revisions rev on rev.store_id=d.store_id and rev.owner_answer_id=d.owner_answer_id
+                    join r_owner_knowledge_states k on k.store_id=d.store_id and k.owner_answer_id=d.owner_answer_id
+                    where d.store_id=$1 and d.member_id=$2 and d.session_id=$3
+                      and not exists(select 1 from r_owner_answer_revisions newer
+                          where newer.store_id=rev.store_id and newer.question_id=rev.question_id
+                            and newer.revision_no>rev.revision_no)
+                      and (k.status in ('PENDING','REVIEW') or (k.status='FAILED' and exists(
+                          select 1 from outbox_events e join outbox_leases l
+                              on l.store_id=e.store_id and l.event_id=e.event_id
+                          where e.store_id=d.store_id and e.owner_answer_id=d.owner_answer_id
+                            and e.event_type='OWNER_ANSWER_SUBMITTED' and l.consumer='W_OWNER_ANSWER_V2'
+                            and l.status in ('FAILED','CLAIMED')
+                            and coalesce(l.last_error,'') not like 'TERMINAL:%'))))""",
+                store_id,member_id,int(session_id))
             responses={}
             for row in rows:
                 if row['response']:
@@ -259,7 +291,9 @@ async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
                 revision=r['revision_no'],knowledge_status=r['knowledge_status'],
                 context_revision=(json.loads(r['context_snapshot']) if isinstance(r['context_snapshot'],str) else r['context_snapshot'] or {}).get('state_revision'),
                 response=responses.get(r['message_id'])) for r in rows],
-                next_after=str(rows[-1]['message_id']) if len(rows)==limit else None)
+                next_after=str(rows[-1]['message_id']) if has_more and not latest else None,
+                next_before=str(rows[0]['message_id']) if has_more and latest else None,
+                has_pending_updates=bool(has_pending_updates))
 
 
 @router.get("/v2/notifications")

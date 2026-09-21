@@ -66,6 +66,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:3011/staff/chat/v2 > /dev/null
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_r_ui.cjs
+          NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_r_history_ui.cjs
   r-required:
     if: always()
     needs: [contracts-unit, database, browser]

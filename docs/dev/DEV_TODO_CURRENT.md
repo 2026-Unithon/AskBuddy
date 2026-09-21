@@ -1,5 +1,11 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-21 R 이력·갱신 보완: R-F01 최신 메시지/선택지 표시, R-F02 세션 전체 대기 요약·자동 갱신 종료, R-V01 브라우저 오류 선택자를 수정했다. [조회 계약·배포 순서](plan/R_HISTORY_READ_CONTRACT.md), [검증 결과](review/R_HISTORY_FIX_VERIFICATION_20260921.md): 단위 913개·119 subtests, v2 API 157 checks, 브라우저 40+36 checks 및 전체 격리 DB runner 통과. 이전 감사는 수정 전 관찰이며, W 구현과 사람 정답/유료 평가 대기는 이번 R 수정과 별도다.
+
+2026-09-21 R 우선 재검토: [R 단독 결함·검증·남은 순서](review/R_ONLY_REVIEW_20260921.md). W는 별도 담당으로 두고 R의 긴 대화 최신 응답/명확화 표시와 앞선 점주 답변 대기 갱신 중단을 브라우저에서 재현했다. R 단독 수정 2건을 우선하며, W 공동 연결과 회의 대기는 별도다.
+
+2026-09-21 전체 재감사: [계획 대비 W/R 구현·연결·인수 판정](review/WR_PLAN_AUDIT_20260921.md). 최신 W 부분 실패의 상세 응답 타입 오류, 성공 오집계/재시도 누락, 추출 중 DB 연결 보유를 재현했다. 집중 회귀 80개 통과와 별개인 검증 공백이다. W2~W4 실제 생산·발행 및 owner-answer worker 연결, 실자료·운영 인수는 미완료이며 담당별 다음 순서를 감사 문서에 정리했다.
+
 2026-09-21 공유: 최신 원격 main `db40813`을 R 브랜치에 통합했다. [공유 변경·담당별 다음 순서·Railway 점검](plan/R_TEAM_NEXT_20260921.md)을 먼저 참고한다. [최신 통합 검증](review/R_SHARE_VERIFICATION_20260921.md): 913 tests/119 subtests, migration 29개 및 R DB/API 회귀 통과. 이전 검증 기록은 당시 기준이다.
 
 2026-09-19 최신 순차 작업: [R ①~⑤ 구현·W 인계·차단 원인](plan/R_SEQUENCE_HANDOFF_20260919.md), [검증 기록](review/R_SEQUENCE_REVIEW_20260919.md). PR #18 병합 main `e8186f6` 기준이다. 외부 AI 판정은 회의 안건 1번으로 대기, 운영 로그 실제 확인도 회의 안건이다. 확정된 의미 범위의 exact-reviewed 병합·대상/온도/크기 명확화와 R 색인/완료 수신을 보강했다. 실제 catalog·품질 평가·운영 활성화·W producer/worker 연결은 아직 완료가 아니다. 아래 9개 커밋 ahead 표기는 병합 전 관찰이다.
