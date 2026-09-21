@@ -12,6 +12,7 @@ from app.contracts.errors import ERROR_TABLE
 from app.contracts.hashing import digest
 from app.learn.owner_delivery import require_owner
 from app.notifications.service import create_notification_event
+from app.learn.owner_publication import publication_evidence, notify_publication
 
 CONSUMER='W_OWNER_ANSWER_V2'
 MAX_ATTEMPTS=10
@@ -88,6 +89,7 @@ async def heartbeat_owner_event(pool, *, store_id:int,event_id:int,claim_token:s
 async def finish_owner_event(conn, *, store_id:int,event_id:int,claim_token:str,result:ApplyOwnerAnswerResult) -> None:
     if not conn.is_in_transaction():raise ValueError('W publication and finish require one transaction')
     result=ApplyOwnerAnswerResult.model_validate(result.model_dump())
+    evidence=await publication_evidence(conn,store_id=store_id,result=result)
     event=await conn.fetchrow("""select e.owner_answer_id,r.question_id,r.revision_no
         from outbox_events e join r_owner_answer_revisions r on r.store_id=e.store_id and r.owner_answer_id=e.owner_answer_id
         where e.store_id=$1 and e.event_id=$2 and e.event_type='OWNER_ANSWER_SUBMITTED'""",store_id,event_id)
@@ -101,7 +103,10 @@ async def finish_owner_event(conn, *, store_id:int,event_id:int,claim_token:str,
                               store_id,event['question_id'])
     if latest!=event['revision_no']:raise ApiError(409,'IDEMPOTENCY_CONFLICT','새 점주 답변이 있습니다. 이전 작업을 되돌려야 합니다.')
     await conn.execute("""update r_owner_knowledge_states set status=$3,result=$4::jsonb,updated_at=now()
-        where store_id=$1 and owner_answer_id=$2""",store_id,event['owner_answer_id'],result.status,result.model_dump_json())
+        where store_id=$1 and owner_answer_id=$2""",store_id,event['owner_answer_id'],result.status,
+        json.dumps(dict(result.model_dump(mode='json'),**evidence)))
+    if evidence:
+        await notify_publication(conn,store_id=store_id,question_id=event['question_id'],owner_answer_id=event['owner_answer_id'])
     retry=should_retry(result,lease)
     if result.status=='FAILED' and not retry:
         await _terminal(conn,store_id=store_id,event_id=event_id,owner_answer_id=event['owner_answer_id'],

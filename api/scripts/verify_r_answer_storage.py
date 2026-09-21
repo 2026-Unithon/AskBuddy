@@ -117,6 +117,28 @@ async def verify(pool,admin,seed):
     check("render failure rolls back pending and receipt",before==await admin.fetchval(
         "select count(*) from pending_questions where store_id=$1",sid) and not await admin.fetchval(
         "select exists(select 1 from r_answer_receipts where store_id=$1 and request_id='m3-failure-rollback')",sid))
+    # Exact reviewed free expressions use the normal transactional pending path.
+    from app.learn.reviewed_grouping import GroupingReview, GroupingEvidence, reviewed_context
+    scope=GroupingReview(entity=card.entity_id,predicate='milk_amount',temperature='HOT',size=None,
+        conditions=('합성 조건',),exceptions=(),scope_bindings=(),polarity='POSITIVE',complete=True)
+    async def grouped(key,text,scope,forge=False):
+        evidence=GroupingEvidence(str(sid),snapshot.snapshot_hash,text,'synthetic human review',scope)
+        context=reviewed_context(snapshot,evidence=evidence,question=text)
+        selected=ResolvedSelection(scope.entity,scope.predicate,((scope.temperature,scope.size),),text,
+            grouping_evidence=None if forge else evidence)
+        return await save_answer(pool,store_id=sid,member_id=mid,session_id=session,request_id=key,
+            question=text,snapshot=snapshot,plan=AnswerPlan(**base,action='ESCALATE',escalation_reason='INSUFFICIENT_KNOWLEDGE'),
+            resolved=selected,confirmed_slots={},semantic_context=context)
+    a=await grouped('m3-reviewed-group-1','합성 자유 표현 하나',scope)
+    b=await grouped('m3-reviewed-group-2','동일 범위의 다른 표현',scope)
+    check('reviewed free expressions share pending',a.response.pending_id==b.response.pending_id)
+    c=await grouped('m3-reviewed-group-3','다른 조건 표현',scope.model_copy(update={'conditions':('다른 조건',)}))
+    check('reviewed conditions remain separate',a.response.pending_id!=c.response.pending_id)
+    try:await grouped('m3-forged-group-1','위조 문맥',scope,forge=True)
+    except ValueError:check('group context without review capability rejected',True)
+    else:raise AssertionError('forged grouping accepted')
+    check('rejected grouping writes no receipt',not await admin.fetchval(
+        "select exists(select 1 from r_answer_receipts where store_id=$1 and request_id='m3-forged-group-1')",sid))
     # 현재 공개 판이 바뀌어도 재조회는 당시 저장 결과다. 신규 답변은 stale로 차단한다.
     await admin.execute("update knowledge_publications set knowledge_revision=knowledge_revision+1 where store_id=$1",sid)
     historical=await save("m3-answer-first")

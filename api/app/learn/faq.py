@@ -192,7 +192,8 @@ async def v2_faq_rows(db:asyncpg.Connection,*,store_id:int) -> list[dict]:
             and k.published_version_id is not null and (
               (k.card_id=rc.card_id and k.published_version_id=rc.card_version_id)
               or (rc.card_id is null and owner_result.result->>'status' in ('LINKED','PUBLISHED')
-                  and k.card_id::text=owner_result.result->>'card_id'))
+                  and k.card_id::text=owner_result.result->>'card_id'
+                  and k.published_version_id::text=owner_result.result->>'published_card_version_id'))
         join card_versions v on v.store_id=k.store_id and v.version_id=k.published_version_id
         join task_categories tc on tc.store_id=k.store_id and tc.category_id=k.category_id
             and tc.deleted_at is null and tc.is_enabled=true
