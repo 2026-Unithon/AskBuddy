@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     # 측정 도구의 오차가 측정하려는 효과보다 크면 실험이 성립하지 않으므로 0.0 을 기본으로 둔다.
     # 0.2 단위로 올려가며 다양성 이득이 있는지는 하네스로 확인한다
     extract_temperature: float = 0.0
+    # PDF 를 모델에 어떻게 넣는가. A/B/C 실험용 (W1 결함3 후속).
+    #   TEXT   — pypdf 텍스트만. 기존 동작이자 대조군. 표 구조가 깨질 수 있다
+    #   FILE   — PDF 원본만. Gemini 가 페이지를 직접 읽는다
+    #   BOTH   — 둘 다. 잃는 것이 없는 대신 페이지마다 비용이 든다
+    #   HYBRID — 텍스트 + 그림이 있는 페이지가 있을 때만 원본을 붙인다 (비용 절충)
+    # 어느 쪽이 정확한지는 측정 전까지 모른다. 기본값은 결함3 수정본인 HYBRID 다.
+    # TEXT 는 그 수정 이전 동작이므로 실험에서 대조군으로만 명시 지정한다.
+    pdf_input_mode: Literal["TEXT", "FILE", "BOTH", "HYBRID"] = "HYBRID"
 
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""

@@ -13,13 +13,21 @@ from app.notifications.service import (
 logger = logging.getLogger(__name__)
 
 
-def final_job_status(*, total: int, failed: int, cards: int) -> str:
+def final_job_status(*, total: int, failed: int, cards: int,
+                     partial: bool = False) -> str:
+    """`partial` 은 자료는 끝났지만 그 안의 구간 일부를 잃었다는 뜻이다.
+
+    구간을 버리고도 카드가 나왔다는 이유로 성공이라고 적으면, 점주는 빠진
+    내용을 영영 모른다.
+    """
     if failed == total:
         return "FAILED"
     if failed > 0:
         return "PARTIAL"
     if cards == 0:
         return "NO_RESULT"
+    if partial:
+        return "PARTIAL"
     return "SUCCEEDED"
 
 
@@ -99,9 +107,30 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     error_code = "NO_RESULT"
                     error_message = "추출된 업무 카드가 없습니다."
                 else:
-                    result_status = "SUCCEEDED"
-                    error_code = None
-                    error_message = None
+                    # 카드가 나왔어도 잃은 구간이 있으면 성공으로 적지 않는다
+                    lost = await conn.fetchrow(
+                        """
+                        select segments_total, segments_failed
+                        from ingest_job_sources
+                        where store_id = $1 and job_id = $2 and source_id = $3
+                        """,
+                        store_id,
+                        job_id,
+                        source_id,
+                    )
+                    failed_segments = int(
+                        (lost and lost["segments_failed"]) or 0)
+                    if failed_segments:
+                        result_status = "PARTIAL"
+                        error_code = "PARTIAL_EXTRACTION"
+                        error_message = (
+                            f"자료의 일부 구간 {failed_segments}/"
+                            f"{lost['segments_total']}개를 읽지 못했습니다."
+                        )
+                    else:
+                        result_status = "SUCCEEDED"
+                        error_code = None
+                        error_message = None
                 await conn.execute(
                     """
                     update ingest_job_sources

@@ -36,6 +36,10 @@
 - [ ] 파일 전송/해시/등록, source 처리의 제한된 동시성·timeout·취소/실패 예산을 실측 후 도입한다. 무제한 병렬화하지 않는다.
 - [ ] 중복 업로드·작업 접수 실패 복구·재시도에서 성공 자료를 잃거나 중복 처리하지 않게 한다.
 - [ ] 실제 접수/작업 ID를 보존하고 파일별 단계/부분 실패/재시도를 보여준다. 임의 퍼센트/남은 시간은 쓰지 않는다.
+  - [ ] **점주 화면이 `PARTIAL` 을 표시한다.** 2026-09-19 서버가 구간 부분 실패를 정직하게 보고하기 시작했으나 `web/` 은 아직 이 상태를 모른다. `ingest_job_sources.status='PARTIAL'`·`error_code='PARTIAL_EXTRACTION'`·`segments_total`/`segments_failed` 를 화면 문구로 옮긴다. 성공과 부분 성공을 같은 모양으로 그리지 않는다. 작업 전 `web-async-state-check` 스킬을 쓴다.
+  - [ ] **실패 구간 재처리 경로를 만든다.** `failed_segment_ids` 에 잃은 구간 이름이 남지만 "다시 시도" API·UI 가 없다. 자료 전체 재처리와 해당 구간만 재처리를 구분하고, 재처리가 이미 적힌 사실을 중복으로 만들지 않는지 확인한다(원장 중복 열쇠는 `unit`·`polarity`·`conditions`·`exceptions` 를 포함하도록 고쳤다).
+
+  근거: [W/R 감사 2026-09-19](../dev/review/WR_IMPLEMENTATION_AUDIT_20260919.md) 결함 2, migration `20260919120000_w_partial_segment_extraction.sql`, 검증 `api/scripts/verify_w_partial_extraction.py`.
 - [ ] 전송 중 화면 이탈의 제약과 서버 접수 후 백그라운드 처리를 구분한다. 화면 이동 가능과 worker 재시작 안전성을 혼동하지 않는다.
 - [ ] 처리 중 카드 목록/수정/조회가 응답하는지, 프로세스 재시작 뒤 고아 작업을 회수하는지 검증한다. 회수 구현은 J2와 연결한다.
 

@@ -131,13 +131,23 @@ async def ingest_sources(
     store_dir: Path,
     manifest: dict[str, Any],
     uploaded_by: int,
+    only_types: set[str] | None = None,
+    only_keys: set[str] | None = None,
 ) -> dict[int, str]:
     """manifest 의 파일을 Storage 에 올리고 sources 행을 만든 뒤 파이프라인을 돌린다.
 
     source_id → source_key 매핑을 돌려준다. 어느 자료에서 나온 카드인지 되짚기 위함이다.
+
+    `only_types` 를 주면 그 유형만 올린다. 한 축(예: PDF 입력 방식)만 비교할 때
+    영상 STT 까지 매 반복 다시 돌리면 비용이 수십 배로 늘고, 비교와 무관한
+    변동이 결과에 섞인다. **분모도 그 유형으로 좁혀서 보고해야 한다.**
     """
     mapping: dict[int, str] = {}
     for entry in manifest["sources"]:
+        if only_types and entry["type"] not in only_types:
+            continue
+        if only_keys and entry["source_key"] not in only_keys:
+            continue
         path = store_dir / entry["file"]
         data = path.read_bytes()
         object_path = storage.build_object_path(store_id, entry["type"], path.name)
@@ -437,6 +447,12 @@ async def main() -> int:
                     help="이미 올린 자료를 다시 태운다. 업로드와 STT 를 건너뛰므로 "
                          "추출 변동만 분리해서 잴 수 있다")
     ap.add_argument("--notes", default=None)
+    ap.add_argument("--only-source", default=None,
+                    help="쉼표로 구분한 source_key 만 처리한다. 자료 하나로 축을 "
+                         "빠르게 떠볼 때 쓴다. 반복 1회는 방향 탐색이지 판정이 아니다")
+    ap.add_argument("--only-type", default=None,
+                    help="쉼표로 구분한 source_type 만 처리한다 (예: SCAN). "
+                         "한 축만 비교할 때 쓴다. 분모도 함께 좁혀 보고한다")
     ap.add_argument("--campaign", default=None,
                     help="사전등록 캠페인 JSON. holdout 을 열 때는 필수다")
     ap.add_argument("--campaign-candidate", default=None,
@@ -717,7 +733,12 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
         await run_pipeline(store_id, [int(r["source_id"]) for r in rows], run_id)
     else:
         print("  자료 적재")
-        mapping = await ingest_sources(conn, store_id, store_dir, manifest, owner)
+        only = ({t.strip().upper() for t in args.only_type.split(',')}
+                if getattr(args, 'only_type', None) else None)
+        keys = ({k.strip() for k in args.only_source.split(',')}
+                if getattr(args, 'only_source', None) else None)
+        mapping = await ingest_sources(conn, store_id, store_dir, manifest,
+                                       owner, only_types=only, only_keys=keys)
         print("  추출 파이프라인")
         await run_pipeline(store_id, list(mapping), run_id)
 

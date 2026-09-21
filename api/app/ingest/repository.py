@@ -232,13 +232,31 @@ async def insert_facts(
 # 사실의 소유자는 카드가 아니라 자료다. 카드를 다시 조립해도 사실은 남는다.
 # legacy facts 와 당분간 둘 다 쓴다 — 코드 이전이 끝나면 legacy 를 끊는다.
 
-def fact_content_hash(subject: str, variant: str | None, attribute: str, value: str) -> str:
+def fact_content_hash(
+    subject: str, variant: str | None, attribute: str, value: str,
+    *,
+    unit: str | None = None,
+    polarity: str | None = None,
+    conditions: list | None = None,
+    exceptions: list | None = None,
+) -> str:
     """같은 자료에서 같은 사실이 두 번 들어오는 것을 막는 열쇠.
 
-    재추출은 흔한 일이다. 값이 같으면 같은 사실로 보고 새 행을 만들지 않는다.
+    재추출은 흔한 일이다. 완전히 같은 주장이면 새 행을 만들지 않는다.
+
+    단위·부정·조건·예외까지 열쇠에 넣는다. 값만 보면
+    `여름엔 얼음 3개` 와 `겨울엔 얼음 3개`, `넣는다` 와 `넣지 않는다`,
+    `275 ml` 와 `275 g` 이 한 사실로 합쳐져 뒤엣것이 조용히 사라진다.
+    조건·예외는 순서가 뜻을 바꾸지 않으므로 정렬해서 비교한다.
     """
+    def _norm_list(items: list | None) -> str:
+        # 없음의 두 표현(None·[])을 같게 두고, 순서 차이로 중복을 만들지 않는다
+        return "\u001f".join(sorted(str(i).strip() for i in (items or [])))
+
     raw = "|".join((subject.strip(), (variant or "").strip(),
-                    attribute.strip(), value.strip()))
+                    attribute.strip(), value.strip(),
+                    (unit or "").strip(), (polarity or "AFFIRM").strip(),
+                    _norm_list(conditions), _norm_list(exceptions)))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -263,7 +281,9 @@ async def insert_source_facts(
     default_locator = json.dumps(locator, ensure_ascii=False)
     for f in facts:
         digest = fact_content_hash(
-            f["subject"], f.get("variant"), f["attribute"], f["value"])
+            f["subject"], f.get("variant"), f["attribute"], f["value"],
+            unit=f.get("unit"), polarity=f.get("polarity"),
+            conditions=f.get("conditions"), exceptions=f.get("exceptions"))
         # 사실마다 근거 위치가 다르면 그 값을 쓴다. 없으면 자료 단위 기본값
         payload = (json.dumps(f["locator"], ensure_ascii=False)
                    if f.get("locator") else default_locator)
