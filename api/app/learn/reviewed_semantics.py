@@ -19,6 +19,7 @@ from app.learn.answer_validation import (
 )
 from app.learn.planner import Decision, policy_action
 from app.learn.semantic_proposals import SemanticProposal, proposal_input, validate_proposal
+from app.learn.reviewed_grouping import GroupingReview, GroupingEvidence, reviewed_context
 
 
 class FactReview(Contract):
@@ -47,6 +48,7 @@ class ReviewedProposal(Contract):
     interpretation: InterpretationReview | None
     reviewer: str = Field(min_length=1, max_length=100)
     review_reference: str = Field(min_length=1, max_length=500)
+    grouping: GroupingReview | None = None
 
     @model_validator(mode='after')
     def admissible(self):
@@ -58,6 +60,8 @@ class ReviewedProposal(Contract):
             raise ValueError('ANSWER requires a separate human interpretation review')
         if self.proposal.plan.action in ('REFUSE', 'SAFE_ROUTE'):
             raise ValueError('policy actions belong to the server policy')
+        if self.grouping is not None and self.proposal.plan.action != 'ESCALATE':
+            raise ValueError('only unresolved delivery can be grouped')
         return self
 
 
@@ -105,6 +109,7 @@ def apply_reviewed(search, *, store_id, question, user_turns, baseline,
     proposal = validate_proposal(match.proposal.model_dump(), search, payload)
     plan = proposal.plan
     resolved = baseline.resolved
+    semantic_context = None
     if plan.action == 'ANSWER':
         review = match.interpretation
         assessment = SuitabilityAssessment(store_id=str(store_id), snapshot_id=search.snapshot.snapshot_id,
@@ -119,8 +124,29 @@ def apply_reviewed(search, *, store_id, question, user_turns, baseline,
             return baseline, None
         # The reviewed/model UUID never becomes a reusable context capability.
         plan = plan.model_copy(update={'context_id': context_id or uuid4()})
+        from app.learn.clarification_scope import validate_options
+        validate_options(search, plan=plan, slots=baseline.confirmed_slots,
+            entity_id=match.interpretation.entity_id if match.interpretation else None,
+            predicate=match.interpretation.predicate if match.interpretation else None)
+    elif match.grouping is not None:
+        scope = match.grouping
+        for key in ('entity', 'predicate', 'temperature', 'size'):
+            value = getattr(scope, key)
+            confirmed = baseline.confirmed_slots.get(key)
+            allowed = {value}
+            if key == 'entity':
+                allowed |= {c.title for c in search.snapshot.cards if c.entity_id == value}
+            if key == 'predicate':
+                from app.learn.planner import PREDICATES
+                allowed.add(PREDICATES.get(value, (value, ()))[0])
+            if confirmed and confirmed not in allowed:
+                raise ValueError('group scope contradicts confirmed context')
+        evidence = GroupingEvidence(str(store_id), search.snapshot.snapshot_hash, question, match.approval_id, scope)
+        semantic_context = reviewed_context(search.snapshot, evidence=evidence, question=question)
+        resolved = ResolvedSelection(scope.entity, scope.predicate, ((scope.temperature,scope.size),),
+            question, grouping_evidence=evidence)
     # Model slots are proposals, not confirmed values. Model grouping IDs are rejected above.
-    return Decision(plan, resolved, dict(baseline.confirmed_slots), None), match.approval_id
+    return Decision(plan, resolved, dict(baseline.confirmed_slots), semantic_context), match.approval_id
 
 
 def product_decision(search, *, settings, **kwargs):

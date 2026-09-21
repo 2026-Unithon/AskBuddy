@@ -111,4 +111,58 @@ async def verify(pool,admin,seed):
     from app.learn.faq import list_faqs
     faqs=await list_faqs(admin,store_id,min_questions=1,limit=100)
     check('FAQ legacy and v2 current-approval query executes',isinstance(faqs,list))
+    # Exercise the real R receiver with a synthetic W completion and existing approved index.
+    from app.reg.hybrid import read_current_index
+    snapshot,_,_=await read_current_index(admin,store_id=store_id)
+    card=snapshot.cards[0]
+    reply=await submit('owner-published-roundtrip','합성 지식 반영',3)
+    claimed=await claim_owner_event(pool,store_id=store_id)
+    completion=dict(store_id=store_id,event_id=int(claimed['event_id']),claim_token=claimed['claim_token'])
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await finish_owner_event(conn,**completion,result=ApplyOwnerAnswerResult(
+                    status='PUBLISHED',card_id=card.card_id,knowledge_revision='999999'))
+    except ApiError:check('unpublished W revision cannot complete delivery',True)
+    else:raise AssertionError('fabricated publication accepted')
+    check('invalid completion leaves knowledge pending',await admin.fetchval(
+        'select status from r_owner_knowledge_states where store_id=$1 and owner_answer_id=$2',
+        store_id,int(reply['owner_answer_id']))=='PENDING')
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                with patch('app.learn.owner_publication.create_notification_event',side_effect=RuntimeError('synthetic failure')):
+                    await finish_owner_event(conn,**completion,result=ApplyOwnerAnswerResult(
+                        status='PUBLISHED',card_id=card.card_id,knowledge_revision=snapshot.knowledge_revision))
+    except RuntimeError:pass
+    else:raise AssertionError('notification failure was not injected')
+    check('completion notification failure rolls back state and consumption',await admin.fetchval(
+        "select status from r_owner_knowledge_states where store_id=$1 and owner_answer_id=$2",
+        store_id,int(reply['owner_answer_id']))=='PENDING' and not await admin.fetchval(
+        "select exists(select 1 from outbox_consumptions where store_id=$1 and event_id=$2 and consumer='W_OWNER_ANSWER_V2')",
+        store_id,completion['event_id']))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await finish_owner_event(conn,**completion,result=ApplyOwnerAnswerResult(
+                status='PUBLISHED',card_id=card.card_id,knowledge_revision=snapshot.knowledge_revision))
+    check('completion pins published card version',await admin.fetchval(
+        "select result->>'published_card_version_id' from r_owner_knowledge_states where store_id=$1 and owner_answer_id=$2",
+        store_id,int(reply['owner_answer_id']))==card.card_version_id)
+    check('knowledge completion creates durable recipient notification',await admin.fetchval(
+        "select count(*) from notification_events where store_id=$1 and aggregate_id=$2 and dedupe_key like 'r-knowledge-ready:%'",
+        store_id,int(reply['owner_answer_id']))>0)
+    check('published completion consumed once',await claim_owner_event(pool,store_id=store_id) is None)
+    from app.learn.faq import v2_faq_rows
+    category=await admin.fetchval("insert into task_categories(store_id,category_name) values($1,'합성 왕복') returning category_id",store_id)
+    await admin.execute('update knowledge_cards set category_id=$3 where store_id=$1 and card_id=$2',store_id,int(card.card_id),category)
+    receipt_ids={str(r['receipt_id']) for r in await admin.fetch(
+        'select receipt_id from r_answer_receipts where store_id=$1 and pending_id=$2',store_id,pending)}
+    rows=await v2_faq_rows(admin,store_id=store_id)
+    check('published owner answer enters FAQ through exact card version',bool(receipt_ids) and receipt_ids <= {str(r['receipt_id']) for r in rows})
+    # Roll back the synthetic card change after checking later versions cannot inherit the old answer.
+    async with admin.transaction():
+        await admin.execute('update knowledge_cards set published_version_id=null where store_id=$1 and card_id=$2',store_id,int(card.card_id))
+        rows=await v2_faq_rows(admin,store_id=store_id)
+        check('withdrawn card removes owner FAQ association',not receipt_ids & {str(r['receipt_id']) for r in rows})
+        await admin.execute('update knowledge_cards set published_version_id=$3 where store_id=$1 and card_id=$2',store_id,int(card.card_id),int(card.card_version_id))
     print(f'Verified {len(passed)} owner delivery checks')

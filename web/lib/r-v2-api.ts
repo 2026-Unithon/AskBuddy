@@ -59,8 +59,8 @@ export const rSessions = (token: string, signal?: AbortSignal) =>
 export const rCreateSession = (token: string, request_id: string) =>
   request<{ session_id: string }>("/sessions", token, undefined, { request_id });
 export const rAsk = (token: string, body: RChatInput) => request<RAnswer>("/chat", token, undefined, body);
-export const rHistory = (token: string, session: string, after: string | null, signal?: AbortSignal) =>
-  request<{ messages: RMessage[]; next_after: string | null }>(`/sessions/${encodeURIComponent(session)}/history${after ? `?after=${after}` : ""}`, token, signal);
+export const rHistory = (token: string, session: string, before: string | null, signal?: AbortSignal) =>
+  request<{ messages: RMessage[]; next_before: string | null; has_pending_updates: boolean }>(`/sessions/${encodeURIComponent(session)}/history?latest=true${before ? `&before=${encodeURIComponent(before)}` : ""}`, token, signal);
 export const rPendingList = (token: string, after: string | null, signal?: AbortSignal) =>
   request<{ questions: { pending_id: string; question: string; status: string }[]; next_after: string | null }>(`/pending${after ? `?after=${after}` : ""}`, token, signal);
 export const rPendingDetail = (token: string, id: string, signal?: AbortSignal) =>

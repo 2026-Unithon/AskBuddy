@@ -10,7 +10,7 @@ export const rKeys = {
   root: (storeId: number | null, userId: number | null) => ["r-v2", storeId, userId] as const,
   sessions: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "sessions"] as const,
   notifications: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "notifications"] as const,
-  history: (storeId: number | null, userId: number | null, session: string | null) => [...rKeys.root(storeId, userId), "history", session] as const,
+  history: (storeId: number | null, userId: number | null, session: string | null) => [...rKeys.root(storeId, userId), "history", session, "latest"] as const,
   pending: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "pending"] as const,
   detail: (storeId: number | null, userId: number | null, id: string | null) => [...rKeys.pending(storeId, userId), id] as const,
 };
@@ -27,12 +27,9 @@ export function rSessionsQuery(token: string | null, store: number | null, user:
 export function rHistoryQuery(token: string | null, store: number | null, user: number | null, session: string | null) {
   return infiniteQueryOptions({ queryKey: rKeys.history(store, user, session),
     queryFn: ({ signal, pageParam }) => rHistory(token!, session!, pageParam, signal),
-    initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
+    initialPageParam: null as string | null, getNextPageParam: (page) => page.next_before,
     enabled: Boolean(token && store && user && session),
-    refetchInterval: (query) => {
-      const messages = query.state.data?.pages.flatMap((page) => page.messages) ?? [];
-      return messages.some((m) => m.knowledge_status === "PENDING") || messages.at(-1)?.response?.action === "ESCALATE" ? 5_000 : false;
-    },
+    refetchInterval: (query) => query.state.data?.pages[0]?.has_pending_updates ? 5_000 : false,
   });
 }
 export function rPendingQuery(token: string | null, store: number | null, user: number | null) {

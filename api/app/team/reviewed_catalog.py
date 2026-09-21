@@ -29,6 +29,8 @@ def build_catalog(items, *, acceptance_reference):
             question=payload['question'],user_turns=payload['user_turns'],confirmed_slots=item['confirmed_slots'],
             proposal=row['proposal'],interpretation=item['interpretation'],reviewer=label.reviewer,
             review_reference=label.reason+'; observation='+row['row_hash']))
+        if item.get('grouping') is not None:
+            entries[-1]['grouping'] = item['grouping']
         searches.append(search)
     catalog=ReviewedCatalog(acceptance_reference=acceptance_reference,entries=entries)
     for search,entry in zip(searches,catalog.entries):

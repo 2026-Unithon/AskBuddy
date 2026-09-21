@@ -51,6 +51,7 @@ class ResolvedSelection:
     variants: tuple[tuple[str | None, str | None], ...]
     question: str = ""
     assessment: SuitabilityAssessment | None = None
+    grouping_evidence: object | None = None
 
 
 def question_hash(question: str) -> str:

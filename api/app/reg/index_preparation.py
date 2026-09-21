@@ -10,7 +10,7 @@ from uuid import uuid4
 from app.config import get_settings
 from app.contracts.errors import ErrorDetail, ERROR_TABLE
 from app.contracts.hashing import digest, knowledge_content_payload, snapshot_digest
-from app.contracts.publication import PrepareIndexResult
+from app.contracts.publication import PrepareIndexRequest, PrepareIndexResult
 from app.contracts.snapshot import KnowledgeContent, PublishedKnowledgeSnapshot
 from app.contracts.usage import UsageContext
 from app.errors import ApiError
@@ -65,7 +65,7 @@ def _prepared(row) -> PrepareIndexResult:
 
 async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key: str,
                         expected_publication_revision: int, content: KnowledgeContent,
-                        usage_context: UsageContext, embedder=None) -> PrepareIndexResult:
+                        usage_context: UsageContext, embedder=None, request_binding: str | None = None) -> PrepareIndexResult:
     """신뢰된 W 승인 preview를 준비한다. HTTP payload/LLM에 직접 연결하지 않는다.
 
     crash 뒤 lease가 지난 같은 키는 새 attempt로 복구한다. TTL 지난 준비는 새 키가 필요하다.
@@ -83,8 +83,11 @@ async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key:
         raise ValueError("r-block-index/v1 requires 1536 dimensions")
     model = settings.embedding_model
     content_hash = digest(knowledge_content_payload(content))
-    request_hash = digest(dict(content_hash=content_hash, model=model, config=INDEX_CONFIG_VERSION,
-                               expected_publication_revision=expected_publication_revision))
+    request_payload = dict(content_hash=content_hash, model=model, config=INDEX_CONFIG_VERSION,
+                           expected_publication_revision=expected_publication_revision)
+    if request_binding is not None:
+        request_payload['producer_request_hash'] = request_binding
+    request_hash = digest(request_payload)
     docs = documents(content)
     claim = uuid4()
     async with pool.acquire() as conn:
@@ -158,6 +161,33 @@ async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key:
             row = await conn.fetchrow("""update r_index_preparations set state='PREPARED'
                 where store_id=$1 and prepared_id=$2 returning *""",store_id,prepared_id)
     return _prepared(row)
+
+
+async def prepare_index_request(pool, *, request: PrepareIndexRequest, content: KnowledgeContent,
+                                usage_context: UsageContext, embedder=None) -> PrepareIndexResult:
+    """Typed W entry point. W still owns approval/card CAS and publication.
+
+    body_hash = digest(request.model_dump(mode='json', exclude={'idempotency'})).
+    The legacy expected_card_revisions tuple has no agreed card/revision mapping.
+    Reject it rather than interpreting draft revisions as immutable version IDs.
+    W must still perform the current-draft CAS in the publication transaction.
+    """
+    request = PrepareIndexRequest.model_validate(request.model_dump(mode='json'))
+    content = KnowledgeContent.model_validate(content.model_dump(mode='json'))
+    binding = digest(request.model_dump(mode='json', exclude={'idempotency'}))
+    versions = {c.card_id: c.card_version_id for c in content.cards}
+    if (request.scope.member_id is None or request.scope.store_id != content.store_id
+            or request.content_hash != digest(knowledge_content_payload(content))
+            or request.idempotency.body_hash != binding
+            or len(set(request.card_ids)) != len(request.card_ids) or set(request.card_ids) != set(versions)
+            or request.embedding_model != get_settings().embedding_model
+            or request.glossary_version != content.glossary_version
+            or request.renderer_version != content.renderer_version
+            or request.expected_card_revisions):
+        return _failed('INVALID_REFERENCE', request.idempotency.key)
+    return await prepare_index(pool, store_id=int(request.scope.store_id), member_id=int(request.scope.member_id),
+        idempotency_key=request.idempotency.key, expected_publication_revision=int(request.expected_publication_revision),
+        content=content, usage_context=usage_context, embedder=embedder, request_binding=binding)
 
 
 async def activate_prepared_index(conn, *, store_id: int, prepared_id: int, snapshot_id: int):

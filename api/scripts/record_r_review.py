@@ -40,10 +40,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--store', choices=('store-a', 'store-b'), required=True)
     parser.add_argument('--queue', required=True, help='filename inside this store r-review directory')
-    parser.add_argument('--decision', help='explicit human decision JSON filename in same directory')
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--decision', help='explicit human decision JSON filename in same directory')
+    source.add_argument('--external-import', help='validated external AI proposal import filename')
+    parser.add_argument('--external-package')
+    parser.add_argument('--redactions', help='same private pseudonym map used for the external package')
+    parser.add_argument('--meaning-id')
+    parser.add_argument('--reviewer')
+    parser.add_argument('--confirm-external-proposal', action='store_true',
+        help='attest that this reviewer explicitly checked this individual AI proposal')
     parser.add_argument('--expected-hash')
     parser.add_argument('--request-id')
     args = parser.parse_args()
+    confirmation = (args.external_package, args.meaning_id, args.reviewer, args.confirm_external_proposal)
+    if args.external_import and not all(confirmation):
+        parser.error('external import requires package, meaning ID, reviewer and explicit confirmation')
+    if not args.external_import and (any(confirmation) or args.redactions):
+        parser.error('external confirmation options require --external-import')
     root = (Path(__file__).resolve().parents[1] / 'eval/data' / args.store).resolve(strict=True)
     directory = (root / 'r-review').resolve(strict=True)
     if directory.parent != root:
@@ -58,11 +71,20 @@ def main():
     prefix = 'intake-' + queue['queue_hash'].split(':')[1] + '-'
     paths = sorted(directory.glob(prefix + '*.json'))
     state = checked_intake(queue, read(paths[-1].name)) if paths else initial
-    if args.decision:
+    if args.decision or args.external_import:
         if not args.expected_hash or not args.request_id:
             parser.error('decision requires expected hash and request ID')
+        if args.external_import:
+            from app.team.real_data_review import prepare_dev_review
+            from app.team.external_review import confirmed_decision
+            review = prepare_dev_review(root.parent, store=args.store)
+            decision = confirmed_decision(review, queue, read(args.external_package), read(args.external_import),
+                meaning_id=args.meaning_id, reviewer=args.reviewer,
+                redactions=read(args.redactions) if args.redactions else None)
+        else:
+            decision = read(args.decision)
         state = record_decision(queue, state, expected_hash=args.expected_hash,
-            request_id=args.request_id, decision=read(args.decision))
+            request_id=args.request_id, decision=decision)
     save_revision(directory, state)
     print(json.dumps(dict(store=args.store, revision=state['revision'], intake_hash=state['intake_hash'],
         reviewed=len(state['decisions']), remaining=len(queue['selected_meaning_ids'])-len(state['decisions']),

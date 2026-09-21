@@ -225,6 +225,21 @@ async def verify(pool, admin):
             where store_id=$1 and idempotency_key='m2-crash-case'""",sid)
         recovered = await prepare_index(pool,**args,idempotency_key="m2-crash-case",embedder=embed)
         check("expired claim recovers as next accounted attempt",recovered.status=="PREPARED" and calls[-1].attempt_no==2)
+        from app.contracts.publication import PrepareIndexRequest
+        from app.contracts.hashing import digest, knowledge_content_payload
+        from app.reg.index_preparation import prepare_index_request
+        body=dict(scope=dict(store_id=str(sid),member_id=str(mid)),card_ids=[c.card_id for c in content.cards],
+            content_hash=digest(knowledge_content_payload(content)),expected_publication_revision='7',
+            expected_card_revisions=[],embedding_model='synthetic-1536',glossary_version=content.glossary_version,
+            renderer_version=content.renderer_version)
+        request=PrepareIndexRequest(**body,idempotency=dict(key='m2-typed-prepare',body_hash=digest(body)))
+        pointer=await admin.fetchval('select current_snapshot_id from knowledge_publications where store_id=$1',sid)
+        typed=await prepare_index_request(pool,request=request,content=content,usage_context=usage,embedder=embed)
+        call_count=len(calls)
+        replay=await prepare_index_request(pool,request=request,content=content,usage_context=usage,embedder=embed)
+        check('typed request durable idempotency',typed.status=='PREPARED' and replay==typed and len(calls)==call_count)
+        check('typed preparation never publishes',await admin.fetchval(
+            'select current_snapshot_id from knowledge_publications where store_id=$1',sid)==pointer)
     print(f"Verified {len(passed)} M2 DB checks")
     from app.reg.hybrid import read_current_index
     current,_,_=await read_current_index(admin,store_id=sid)

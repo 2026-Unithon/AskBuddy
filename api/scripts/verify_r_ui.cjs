@@ -43,7 +43,13 @@ const path = require('node:path');
         if (state.unavailable) { await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'V2_UNAVAILABLE', message: '새 답변 경로가 아직 활성화되지 않았습니다.' } }) }); return; }
         if (body) { state.sessions = [{ session_id: '1' }]; payload = { session_id: '1' }; }
         else payload = { sessions: state.sessions };
-      } else if (p.includes('/history')) payload = { messages: state.messages, next_after: null };
+      } else if (p.includes('/history')) {
+        const before = Number(url.searchParams.get('before') || Number.MAX_SAFE_INTEGER);
+        const available = state.messages.filter(m => Number(m.message_id) < before);
+        const rows = available.slice(-100);
+        payload = { messages: rows, next_before: available.length > 100 ? rows[0].message_id : null,
+          has_pending_updates: (state.pending && !state.answers.length) || state.answers.some(a => ['PENDING', 'REVIEW'].includes(a.knowledge_status)) };
+      }
       else if (p.includes('/citations/')) payload = { title: '합성 라테', text: 'HOT 합성 라테 물 225ml', source_availability: 'AVAILABLE', card_version_id: '2' };
       else if (p === '/learn/v2/chat') {
         state.calls++;
@@ -104,7 +110,7 @@ const path = require('node:path');
     state.failNext = true;
     await page.getByLabel('업무 질문').fill('미확인 업무');
     await page.getByRole('button', { name: '질문하기', exact: true }).click();
-    await page.getByRole('alert').waitFor();
+    await page.getByTestId('r-chat').getByRole('alert').waitFor();
     check('failed submit retains input', await page.getByLabel('업무 질문').inputValue() === '미확인 업무');
     await page.getByRole('button', { name: '다시 확인', exact: true }).click();
     await page.getByText('사장님께 확인을 요청했어요.', { exact: true }).waitFor();
@@ -150,7 +156,7 @@ const path = require('node:path');
     await page.getByLabel('업무 질문').fill('작성 중인 다른 질문');
     state.failNext = true;
     await page.getByTestId('r-policy-confirm').click();
-    await page.getByRole('alert').waitFor();
+    await page.getByTestId('r-chat').getByRole('alert').waitFor();
     check('confirmation failure keeps draft and offers retry', await page.getByLabel('업무 질문').inputValue() === '작성 중인 다른 질문');
     await page.getByRole('button', { name: '다시 확인', exact: true }).click();
     await page.locator('[data-testid="r-policy-confirm"][disabled]').waitFor();

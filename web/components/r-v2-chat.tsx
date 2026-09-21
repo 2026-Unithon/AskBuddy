@@ -42,7 +42,7 @@ export default function RV2Chat() {
   const ask = useMutation({ mutationFn: (body: RChatInput) => rAsk(state.token!, body),
     onSuccess: async (_data, body) => { if (!body.policy_receipt_id) setInput(""); await client.invalidateQueries({ queryKey: rKeys.history(state.storeId, state.userId, body.session_id) }); },
   });
-  const messages = history.data?.pages.flatMap((page) => page.messages) ?? [];
+  const messages = history.data ? [...history.data.pages].reverse().flatMap((page) => page.messages) : [];
   useRPublicationRefresh(state.storeId, messages.filter((m) => m.knowledge_status && ["PUBLISHED", "LINKED"].includes(m.knowledge_status)).map((m) => `${m.owner_answer_id}:${m.revision}:${m.knowledge_status}`).join("|"));
   const last = messages.at(-1);
   const busy = ask.isPending || create.isPending;
@@ -60,18 +60,18 @@ export default function RV2Chat() {
       {history.error && <RError error={history.error} retry={() => void history.refetch()} />}
       {history.isFetching && !history.isLoading && <p role="status">대화 갱신 중…</p>}
       {history.data && messages.length === 0 && <p>궁금한 대상과 규격을 함께 알려주세요.</p>}
+      {history.hasNextPage && <button className={button} disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>이전 대화 기록 보기</button>}
       <ol className="space-y-4" aria-live="polite">{messages.map((m) => <li key={m.message_id} className="rounded-2xl border bg-white p-4 break-words">
         <p className="mb-2 font-semibold">{m.sender === "USER" ? "내 질문" : m.owner_answer_id ? "사장님 답변" : "Buddy"}</p>
         <p className="whitespace-pre-wrap">{m.content}</p>
-        {m.response?.action === "SAFE_ROUTE" && m.receipt_id && m.original_question && m.message_id === last?.message_id && !history.hasNextPage && <div className="mt-3 space-y-2">
+        {m.response?.action === "SAFE_ROUTE" && m.receipt_id && m.original_question && m.message_id === last?.message_id && <div className="mt-3 space-y-2">
           <p>이 질문을 사장님께 전달할 수 있어요. 확인 요청은 안전하다는 판정을 뜻하지 않습니다.</p>
           <button className={button} data-testid="r-policy-confirm" disabled={busy} onClick={() => ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: m.original_question!, policy_receipt_id: m.receipt_id! })}>사장님께 확인 요청</button>
         </div>}
         {m.owner_answer_id && <p className="mt-2 text-sm">답변 {m.revision} · 지식 반영: {({ PENDING: "대기", REVIEW: "검토 필요", LINKED: "기존 지식 연결", PUBLISHED: "공개 완료", FAILED: "실패" } as Record<string, string>)[m.knowledge_status ?? ""] ?? "확인 중"}</p>}
         {m.receipt_id && m.response?.citations.map((c, index) => <Citation key={index} receipt={m.receipt_id!} order={index+1} broken={c.source_availability !== "AVAILABLE"} />)}
-        {m.response?.action === "CLARIFY" && m.message_id === last?.message_id && !history.hasNextPage && m.context_revision !== null && <div className="mt-3 flex flex-wrap gap-2">{m.response.allowed_options.map((option) => <button className={button} disabled={busy} key={option} onClick={() => ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: option, option, context_id: m.response!.context_id!, context_revision: m.context_revision! })}>{option}</button>)}</div>}
+        {m.response?.action === "CLARIFY" && m.message_id === last?.message_id && m.context_revision !== null && <div className="mt-3 flex flex-wrap gap-2">{m.response.allowed_options.map((option) => <button className={button} disabled={busy} key={option} onClick={() => ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: option, option, context_id: m.response!.context_id!, context_revision: m.context_revision! })}>{option}</button>)}</div>}
       </li>)}</ol>
-      {history.hasNextPage && <button className={button} disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>다음 대화 기록 보기</button>}
       {ask.error && <RError error={ask.error} retry={() => ask.variables && ask.mutate(ask.variables)} />}
       {ask.isPending && <p role="status">{ask.variables?.policy_receipt_id ? "확인 요청을 보내고 있어요…" : "근거를 확인하고 있어요…"}</p>}
       <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (input.trim() && !busy) ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: input }); }}>

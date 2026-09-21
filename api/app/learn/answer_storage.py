@@ -20,6 +20,7 @@ from app.learn.question_contexts import (
 )
 from app.notifications.service import create_pending_question_notification
 from app.learn.semantic_grouping import explicit_key, explicit_context
+from app.learn.reviewed_grouping import VERSION as REVIEWED_VERSION, reviewed_context, reviewed_key
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class StoredReply:
 
 def pending_key(*, store_id: int, semantic_context: dict | None) -> str:
     if isinstance(semantic_context,dict) and "version" in semantic_context:
+        if semantic_context['version'] == REVIEWED_VERSION:
+            return reviewed_key(store_id=store_id, context=semantic_context)
         key=explicit_key(store_id=store_id,context=semantic_context)
         return key or digest(dict(store_id=store_id,version="r-semantic/invalid",occurrence=str(uuid4())))
     required={"entity","predicate","variant","conditions","policy_scope"}
@@ -173,8 +176,11 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 validate_context_question(question=question,resolved=resolved,choice=choice,
                     original_question=context.context.original_question)
             if isinstance(semantic_context,dict) and 'version' in semantic_context:
-                expected_context=explicit_context(snapshot,question=resolved.question,entity=resolved.entity_id,
-                    predicate=resolved.predicate,variants=resolved.variants,has_context=False)
+                if semantic_context['version'] == REVIEWED_VERSION:
+                    expected_context=reviewed_context(snapshot, evidence=resolved.grouping_evidence, question=resolved.question)
+                else:
+                    expected_context=explicit_context(snapshot,question=resolved.question,entity=resolved.entity_id,
+                        predicate=resolved.predicate,variants=resolved.variants,has_context=False)
                 if plan.action!='ESCALATE' or expected_context is None or semantic_context!=expected_context:
                     raise ApiError(422,'INVALID_CONTRACT','질문 묶음의 확정 근거가 일치하지 않습니다.')
             validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)

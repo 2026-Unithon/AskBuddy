@@ -329,6 +329,8 @@ async def verify(pool,admin,seed):
                 denied.json()['error']['code']=='EVALUATION_BUDGET_DENIED' and denied.json()['error']['retryable'] is False)
             check('budget denial creates no answer or pending',not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-evaluation-budget-denied')") and
                 before==await admin.fetchval('select count(*) from pending_questions where store_id=$1',seed['store_id']))
+            from verify_r_history import verify as verify_history
+            await verify_history(client,admin,seed,headers,staff_headers,check)
             settings.r_v2_enabled=False
             disabled=await chat("api-disabled-key",question)
             check("rollout flag disables v2 explicitly",disabled.status_code==503 and disabled.json()["error"]["code"]=="V2_UNAVAILABLE")
