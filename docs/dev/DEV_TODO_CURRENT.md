@@ -1,5 +1,7 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-21 공유: 최신 원격 main `db40813`을 R 브랜치에 통합했다. [공유 변경·담당별 다음 순서·Railway 점검](plan/R_TEAM_NEXT_20260921.md)을 먼저 참고한다. [최신 통합 검증](review/R_SHARE_VERIFICATION_20260921.md): 913 tests/119 subtests, migration 29개 및 R DB/API 회귀 통과. 이전 검증 기록은 당시 기준이다.
+
 2026-09-19 최신 순차 작업: [R ①~⑤ 구현·W 인계·차단 원인](plan/R_SEQUENCE_HANDOFF_20260919.md), [검증 기록](review/R_SEQUENCE_REVIEW_20260919.md). PR #18 병합 main `e8186f6` 기준이다. 외부 AI 판정은 회의 안건 1번으로 대기, 운영 로그 실제 확인도 회의 안건이다. 확정된 의미 범위의 exact-reviewed 병합·대상/온도/크기 명확화와 R 색인/완료 수신을 보강했다. 실제 catalog·품질 평가·운영 활성화·W producer/worker 연결은 아직 완료가 아니다. 아래 9개 커밋 ahead 표기는 병합 전 관찰이다.
 
 2026-09-19 W/R 전체 재대조: [현재 구현 단계·실제 남은 구현·회의 의존성](review/WR_IMPLEMENTATION_AUDIT_20260919.md). main pull은 변경 없음이며 R 작업 브랜치가 main보다 9개 커밋 앞선다. W는 원장 선저장 이후 revision·참조 카드·실제 snapshot 발행/점주 답변 소비자 연결이 남고, R은 일반 의미 경로 구현과 별개로 자유 표현 병합·범용 명확화 및 실자료 인수가 남는다. 아래 누적 체크박스는 이 감사와 최신 코드 근거를 함께 확인한다.
