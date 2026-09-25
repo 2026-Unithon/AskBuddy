@@ -27,12 +27,12 @@ async def _scan(mode, read_result, monkeypatch, tmp_path):
                         lambda conn, sid: _async({"scan_id": 1}))
     monkeypatch.setattr(pipeline.repo, "update_scan_result", noop)
     monkeypatch.setattr(pipeline, "_download",
-                        lambda conn, store, src: _async(pdf))
+                        lambda pool, store, src: _async(pdf))
     monkeypatch.setattr(pipeline.document, "read_pdf", lambda _p: read_result)
     import app.config
     monkeypatch.setattr(app.config, "get_settings", lambda: _Settings(mode))
     result = await pipeline._preprocess_scan(
-        None, 1, {"source_id": 7, "file_url": "x"})
+        _NullPool(), 1, {"source_id": 7, "file_url": "x"})
     return result, pdf
 
 
@@ -89,3 +89,18 @@ async def test_a_scan_without_text_layer_always_sends_the_document(
     for mode in ("TEXT", "FILE", "BOTH", "HYBRID"):
         (text, media, _), pdf = await _scan(mode, blank, monkeypatch, tmp_path)
         assert media == [pdf], f"{mode} arm 이 스캔본을 버렸다"
+
+
+class _NullPool:
+    """전처리는 풀을 받아 DB 호출마다 짧게 빌린다. 연결은 대역 repo 가 쓰지 않는다."""
+
+    def acquire(self):
+        return _NullLease()
+
+
+class _NullLease:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False

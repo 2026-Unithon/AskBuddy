@@ -115,14 +115,17 @@ async def test_lost_segments_are_recorded_on_the_job_source_row():
 
 
 @pytest.mark.asyncio
-async def test_nothing_is_recorded_when_no_segment_was_lost():
+async def test_no_lost_segment_overwrites_previous_record():
+    # 재시도로 되찾은 구간이 지난 실패 기록에 남으면 자료가 계속 PARTIAL 로 보인다
     from app.ingest.pipeline import ExtractionOutcome, _record_segment_failures
 
     conn = _RecordingConn()
     outcome = ExtractionOutcome([], [], 3, 0, [])
     await _record_segment_failures(conn, store_id=1, job_id=5, source_id=7,
                                    outcome=outcome)
-    assert conn.calls == []
+    assert len(conn.calls) == 1
+    _, args = conn.calls[0]
+    assert args == (1, 5, 7, 3, 0, None)
 
 
 @pytest.mark.asyncio

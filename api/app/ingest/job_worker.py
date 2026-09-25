@@ -12,6 +12,11 @@ from app.notifications.service import (
 
 logger = logging.getLogger(__name__)
 
+PARTIAL_RETRY_UNAVAILABLE_MESSAGE = (
+    "구간 구성이 바뀌어 잃은 구간만 다시 읽을 수 없습니다. 자료를 새로 올려 주세요."
+)
+PARTIAL_RETRY_FAILED_MESSAGE = "잃은 구간을 다시 읽다가 실패했습니다. 다시 시도해 주세요."
+
 
 def final_job_status(*, total: int, failed: int, cards: int,
                      partial: bool = False) -> str:
@@ -50,7 +55,8 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
             return
         source_ids = await conn.fetch(
             """
-            select source_id from ingest_job_sources
+            select source_id, failed_segment_ids, segments_total
+            from ingest_job_sources
             where store_id = $1 and job_id = $2 and status = 'QUEUED'
             order by source_id
             """,
@@ -73,7 +79,17 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     source_id,
                 )
 
-            await pipeline.process_source(store_id, source_id, job_id=job_id)
+            # PARTIAL 재시도면 잃은 구간만 다시 읽는다. 전체를 다시 돌리면 카드가 겹친다
+            lost_ids = row["failed_segment_ids"]
+            if lost_ids:
+                outcome = await pipeline.process_source(
+                    store_id, source_id, job_id=job_id,
+                    retry_segments=list(lost_ids),
+                    expected_segments_total=row["segments_total"],
+                )
+            else:
+                outcome = await pipeline.process_source(
+                    store_id, source_id, job_id=job_id)
 
             async with pool.acquire() as conn:
                 source = await conn.fetchrow(
@@ -96,7 +112,18 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     )
                     or 0
                 )
-                if source is None or source["status"] == "FAILED":
+                if lost_ids and source is not None and source["status"] == "FAILED":
+                    # 잃은 구간 재시도가 예외로 끝났다. 앞서 만든 카드는 그대로 있다.
+                    # FAILED 로 적으면 다음 재시도가 전체를 다시 돌려 카드가 겹치므로
+                    # PARTIAL 로 남기고 구간 기록도 건드리지 않는다
+                    result_status = "PARTIAL"
+                    error_code = "PARTIAL_RETRY_FAILED"
+                    detail = source["error_message"]
+                    error_message = (
+                        f"{PARTIAL_RETRY_FAILED_MESSAGE} ({detail})" if detail
+                        else PARTIAL_RETRY_FAILED_MESSAGE
+                    )[:1000]
+                elif source is None or source["status"] == "FAILED":
                     result_status = "FAILED"
                     error_code = "EXTRACTION_FAILED"
                     error_message = (
@@ -120,7 +147,12 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     )
                     failed_segments = int(
                         (lost and lost["segments_failed"]) or 0)
-                    if failed_segments:
+                    if outcome == pipeline.PARTIAL_RETRY_UNAVAILABLE:
+                        # 잃은 구간을 다시 읽지 못했다. 기존 카드는 두고 PARTIAL 로 남긴다
+                        result_status = "PARTIAL"
+                        error_code = "PARTIAL_RETRY_UNAVAILABLE"
+                        error_message = PARTIAL_RETRY_UNAVAILABLE_MESSAGE
+                    elif failed_segments:
                         result_status = "PARTIAL"
                         error_code = "PARTIAL_EXTRACTION"
                         error_message = (
@@ -189,6 +221,7 @@ async def _refresh_job(
                count(*) filter (where status = 'SUCCEEDED')::int as succeeded,
                count(*) filter (where status = 'FAILED')::int as failed,
                count(*) filter (where status = 'NO_RESULT')::int as no_result,
+               count(*) filter (where status = 'PARTIAL')::int as partial,
                coalesce(sum(card_count), 0)::int as cards
         from ingest_job_sources
         where store_id = $1 and job_id = $2
@@ -201,6 +234,7 @@ async def _refresh_job(
             total=int(counts["total"]),
             failed=int(counts["failed"]),
             cards=int(counts["cards"]),
+            partial=int(counts["partial"]) > 0,
         )
     else:
         status = "EXTRACTING"

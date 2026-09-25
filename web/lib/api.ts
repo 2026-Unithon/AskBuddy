@@ -729,7 +729,7 @@ export type IngestJobDetail = {
   title: string | null;
   status: IngestJobStatus;
   category_version: number;
-  counts: { sources: number; succeeded: number; failed: number; cards: number };
+  counts: { sources: number; succeeded: number; failed: number; partial: number; cards: number };
   sources: Array<{
     source_id: number;
     filename: string;
