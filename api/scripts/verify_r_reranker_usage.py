@@ -1,12 +1,16 @@
-"""실제 RERANK SDK adapter + 실제 usage DB. 외부 SDK 응답만 합성으로 대체한다."""
+"""실제 RERANK SDK adapter + 실제 usage DB의 저장 계약을 검증한다.
+
+DB 부하를 운영 지연 인수로 판정하지 않는다. 짧은 실행/정리 기한과 단계별
+멈춤은 test_r_reranker_lifecycle.py에서 검사하고 여기서는 여유 있는 유한 기한을 쓴다.
+"""
 import asyncio
 import json
 from types import SimpleNamespace as NS
-from unittest.mock import AsyncMock,Mock,patch
+from unittest.mock import AsyncMock,patch
 
 from app.contracts.usage import UsageContext
-from app.reg.hybrid import Candidate,SearchResult
-from app.reg.reranker import candidate_id,rerank
+from app.reg.hybrid import Candidate
+from app.reg.reranker import _model,candidate_id
 from app.usage import DbUsageSink
 from app.usage.repository import UsageWriteError
 
@@ -19,7 +23,6 @@ async def verify(pool,admin,seed):
         print('PASS RERANK usage',name)
     snap=seed['snapshot']
     candidates=tuple(Candidate(c.card_id,c.card_version_id,b.block_id,.4,.3,.05) for c in snap.cards for b in c.blocks)
-    search=SearchResult(snap,1,candidates,'합성 질문')
     ids=[candidate_id(c) for c in reversed(candidates)]
     calls=[]
     entered=asyncio.Event()
@@ -34,6 +37,7 @@ async def verify(pool,admin,seed):
         calls.append(key)
         entered.set()
         if mode=='wait':await asyncio.Event().wait()
+        if mode=='timeout':raise TimeoutError('synthetic provider timeout')
         text='{' if mode=='invalid-json' else json.dumps(dict(ids=['invented'])) if mode=='invalid-ids' else json.dumps(dict(ids=ids))
         return NS(text=text,model_version='gemini-3.6-flash',response_id='synthetic-rank-response',
             usage_metadata=NS(prompt_token_count=12,candidates_token_count=3,total_token_count=15))
@@ -41,13 +45,14 @@ async def verify(pool,admin,seed):
     close=AsyncMock()
     client=NS(aio=NS(models=NS(generate_content=generate),aclose=close))
     settings=NS(gemini_model='gemini-3.6-flash',gemini_api_key='synthetic-not-a-key')
-    async def run(name,*,sink=None,timeout=1):
+    async def run(name,*,sink=None):
         nonlocal key
         key='r-rank-db-'+name
         context=UsageContext(store_id=str(seed['store_id']),stage='RERANK',cost_phase='OPERATING',
             cost_purpose='EVALUATION',evaluation_run_id='9901',logical_call_id=key)
-        return await rerank(search,store_id=seed['store_id'],question='합성 질문',context=context,
-                            sink=sink or DbUsageSink(pool),timeout=timeout)
+        # 실제 저장/SDK adapter를 사용하되 DB 왕복에 운영의 200ms 정리 예산을 적용하지 않는다.
+        return await asyncio.wait_for(_model('합성 질문',context=context,
+            sink=sink or DbUsageSink(pool),candidate_ids=tuple(ids),cleanup_budget=5),timeout=30)
     async def row():
         return await admin.fetchrow('select * from ai_usage_attempts where store_id=$1 and logical_call_id=$2',seed['store_id'],key)
     # This verifier isolates usage behavior; the integrated budget verifier uses real reservations.
@@ -57,7 +62,7 @@ async def verify(pool,admin,seed):
         saved=await row()
         check('committed before SDK and connection released',len(calls)==1)
         check('SDK retry count fixed to one',factory.call_args.kwargs['http_options'].retry_options.attempts==1)
-        check('successful ranking and usage attribution',result.rerank_status=='APPLIED' and saved['status']=='SUCCEEDED'
+        check('successful ranking and usage attribution',result.ids==ids and saved['status']=='SUCCEEDED'
               and saved['stage']=='RERANK' and saved['cost_purpose']=='EVALUATION' and saved['prompt_tokens']==12
               and saved['completion_tokens']==3 and saved['provider_request_id']=='synthetic-rank-response')
         check('prompt and configuration hashes recorded',bool(saved['prompt_hash']) and bool(saved['config_hash']))
@@ -66,19 +71,25 @@ async def verify(pool,admin,seed):
         except UsageWriteError:check('duplicate receipt prevents another SDK call',len(calls)==before)
         else:raise AssertionError('duplicate call accepted')
         for mode in ('invalid-json','invalid-ids'):
-            result=await run(mode)
+            try:await run(mode)
+            except ValueError:pass
+            else:raise AssertionError('invalid ranking accepted')
             saved=await row()
-            check(mode+' preserves observed tokens and original candidates',result.rerank_status=='FAILED'
-                and result.candidates==candidates and saved['status']=='FAILED' and saved['prompt_tokens']==12)
-        mode='wait'
-        result=await run('timeout',timeout=.2)
+            check(mode+' preserves observed tokens on failure',saved['status']=='FAILED' and saved['prompt_tokens']==12)
+        mode='timeout'
+        try:await run('timeout')
+        except TimeoutError:pass
+        else:raise AssertionError('provider timeout swallowed')
         saved=await row()
-        check('timeout preserves unknown usage as failure',result.rerank_status=='TIMEOUT' and saved['status']=='FAILED'
+        check('timeout preserves unknown usage as failure',saved['status']=='FAILED'
               and saved['prompt_tokens'] is None and saved['cost_usd'] is None)
+        mode='wait'
         entered.clear()
         task=asyncio.create_task(run('cancel'))
-        await asyncio.wait_for(entered.wait(),1)
-        task.cancel()
+        try:await asyncio.wait_for(entered.wait(),10)
+        finally:
+            task.cancel()
+            await asyncio.gather(task,return_exceptions=True)
         try:await task
         except asyncio.CancelledError:pass
         else:raise AssertionError('cancellation swallowed')
@@ -93,18 +104,25 @@ async def verify(pool,admin,seed):
         except UsageWriteError:check('arbitrary start failure prevents SDK call',len(calls)==before)
         else:raise AssertionError('usage start failed open')
 
-        class SlowFinalize(DbUsageSink):
-            async def finalize(self,*args):await asyncio.Event().wait()
+        class DelayedStart(DbUsageSink):
+            async def start(self,receipt):
+                await asyncio.sleep(.25)
+                return await super().start(receipt)
         before=len(calls)
-        start=asyncio.get_running_loop().time()
-        result=await run('finalize-hangs',sink=SlowFinalize(pool))
+        result=await run('delayed-start',sink=DelayedStart(pool))
         saved=await row()
-        check('stalled finalization bounded without rebilling',asyncio.get_running_loop().time()-start<1.5
-            and result.rerank_status=='APPLIED' and len(calls)==before+1 and saved['status']=='STARTED' and saved['cost_usd'] is None)
-        async def slow_close():await asyncio.Event().wait()
-        close.side_effect=slow_close
-        start=asyncio.get_running_loop().time()
-        result=await run('close-hangs')
-        check('SDK close bounded without losing successful ranking',result.rerank_status=='APPLIED' and asyncio.get_running_loop().time()-start<1.5)
+        check('DB scheduling delay is not a production latency assertion',result.ids==ids
+              and len(calls)==before+1 and saved['status']=='SUCCEEDED')
+
+        class FailedFinalize(DbUsageSink):
+            async def finalize(self,*args):raise TimeoutError('synthetic finalize timeout')
+        before=len(calls)
+        result=await run('finalize-fails',sink=FailedFinalize(pool))
+        saved=await row()
+        check('failed finalization remains unknown without rebilling',result.ids==ids
+            and len(calls)==before+1 and saved['status']=='STARTED' and saved['cost_usd'] is None)
+        close.side_effect=TimeoutError('synthetic SDK close timeout')
+        result=await run('close-fails')
+        check('SDK close failure preserves successful ranking',result.ids==ids and (await row())['status']=='SUCCEEDED')
         check('SDK cleanup attempted for every constructed client',close.await_count==factory.call_count)
     print(f'Verified {len(passed)} RERANK usage checks')
