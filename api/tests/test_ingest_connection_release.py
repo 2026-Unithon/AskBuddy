@@ -92,10 +92,13 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
 
     persist = AsyncMock(return_value=0)
     set_status = AsyncMock()
-    settings = NS(ingest_mode="real")
+    settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
+                  video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID')
     get_source = get_source or AsyncMock(return_value=_row())
 
     with patch.object(pipeline, "get_pool", return_value=pool), \
+         patch.object(pipeline.recovery, 'load', AsyncMock(return_value=None)), \
+         patch.object(pipeline.recovery, 'replace', AsyncMock()), \
          patch("app.config.get_settings", return_value=settings), \
          patch.object(pipeline.repo, "get_source", get_source), \
          patch.object(pipeline.repo, "set_status", set_status), \

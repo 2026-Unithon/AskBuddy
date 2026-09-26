@@ -182,6 +182,8 @@ class _Pool:
 
 
 async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
+    from app.config import get_settings
+    from app.ingest.schemas import ExtractedCard
     extract_calls = []
 
     async def fake_extract_facts(**kw):
@@ -194,7 +196,12 @@ async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
     set_status = AsyncMock()
     record = AsyncMock()
     pool = _Pool()
+    prior = dict(version=1, phase='COMMITTED', ledger_ids={},
+        layout_hash=pipeline.recovery.layout_hash(src, '본문', [], SEGMENTS, get_settings()),
+        outcome=dict(failed_segment_ids=retry_segments, segments_total=expected_total))
     with patch.object(pipeline, "get_pool", return_value=pool), \
+         patch.object(pipeline.recovery, 'load', AsyncMock(return_value=prior)), \
+         patch.object(pipeline.recovery, 'replace', AsyncMock()), \
          patch.object(pipeline, "_preprocess",
                       AsyncMock(return_value=("본문", [], segments))), \
          patch.object(pipeline.repo, "get_source", AsyncMock(return_value=src)), \
@@ -205,7 +212,8 @@ async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
          patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
          patch.object(pipeline, "assemble_assertions",
-                      AsyncMock(return_value=ExtractionResult(cards=[], unresolved=[]))), \
+                      AsyncMock(return_value=ExtractionResult(cards=[ExtractedCard(
+                          category_name='기타', title='합성', content='원두 18g', confidence=.9)], unresolved=[]))), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(pipeline, "_record_segment_failures", record), \
          patch.object(pipeline, "_persist", persist):
