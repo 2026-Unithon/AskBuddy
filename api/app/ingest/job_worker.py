@@ -36,6 +36,13 @@ def final_job_status(*, total: int, failed: int, cards: int,
     return "SUCCEEDED"
 
 
+def _run_tag(started_at) -> int | None:
+    """자료 시작 시각을 epoch 밀리초 정수로 바꾼다. 행이 없으면 표지 없이 돈다."""
+    if started_at is None:
+        return None
+    return int(started_at.timestamp() * 1000)
+
+
 async def process_ingest_job(store_id: int, job_id: int) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -68,16 +75,20 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
         for row in source_ids:
             source_id = int(row["source_id"])
             async with pool.acquire() as conn:
-                await conn.execute(
+                started_at = await conn.fetchval(
                     """
                     update ingest_job_sources
                     set status = 'EXTRACTING', started_at = now(), updated_at = now()
                     where store_id = $1 and job_id = $2 and source_id = $3
+                    returning started_at
                     """,
                     store_id,
                     job_id,
                     source_id,
                 )
+            # 실행 표지 — 같은 작업을 다시 돌리면 job_id 가 같아 원가 receipt 의
+            # 논리 호출 ID 가 지난 실행과 겹친다 (원장 unique). 시작 시각으로 가른다
+            run_tag = _run_tag(started_at)
 
             # PARTIAL 재시도면 잃은 구간만 다시 읽는다. 전체를 다시 돌리면 카드가 겹친다
             lost_ids = row["failed_segment_ids"]
@@ -86,10 +97,11 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     store_id, source_id, job_id=job_id,
                     retry_segments=list(lost_ids),
                     expected_segments_total=row["segments_total"],
+                    run_tag=run_tag,
                 )
             else:
                 outcome = await pipeline.process_source(
-                    store_id, source_id, job_id=job_id)
+                    store_id, source_id, job_id=job_id, run_tag=run_tag)
 
             async with pool.acquire() as conn:
                 source = await conn.fetchrow(
