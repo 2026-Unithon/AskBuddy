@@ -188,13 +188,14 @@ async def reset_retryable_sources(
     include_no_result: bool,
 ) -> int:
     statuses = ["FAILED", "NO_RESULT"] if include_no_result else ["FAILED"]
-    # 실패·무결과 자료는 처음부터 다시 돈다. 지난 구간 기록도 함께 비운다
+    # 실패는 조립 대기 복구본을 보존한다. 무결과의 명시 재실행만 복구본을 비운다.
     rows = await conn.fetch(
         """
         update ingest_job_sources
         set status = 'QUEUED', error_code = null, error_message = null,
             card_count = 0, segments_total = null, segments_failed = null,
             failed_segment_ids = null,
+            recovery_state = case when status = 'NO_RESULT' then null else recovery_state end,
             started_at = null, completed_at = null, updated_at = now()
         where store_id = $1 and job_id = $2 and status = any($3::varchar[])
         returning source_id

@@ -141,6 +141,10 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     error_message = (
                         source["error_message"] if source else "자료를 찾을 수 없습니다."
                     )
+                elif outcome == pipeline.PARTIAL_RETRY_UNAVAILABLE:
+                    result_status = 'PARTIAL' if card_count else 'FAILED'
+                    error_code = 'PARTIAL_RETRY_UNAVAILABLE'
+                    error_message = PARTIAL_RETRY_UNAVAILABLE_MESSAGE
                 elif card_count == 0:
                     result_status = "NO_RESULT"
                     error_code = "NO_RESULT"
@@ -159,12 +163,7 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     )
                     failed_segments = int(
                         (lost and lost["segments_failed"]) or 0)
-                    if outcome == pipeline.PARTIAL_RETRY_UNAVAILABLE:
-                        # 잃은 구간을 다시 읽지 못했다. 기존 카드는 두고 PARTIAL 로 남긴다
-                        result_status = "PARTIAL"
-                        error_code = "PARTIAL_RETRY_UNAVAILABLE"
-                        error_message = PARTIAL_RETRY_UNAVAILABLE_MESSAGE
-                    elif failed_segments:
+                    if failed_segments:
                         result_status = "PARTIAL"
                         error_code = "PARTIAL_EXTRACTION"
                         error_message = (

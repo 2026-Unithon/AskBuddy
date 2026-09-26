@@ -55,6 +55,8 @@ async def main():
             await verify_retention(pool,fresh,seed)
         finally:
             await pool.close()
+        from verify_w_ingest_recovery import verify as verify_w_recovery
+        await verify_w_recovery(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
     finally:
         if fresh is not None:
             await fresh.close()

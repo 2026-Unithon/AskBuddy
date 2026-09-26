@@ -7,6 +7,7 @@
 이 함수는 백그라운드에서 돈다. 요청 커넥션이 이미 닫힌 뒤이므로 풀에서 직접 얻는다.
 실패하면 다음 단계로 넘어가지 않고 FAILED 로 명확히 멈춘다.
 """
+import asyncio
 import logging
 import shutil
 import time
@@ -17,8 +18,9 @@ import asyncpg
 
 from app.deps import get_pool
 from app.ingest import repository as repo
+from app.ingest import recovery
 from app.ingest.preprocess import audio, document, kakao, storage, video
-from app.ingest.schemas import ExtractionResult
+from app.ingest.schemas import ExtractionResult, ExtractedAssertion
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ async def process_source(
     pool = get_pool()
     usage_sink = DbUsageSink(pool)
     started = time.perf_counter()
+    recovery_enabled = job_id is not None and extraction_run_id is None and cost_purpose == 'PRODUCT'
+    previous = None
 
     # 연결은 DB 를 칠 때만 짧게 빌린다. 다운로드·STT·추출·조립처럼 느린 외부
     # 호출 동안 쥐고 있으면, 별도 연결을 잡는 원가 receipt 와 작은 풀에서 겹쳐
@@ -66,6 +70,12 @@ async def process_source(
             if src is None:
                 logger.warning("source %s not in store %s — 처리 중단", source_id, store_id)
                 return
+            if recovery_enabled:
+                previous = await recovery.load(conn, store_id, job_id, source_id)
+                if previous and previous['phase'] == 'COMMITTED' and not previous['outcome']['failed_segment_ids']:
+                    # 카드 커밋 후 worker 결과 기록만 실패한 재호출은 카드를 다시 만들지 않는다.
+                    await repo.set_status(conn, store_id, source_id, 'DONE')
+                    return
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
         text, media, segments = await _preprocess(
@@ -76,8 +86,14 @@ async def process_source(
                 cost_phase, cost_purpose, extraction_run_id, run_tag=run_tag),
         )
 
-        if retry_segments is not None and not _same_layout(
-                segments, retry_segments, expected_segments_total):
+        from app.config import get_settings
+        fingerprint = await asyncio.to_thread(recovery.layout_hash, src, text, media, segments, get_settings()) if recovery_enabled else None
+        if previous and previous['phase'] == 'COMMITTED':
+            retry_segments = previous['outcome']['failed_segment_ids']
+            expected_segments_total = previous['outcome']['segments_total']
+        if ((previous and previous['layout_hash'] != fingerprint)
+                or (retry_segments is not None and (
+                    not previous or not _same_layout(segments, retry_segments, expected_segments_total)))):
             # 구간 번호가 지난 실행과 같은 내용을 가리킨다고 믿을 수 없다. 다시 뽑으면
             # 이미 만든 카드와 겹치거나 엉뚱한 구간을 채운다. 잃은 구간은 그대로 두고,
             # 기존 카드가 남아 있으므로 자료는 FAILED 가 아닌 DONE 으로 돌린다
@@ -131,18 +147,29 @@ async def process_source(
                     c, store_id, source_id, src["source_type"],
                     seg_assertions))
 
-        outcome = await _extract_facts_all(
-            source_id=source_id,
-            source_type=src["source_type"],
-            text=text,
-            media=media,
-            glossary=glossary,
-            segments=segments,
-            usage_sink=usage_sink,
-            usage_base=usage_base,
-            checkpoint=_checkpoint,
-            only_segments=set(retry_segments) if retry_segments is not None else None,
-        )
+        if previous and previous['phase'] == 'EXTRACTED':
+            cached = previous['outcome']
+            outcome = ExtractionOutcome(
+                [ExtractedAssertion.model_validate(a) for a in cached['assertions']],
+                cached['unresolved'], cached['segments_total'], cached['segments_failed'],
+                cached['failed_segment_ids'])
+            ledger_ids = previous['ledger_ids']
+        else:
+            outcome = await _extract_facts_all(
+                source_id=source_id, source_type=src["source_type"], text=text, media=media,
+                glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
+                checkpoint=_checkpoint,
+                only_segments=set(retry_segments) if retry_segments is not None else None,
+            )
+            if recovery_enabled:
+                pending = dict(version=1, phase='EXTRACTED', layout_hash=fingerprint,
+                    outcome=dict(assertions=[a.model_dump(mode='json') for a in outcome.assertions],
+                        unresolved=outcome.unresolved, segments_total=outcome.segments_total,
+                        segments_failed=outcome.segments_failed, failed_segment_ids=outcome.failed_segment_ids),
+                    ledger_ids=ledger_ids)
+                async with pool.acquire() as c, c.transaction():
+                    await recovery.replace(c, store_id, job_id, source_id, previous, pending)
+                previous = pending
         assertions, unresolved = outcome.assertions, outcome.unresolved
         # 원장 선저장은 위 checkpoint 에서 구간마다 이미 끝났다
         logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
@@ -157,11 +184,18 @@ async def process_source(
             source_id=source_id, assertions=assertions,
             categories=list(categories), glossary=glossary,
             usage_sink=usage_sink, usage_base=usage_base,
+            strict=True,
         )
+        if assertions and not result.cards:
+            raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
         result.unresolved.extend(unresolved)
 
         async with pool.acquire() as conn:
             async with conn.transaction():
+                if recovery_enabled:
+                    committed = dict(previous, phase='COMMITTED', ledger_ids={},
+                                     outcome=dict(previous['outcome'], assertions=[], unresolved=[]))
+                    await recovery.replace(conn, store_id, job_id, source_id, previous, committed)
                 # 연결을 놓은 사이 자료가 다른 경로로 끝났을 수 있다. 다시 보고 저장한다
                 current = await repo.get_source(conn, store_id, source_id)
                 if current is None or current["status"] != "PROCESSING":
@@ -212,6 +246,9 @@ async def process_source(
                     time.perf_counter() - started)
         return None
 
+    except recovery.RecoveryConflict:
+        # 다른 호출이 확정한 상태를 FAILED로 덮지 않는다.
+        raise
     except Exception as e:
         logger.exception("ingest FAILED source=%s", source_id)
         await _mark_failed(pool, store_id, source_id, e)
@@ -731,7 +768,7 @@ async def _persist_ledger(
 async def assemble_assertions(
     *, source_id: int, assertions: list,
     categories: list[str], glossary: list[dict],
-    usage_sink=None, usage_base: tuple | None = None,
+    usage_sink=None, usage_base: tuple | None = None, strict: bool = False,
 ):
     """추출된 사실을 대상 단위로 묶어 카드로 만든다. 등록과 미리보기에서 공유한다.
 
@@ -768,6 +805,8 @@ async def assemble_assertions(
             usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
         )
     except Exception as exc:
+        if strict:
+            raise RuntimeError('카드 조립 실패 — 저장한 추출 결과로 재시도해야 합니다.') from exc
         # 원장은 이미 적혔다. 카드를 못 만들어도 사실은 남는다
         logger.warning("조립 실패 source=%s: %s — 원장의 사실은 남는다", source_id, exc)
         return ExtractionResult(cards=[], unresolved=[f"조립 실패: {exc}"])
