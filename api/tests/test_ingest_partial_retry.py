@@ -3,6 +3,7 @@
 F02: 재시도 대상이 FAILED/NO_RESULT 뿐이라 PARTIAL 자료를 다시 돌릴 길이 없었다.
 자료 전체를 다시 돌리면 이미 만든 카드가 중복되므로 잃은 구간만 다시 뽑는다.
 """
+from datetime import datetime, timezone
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -252,6 +253,10 @@ async def test_matching_layout_extracts_only_lost_segment_and_appends(tmp_path):
 
 # ── job_worker ─────────────────────────────────────────────────────────
 
+STARTED_AT = datetime(2026, 9, 26, 3, 0, 0, 123000, tzinfo=timezone.utc)
+STARTED_TAG = int(STARTED_AT.timestamp() * 1000)
+
+
 def _worker_pool(queued_rows, *, source_status="DONE", card_count=3,
                  lost=None):
     conn = AsyncMock()
@@ -270,7 +275,14 @@ def _worker_pool(queued_rows, *, source_status="DONE", card_count=3,
 
     conn.fetchrow = AsyncMock(side_effect=fetchrow)
     conn.fetch = AsyncMock(return_value=queued_rows)
-    conn.fetchval = AsyncMock(return_value=card_count)
+
+    async def fetchval(sql, *args):
+        # 자료 시작 시각 — 실행 표지를 여기서 만든다
+        if "returning started_at" in sql:
+            return STARTED_AT
+        return card_count
+
+    conn.fetchval = AsyncMock(side_effect=fetchval)
 
     class Pool:
         def acquire(self):
@@ -322,7 +334,28 @@ async def test_worker_full_run_keeps_existing_call():
                       AsyncMock(return_value=None)):
         await job_worker.process_ingest_job(1, 2)
 
-    process.assert_awaited_once_with(1, 3, job_id=2)
+    process.assert_awaited_once_with(1, 3, job_id=2, run_tag=STARTED_TAG)
+
+
+@pytest.mark.asyncio
+async def test_worker_passes_run_tag_from_source_start_time():
+    # 같은 작업을 다시 돌릴 때 원가 receipt 의 논리 호출 ID 가 겹치지 않게 한다 (C1)
+    rows = [{"source_id": 3, "failed_segment_ids": ["seg2"], "segments_total": 3}]
+    pool, conn = _worker_pool(rows)
+    process = AsyncMock(return_value=None)
+    with patch.object(job_worker, "get_pool", return_value=pool), \
+         patch.object(job_worker.pipeline, "process_source", process), \
+         patch.object(job_worker, "_refresh_job",
+                      AsyncMock(return_value=("SUCCEEDED", 3))), \
+         patch.object(job_worker, "create_ingest_completed_notification",
+                      AsyncMock(return_value=None)):
+        await job_worker.process_ingest_job(1, 2)
+
+    assert process.await_args.kwargs["run_tag"] == STARTED_TAG
+    start_sql = next(c for c in conn.fetchval.await_args_list
+                     if "returning started_at" in c.args[0])
+    assert "started_at = now()" in start_sql.args[0]
+    assert start_sql.args[1:] == (1, 2, 3)
 
 
 @pytest.mark.asyncio
@@ -426,3 +459,116 @@ async def test_retry_failure_cycle_retries_only_lost_segments_again():
     _, process = await _run_worker(rows, source_status="DONE")
     assert process.await_args.kwargs["retry_segments"] == ["seg2"]
     assert process.await_args.kwargs["expected_segments_total"] == 3
+
+
+# ── 같은 작업 재시도의 원가 receipt 충돌 (C1) ──────────────────────────
+
+from app.usage.repository import UsageWriteError  # noqa: E402
+
+
+class _UniqueLedger:
+    """원장 unique (store_id, logical_call_id, attempt_no) 를 흉내 낸다.
+
+    실제 start_attempt 처럼 모델 호출 **전에** 적고, 이미 있으면 UsageWriteError.
+    """
+
+    def __init__(self):
+        self.keys: set[tuple] = set()
+
+    def start(self, ctx):
+        key = (ctx.store_id, ctx.logical_call_id, ctx.attempt_no)
+        if key in self.keys:
+            raise UsageWriteError(f"이미 기록된 시도다 (call={ctx.logical_call_id})")
+        self.keys.add(key)
+
+
+async def _run_with_ledger(tmp_path, ledger, *, run_tag, retry_segments=None,
+                           fail_segments=()):
+    """구간 3개 영상 자료를 한 번 처리한다. 추출·조립이 receipt 를 먼저 적는다."""
+    extracted, assembled = [], []
+
+    async def fake_extract_facts(**kw):
+        ledger.start(kw["usage_context"])
+        seg = kw["usage_context"].segment_id
+        if seg in fail_segments:
+            raise RuntimeError("모델 응답 없음")
+        extracted.append(seg)
+        return NS(assertions=[_assertion("f1")], unresolved=[])
+
+    async def fake_assemble_cards(**kw):
+        ledger.start(kw["usage_context"])
+        assembled.append(len(kw["facts"]))
+        return ExtractionResult(cards=[], unresolved=[])
+
+    src = {"source_id": 2, "store_id": 1, "source_type": "VIDEO",
+           "file_url": "x", "content_hash": "h", "status": "PROCESSING"}
+    persist = AsyncMock(return_value=1)
+    record = AsyncMock()
+    set_status = AsyncMock()
+    with patch.object(pipeline, "get_pool", return_value=_Pool()), \
+         patch.object(pipeline, "_preprocess",
+                      AsyncMock(return_value=("본문", [], SEGMENTS))), \
+         patch.object(pipeline.repo, "get_source", AsyncMock(return_value=src)), \
+         patch.object(pipeline.repo, "set_status", set_status), \
+         patch.object(pipeline.repo, "enabled_categories",
+                      AsyncMock(return_value={"기타": 1})), \
+         patch.object(pipeline.repo, "glossary", AsyncMock(return_value=[])), \
+         patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
+         patch.object(extract, "extract_facts", fake_extract_facts), \
+         patch.object(extract, "assemble_cards", fake_assemble_cards), \
+         patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
+         patch.object(pipeline, "_record_segment_failures", record), \
+         patch.object(pipeline, "_persist", persist):
+        await pipeline.process_source(
+            1, 2, job_id=5, run_tag=run_tag, retry_segments=retry_segments,
+            expected_segments_total=3 if retry_segments else None)
+    return NS(extracted=extracted, assembled=assembled, persist=persist,
+              outcome=record.await_args.kwargs["outcome"] if record.await_args else None,
+              last_status=set_status.await_args_list[-1].args[3])
+
+
+@pytest.mark.asyncio
+async def test_same_job_retry_with_new_run_tag_does_not_collide(tmp_path):
+    ledger = _UniqueLedger()
+    first = await _run_with_ledger(
+        tmp_path, ledger, run_tag=1_790_000_000_000, fail_segments={"seg2"})
+    assert first.outcome.failed_segment_ids == ["seg2"]
+
+    # 같은 작업·자료를 다시 돌린다. 실행 표지가 달라 receipt 가 겹치지 않는다
+    retry = await _run_with_ledger(
+        tmp_path, ledger, run_tag=1_790_000_060_000, retry_segments=["seg2"])
+
+    assert retry.extracted == ["seg2"]
+    assert retry.assembled == [1]
+    retry.persist.assert_awaited_once()
+    assert (retry.outcome.segments_failed, retry.outcome.failed_segment_ids) == (0, [])
+    assert retry.last_status == "DONE"
+
+
+@pytest.mark.asyncio
+async def test_same_run_tag_twice_collides(tmp_path):
+    # 대역 원장이 정말 unique 를 강제하는지 — 같은 표지면 재시도 구간이 receipt 에서 죽는다
+    ledger = _UniqueLedger()
+    await _run_with_ledger(
+        tmp_path, ledger, run_tag=1_790_000_000_000, fail_segments={"seg2"})
+    retry = await _run_with_ledger(
+        tmp_path, ledger, run_tag=1_790_000_000_000, retry_segments=["seg2"])
+
+    assert retry.extracted == []
+    assert retry.outcome.failed_segment_ids == ["seg2"]
+
+
+def test_run_tag_scopes_logical_call_id_within_80_chars():
+    big = 999_999_999
+    ctx = pipeline._usage_context(
+        big, big, big, "ASSEMBLE", "REGISTRATION", "PRODUCT", None,
+        segment_id="seg99", run_tag=9_999_999_999_999)
+    assert ctx.logical_call_id.startswith(f"job{big}r9999999999999:")
+    assert len(ctx.logical_call_id) <= 80
+    # 표지가 없으면 기존 범위 그대로다 (평가 스크립트 등)
+    assert pipeline._usage_context(
+        1, 2, 3, "EXTRACT", "REGISTRATION", "PRODUCT", None
+    ).logical_call_id == "job3:src2:extract"
+    assert pipeline._usage_context(
+        1, 2, 3, "EXTRACT", "REGISTRATION", "EVALUATION", 7, run_tag=5
+    ).logical_call_id == "run7:src2:extract"

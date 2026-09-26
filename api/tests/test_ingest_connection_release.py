@@ -161,3 +161,111 @@ async def test_changed_source_status_blocks_persist(tmp_path, late_row):
     assert last.args[3] == "FAILED"
     assert "처리 중 바뀌었다" in last.kwargs["error_message"]
     assert pool.held == 0
+
+
+# ── 저장·구간 기록·DONE 은 한 트랜잭션이다 (I1) ─────────────────────────
+
+class _TrackedTx:
+    """열림 여부와 빠져나갈 때의 예외를 기록한다."""
+
+    def __init__(self, log):
+        self.log = log
+
+    async def __aenter__(self):
+        self.log["open"] = True
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.log["open"] = False
+        self.log["exits"].append(exc_type)
+        return False
+
+
+def _tracked_pool():
+    pool = _Pool()
+    log = {"open": False, "exits": []}
+    pool.conn.transaction = MagicMock(side_effect=lambda: _TrackedTx(log))
+    return pool, log
+
+
+async def _run_tracked(tmp_path, *, record_error=None):
+    pool, log = _tracked_pool()
+    during: dict[str, list[bool]] = {}
+
+    def note(name):
+        during.setdefault(name, []).append(log["open"])
+
+    async def persist(*a, **kw):
+        note("persist")
+        return 1
+
+    async def record(*a, **kw):
+        note("record")
+        if record_error is not None:
+            raise record_error
+
+    async def set_status(conn, store_id, source_id, status, **kw):
+        note(status)
+
+    with patch.object(pipeline, "_persist", persist), \
+         patch.object(pipeline, "_record_segment_failures", record), \
+         patch.object(pipeline.repo, "set_status", set_status):
+        await _run_inner(pool, tmp_path, job_id=5)
+    return during, log
+
+
+async def _run_inner(pool, tmp_path, *, job_id):
+    txt = tmp_path / "대화.txt"
+    txt.write_text("대화", encoding="utf-8")
+
+    async def fake_download(source_id, url):
+        return txt
+
+    async def fake_extract_facts(**kw):
+        return NS(assertions=[], unresolved=[])
+
+    async def fake_assemble(**kw):
+        return ExtractionResult(cards=[], unresolved=[])
+
+    with patch("app.config.get_settings", return_value=NS(ingest_mode="real")), \
+         patch.object(pipeline, "get_pool", return_value=pool), \
+         patch.object(pipeline.repo, "get_source", AsyncMock(return_value=_row())), \
+         patch.object(pipeline.repo, "get_kakao", AsyncMock(return_value={"kakao_id": 1})), \
+         patch.object(pipeline.repo, "update_kakao_result", AsyncMock()), \
+         patch.object(pipeline.repo, "enabled_categories",
+                      AsyncMock(return_value={"기타": 1})), \
+         patch.object(pipeline.repo, "glossary", AsyncMock(return_value=[])), \
+         patch.object(pipeline.storage, "download", fake_download), \
+         patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
+         patch.object(pipeline.kakao, "parse", return_value={
+             "room_name": None, "message_count": 1, "participants": [],
+             "period_start": None, "period_end": None, "parsed_text": "대화"}), \
+         patch.object(extract, "extract_facts", fake_extract_facts), \
+         patch.object(pipeline, "assemble_assertions", fake_assemble), \
+         patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})):
+        await pipeline.process_source(1, 2, job_id=job_id)
+
+
+@pytest.mark.asyncio
+async def test_persist_segment_record_and_done_share_one_transaction(tmp_path):
+    during, log = await _run_tracked(tmp_path)
+
+    assert during["persist"] == [True]
+    assert during["record"] == [True]
+    assert during["DONE"] == [True]
+    assert log["open"] is False
+
+
+@pytest.mark.asyncio
+async def test_segment_record_failure_rolls_back_persisted_cards(tmp_path):
+    # 구간 기록이 죽으면 카드 저장도 함께 되돌린다. 커밋된 카드가 남으면
+    # 다음 재시도가 같은 구간을 또 뽑아 카드가 겹친다
+    during, log = await _run_tracked(
+        tmp_path, record_error=RuntimeError("연결 끊김"))
+
+    assert during["persist"] == [True]
+    assert during["record"] == [True]
+    assert "DONE" not in during
+    # 저장이 든 트랜잭션이 예외를 안고 빠져나갔다 (= 롤백)
+    assert RuntimeError in log["exits"]
+    assert during["FAILED"] == [False]
