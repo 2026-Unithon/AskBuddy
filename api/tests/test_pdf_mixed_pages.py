@@ -110,7 +110,7 @@ async def _scan(read_result, monkeypatch, tmp_path):
     async def fake_update(conn, source_id, **kw):
         return None
 
-    async def fake_download(conn, store_id, src):
+    async def fake_download(pool, store_id, src):
         return pdf
 
     monkeypatch.setattr(pipeline.repo, "get_scan", fake_get_scan)
@@ -118,7 +118,7 @@ async def _scan(read_result, monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "_download", fake_download)
     monkeypatch.setattr(pipeline.document, "read_pdf", lambda _p: read_result)
     return await pipeline._preprocess_scan(
-        None, 1, {"source_id": 7, "file_url": "x"}), pdf
+        _NullPool(), 1, {"source_id": 7, "file_url": "x"}), pdf
 
 
 @pytest.mark.asyncio
@@ -173,3 +173,18 @@ def test_real_pypdf_page_images_api_is_usable(tmp_path):
     assert result.page_count == 3
     assert result.text == ""
     assert result.visual_pages == [1, 2, 3]
+
+
+class _NullPool:
+    """전처리는 풀을 받아 DB 호출마다 짧게 빌린다. 연결은 대역 repo 가 쓰지 않는다."""
+
+    def acquire(self):
+        return _NullLease()
+
+
+class _NullLease:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False

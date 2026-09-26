@@ -7,6 +7,7 @@
 이 함수는 백그라운드에서 돈다. 요청 커넥션이 이미 닫힌 뒤이므로 풀에서 직접 얻는다.
 실패하면 다음 단계로 넘어가지 않고 FAILED 로 명확히 멈춘다.
 """
+import asyncio
 import logging
 import shutil
 import time
@@ -17,47 +18,90 @@ import asyncpg
 
 from app.deps import get_pool
 from app.ingest import repository as repo
+from app.ingest import recovery
 from app.ingest.preprocess import audio, document, kakao, storage, video
-from app.ingest.schemas import ExtractionResult
+from app.ingest.schemas import ExtractionResult, ExtractedAssertion
 
 logger = logging.getLogger(__name__)
 
 MOCK_PLACEHOLDER = "(목 모드 — 전처리를 건너뛰었다)"
+
+# PARTIAL 재시도에서 구간 구성이 달라져 잃은 구간만 다시 읽을 수 없을 때 돌려준다.
+# 호출부(job_worker)가 이 값을 보고 자료를 PARTIAL 로 남긴다
+PARTIAL_RETRY_UNAVAILABLE = "PARTIAL_RETRY_UNAVAILABLE"
 
 
 async def process_source(
     store_id: int, source_id: int, *, job_id: int | None = None,
     cost_phase: str = "REGISTRATION", cost_purpose: str = "PRODUCT",
     extraction_run_id: int | None = None,
-) -> None:
+    retry_segments: list[str] | None = None,
+    expected_segments_total: int | None = None,
+) -> str | None:
     """자료 하나를 처리한다.
 
     원가 계측(CP-00B) — 유료 호출마다 원장에 receipt 를 남긴다. 등록인지 운영인지는
     호출부가 정한다. 추출 결과만 보고 자동 분류하지 않는다 (승인 카드 0건이어도
     운영 중 추가 업로드일 수 있다).
+
+    `retry_segments` 를 주면 PARTIAL 재시도다. 그 구간만 다시 뽑아 카드를 **추가**
+    한다. 이미 만든 카드·원장은 건드리지 않는다. 구간 구성이 지난 실행과 달라
+    같은 구간을 가리킬 수 없으면 추출하지 않고 `PARTIAL_RETRY_UNAVAILABLE` 을
+    돌려준다. 보통 경로는 `None` 을 돌려준다.
     """
     from app.usage import DbUsageSink
 
     pool = get_pool()
     usage_sink = DbUsageSink(pool)
     started = time.perf_counter()
+    recovery_enabled = job_id is not None and extraction_run_id is None and cost_purpose == 'PRODUCT'
+    previous = None
 
-    async with pool.acquire() as conn:
-        try:
+    # 연결은 DB 를 칠 때만 짧게 빌린다. 다운로드·STT·추출·조립처럼 느린 외부
+    # 호출 동안 쥐고 있으면, 별도 연결을 잡는 원가 receipt 와 작은 풀에서 겹쳐
+    # 작업 전체가 멈춘다.
+    try:
+        async with pool.acquire() as conn:
             src = await repo.get_source(conn, store_id, source_id)
             if src is None:
                 logger.warning("source %s not in store %s — 처리 중단", source_id, store_id)
                 return
-
+            if recovery_enabled:
+                previous = await recovery.load(conn, store_id, job_id, source_id)
+                if previous and previous['phase'] == 'COMMITTED' and not previous['outcome']['failed_segment_ids']:
+                    # 카드 커밋 후 worker 결과 기록만 실패한 재호출은 카드를 다시 만들지 않는다.
+                    await repo.set_status(conn, store_id, source_id, 'DONE')
+                    return
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
-            text, media, segments = await _preprocess(
-                conn, store_id, src,
-                usage_sink=usage_sink,
-                usage_context=_usage_context(
-                    store_id, source_id, job_id, "STT",
-                    cost_phase, cost_purpose, extraction_run_id),
-            )
+        text, media, segments = await _preprocess(
+            pool, store_id, src,
+            usage_sink=usage_sink,
+            usage_context=_usage_context(
+                store_id, source_id, job_id, "STT",
+                cost_phase, cost_purpose, extraction_run_id),
+        )
+
+        from app.config import get_settings
+        fingerprint = await asyncio.to_thread(recovery.layout_hash, src, text, media, segments, get_settings()) if recovery_enabled else None
+        if previous and previous['phase'] == 'COMMITTED':
+            retry_segments = previous['outcome']['failed_segment_ids']
+            expected_segments_total = previous['outcome']['segments_total']
+        if ((previous and previous['layout_hash'] != fingerprint)
+                or (retry_segments is not None and (
+                    not previous or not _same_layout(segments, retry_segments, expected_segments_total)))):
+            # 구간 번호가 지난 실행과 같은 내용을 가리킨다고 믿을 수 없다. 다시 뽑으면
+            # 이미 만든 카드와 겹치거나 엉뚱한 구간을 채운다. 잃은 구간은 그대로 두고,
+            # 기존 카드가 남아 있으므로 자료는 FAILED 가 아닌 DONE 으로 돌린다
+            logger.warning("구간 구성 변경 — 잃은 구간만 재추출 불가 source=%s "
+                           "기대 %s구간, 현재 %d구간, 요청 %s",
+                           source_id, expected_segments_total, len(segments),
+                           retry_segments)
+            async with pool.acquire() as conn:
+                await repo.set_status(conn, store_id, source_id, "DONE")
+            return PARTIAL_RETRY_UNAVAILABLE
+
+        async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
 
@@ -81,66 +125,98 @@ async def process_source(
                     job_id,
                 )
 
-            usage_base = (store_id, job_id, cost_phase, cost_purpose,
-                          extraction_run_id)
+        usage_base = (store_id, job_id, cost_phase, cost_purpose,
+                      extraction_run_id)
 
-            # ── 입력 → 사실 → (원장) → 카드 ──────────────────────────────
-            # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
-            # 사실은 원장에도 안 남아, 못 뽑은 것과 뽑고 버린 것을 구분할 수
-            # 없었다. 이제 뽑는 즉시 전부 원장에 적고 조립이 그중에서 고른다.
-            # 구간을 뽑는 즉시 원장에 적는다 (checkpoint). 전부 끝난 뒤 한 번에
-            # 적으면 뒤쪽 구간에서 죽을 때 앞서 뽑은 것까지 같이 사라진다.
-            # 트랜잭션은 구간 하나만큼만 열어 모델 호출 중 DB 를 점유하지 않는다.
-            ledger_ids: dict[str, int] = {}
+        # ── 입력 → 사실 → (원장) → 카드 ──────────────────────────────
+        # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
+        # 사실은 원장에도 안 남아, 못 뽑은 것과 뽑고 버린 것을 구분할 수
+        # 없었다. 이제 뽑는 즉시 전부 원장에 적고 조립이 그중에서 고른다.
+        # 구간을 뽑는 즉시 원장에 적는다 (checkpoint). 전부 끝난 뒤 한 번에
+        # 적으면 뒤쪽 구간에서 죽을 때 앞서 뽑은 것까지 같이 사라진다.
+        # 연결과 트랜잭션은 구간 하나만큼만 잡아 모델 호출 중 DB 를 점유하지 않는다.
+        ledger_ids: dict[str, int] = {}
 
-            async def _checkpoint(seg_assertions, segment_id):
-                async with conn.transaction():
-                    ledger_ids.update(await _persist_ledger(
-                        conn, store_id, source_id, src["source_type"],
-                        seg_assertions))
+        async def _checkpoint(seg_assertions, segment_id):
+            async with pool.acquire() as c, c.transaction():
+                ledger_ids.update(await _persist_ledger(
+                    c, store_id, source_id, src["source_type"],
+                    seg_assertions))
 
+        if previous and previous['phase'] == 'EXTRACTED':
+            cached = previous['outcome']
+            outcome = ExtractionOutcome(
+                [ExtractedAssertion.model_validate(a) for a in cached['assertions']],
+                cached['unresolved'], cached['segments_total'], cached['segments_failed'],
+                cached['failed_segment_ids'])
+            ledger_ids = previous['ledger_ids']
+        else:
             outcome = await _extract_facts_all(
-                source_id=source_id,
-                source_type=src["source_type"],
-                text=text,
-                media=media,
-                glossary=glossary,
-                segments=segments,
-                usage_sink=usage_sink,
-                usage_base=usage_base,
+                source_id=source_id, source_type=src["source_type"], text=text, media=media,
+                glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
                 checkpoint=_checkpoint,
+                only_segments=set(retry_segments) if retry_segments is not None else None,
             )
-            assertions, unresolved = outcome.assertions, outcome.unresolved
+            if recovery_enabled:
+                pending = dict(version=1, phase='EXTRACTED', layout_hash=fingerprint,
+                    outcome=dict(assertions=[a.model_dump(mode='json') for a in outcome.assertions],
+                        unresolved=outcome.unresolved, segments_total=outcome.segments_total,
+                        segments_failed=outcome.segments_failed, failed_segment_ids=outcome.failed_segment_ids),
+                    ledger_ids=ledger_ids)
+                async with pool.acquire() as c, c.transaction():
+                    await recovery.replace(c, store_id, job_id, source_id, previous, pending)
+                previous = pending
+        assertions, unresolved = outcome.assertions, outcome.unresolved
+        # 원장 선저장은 위 checkpoint 에서 구간마다 이미 끝났다
+        logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
 
-            # 분류 중 설정이 바뀌었으면 저장 직전 최신 카테고리를 사용한다.
+        # 분류 중 설정이 바뀌었으면 최신 카테고리로 조립한다 (기존 동작 유지)
+        async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
-            category_version = int(
-                await conn.fetchval(
-                    "select category_version from stores where store_id = $1", store_id
-                )
-            )
-            origin_job_id = job_id
-            if origin_job_id is None:
-                origin_job_id = await conn.fetchval(
-                    """
-                    select job_id from ingest_jobs
-                    where store_id = $1 and idempotency_key = $2
-                    """,
-                    store_id,
-                    f"legacy-source-{source_id}",
-                )
-            # 원장 선저장은 위 checkpoint 에서 구간마다 이미 끝났다
-            logger.info("원장 선저장 source=%s 사실 %d건", source_id, len(ledger_ids))
 
-            # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다
-            result = await assemble_assertions(
-                source_id=source_id, assertions=assertions,
-                categories=list(categories), glossary=glossary,
-                usage_sink=usage_sink, usage_base=usage_base,
-            )
-            result.unresolved.extend(unresolved)
+        # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다.
+        # 모델 호출이므로 연결 밖에서 한다
+        result = await assemble_assertions(
+            source_id=source_id, assertions=assertions,
+            categories=list(categories), glossary=glossary,
+            usage_sink=usage_sink, usage_base=usage_base,
+            strict=True,
+        )
+        if assertions and not result.cards:
+            raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
+        result.unresolved.extend(unresolved)
 
+        async with pool.acquire() as conn:
             async with conn.transaction():
+                if recovery_enabled:
+                    committed = dict(previous, phase='COMMITTED', ledger_ids={},
+                                     outcome=dict(previous['outcome'], assertions=[], unresolved=[]))
+                    await recovery.replace(conn, store_id, job_id, source_id, previous, committed)
+                # 연결을 놓은 사이 자료가 다른 경로로 끝났을 수 있다. 다시 보고 저장한다
+                current = await repo.get_source(conn, store_id, source_id)
+                if current is None or current["status"] != "PROCESSING":
+                    state = "없음" if current is None else current["status"]
+                    raise RuntimeError(
+                        f"자료 상태가 처리 중 바뀌었다 (현재 {state}) — 저장하지 않는다")
+
+                # 조립 중 설정이 바뀌었을 수 있다. 저장 직전 최신 카테고리를 사용한다.
+                categories = await repo.enabled_categories(conn, store_id)
+                category_version = int(
+                    await conn.fetchval(
+                        "select category_version from stores where store_id = $1", store_id
+                    )
+                )
+                origin_job_id = job_id
+                if origin_job_id is None:
+                    origin_job_id = await conn.fetchval(
+                        """
+                        select job_id from ingest_jobs
+                        where store_id = $1 and idempotency_key = $2
+                        """,
+                        store_id,
+                        f"legacy-source-{source_id}",
+                    )
+
                 saved = await _persist(
                     conn,
                     store_id,
@@ -152,23 +228,27 @@ async def process_source(
                     ledger_ids=ledger_ids,
                 )
 
-            # 잃은 구간을 먼저 적는다. 그래야 뒤에서 상태를 PARTIAL 로 가른다
-            await _record_segment_failures(
-                conn, store_id, job_id, source_id, outcome=outcome)
+                # 카드·구간 결과·완료를 함께 확정한다. 중간 오류는 모두 rollback한다.
+                await _record_segment_failures(
+                    conn, store_id, job_id, source_id, outcome=outcome)
 
-            await repo.set_status(conn, store_id, source_id, "DONE")
-            logger.info("ingest DONE source=%s cards=%d unresolved=%d "
-                        "구간 %d/%d 실패 %.1fs",
-                        source_id, saved, len(result.unresolved),
-                        outcome.segments_failed, outcome.segments_total,
-                        time.perf_counter() - started)
+                await repo.set_status(conn, store_id, source_id, "DONE")
+        logger.info("ingest DONE source=%s cards=%d unresolved=%d "
+                    "구간 %d/%d 실패 %.1fs",
+                    source_id, saved, len(result.unresolved),
+                    outcome.segments_failed, outcome.segments_total,
+                    time.perf_counter() - started)
+        return None
 
-        except Exception as e:
-            logger.exception("ingest FAILED source=%s", source_id)
-            await _mark_failed(conn, store_id, source_id, e)
+    except recovery.RecoveryConflict:
+        # 다른 호출이 확정한 상태를 FAILED로 덮지 않는다.
+        raise
+    except Exception as e:
+        logger.exception("ingest FAILED source=%s", source_id)
+        await _mark_failed(pool, store_id, source_id, e)
 
-        finally:
-            shutil.rmtree(storage.workdir(source_id), ignore_errors=True)
+    finally:
+        shutil.rmtree(storage.workdir(source_id), ignore_errors=True)
 
 
 def _usage_context(store_id: int, source_id: int, job_id: int | None,
@@ -198,6 +278,20 @@ def _usage_context(store_id: int, source_id: int, job_id: int | None,
     )
 
 
+def _same_layout(segments: list, retry_segments: list[str],
+                 expected_total: int | None) -> bool:
+    """재계산한 구간이 지난 실행의 구간 번호와 같은 구성인지 본다.
+
+    구간 없는 자료는 잃은 구간이라는 개념이 없으므로 같은 구성으로 보지 않는다.
+    """
+    if not segments or not retry_segments:
+        return False
+    if expected_total is not None and len(segments) != expected_total:
+        return False
+    valid = {f"seg{i}" for i in range(1, len(segments) + 1)}
+    return set(retry_segments) <= valid
+
+
 def _ctx_for(base: tuple | None, source_id: int, stage: str,
              segment_id: str | None = None):
     """usage_base 가 없으면 계측하지 않는다 (기존 호출 경로 호환)."""
@@ -211,11 +305,14 @@ def _ctx_for(base: tuple | None, source_id: int, stage: str,
 
 
 async def _mark_failed(
-    conn: asyncpg.Connection, store_id: int, source_id: int, exc: Exception
+    pool: asyncpg.Pool, store_id: int, source_id: int, exc: Exception
 ) -> None:
+    """FAILED 를 적는다. 작업 연결을 이미 놓았으므로 스스로 빌린다."""
     message = f"{type(exc).__name__}: {exc}"
     try:
-        await repo.set_status(conn, store_id, source_id, "FAILED", error_message=message)
+        async with pool.acquire() as conn:
+            await repo.set_status(conn, store_id, source_id, "FAILED",
+                                  error_message=message)
     except Exception:
         # 커넥션까지 죽은 경우. 새 커넥션으로 한 번만 더 시도한다.
         # 여기서도 실패하면 프론트 폴링이 PROCESSING 에서 멈추므로 반드시 로그를 남긴다
@@ -229,7 +326,7 @@ async def _mark_failed(
 
 
 async def _preprocess(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+    pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
 , *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """자료 유형별 전처리.
 
@@ -252,37 +349,44 @@ async def _preprocess(
         logger.info("preprocess skipped (mock) source=%s type=%s", source_id, source_type)
         return MOCK_PLACEHOLDER, [], []
 
-    return await handler(conn, store_id, src,
+    # 핸들러는 연결 대신 풀을 받는다. DB 호출마다 짧게 빌리고 다운로드·STT 는 연결 밖에서 한다
+    return await handler(pool, store_id, src,
                          usage_sink=usage_sink, usage_context=usage_context)
 
 
-async def _download(conn: asyncpg.Connection, store_id: int,
+async def _download(pool: asyncpg.Pool, store_id: int,
                     src: asyncpg.Record) -> Path:
-    """원본을 받고, 프론트가 안 보낸 content_hash 를 채운다."""
+    """원본을 받고, 프론트가 안 보낸 content_hash 를 채운다.
+
+    내려받는 동안은 연결을 쥐지 않는다. 해시 기록만큼만 빌린다.
+    """
     source_id = src["source_id"]
     if not src["file_url"]:
         raise RuntimeError("file_url 이 비어 있다. Storage 업로드가 끝난 뒤 호출하라")
 
     path = await storage.download(source_id, src["file_url"])
     if src["content_hash"] is None:
-        if not await repo.set_content_hash(conn, store_id, source_id,
-                                           storage.sha256_of(path)):
+        digest = storage.sha256_of(path)
+        async with pool.acquire() as conn:
+            updated = await repo.set_content_hash(conn, store_id, source_id, digest)
+        if not updated:
             logger.warning("동일 해시의 자료가 이미 있다 source=%s", source_id)
     return path
 
 
 async def _preprocess_video(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+    pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
 , *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
     from app.config import get_settings
 
     source_id = src["source_id"]
-    row = await repo.get_video(conn, source_id)
+    async with pool.acquire() as conn:
+        row = await repo.get_video(conn, source_id)
     if row is None:
         raise RuntimeError("source_video 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(conn, store_id, src)
+    path = await _download(pool, store_id, src)
     work = storage.workdir(source_id)
     meta = await video.probe(path)
 
@@ -305,12 +409,14 @@ async def _preprocess_video(
 
     frames = await video.extract_frames(path, work)
     rows = await video.upload_frames(store_id, source_id, frames)
-    await repo.insert_frames(conn, row["video_id"], rows)
-    await repo.update_video_result(
-        conn, source_id,
-        duration_sec=meta["duration_sec"], resolution=meta["resolution"],
-        fps=meta["fps"], frame_count=len(frames), transcript=transcript or None,
-    )
+    # 업로드가 끝난 뒤에만 연결을 빌린다
+    async with pool.acquire() as conn:
+        await repo.insert_frames(conn, row["video_id"], rows)
+        await repo.update_video_result(
+            conn, source_id,
+            duration_sec=meta["duration_sec"], resolution=meta["resolution"],
+            fps=meta["fps"], frame_count=len(frames), transcript=transcript or None,
+        )
 
     text = transcript or "(오디오 없음. 화면 이미지만으로 판단할 것)"
 
@@ -330,47 +436,52 @@ async def _preprocess_video(
 
 
 async def _preprocess_kakao(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+    pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
 , *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """카톡: txt 를 파싱한다. LLM 을 쓰지 않는다."""
     source_id = src["source_id"]
-    if await repo.get_kakao(conn, source_id) is None:
+    async with pool.acquire() as conn:
+        kakao_row = await repo.get_kakao(conn, source_id)
+    if kakao_row is None:
         raise RuntimeError("source_kakao 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(conn, store_id, src)
+    path = await _download(pool, store_id, src)
 
     # 캡처 이미지는 파싱할 텍스트가 없다. 모델이 그림째 읽는다 (import_type SCREENSHOT)
     if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-        await repo.update_kakao_result(
-            conn, source_id, room_name=None, message_count=0, participant_cnt=0,
-            period_start=None, period_end=None, parsed_text="",
-        )
+        async with pool.acquire() as conn:
+            await repo.update_kakao_result(
+                conn, source_id, room_name=None, message_count=0, participant_cnt=0,
+                period_start=None, period_end=None, parsed_text="",
+            )
         return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path], []
 
     raw = path.read_text(encoding="utf-8", errors="replace")
     parsed = kakao.parse(raw)
 
-    await repo.update_kakao_result(
-        conn, source_id,
-        room_name=parsed["room_name"],
-        message_count=parsed["message_count"],
-        participant_cnt=len(parsed["participants"]),
-        period_start=parsed["period_start"], period_end=parsed["period_end"],
-        parsed_text=parsed["parsed_text"],
-    )
+    async with pool.acquire() as conn:
+        await repo.update_kakao_result(
+            conn, source_id,
+            room_name=parsed["room_name"],
+            message_count=parsed["message_count"],
+            participant_cnt=len(parsed["participants"]),
+            period_start=parsed["period_start"], period_end=parsed["period_end"],
+            parsed_text=parsed["parsed_text"],
+        )
     return parsed["parsed_text"], [], []
 
 
 async def _preprocess_scan(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+    pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
 , *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """문서·이미지: PDF 는 텍스트 레이어를 먼저 읽고, 없으면 모델에 그림째 넘긴다."""
     source_id = src["source_id"]
-    row = await repo.get_scan(conn, source_id)
+    async with pool.acquire() as conn:
+        row = await repo.get_scan(conn, source_id)
     if row is None:
         raise RuntimeError("source_scan 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(conn, store_id, src)
+    path = await _download(pool, store_id, src)
 
     if path.suffix.lower() == ".pdf":
         from app.config import get_settings
@@ -380,15 +491,17 @@ async def _preprocess_scan(
 
         # 글이 아예 없는 스캔본은 arm 과 무관하게 문서를 넘긴다. 안 넘기면 빈손이다
         if not read.text:
-            await repo.update_scan_result(conn, source_id,
-                                          page_count=read.page_count,
-                                          ocr_text=None, ocr_engine=None)
+            async with pool.acquire() as conn:
+                await repo.update_scan_result(conn, source_id,
+                                              page_count=read.page_count,
+                                              ocr_text=None, ocr_engine=None)
             return ("(텍스트 레이어 없는 스캔본. 첨부한 문서를 읽고 판단할 것)",
                     [path], [])
 
-        await repo.update_scan_result(conn, source_id,
-                                      page_count=read.page_count,
-                                      ocr_text=read.text, ocr_engine="pypdf")
+        async with pool.acquire() as conn:
+            await repo.update_scan_result(conn, source_id,
+                                          page_count=read.page_count,
+                                          ocr_text=read.text, ocr_engine="pypdf")
 
         if mode == "FILE":
             # 텍스트 레이어를 쓰지 않는 arm. 추출한 본문을 붙이지 않는다
@@ -408,13 +521,14 @@ async def _preprocess_scan(
         # TEXT — 대조군. 글로 읽힌 것만 쓴다
         return read.text, [], []
 
-    await repo.update_scan_result(conn, source_id, page_count=1,
-                                  ocr_text=None, ocr_engine=None)
+    async with pool.acquire() as conn:
+        await repo.update_scan_result(conn, source_id, page_count=1,
+                                      ocr_text=None, ocr_engine=None)
     return "(이미지 자료. 첨부한 그림을 읽고 판단할 것)", [path], []
 
 
 async def _preprocess_voice(
-    conn: asyncpg.Connection, store_id: int, src: asyncpg.Record
+    pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
 , *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     from app.config import get_settings
     source_id = src["source_id"]
@@ -422,7 +536,8 @@ async def _preprocess_voice(
     # 전사문이 이미 있으면 STT 를 건너뛴다 (가이드 8장 --skip-stt).
     # 추출 프롬프트는 수십 번 돌려야 하는데 STT 는 느리고 비싸다.
     # 다시 전사하려면 source_voice.transcript 를 비우고 재실행한다.
-    row = await repo.get_voice(conn, source_id)
+    async with pool.acquire() as conn:
+        row = await repo.get_voice(conn, source_id)
     if row and row["transcript"]:
         logger.info("STT 건너뜀 — 기존 전사문 재사용 source=%s chars=%d",
                     source_id, len(row["transcript"]))
@@ -431,18 +546,19 @@ async def _preprocess_voice(
     if get_settings().ingest_mode == "mock":
         return MOCK_PLACEHOLDER, [], []
 
-    path = await _download(conn, store_id, src)
+    path = await _download(pool, store_id, src)
     meta = await audio.probe(path)
     plain, stt_segments, model = await audio.transcribe_detailed(
         path, usage_sink=usage_sink, usage_context=usage_context)
     text = audio.with_timestamps(stt_segments) if stt_segments else plain
 
-    await repo.update_voice_result(
-        conn, source_id,
-        duration_sec=meta["duration_sec"] or 0,
-        transcript=text,
-        stt_model=model,
-    )
+    async with pool.acquire() as conn:
+        await repo.update_voice_result(
+            conn, source_id,
+            duration_sec=meta["duration_sec"] or 0,
+            transcript=text,
+            stt_model=model,
+        )
     return text, [], []
 
 
@@ -468,6 +584,7 @@ async def _extract_facts_all(
     glossary: list[dict], segments: list[tuple[str, list[Path]]],
     usage_sink=None, usage_base: tuple | None = None,
     checkpoint=None,
+    only_segments: set[str] | None = None,
 ) -> ExtractionOutcome:
     """map — 구간마다 **사실**을 뽑아 모은다. 카드를 만들지 않는다.
 
@@ -481,6 +598,10 @@ async def _extract_facts_all(
     전부 끝난 뒤 한 번에 적으면 8구간에서 죽을 때 앞 7구간도 같이 사라진다.
     모델 호출은 비싸고 느리다. 이미 뽑은 것은 지킨다.
     적지 못한 구간은 뽑았더라도 잃은 것으로 센다 — 원장에 없으면 없는 것이다.
+
+    `only_segments` 를 주면 PARTIAL 재시도다. 번호(`seg1..segN`)와 전체 구간 수는
+    그대로 두고 목록에 든 구간만 뽑는다. 실패 수·목록은 다시 시도한 구간만 센다.
+    대상이 전부 다시 실패해도 예외를 올리지 않는다 — 이미 만든 카드가 있다.
     """
     from app.ingest.extract import extract_facts
 
@@ -493,6 +614,9 @@ async def _extract_facts_all(
         return items
 
     if not segments:
+        if only_segments is not None:
+            # 호출부가 구간 구성을 먼저 확인한다. 여기 오면 자료 전체를 다시 뽑아 카드가 겹친다
+            raise RuntimeError("구간 없는 자료는 잃은 구간만 다시 뽑을 수 없다")
         result = await extract_facts(
             source_id=source_id, source_type=source_type, text=text,
             glossary=glossary, media=media, usage_sink=usage_sink,
@@ -506,6 +630,8 @@ async def _extract_facts_all(
     merged, unresolved, failed_ids = [], [], []
     for index, (seg_text, seg_media) in enumerate(segments, start=1):
         segment = f"seg{index}"
+        if only_segments is not None and segment not in only_segments:
+            continue
         try:
             part = await extract_facts(
                 source_id=source_id, source_type=source_type, text=seg_text,
@@ -534,6 +660,11 @@ async def _extract_facts_all(
         logger.info("구간 %d/%d 사실 %d건", index, len(segments), len(part.assertions))
 
     failed = len(failed_ids)
+    if only_segments is not None:
+        if failed:
+            logger.warning("재시도 구간 %d/%d 다시 실패 source=%s",
+                           failed, len(only_segments), source_id)
+        return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids)
     if failed == len(segments):
         raise RuntimeError(f"모든 구간({failed}개) 사실 추출이 실패했다")
     if failed:
@@ -547,9 +678,12 @@ async def _record_segment_failures(
 ) -> None:
     """잃은 구간을 작업 자료 행에 적는다. 뒤에서 상태를 PARTIAL 로 가른다.
 
+    실패가 0 이어도 현재 결과로 덮어쓴다. 안 그러면 재시도로 되찾은 구간이
+    지난 실패 기록에 남아 자료가 계속 PARTIAL 로 보인다.
+
     D1 — store_id 는 필수 인자다. job 없이 도는 레거시 경로에는 적을 행이 없다.
     """
-    if job_id is None or not outcome.segments_failed:
+    if job_id is None:
         return
     await conn.execute(
         """
@@ -560,7 +694,7 @@ async def _record_segment_failures(
         """,
         store_id, job_id, source_id,
         outcome.segments_total, outcome.segments_failed,
-        list(outcome.failed_segment_ids),
+        list(outcome.failed_segment_ids) or None,
     )
 
 
@@ -622,7 +756,7 @@ async def _persist_ledger(
 async def assemble_assertions(
     *, source_id: int, assertions: list,
     categories: list[str], glossary: list[dict],
-    usage_sink=None, usage_base: tuple | None = None,
+    usage_sink=None, usage_base: tuple | None = None, strict: bool = False,
 ):
     """추출된 사실을 대상 단위로 묶어 카드로 만든다. 등록과 미리보기에서 공유한다.
 
@@ -659,6 +793,8 @@ async def assemble_assertions(
             usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
         )
     except Exception as exc:
+        if strict:
+            raise RuntimeError('카드 조립 실패 — 저장한 추출 결과로 재시도해야 합니다.') from exc
         # 원장은 이미 적혔다. 카드를 못 만들어도 사실은 남는다
         logger.warning("조립 실패 source=%s: %s — 원장의 사실은 남는다", source_id, exc)
         return ExtractionResult(cards=[], unresolved=[f"조립 실패: {exc}"])

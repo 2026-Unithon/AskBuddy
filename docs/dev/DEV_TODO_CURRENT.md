@@ -1,5 +1,7 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-26 W 재시도 보완: W `ef51787`의 PARTIAL/API/집계/연결 수정 위에 조립 대기 추출 복구본, 입력 지문 검사, 카드·구간·완료 원자 저장을 추가했다. [검증·migration 선행·기존 자료 제한](review/W_RETRY_SAFETY_VERIFICATION_20260926.md). 단위 944개/119 subtests, 30개 migration 및 R/W 격리 DB 검증 통과. 실제 W snapshot/OWNER_ANSWER worker와 영속 작업 회수·실자료/운영 인수는 별도다.
+
 2026-09-21 R 이력·갱신 보완: R-F01 최신 메시지/선택지 표시, R-F02 세션 전체 대기 요약·자동 갱신 종료, R-V01 브라우저 오류 선택자를 수정했다. [조회 계약·배포 순서](plan/R_HISTORY_READ_CONTRACT.md), [검증 결과](review/R_HISTORY_FIX_VERIFICATION_20260921.md): 단위 913개·119 subtests, v2 API 157 checks, 브라우저 40+36 checks 및 전체 격리 DB runner 통과. 이전 감사는 수정 전 관찰이며, W 구현과 사람 정답/유료 평가 대기는 이번 R 수정과 별도다.
 
 2026-09-21 R 우선 재검토: [R 단독 결함·검증·남은 순서](review/R_ONLY_REVIEW_20260921.md). W는 별도 담당으로 두고 R의 긴 대화 최신 응답/명확화 표시와 앞선 점주 답변 대기 갱신 중단을 브라우저에서 재현했다. R 단독 수정 2건을 우선하며, W 공동 연결과 회의 대기는 별도다.

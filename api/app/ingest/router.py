@@ -376,6 +376,8 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
             sources=int(job["total_source_count"]),
             succeeded=int(job["success_source_count"]),
             failed=int(job["failed_source_count"]),
+            # DB 컬럼이 아니라 자료 목록에서 PARTIAL 건수를 센다
+            partial=sum(1 for row in sources if row["status"] == "PARTIAL"),
             cards=int(job["card_count"]),
         ),
         sources=[

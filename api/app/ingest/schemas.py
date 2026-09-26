@@ -188,7 +188,7 @@ IngestJobStatus = Literal[
     "SUCCEEDED", "PARTIAL", "NO_RESULT", "FAILED",
 ]
 IngestJobSourceStatus = Literal[
-    "QUEUED", "EXTRACTING", "CLASSIFYING", "SUCCEEDED", "NO_RESULT", "FAILED",
+    "QUEUED", "EXTRACTING", "CLASSIFYING", "SUCCEEDED", "PARTIAL", "NO_RESULT", "FAILED",
 ]
 
 
@@ -234,6 +234,8 @@ class IngestJobCounts(BaseModel):
     sources: int
     succeeded: int
     failed: int
+    # 자료는 끝났지만 구간 일부를 잃은 건수. DB 컬럼이 아니라 자료 목록에서 센다
+    partial: int = 0
     cards: int
 
 
