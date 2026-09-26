@@ -37,6 +37,7 @@ async def process_source(
     extraction_run_id: int | None = None,
     retry_segments: list[str] | None = None,
     expected_segments_total: int | None = None,
+    run_tag: int | None = None,
 ) -> str | None:
     """자료 하나를 처리한다.
 
@@ -48,6 +49,9 @@ async def process_source(
     한다. 이미 만든 카드·원장은 건드리지 않는다. 구간 구성이 지난 실행과 달라
     같은 구간을 가리킬 수 없으면 추출하지 않고 `PARTIAL_RETRY_UNAVAILABLE` 을
     돌려준다. 보통 경로는 `None` 을 돌려준다.
+
+    `run_tag` 는 같은 작업을 다시 돌릴 때 실행 하나를 가르는 표지다 (job_worker 가
+    자료 시작 시각에서 만든다). 없으면 논리 호출 ID 가 작업 단위로만 묶인다.
     """
     from app.usage import DbUsageSink
 
@@ -79,7 +83,7 @@ async def process_source(
             usage_sink=usage_sink,
             usage_context=_usage_context(
                 store_id, source_id, job_id, "STT",
-                cost_phase, cost_purpose, extraction_run_id),
+                cost_phase, cost_purpose, extraction_run_id, run_tag=run_tag),
         )
 
         from app.config import get_settings
@@ -126,7 +130,7 @@ async def process_source(
                 )
 
         usage_base = (store_id, job_id, cost_phase, cost_purpose,
-                      extraction_run_id)
+                      extraction_run_id, run_tag)
 
         # ── 입력 → 사실 → (원장) → 카드 ──────────────────────────────
         # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
@@ -254,18 +258,24 @@ async def process_source(
 def _usage_context(store_id: int, source_id: int, job_id: int | None,
                    stage: str, cost_phase: str, cost_purpose: str,
                    extraction_run_id: int | None, segment_id: str | None = None,
-                   attempt_no: int = 1):
+                   attempt_no: int = 1, run_tag: int | None = None):
     """호출 하나를 어느 매장·단계에 귀속시킬지. 논리 호출 ID 로 재시도를 묶는다.
 
     **재추출은 재시도가 아니다.** 논리 호출 ID 에 실행 범위를 넣지 않으면 같은
     자료를 다시 뽑을 때 원장 unique 에 걸려 추출 자체가 죽는다 — 계측이 제품을
     멈추게 한다. 같은 실행 안의 재시도만 `attempt_no` 로 묶는다.
+
+    같은 작업을 다시 돌리는 재시도(실패 자료·잃은 구간)도 재추출이다. 작업 ID 만으로는
+    지난 실행과 ID 가 같아지므로 `run_tag` 로 실행을 가른다.
     """
     from app.contracts.usage import UsageContext
 
     # 실행 범위: 평가는 run, 제품은 job. 둘 다 없으면 자료 단위로만 묶인다
+    # 제품 작업은 실행 표지를 붙인다 — `job{J}r{tag}:`. 길이 상한 80 안이다
+    # (ID 9자리·표지 13자리·seg99 에서 약 55자)
+    job_scope = f"job{job_id}r{run_tag}:" if run_tag else f"job{job_id}:"
     scope = (f"run{extraction_run_id}:" if extraction_run_id
-             else f"job{job_id}:" if job_id else "")
+             else job_scope if job_id else "")
     call = f"{scope}src{source_id}:{stage.lower()}"
     if segment_id:
         call = f"{call}:{segment_id}"
@@ -297,9 +307,9 @@ def _ctx_for(base: tuple | None, source_id: int, stage: str,
     """usage_base 가 없으면 계측하지 않는다 (기존 호출 경로 호환)."""
     if base is None:
         return None
-    store_id, job_id, phase, purpose, run_id = base
+    store_id, job_id, phase, purpose, run_id, run_tag = base
     return _usage_context(store_id, source_id, job_id, stage, phase, purpose,
-                          run_id, segment_id=segment_id)
+                          run_id, segment_id=segment_id, run_tag=run_tag)
 
 
 
