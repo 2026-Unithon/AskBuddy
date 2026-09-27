@@ -24,7 +24,7 @@ async def source_rows(
 ):
     return await conn.fetch(
         """
-        select source_id, status
+        select source_id, status, source_availability
         from sources
         where store_id = $1 and source_id = any($2::bigint[])
         order by source_id
@@ -169,7 +169,8 @@ async def get_job_sources(conn: asyncpg.Connection, store_id: int, job_id: int):
     return await conn.fetch(
         """
         select js.source_id, coalesce(s.original_filename, s.title) as filename,
-               js.status, js.card_count, js.error_code, js.error_message
+               js.status, js.card_count, js.error_code, js.error_message,
+               s.source_availability
         from ingest_job_sources js
         join sources s on s.store_id = js.store_id and s.source_id = js.source_id
         where js.store_id = $1 and js.job_id = $2
@@ -198,6 +199,11 @@ async def reset_retryable_sources(
             recovery_state = case when status = 'NO_RESULT' then null else recovery_state end,
             started_at = null, completed_at = null, updated_at = now()
         where store_id = $1 and job_id = $2 and status = any($3::varchar[])
+          -- D20: 삭제된 자료는 원본을 열 수 없으므로 다시 처리하지 않는다
+          and not exists (
+            select 1 from sources s
+            where s.store_id = $1 and s.source_id = ingest_job_sources.source_id
+              and s.source_availability = 'DELETED')
         returning source_id
         """,
         store_id,
@@ -212,6 +218,10 @@ async def reset_retryable_sources(
         set status = 'QUEUED', error_code = null, error_message = null,
             started_at = null, completed_at = null, updated_at = now()
         where store_id = $1 and job_id = $2 and status = 'PARTIAL'
+          and not exists (
+            select 1 from sources s
+            where s.store_id = $1 and s.source_id = ingest_job_sources.source_id
+              and s.source_availability = 'DELETED')
         returning source_id
         """,
         store_id,
@@ -242,3 +252,25 @@ async def reset_retryable_sources(
             job_id,
         )
     return len(rows)
+
+
+async def source_in_progress(conn: asyncpg.Connection, store_id: int, source_id: int) -> bool:
+    """자료가 지금 처리 중(대기 포함)인가. 처리 중 자료는 삭제하지 않는다."""
+    return bool(await conn.fetchval(
+        """
+        select exists (
+          select 1 from sources
+          where store_id = $1 and source_id = $2 and status = 'PROCESSING'
+        ) or exists (
+          select 1 from ingest_job_sources js
+          join ingest_jobs j on j.store_id = js.store_id and j.job_id = js.job_id
+          where js.store_id = $1 and js.source_id = $2
+            and js.status in ('QUEUED', 'EXTRACTING', 'CLASSIFYING')
+            -- 자료 등록 트리거가 만드는 호환 작업은 상태 변경 때만 동기화된다.
+            -- 처리하지 않은 자료도 QUEUED 로 남으므로 처리 중으로 보지 않는다
+            and j.prompt_version <> 'legacy-adapter'
+        )
+        """,
+        store_id,
+        source_id,
+    ))

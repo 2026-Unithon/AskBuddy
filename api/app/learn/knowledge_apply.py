@@ -9,7 +9,6 @@ import asyncpg
 
 from app.cards import repository as card_repo
 from app.config import get_settings
-from app.ingest.embed import embed_card, prepare_embedding
 from app.publish.approval import CardChange, PublishCardsResult, publish_cards
 from app.publish.service import _lock_publication
 
@@ -31,9 +30,9 @@ async def prepare_proposal(db, store_id: int, proposal_id: int):
         raise LookupError("knowledge proposal not found")
     if proposal["status"] not in ("ANALYZED", "PENDING_REVIEW", "FAILED"):
         raise ValueError("proposal cannot be published")
-    prepared = await prepare_embedding(store_id, proposal["proposed_title"],
-                                       proposal["proposed_content"], cost_phase="OPERATING")
-    return dict(proposal), prepared
+    # 옛 색인(card_embeddings) 준비는 제거했다. 두 번째 값은 호출부(R v1 답변 경로)
+    # 호환을 위해 자리만 남긴다 — 이 경로의 색인은 R 인계 문서 §7 참조
+    return dict(proposal), None
 
 
 async def _attach_owner_answer_citations(
@@ -171,7 +170,7 @@ async def publish_new_proposal(
     )
     if proposal is None:
         raise LookupError("knowledge proposal not found")
-    expected, prepared = preparation
+    expected, _ = preparation
     if dict(proposal) != expected:
         raise ValueError("knowledge proposal changed during embedding")
     if proposal["relation_type"] != "NEW":
@@ -197,7 +196,6 @@ async def publish_new_proposal(
         card_id,
     )
     version_id = draft_version_id
-    await embed_card(db, store_id, card_id, prepared=prepared)
     await db.execute(
         """
         update knowledge_change_proposals
@@ -243,7 +241,7 @@ async def publish_existing_proposal(
     )
     if proposal is None:
         raise LookupError("knowledge proposal not found")
-    expected, prepared = preparation
+    expected, _ = preparation
     if dict(proposal) != expected:
         raise ValueError("knowledge proposal changed during embedding")
     if proposal["relation_type"] not in ("SUPPLEMENT", "CONFLICT"):
@@ -301,7 +299,6 @@ async def publish_existing_proposal(
         proposal["proposed_content"],
         version_id,
     )
-    await embed_card(db, store_id, card_id, prepared=prepared)
     await db.execute(
         "update owner_answers set card_id = $2 where answer_id = $1",
         int(proposal["answer_id"]),
@@ -614,20 +611,11 @@ async def approve_owner_proposal(
             card_id, version_id = await _stage_proposal_card(
                 conn, store_id=store_id, proposal=proposal, actor_id=actor_user_id)
 
-    # 옛 색인 호환: R 의 점주답변 후보 검색(knowledge_loop.match_cards)이
-    # 아직 card_embeddings 를 읽는다. 후보 검색이 새 색인으로 옮겨질 때까지
-    # publish_cards 의 in_transaction hook 에서 옛 색인도 함께 채운다.
-    # (트랜잭션 밖에서 미리 준비 — 임베딩 호출은 연결을 잡지 않는다)
-    prepared = await prepare_embedding(
-        store_id, proposal["proposed_title"], proposal["proposed_content"],
-        cost_phase=usage_context.cost_phase, context=usage_context)
-
     async def hook(conn, snapshot_id: int, knowledge_revision: int) -> None:
         current = await _lock_proposal(conn, store_id=store_id, proposal_id=proposal_id)
         if current is None or current["status"] not in APPROVABLE_PROPOSAL_STATUSES:
             # 준비 사이 다른 경로가 제안을 닫았다. 발행째 롤백한다
             raise ValueError("knowledge proposal changed during publication")
-        await embed_card(conn, store_id, card_id, prepared=prepared)
         await _finish_proposal(conn, store_id=store_id, proposal=current,
                                card_id=card_id, version_id=version_id)
         if notify_r is None:

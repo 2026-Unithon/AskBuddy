@@ -23,8 +23,7 @@ from app.cards.schemas import (
 )
 from app.deps import Db, get_pool
 from app.errors import ApiClaims, ApiError
-from app.ingest.embed import embed_card, prepare_embedding
-from app.ingest.embed.service import card_usage_context
+from app.ingest.embed import card_usage_context
 from app.ingest.preprocess.storage import create_signed_read_url
 from app.publish import CardChange, publish_cards
 
@@ -66,11 +65,13 @@ def _category(row) -> CardCategory | None:
 def _source(row, *, read_url: str | None = None) -> CardSource | None:
     if row["source_id"] is None:
         return None
+    availability = row.get("source_availability")
     return CardSource(
         source_id=int(row["source_id"]),
         title=row["source_title"],
         source_type=row["source_type"],
         read_url=read_url,
+        source_availability=availability or "AVAILABLE",
     )
 
 
@@ -101,6 +102,9 @@ async def _evidence_items(db: Db, store_id: int, version_id: int) -> list[CardEv
     items: list[CardEvidence] = []
     for row in rows:
         source_id = int(row["source_id"])
+        if source_id not in urls and (row.get("source_availability") or "AVAILABLE") != "AVAILABLE":
+            # D20: 삭제된 자료는 원본 열람 URL 을 발급하지 않는다(원본 접근 해제)
+            urls[source_id] = None
         if source_id not in urls:
             try:
                 urls[source_id] = (
@@ -300,20 +304,7 @@ async def approve_card(
         if member_id is None:
             raise ApiError(403, "OWNER_ONLY", "카드는 사장님만 검수할 수 있습니다.")
 
-        draft = await repo.get_version(db, store_id, draft_version_id)
         context = await card_usage_context(db, store_id, card_id)
-        # 옛 색인 호환: R 의 점주답변 후보 검색(knowledge_loop.match_cards)이
-        # 아직 card_embeddings 를 읽는다. 후보 검색이 새 색인으로 옮겨질 때까지
-        # publish_cards 의 in_transaction hook 에서 옛 색인도 함께 채운다.
-        # (트랜잭션 밖에서 미리 준비 — 임베딩 호출은 연결을 잡지 않는다)
-        prepared = await prepare_embedding(store_id, draft["title"], draft["content"],
-                                           cost_phase=context.cost_phase, context=context)
-
-        async def _reindex_legacy(conn, snapshot_id: int, knowledge_revision: int) -> None:
-            # publish_cards 가 이미 review_status 를 APPROVED 로 바꾼 뒤 불리므로
-            # embed_card 의 is_verified 검사를 통과한다
-            await embed_card(conn, store_id, card_id, prepared=prepared)
-
         result = await publish_cards(
             get_pool(),
             store_id=store_id,
@@ -326,7 +317,6 @@ async def approve_card(
             )],
             idempotency_key=f"approve:{card_id}:{draft_version_id}",
             usage_context=context,
-            in_transaction=_reindex_legacy,
         )
 
         if result.status in ("PUBLISHED", "ALREADY_APPLIED"):

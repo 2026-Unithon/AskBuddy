@@ -69,12 +69,8 @@ class ApproveRouteTest(unittest.IsolatedAsyncioTestCase):
     def _patches(self, *, publish_result: PublishCardsResult):
         """approve_card 가 쓰는 외부 협력자를 전부 patch 한다."""
         patches = [
-            patch(f"{MOD}.repo.get_version", new=AsyncMock(
-                return_value=dict(title="제목", content="내용"))),
             patch(f"{MOD}.card_usage_context", new=AsyncMock(
                 return_value=_usage_context())),
-            patch(f"{MOD}.prepare_embedding", new=AsyncMock(return_value="PREPARED")),
-            patch(f"{MOD}.embed_card", new=AsyncMock(return_value=1)),
             patch(f"{MOD}.get_pool", new=lambda: "POOL"),
             patch(f"{MOD}.publish_cards", new=AsyncMock(return_value=publish_result)),
             patch(f"{MOD}.repo.mutation_row", new=AsyncMock(return_value=dict(
@@ -160,7 +156,7 @@ class ApproveRouteTest(unittest.IsolatedAsyncioTestCase):
                          "카드 내용이 비어 있거나 너무 길어 공개할 수 없습니다.")
 
     async def test_builds_card_change_and_idempotency_key(self):
-        _, _, _, _, _, publish_mock, _ = self._patches(publish_result=PublishCardsResult(
+        _, _, publish_mock, _ = self._patches(publish_result=PublishCardsResult(
             status="PUBLISHED", snapshot_id=1, knowledge_revision=1))
         db = FakeDb(_expected_row(), MEMBER)
         await approve_card(CARD, db, _claims())
@@ -173,7 +169,8 @@ class ApproveRouteTest(unittest.IsolatedAsyncioTestCase):
             card_id=CARD, expected_draft_version_id=DRAFT_VERSION,
             target_card_version_id=DRAFT_VERSION)])
         self.assertEqual(kwargs["idempotency_key"], f"approve:{CARD}:{DRAFT_VERSION}")
-        self.assertIn("in_transaction", kwargs)
+        # 옛 색인(card_embeddings) 호환 쓰기는 제거했다 — 공개 트랜잭션 hook 이 없다
+        self.assertNotIn("in_transaction", kwargs)
 
     async def test_member_id_missing_raises_owner_only(self):
         self._patches(publish_result=PublishCardsResult(status="PUBLISHED"))

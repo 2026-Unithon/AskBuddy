@@ -245,6 +245,15 @@ class IngestJobSource(BaseModel):
     status: IngestJobSourceStatus
     card_count: int
     error: dict[str, str] | None = None
+    # D20: DELETED 면 원본을 열 수 없고 다시 처리하지 않는다. 사실·카드·인용은 남는다
+    source_availability: Literal["AVAILABLE", "DELETED", "UNAVAILABLE"] = "AVAILABLE"
+
+
+class SourceDeleted(BaseModel):
+    source_id: int
+    source_availability: Literal["DELETED"]
+    deleted_at: str
+    already_deleted: bool
 
 
 class IngestJobDetail(BaseModel):

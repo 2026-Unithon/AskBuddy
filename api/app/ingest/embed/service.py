@@ -1,22 +1,10 @@
-"""임베딩 외부 준비 → 짧은 DB 트랜잭션에서 승인·내용 재검사 후 저장."""
-from dataclasses import dataclass
+"""카드 임베딩 비용 귀속.
+
+옛 색인(card_embeddings)에 직접 쓰던 prepare_embedding·embed_card 는 2026-09-27 제거했다.
+공개 카드의 색인은 publish_cards 가 R 색인 준비(app.reg.index_preparation)로만 만든다.
+"""
 from uuid import uuid4
-import asyncpg
-from app.config import get_settings
 from app.contracts.usage import UsageContext
-from app.deps import get_pool
-from app.ingest import repository as repo
-from app.reg.embeddings import content_hash, recorded_embeddings
-from app.usage import DbUsageSink
-
-
-@dataclass(frozen=True)
-class PreparedEmbedding:
-    store_id: int
-    text: str
-    vector: list[float]
-    model: str
-    dimension: int
 
 
 async def card_usage_context(db, store_id: int, card_id: int) -> UsageContext:
@@ -42,41 +30,3 @@ async def card_usage_context(db, store_id: int, card_id: int) -> UsageContext:
         source_id=str(source_id) if source_id is not None else None,
         job_id=str(prior["job_id"]) if prior and prior["job_id"] is not None else None,
         logical_call_id=f"card-embed:{operation}", operation_id=operation)
-
-
-async def prepare_embedding(store_id: int, title: str, content: str, *,
-                            cost_phase: str, cost_purpose: str = "PRODUCT",
-                            context: UsageContext | None = None, sink=None) -> PreparedEmbedding:
-    """호출자는 DB 트랜잭션 전에 준비한다. 목적·단계는 서버가 결정한다."""
-    text = f"{title}\n{content}".strip()
-    if context is None:
-        operation = str(uuid4())
-        context = UsageContext(store_id=str(store_id), stage="EMBED",
-                               cost_phase=cost_phase, cost_purpose=cost_purpose,
-                               logical_call_id=f"card-embed:{operation}", operation_id=operation)
-    if context.store_id != str(store_id) or context.stage != "EMBED":
-        raise ValueError("embedding context scope mismatch")
-    settings = get_settings()
-    vectors = await recorded_embeddings([text], context=context,
-                                        sink=sink if sink is not None else DbUsageSink(get_pool()))
-    return PreparedEmbedding(store_id, text, vectors[0], settings.embedding_model, settings.embedding_dim)
-
-
-async def embed_card(conn: asyncpg.Connection, store_id: int, card_id: int, *,
-                     prepared: PreparedEmbedding) -> int:
-    """외부 호출 없이 저장한다. 승인·내용은 같은 트랜잭션에서 잠금 후 확인한다."""
-    card = await conn.fetchrow(
-        "select card_id, title, content, is_verified from knowledge_cards "
-        "where store_id = $1 and card_id = $2 for update", store_id, card_id)
-    if card is None:
-        raise LookupError(f"card {card_id} not found in store {store_id}")
-    if not card["is_verified"]:
-        raise ValueError("승인된 카드만 검색 대상이다")
-    text = f"{card['title']}\n{card['content']}".strip()
-    if prepared.store_id != store_id or prepared.text != text:
-        raise ValueError("임베딩 준비 후 카드 내용이 변경됐다")
-    await repo.upsert_embedding(conn, store_id, card_id=card_id, chunk_index=0,
-                                chunk_text=text, embedding=prepared.vector,
-                                content_hash=content_hash(text), model_name=prepared.model,
-                                dimension=prepared.dimension)
-    return 1

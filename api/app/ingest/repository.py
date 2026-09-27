@@ -57,7 +57,7 @@ async def get_source(
 ) -> asyncpg.Record | None:
     return await conn.fetchrow(
         "select source_id, store_id, source_type, title, file_url, content_hash, status, "
-        "       error_message, processed_at "
+        "       error_message, processed_at, source_availability "
         "from sources where store_id = $1 and source_id = $2",
         store_id, source_id,
     )
@@ -383,46 +383,6 @@ async def get_card(
         "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
         "where store_id = $1 and card_id = $2",
         store_id, card_id,
-    )
-
-
-# ── 임베딩 ─────────────────────────────────────────────────────────────────
-
-async def upsert_embedding(
-    conn: asyncpg.Connection,
-    store_id: int,
-    *,
-    card_id: int,
-    chunk_index: int,
-    chunk_text: str,
-    embedding: list[float],
-    content_hash: str,
-    model_name: str,
-    dimension: int,
-) -> None:
-    """asyncpg 는 vector 타입을 모른다. 문자열로 넘기고 SQL 에서 캐스팅한다.
-
-    변환은 관호님 vector_literal 을 쓴다. 자릿수가 갈라지면 같은 카드가
-    재적재될 때마다 content_hash 는 같은데 벡터만 미세하게 달라진다.
-    """
-    from app.reg.embeddings import vector_literal
-    literal = vector_literal(embedding)
-    await conn.execute(
-        "insert into card_embeddings "
-        "  (card_id, store_id, chunk_index, chunk_text, embedding, dimension, "
-        "   model_name, content_hash, lexical_tsv, is_stale, indexed_at) "
-        "values ($1, $2, $3, $4, $5::vector, $6, $7, $8, to_tsvector('simple', $4), false, now()) "
-        "on conflict (card_id, chunk_index) do update set "
-        "  chunk_text = excluded.chunk_text, "
-        "  embedding = excluded.embedding, "
-        "  dimension = excluded.dimension, "
-        "  model_name = excluded.model_name, "
-        "  content_hash = excluded.content_hash, "
-        "  lexical_tsv = excluded.lexical_tsv, "
-        "  is_stale = false, "
-        "  updated_at = now()",
-        card_id, store_id, chunk_index, chunk_text, literal, dimension,
-        model_name, content_hash,
     )
 
 

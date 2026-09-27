@@ -390,11 +390,15 @@ export async function patchRoadmapItem(
   );
 }
 
+export type SourceAvailability = "AVAILABLE" | "DELETED" | "UNAVAILABLE";
+
 export type CardSourceDto = {
   source_id: number;
   title: string | null;
   source_type: string | null;
   read_url: string | null;
+  // 자료가 삭제되면 원본을 열 수 없다. 근거는 '인용 끊김'으로 표시한다
+  source_availability?: SourceAvailability;
 };
 
 export type CardEvidenceDto = {
@@ -685,6 +689,7 @@ export type IngestJobDetail = {
     status: string;
     card_count: number;
     error: { code: string; message: string } | null;
+    source_availability?: SourceAvailability;
   }>;
   review_destination: string;
 };
@@ -725,6 +730,16 @@ export async function getIngestJob(jobId: number, token: string, signal?: AbortS
     headers: authHeader(token),
     signal,
   });
+}
+
+// 자료 삭제: 원본 접근만 해제한다. 사실·카드·답변 근거는 남고 '인용 끊김'으로 표시된다
+export async function deleteIngestSource(sourceId: number, token: string) {
+  return fetchJson<{
+    source_id: number;
+    source_availability: "DELETED";
+    deleted_at: string;
+    already_deleted: boolean;
+  }>(`/ingest/sources/${sourceId}`, { method: "DELETE", headers: authHeader(token) });
 }
 
 export async function retryIngestJob(jobId: number, token: string) {

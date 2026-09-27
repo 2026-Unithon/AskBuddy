@@ -61,6 +61,7 @@ async def list_cards(
                k.updated_at, c.category_id, c.category_name,
                s.source_id, s.source_type,
                coalesce(s.original_filename, s.title) as source_title,
+               s.source_availability,
                exists (
                  select 1 from card_evidence e
                  where e.store_id = k.store_id and e.version_id = v.version_id
@@ -128,7 +129,7 @@ async def get_card(conn: asyncpg.Connection, store_id: int, card_id: int):
         """
         select k.*, c.category_name,
                s.source_type, coalesce(s.original_filename, s.title) as source_title,
-               s.file_url
+               s.file_url, s.source_availability
         from knowledge_cards k
         left join task_categories c
           on c.store_id = k.store_id and c.category_id = k.category_id
@@ -258,7 +259,8 @@ async def list_evidence(
         """
         select e.evidence_id, e.locator_type, e.locator, e.excerpt,
                s.source_id, s.source_type,
-               coalesce(s.original_filename, s.title) as source_title, s.file_url
+               coalesce(s.original_filename, s.title) as source_title, s.file_url,
+               s.source_availability
         from card_evidence e
         join sources s on s.store_id = e.store_id and s.source_id = e.source_id
         where e.store_id = $1 and e.version_id = $2

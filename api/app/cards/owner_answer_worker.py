@@ -36,6 +36,7 @@ from app.learn.owner_handoff import (
     heartbeat_owner_event,
 )
 from app.publish.approval import CardChange, publish_cards
+from app.publish.bootstrap import READY, index_status
 from app.publish.content import current_manifest
 from app.usage import DbUsageSink
 from app.usage.gemini import UsageStartError
@@ -513,11 +514,35 @@ async def process_next_owner_event(pool, *, store_id: int) -> str | None:
                                     token=token, code=code, message=message)
 
 
+async def _index_ready(pool, *, store_id: int, warned: dict[int, str]) -> bool:
+    """활성 공개 색인이 있는 매장만 처리한다.
+
+    색인이 없으면 후보 검색이 INDEX_UNAVAILABLE 로 실패해 사건이 실패로 끝난다.
+    사건을 태우지 않고 남겨 둔 채 건너뛰고, 상태가 바뀔 때만 한 번 경고한다.
+    준비는 scripts/bootstrap_store_index.py 로 한다.
+    """
+    async with pool.acquire() as conn:
+        status = await index_status(conn, store_id=store_id)
+    if status.status == READY:
+        warned.pop(store_id, None)
+        return True
+    if warned.get(store_id) != status.status:
+        warned[store_id] = status.status
+        logger.warning(
+            "공개 색인이 준비되지 않아 점주 답변 처리를 미룬다 store=%s status=%s "
+            "— scripts/bootstrap_store_index.py 로 준비",
+            store_id, status.status)
+    return False
+
+
 async def run_owner_answer_worker(pool, *, stop: asyncio.Event) -> None:
     """주기마다 사건이 있는 매장을 찾아 매장별로 비울 때까지 처리한다."""
+    warned: dict[int, str] = {}
     while not stop.is_set():
         try:
             for store_id in await _stores_with_pending(pool):
+                if not await _index_ready(pool, store_id=store_id, warned=warned):
+                    continue
                 for _ in range(MAX_EVENTS_PER_STORE):
                     if stop.is_set():
                         break

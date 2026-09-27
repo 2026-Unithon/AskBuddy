@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 
 from app.db_session import ShortSession
-from app.ingest.embed.service import PreparedEmbedding, embed_card, prepare_embedding, card_usage_context
+from app.ingest.embed.service import card_usage_context
 from app.team.extraction import applicability, match_fact, aggregate
 from app.team.repeat_metrics import compare_repeats
 from app.team.answer_metrics import paired_gate
@@ -120,31 +120,18 @@ class EmbedTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_source_attribution_blocks_before_paid_call(self):
         db=NS(fetchrow=AsyncMock(side_effect=[dict(source_id=12),None]))
-        with patch("app.ingest.embed.service.recorded_embeddings",new_callable=AsyncMock) as provider:
+        with patch("app.reg.embeddings.recorded_embeddings",new_callable=AsyncMock) as provider:
             with self.assertRaises(ValueError):
                 await card_usage_context(db,1,2)
             provider.assert_not_awaited()
 
-    async def test_prepare_injects_trusted_context_and_single_call(self):
-        sink=object()
-        with patch("app.ingest.embed.service.recorded_embeddings", new_callable=AsyncMock,return_value=[[1.]]) as call, \
-             patch("app.ingest.embed.service.get_settings",return_value=NS(embedding_model="synthetic",embedding_dim=1)):
-            result=await prepare_embedding(1,"예시","본문",cost_phase="REGISTRATION",cost_purpose="DEVELOPMENT",sink=sink)
-        self.assertEqual(result.store_id,1)
-        context=call.call_args.kwargs["context"]
-        self.assertEqual((context.stage,context.store_id,context.cost_phase,context.cost_purpose),
-                         ("EMBED","1","REGISTRATION","DEVELOPMENT"))
-        self.assertIs(call.call_args.kwargs["sink"],sink)
-        call.assert_awaited_once()
-
-    async def test_stale_or_other_store_is_not_saved(self):
-        db=NS(fetchrow=AsyncMock(return_value=dict(title="예시",content="새 내용",is_verified=True)))
-        with patch("app.ingest.embed.service.repo.upsert_embedding",new_callable=AsyncMock) as write:
-            for prepared in (PreparedEmbedding(1,"예시\n옛 내용",[1.],"synthetic",1),
-                             PreparedEmbedding(2,"예시\n새 내용",[1.],"synthetic",1)):
-                with self.assertRaises(ValueError):
-                    await embed_card(db,1,1,prepared=prepared)
-            write.assert_not_awaited()
+    def test_legacy_card_embedding_writers_are_removed(self):
+        # 옛 색인(card_embeddings) 쓰기는 2026-09-27 제거했다. 색인은 publish_cards 경로 하나다
+        import app.ingest.embed.service as service
+        import app.ingest.repository as ingest_repo
+        for name in ("prepare_embedding","embed_card","PreparedEmbedding"):
+            self.assertFalse(hasattr(service,name),name)
+        self.assertFalse(hasattr(ingest_repo,"upsert_embedding"))
 
     async def test_short_session_does_not_hold_connection_between_queries(self):
         pool=NS(fetchval=AsyncMock(return_value=1))

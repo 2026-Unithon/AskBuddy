@@ -370,9 +370,54 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             return result
 
         with patch(f"{MOD}._stores_with_pending", AsyncMock(return_value=[1, 2])), \
+                patch(f"{MOD}._index_ready", AsyncMock(return_value=True)), \
                 patch(f"{MOD}.process_next_owner_event", side_effect=process):
             await asyncio.wait_for(worker.run_owner_answer_worker(object(), stop=stop), 2)
         self.assertEqual(calls, [1, 1, 2])
+
+    async def test_loop_skips_store_without_active_index(self):
+        """활성 공개 색인이 없는 매장은 사건을 태우지(FAILED) 않고 건너뛴다."""
+        stop = asyncio.Event()
+        calls = []
+
+        async def ready(pool, *, store_id, warned):
+            return store_id != 1
+
+        async def process(pool, *, store_id):
+            calls.append(store_id)
+            stop.set()
+            return None
+
+        with patch(f"{MOD}._stores_with_pending", AsyncMock(return_value=[1, 2])), \
+                patch(f"{MOD}._index_ready", side_effect=ready), \
+                patch(f"{MOD}.process_next_owner_event", side_effect=process):
+            await asyncio.wait_for(worker.run_owner_answer_worker(object(), stop=stop), 2)
+        self.assertEqual(calls, [2])
+
+    async def test_index_ready_warns_once_per_status(self):
+        from app.publish.bootstrap import IndexStatus
+
+        class Pool:
+            def acquire(self):
+                return _Ctx()
+
+        class _Ctx:
+            async def __aenter__(self):
+                return object()
+
+            async def __aexit__(self, *exc):
+                return False
+
+        statuses = iter([IndexStatus(5, "MISSING", 3, 0), IndexStatus(5, "MISSING", 3, 0),
+                         IndexStatus(5, "READY", 3, 1)])
+        warned: dict[int, str] = {}
+        with patch(f"{MOD}.index_status", AsyncMock(side_effect=lambda *a, **k: next(statuses))), \
+                self.assertLogs(worker.logger, level="WARNING") as logs:
+            self.assertFalse(await worker._index_ready(Pool(), store_id=5, warned=warned))
+            self.assertFalse(await worker._index_ready(Pool(), store_id=5, warned=warned))
+            self.assertTrue(await worker._index_ready(Pool(), store_id=5, warned=warned))
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(warned, {})
 
     async def test_loop_logs_exception_and_continues(self):
         stop = asyncio.Event()
