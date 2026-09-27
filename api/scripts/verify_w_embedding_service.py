@@ -1,15 +1,17 @@
-"""일회용 PG15에서 실제 W 준비/원장/연결/CAS 검증. 모델은 합성, pgvector는 별도다."""
+"""일회용 PG에서 W 카드 임베딩 비용 귀속 검증.
+
+옛 색인(card_embeddings)에 직접 쓰던 prepare_embedding·embed_card 는 2026-09-27 제거했다.
+공개 카드 색인은 publish_cards → R 색인 준비 경로 하나다(verify_w_publication_flow 가 검증).
+여기서는 남은 비용 귀속(card_usage_context)과 옛 쓰기 경로가 사라졌는지만 본다.
+"""
 import asyncio
 import sys
 from pathlib import Path
-from types import SimpleNamespace as NS
-from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import asyncpg
+import app.ingest.embed.service as service
+import app.ingest.repository as ingest_repo
 from app.db_session import ShortSession
-from app.ingest.embed.service import prepare_embedding, embed_card
-from app.contracts.usage import UsageContext
-from app.usage import DbUsageSink
 from verify_r_answer_usage import DSN
 
 
@@ -22,49 +24,24 @@ async def main():
         passed.append(name)
         print("PASS",name)
     try:
-        await observer.execute("create table knowledge_cards(card_id bigint primary key,store_id bigint,title text,content text,is_verified boolean);"
-                               "insert into knowledge_cards values(1,1,'예시','본문',false);")
-        loop=asyncio.get_running_loop()
-        def provider(**kwargs):
-            count=asyncio.run_coroutine_threadsafe(observer.fetchval(
-                "select count(*) from ai_usage_attempts where store_id=1 and logical_call_id='w-service-test' and status='STARTED'"),loop).result(timeout=2)
-            assert count==1 and pool.get_idle_size()==1
-            return NS(data=[NS(index=0,embedding=[1.])],usage=NS(prompt_tokens=7,total_tokens=7))
-        settings=NS(openai_api_key="fake",embedding_model="synthetic",embedding_dim=1,embedding_timeout_seconds=30)
-        client=NS(embeddings=NS(create=Mock(side_effect=provider)),close=Mock())
+        check("legacy card_embeddings writers are removed",
+              not any(hasattr(service,n) for n in ("prepare_embedding","embed_card","PreparedEmbedding"))
+              and not hasattr(ingest_repo,"upsert_embedding"))
+        await observer.execute("create table knowledge_cards(card_id bigint primary key,store_id bigint,source_id bigint,title text,content text,is_verified boolean);"
+                               "insert into knowledge_cards values(1,1,null,'예시','본문',true);")
         db=ShortSession(pool)
-        await db.fetchrow("select * from knowledge_cards where store_id=$1 and card_id=$2",1,1)
-        context=UsageContext(store_id="1",cost_phase="REGISTRATION",cost_purpose="DEVELOPMENT",stage="EMBED",logical_call_id="w-service-test")
-        with patch("app.ingest.embed.service.get_settings",return_value=settings), \
-             patch("app.reg.embeddings.get_settings",return_value=settings), \
-             patch("app.reg.embeddings.OpenAI",return_value=client):
-            prepared=await prepare_embedding(1,"예시","본문",cost_phase="REGISTRATION",context=context,sink=DbUsageSink(pool))
-        check("W service releases one-slot pool before provider and durable STARTED",client.embeddings.create.call_count==1)
-        receipt=await observer.fetchrow("select stage,status,prompt_tokens from ai_usage_attempts where store_id=1 and logical_call_id='w-service-test'")
-        check("W service records embedding usage",tuple(receipt)==("EMBED","SUCCEEDED",7))
-        with patch("app.ingest.embed.service.repo.upsert_embedding") as write:
-            try:
-                async with db.transaction():
-                    await db.execute("update knowledge_cards set is_verified=true,content='다른 내용' where store_id=1 and card_id=1")
-                    await embed_card(db,1,1,prepared=prepared)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError("stale content accepted")
-            check("stale content rolls approval back without index write",not write.called and not await observer.fetchval("select is_verified from knowledge_cards where store_id=1 and card_id=1"))
-            async with db.transaction():
-                await db.execute("update knowledge_cards set is_verified=true where store_id=1 and card_id=1")
-                await embed_card(db,1,1,prepared=prepared)
-            check("matching approved content commits index boundary",write.call_count==1)
-            try:
-                async with db.transaction():
-                    await embed_card(db,2,1,prepared=prepared)
-            except LookupError:
-                pass
-            else:
-                raise AssertionError("other store accessed")
-            check("W service rejects cross-store card lookup",write.call_count==1)
-        check("transaction exits return connection",pool.get_idle_size()==1 and db.connection is None)
+        context=await service.card_usage_context(db,1,1)
+        check("owner-written card embeds as operating product cost",
+              (context.stage,context.store_id,context.cost_phase,context.cost_purpose,context.source_id)
+              ==("EMBED","1","OPERATING","PRODUCT",None))
+        try:
+            await service.card_usage_context(db,2,1)
+        except LookupError:
+            pass
+        else:
+            raise AssertionError("other store accessed")
+        check("usage context rejects cross-store card lookup",True)
+        check("short session returns connection",pool.get_idle_size()==1 and db.connection is None)
         print(f"{len(passed)}/{len(passed)} PASS PostgreSQL " + await observer.fetchval("show server_version"))
     finally:
         await observer.close()

@@ -126,3 +126,17 @@ def test_policy_preserves_snapshot_and_cannot_rewrite_values():
     assert truth == before
     with pytest.raises(ValueError):
         apply_evaluation_policy(truth, {"old": {"value": "99번 냉장고"}})
+
+
+def test_policy_accepts_confirmed_applicability_scope():
+    # 사람이 확정한 규격 적용 범위(COMMON)는 정책으로 받는다. 규격 없는 카드도 담은 것으로 센다
+    fact = {"fact_id": "f", "subject": "음료A", "variant": "HOT", "attribute": "시럽 펌프 수",
+            "value": "3펌프"}
+    card = {"card_id": 1, "title": "음료A 시럽", "content": "음료A 시럽 펌프 수는 3펌프입니다."}
+    [scoped] = apply_evaluation_policy([fact], {"f": {"applicability": "COMMON"}})
+    assert "applicability" not in fact
+    assert match_fact(scoped, [card]).verdict == "COVERED"
+    specific = match_fact({**fact, "applicability": "SPECIFIC"}, [card])
+    assert specific.verdict != "COVERED" and specific.variant_hit is False
+    with pytest.raises(ValueError):
+        apply_evaluation_policy([fact], {"f": {"applicability": "ALL"}})

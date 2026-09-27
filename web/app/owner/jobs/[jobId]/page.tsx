@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Shell, TopBar } from "@/components/ui";
-import { ApiError, isIngestJobActive, retryIngestJob } from "@/lib/api";
+import { ApiError, deleteIngestSource, isIngestJobActive, retryIngestJob } from "@/lib/api";
 import { ingestJobQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
@@ -27,8 +27,18 @@ export default function JobDetailPage() {
       ]);
     },
   });
+  const removeSource = useMutation({
+    mutationFn: (sourceId: number) => deleteIngestSource(sourceId, state.token!),
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.ingestJob(state.storeId, jobId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) }),
+      ]);
+    },
+  });
   const data = job.data;
   const error = job.error ?? retry.error;
+  const sourceBusy = data ? isIngestJobActive(data.status) : true;
   return (
     <Shell>
       <TopBar title="처리 작업 상세" backHref="/owner/upload" />
@@ -44,7 +54,22 @@ export default function JobDetailPage() {
             {(data.status === "FAILED" || data.status === "NO_RESULT" || data.status === "PARTIAL") && <Button loading={retry.isPending} loadingLabel="작업 재시도 중" onClick={() => retry.mutate()}>작업 재시도</Button>}
             {data.counts.cards > 0 && <Link href={data.review_destination} className="flex min-h-11 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-bold text-white">이 작업의 카드 검토</Link>}
           </Card>
-          <section className="space-y-3"><h2 className="text-sm font-bold text-brand-700">자료별 상태</h2>{data.sources.map((source) => <Card key={source.source_id} className="space-y-2 p-4"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-semibold">{source.filename}</p><span className="shrink-0 text-xs font-bold text-muted">{source.status}</span></div><p className="text-xs text-muted">생성 카드 {source.card_count}개</p>{source.error && <p role="alert" className="rounded-xl bg-danger-50 px-3 py-2 text-sm text-danger-600">{source.error.message}</p>}</Card>)}</section>
+          <section className="space-y-3"><h2 className="text-sm font-bold text-brand-700">자료별 상태</h2>{data.sources.map((source) => {
+            const deleted = source.source_availability === "DELETED";
+            const deleting = removeSource.isPending && removeSource.variables === source.source_id;
+            const deleteError = removeSource.isError && removeSource.variables === source.source_id ? removeSource.error : null;
+            return <Card key={source.source_id} className="space-y-2 p-4" data-testid={`job-source-${source.source_id}`}>
+              <div className="flex items-center justify-between gap-3"><p className={`truncate text-sm font-semibold ${deleted ? "text-muted line-through" : ""}`}>{source.filename}</p><span className="shrink-0 text-xs font-bold text-muted">{deleted ? "삭제됨" : source.status}</span></div>
+              <p className="text-xs text-muted">생성 카드 {source.card_count}개</p>
+              {deleted && <p className="text-xs text-muted">원본은 더 이상 열 수 없어요. 만든 카드와 답변 근거는 남고 &lsquo;인용 끊김&rsquo;으로 표시돼요.</p>}
+              {source.error && !deleted && <p role="alert" className="rounded-xl bg-danger-50 px-3 py-2 text-sm text-danger-600">{source.error.message}</p>}
+              {deleteError && <p role="alert" className="rounded-xl bg-danger-50 px-3 py-2 text-sm text-danger-600">{deleteError instanceof ApiError ? deleteError.detail || "자료를 삭제하지 못했어요." : "서버에 연결할 수 없습니다."}</p>}
+              {!deleted && <Button variant="secondary" disabled={sourceBusy || removeSource.isPending} loading={deleting} loadingLabel="자료 삭제 중" aria-label={`${source.filename} 자료 삭제`} onClick={() => {
+                if (window.confirm("이 자료를 삭제할까요? 원본 파일은 더 이상 열 수 없고 다시 처리할 수 없습니다. 이미 만든 카드와 답변 근거는 남고 '인용 끊김'으로 표시됩니다.")) removeSource.mutate(source.source_id);
+              }}>자료 삭제</Button>}
+              {!deleted && sourceBusy && <p className="text-xs text-muted">처리가 끝난 뒤 삭제할 수 있어요.</p>}
+            </Card>;
+          })}</section>
         </>}
         {!jobId && <Card className="p-6 text-center text-sm text-danger-500">잘못된 작업 링크입니다.</Card>}
       </div>

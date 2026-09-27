@@ -269,6 +269,11 @@ export default function CardDetailPage() {
                     <strong className="font-semibold text-foreground block truncate">
                       📎 {evidence.source.title ?? `자료 #${evidence.source.source_id}`}
                     </strong>
+                    {evidence.source.source_availability === "DELETED" && (
+                      <p className="text-xs font-bold text-muted" data-testid="broken-citation">
+                        인용 끊김 · 원본 자료가 삭제됐어요
+                      </p>
+                    )}
                     {evidence.excerpt && (
                       <blockquote className="border-l-2 border-brand-500 bg-brand-50/40 p-2 rounded-r text-sm leading-relaxed text-foreground/85 italic">
                         &ldquo;{evidence.excerpt}&rdquo;

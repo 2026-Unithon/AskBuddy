@@ -26,7 +26,7 @@ import asyncpg  # noqa: E402
 import bcrypt  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
-from app.reg.embeddings import content_hash, embed_texts, vector_literal  # noqa: E402
+from app.publish.bootstrap import bootstrap_store_index  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTDATA = ROOT / "testdata"
@@ -356,20 +356,22 @@ async def main() -> int:
                             "values ($1,'BUDDY',$2,'ANSWERED',95,'OWNER_ANSWER','NOT_APPLICABLE',$3)",
                             sess, extra, at + timedelta(hours=2, seconds=5))
 
-        # ── 임베딩 (트랜잭션 밖 — 외부 호출) ──────────────────────────
-        rows = await c.fetch(
-            "select card_id, title, content from knowledge_cards "
-            "where store_id=$1 and is_verified order by card_id", store_id)
-        texts = [f"{r['title']}\n{r['content']}" for r in rows]
-        print(f"  임베딩 {len(texts)}건 생성 중…")
-        vecs = embed_texts(texts)
-        for r, t, v in zip(rows, texts, vecs):
-            await c.execute(
-                "insert into card_embeddings (card_id,store_id,chunk_index,chunk_text,embedding,"
-                "  dimension,model_name,content_hash,lexical_tsv) "
-                "values ($1,$2,0,$3,$4::vector,$5,$6,$7,to_tsvector('simple',$3))",
-                r["card_id"], store_id, t, vector_literal(v), s.embedding_dim,
-                s.embedding_model, content_hash(t))
+        # ── 공개 색인 (트랜잭션 밖 — 외부 호출) ─────────────────────────
+        # 검색은 활성 공개 색인만 읽는다. 승인 카드 그대로 한 번 발행해 색인을 만든다
+        n_verified = await c.fetchval(
+            "select count(*) from knowledge_cards where store_id=$1 and is_verified", store_id)
+        print(f"  공개 색인 준비 중… (승인 카드 {n_verified}건)")
+        pool = await asyncpg.create_pool(url, min_size=1, max_size=2)
+        try:
+            status, result = await bootstrap_store_index(
+                pool, store_id=store_id, cost_phase="REGISTRATION")
+        finally:
+            await pool.close()
+        outcome = result.status if result else status.status
+        print(f"  공개 색인: {outcome}")
+        if result is not None and result.status not in ("PUBLISHED", "ALREADY_APPLIED"):
+            print(f"  색인 준비 실패 code={result.error_code} — 검색이 동작하지 않는다", file=sys.stderr)
+            return 3
 
         print(f"""
   ── 데모 준비 완료 (store_id={store_id}) ──
@@ -378,7 +380,7 @@ async def main() -> int:
             {STAFF[1][1]} / {PW}   진도 16.67%
    초대코드 CAFE-DEMO
 
-   자료 {len(SOURCES)}건 · 카드 {len(CARDS)}건(승인 {len(texts)} · 검수대기 {len(CARDS)-len(texts)})
+   자료 {len(SOURCES)}건 · 카드 {len(CARDS)}건(승인 {n_verified} · 검수대기 {len(CARDS)-n_verified})
    대화 {len(CHAT)}건 · 대기질문 2건 · 점주가 답해준 것 1건
 """)
     finally:

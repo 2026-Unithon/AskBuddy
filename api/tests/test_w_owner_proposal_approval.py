@@ -97,8 +97,6 @@ class ApproveOwnerProposalTests(unittest.IsolatedAsyncioTestCase):
             "resolve": patch(f"{MOD}.resolve_owner_answer_category",
                              AsyncMock(return_value=8)),
             "set_category": patch(f"{MOD}._set_proposal_category", AsyncMock()),
-            "prepare": patch(f"{MOD}.prepare_embedding", AsyncMock(return_value="PREP")),
-            "embed": patch(f"{MOD}.embed_card", AsyncMock(return_value=1)),
             "finish": patch(f"{MOD}._finish_proposal", AsyncMock()),
             "publish": patch(f"{MOD}.publish_cards", AsyncMock(
                 side_effect=self._publish)),
@@ -216,7 +214,6 @@ class ApproveOwnerProposalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "ALREADY_APPLIED")
         self.m["publish"].assert_not_awaited()
         self.m["create"].assert_not_awaited()
-        self.m["prepare"].assert_not_awaited()
 
     async def test_published_without_result_ids_is_rejected(self):
         self.m["lock_proposal"].return_value = _proposal(status="PUBLISHED")
@@ -293,7 +290,7 @@ class ApproveOwnerProposalTests(unittest.IsolatedAsyncioTestCase):
                 result = await self._approve()
             self.assertEqual(result.status, "NO_PROVENANCE")
         for name in ("create", "create_draft", "mark_source", "set_category", "target",
-                     "prepare", "publish"):
+                     "publish"):
             self.m[name].assert_not_awaited()
 
     async def test_flag_off_still_replays_published_proposal(self):
@@ -318,11 +315,9 @@ class ApproveOwnerProposalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((finish["store_id"], finish["card_id"], finish["version_id"]),
                          (STORE, 90, 900))
         self.assertEqual(finish["proposal"]["proposal_id"], PROPOSAL)
-        # 옛 색인 호환 쓰기는 hook 안에서, 준비는 hook 밖에서
-        self.m["embed"].assert_awaited_once()
-        self.assertEqual(self.m["embed"].await_args.args[1:], (STORE, 90))
-        self.assertEqual(self.m["embed"].await_args.kwargs, dict(prepared="PREP"))
-        self.m["prepare"].assert_awaited_once()
+        # 옛 색인(card_embeddings) 호환 쓰기는 제거했다
+        self.assertFalse(hasattr(ka, "embed_card"))
+        self.assertFalse(hasattr(ka, "prepare_embedding"))
 
     async def test_hook_rejects_proposal_changed_meanwhile(self):
         notify = AsyncMock()

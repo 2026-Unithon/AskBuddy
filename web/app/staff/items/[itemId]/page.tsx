@@ -146,6 +146,11 @@ export default function LearnItemPage() {
                       <strong className="font-semibold text-foreground truncate">
                         📎 {evidence.source.title ?? "매장 등록 업무 자료"}
                       </strong>
+                      {evidence.source.source_availability === "DELETED" && (
+                        <span className="text-xs font-bold text-muted shrink-0" data-testid="broken-citation">
+                          인용 끊김
+                        </span>
+                      )}
                       {evidence.source.source_type && (
                         <span className="text-xs text-muted shrink-0 bg-surface-muted px-1.5 py-0.5 rounded">
                           {evidence.source.source_type}

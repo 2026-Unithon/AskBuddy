@@ -73,7 +73,8 @@ def apply_evaluation_policy(truth, overrides):
     ids = {f["fact_id"] for f in truth}
     if set(overrides) - ids:
         raise ValueError("정답지 밖 정책 ID")
-    allowed = {"expectation", "superseded_by", "recipe_uses_ice"}
+    # applicability 는 사람이 확정한 규격 적용 범위다. 대상·속성·값이 아니므로 정책으로 받는다
+    allowed = {"expectation", "superseded_by", "recipe_uses_ice", "applicability"}
     for update in overrides.values():
         if set(update) - allowed:
             raise ValueError("정책은 원본 대상·속성·값을 바꿀 수 없다")
@@ -81,6 +82,8 @@ def apply_evaluation_policy(truth, overrides):
             raise ValueError("invalid fact expectation")
         if "recipe_uses_ice" in update and type(update["recipe_uses_ice"]) is not bool:
             raise ValueError("recipe_uses_ice must be boolean")
+        if update.get("applicability", "COMMON") not in {"SPECIFIC", "COMMON", "NOT_APPLICABLE", "UNKNOWN"}:
+            raise ValueError("invalid fact applicability")
     return [{**f, **overrides.get(f["fact_id"], {})} for f in truth]
 
 _ATTRIBUTE_ALIASES = {

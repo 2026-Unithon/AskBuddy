@@ -208,7 +208,8 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
       **자료를 지워도 사실과 카드는 남는다.** 이미 나간 답변의 인용은 끊지 않고
       `인용 끊김` 으로 표시한다. 개인정보 삭제 요청은 별도 절차로 다룬다.
 - [x] `인용 끊김`의 API/UI 설계를 결정서 §4.4에 고정했다. occurrence별 source_availability overlay와 승인 카드 접근을 제공한다.
-- [~] D20의 source tombstone·보존 FK를 구현하고 source 삭제가 facts/occurrence를 지우지 않는 것을 실제 DB에서 확인했다 (CP-04 M1). 근거로 쓰이는 자료는 물리 삭제를 거절한다. **원본 파일 접근 해제와 `인용 끊김` UI는 아직이다.**
+- [~] D20의 source tombstone·보존 FK를 구현하고 source 삭제가 facts/occurrence를 지우지 않는 것을 실제 DB에서 확인했다 (CP-04 M1). 근거로 쓰이는 자료는 물리 삭제를 거절한다.
+  - 2026-09-27: 점주 자료 삭제 `DELETE /ingest/sources/{id}`(tombstone, 처리 중 거절), 삭제 자료의 원본 열람 URL 미발급·재처리 차단, 카드 근거·직원 항목·작업 상세의 `인용 끊김`/`삭제됨` 표시를 넣었다 (`api/app/ingest/router.py`, `web/app/owner/jobs/[jobId]/page.tsx`, 실제 DB `verify_w_publication_flow.py` 14). 남은 것: Storage 원본 파일 물리 삭제(개인정보 삭제 절차)와 브라우저 확인.
 - [x] 멱등성 키·schema version·content hash·발행 실패 코드·timeout·재시도 상한을 계약과 DB로 고정했다 (CP-02 `errors.py`·`hashing.py`, CP-04 `operations`). 재시도 가능 여부는 표가 정하고 호출부가 바꾸지 못한다. 미확정 항목이 있으면 실험은 탐색으로 표시하고 승격하지 않는다.
 - [~] W의 지식·발행 schema(M0·M1)를 작성했고 적용된 migration은 수정하지 않았다 — 기존 CASCADE는 새 migration에서 제약만 교체했다. **R의 질문·인용 schema(M2·M3)와 상호 검토는 남아 있다.**
 - [x] 공유 config/schema/router/의존성/UI/query key의 초기 주 작성자와 변경 묶음별 단일 편집 규칙을 결정서 §2에 지정했다. 실제 변경마다 준수 여부는 별도 확인한다.
@@ -247,7 +248,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [x] VIDEO·VOICE·SCAN·KAKAO 네 입력 유형을 dev A/B 정답지·실행에 포함했다 (W0 기준선 §1/3).
 - [ ] 세부 커버리지 표를 확정한다: PDF와 개별 이미지, 레시피/위치/규칙/공지, 같은 대상의 다중 자료, 상충 규격·부정/조건/예외/순서. 유형 4개 존재만으로 전체 커버리지 완료를 선언하지 않는다.
 - [x] 평가 원본/정답지/리포트는 Git 제외 경로, 공유 fixture는 익명/합성 ID로 관리한다. W0 감사의 상호/브랜드 노출 0 기록과 현재 `git ls-files`·`git check-ignore`를 확인했다. 새 데모/발표/백업 공유 시 재검사한다.
-- [~] 기존 TEST 정답지의 사람 판정자/판정일·핵심 필드 감사는 완료. 원본 음성 청취/영상 동작, 사실별 적용 범위, 조건/부정/예외/순서의 미확정 항목과 실제 점주 확인은 남았다.
+- [~] 기존 TEST 정답지의 사람 판정자/판정일·핵심 필드 감사는 완료. 2026-09-27 검토 packet의 원본 확인 8건(영상 3·음성 4·적용 범위 1)을 사용자가 판정했다 ([기록](review/W_USER_DECISIONS_20260927.md)). 나머지 표본 60건의 사람 판정, 그 밖의 조건/부정/예외/순서 미확정 항목과 실제 점주 확인은 남았다.
 - [x] `run_extract_eval.py`에서 원시 추출과 최종 카드 채점을 분리했다. `E-O0`는 원본→카드 종합 손실로 보존하고 `loss_stage`(OK/ASSEMBLY/CARD_ONLY/EXTRACTION)를 추가했다.
 - [x] `compare_runs.py`를 정답지 전체 고정 분모로 바꾸고 실패 실행·설정 지문·입력 자료 해시 불일치를 경고하게 했다. `variance_report.py`도 같다. 실험군 라벨이 대조군을 삼키던 문제(`like 'BASE-%'`가 `BASE-AA`까지 포함)를 반복 번호 한정으로 고쳤다.
 - [x] 출력 주장 precision/오연결/불확실성 저장, 정답지 읽기 전 holdout guard·캠페인 파일 필수, 채점 v3의 속성/값/단위/규격/부정/정정·ICE 표시 검사를 구현/회귀 검증했다. 제품 의미 정확성 인수는 아님.
@@ -260,6 +261,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [~] 최초 dev 기준선에서 extract/assemble/STT usage·실패/재시도·원본/전송 bytes를 run에 연결했고 이후 W EMBED 계측도 연결했다. 전 단계 원가 인수 후 교정된 채점/라벨·동결 입력으로 기준선을 확정하는 작업은 남았다. 재사용 실행을 최초 등록 전체 비용으로 쓰지 않는다.
 - [ ] 18개 유효 과거 실행 중 미복구 16개 입력을 확보해 같은 기준으로 재평가한다. 없으면 과거 결과를 추정하지 않고 별도 승인/사전등록된 새 dev 기준선 캠페인으로 전환한다.
 - [ ] 숫자·문자 매칭 채점의 거짓 양성/음성과 `PARTIAL`을 사람 표본 판정으로 확인한다. 모델 confidence를 정답으로 쓰지 않는다.
+  - 2026-09-27: 사용자가 맞다고 확인한 카드 5건을 "속성 관계 미확인" 규칙이 떨어뜨린다(거짓 음성). 같은 규칙이 프로그램 번호 3 ≠ 3잔 일괄 제조는 올바르게 막으므로, 규칙을 없애지 말고 속성 표현 인정 범위를 좁혀 교정한다.
 
 완료: 설정·원시 JSON·Markdown 리포트가 재현되고 정답지 확인 상태가 명시된다. **사실 손실률을 곧바로 질문 정확도의 수학적 상한으로 쓰지 않는다.** 질문별 필요한 사실 집합과 실제 답변 가능 범위를 별도로 평가한다.
 
@@ -310,13 +312,13 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 
 ## W4. 승인 스냅샷과 발행 — R 필수 검토
 
-2026-09-27 갱신. 근거는 PR #24(공개 연결, `api/app/publish/approval.py`·`content.py`·`service.py`)와 브랜치 `w/publish-cleanup`(뒷정리)이다. `[~]` 는 부분 구현이며 남은 것을 한 줄로 적는다.
+2026-09-27 갱신. 근거는 PR #24(공개 연결, `api/app/publish/approval.py`·`content.py`·`service.py`), `w/publish-cleanup`(뒷정리), `w/legacy-embed-cleanup`(옛 색인 쓰기 제거·초기 색인 준비)이다. `[~]` 는 부분 구현이며 남은 것을 한 줄로 적는다.
 
 - [~] `card_version → fact_revision`과 렌더링 블록을 고정해 `PublishedKnowledgeSnapshot`을 만든다. 원장 전체를 R에 넘기지 않는다.
   - 구현: 카드 버전 원문을 불변 RAW 블록으로 고정해 manifest 단위 snapshot 으로 공개한다(`api/app/publish/content.py` `ensure_raw_blocks`·`build_knowledge_content`). 남은 것: fact_revision 블록 고정은 미구현.
 - [ ] 점주에게 숫자·조건·예외·순서와 답변에 사용할 내용을 모두 보여준다. 요약만 검수하고 숨은 facts를 승인 처리하지 않는다.
 - [~] W가 발행 조정을 소유하고 R의 인덱스 준비 어댑터를 호출한다. 임베딩은 단일 진입점 `app.reg.embeddings.embed_texts`를 유지한다.
-  - 구현: `api/app/publish/approval.py` `publish_cards` → `prepare_index_request`·`activate_prepared_index`(R 어댑터). 승인·제외·복원·점주 제안 승인·점주 답변 worker 가 이 조정자를 거친다. 레거시 `/ingest/cards/*` 직접 공개 경로는 제거했다(`api/app/ingest/router.py`, `api/tests/test_w_legacy_ingest_cards_removed.py`). 남은 것: 레거시 점주 답변 경로(`api/app/learn/router.py` → `publish_new_proposal`, R 소유 파일)가 아직 `publish_cards` 밖에서 포인터를 옮긴다.
+  - 구현: `api/app/publish/approval.py` `publish_cards` → `prepare_index_request`·`activate_prepared_index`(R 어댑터). 승인·제외·복원·점주 제안 승인·점주 답변 worker 가 이 조정자를 거친다. 레거시 `/ingest/cards/*` 직접 공개 경로는 제거했다(`api/app/ingest/router.py`, `api/tests/test_w_legacy_ingest_cards_removed.py`). 옛 색인(`card_embeddings`) 호환 쓰기와 `POST /ingest/embed` 를 제거했다(PR #26 이후). 옛 색인 매장은 `api/scripts/bootstrap_store_index.py --apply` 로 초기 색인을 만든다(`api/app/publish/bootstrap.py`, worker 는 색인 없는 매장을 미룬다). 남은 것: 레거시 점주 답변 경로(`api/app/learn/router.py` → `publish_new_proposal`, R 소유 파일)가 아직 `publish_cards` 밖에서 포인터를 옮긴다.
 - [~] 임베딩/payload를 먼저 준비한 뒤 짧은 DB 트랜잭션에서 CAS로 승인 대상 revision을 확인하고 공개 포인터·index·fact refs·`knowledge_revision`을 원자적으로 바꾼다. 모델 호출 동안 DB lock/연결을 점유하지 않는다.
   - 구현: 준비는 연결 없이, 공개는 한 트랜잭션에서 카드 CAS·`publish_knowledge`·공개 포인터·`activate_prepared_index` 를 함께 커밋한다(`approval.py`). 점주 답변 worker 의 관계 분석은 `ShortSession` 으로 모델 호출 중 연결을 쥐지 않고, 색인 준비 뒤 `after_prepare` 로 점유를 연장한다(`api/app/cards/owner_answer_worker.py`). 풀 크기는 `DB_POOL_MIN_SIZE`·`DB_POOL_MAX_SIZE` 설정(`api/app/config.py`). 남은 것: fact refs 원자 전환은 fact_revision 블록과 함께 미구현.
 - [x] 동시 수정·승인·제외의 stale 발행을 거절한다. 실패하면 기존 공개본을 유지하고 중복 요청이 중복 발행하지 않게 한다.

@@ -18,6 +18,8 @@ class CardSource(BaseModel):
     title: str | None = None
     source_type: str | None = None
     read_url: str | None = None
+    # D20: 자료가 삭제(DELETED)되면 원본을 열 수 없다. 화면은 '인용 끊김' 으로 표시한다
+    source_availability: Literal["AVAILABLE", "DELETED", "UNAVAILABLE"] = "AVAILABLE"
 
 
 class CardListItem(BaseModel):

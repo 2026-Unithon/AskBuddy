@@ -182,7 +182,7 @@ cd api && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env              # 키 채우기
 python scripts/init_storage.py    # 버킷 생성. 최초 1회
-python scripts/seed_embeddings.py # 시드 카드 임베딩
+python scripts/bootstrap_store_index.py --apply # 승인 카드 공개 색인 준비(임베딩 비용)
 uvicorn app.main:app --reload --port 8000
 
 # 3. WEB

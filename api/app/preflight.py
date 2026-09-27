@@ -56,7 +56,16 @@ async def _probe_db(s) -> list[dict]:
                 "cards": await conn.fetchval("select count(*) from knowledge_cards"),
                 "verified": await conn.fetchval(
                     "select count(*) from knowledge_cards where is_verified"),
-                "embeddings": await conn.fetchval("select count(*) from card_embeddings"),
+                # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
+                "approved_stores": await conn.fetchval(
+                    "select count(distinct store_id) from knowledge_cards "
+                    "where review_status = 'APPROVED' and is_verified "
+                    "and published_version_id is not null"),
+                # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
+                "indexed_stores": await conn.fetchval(
+                    "select count(*) from knowledge_publications p "
+                    "join r_index_publications a on a.store_id = p.store_id "
+                    "and a.snapshot_id = p.current_snapshot_id"),
                 "vector_ext": await conn.fetchval(
                     "select count(*) from pg_extension where extname = 'vector'"),
                 "match_cards": await conn.fetchval(
@@ -94,11 +103,12 @@ async def _probe_db(s) -> list[dict]:
         else _check("시드 데이터", "dead", f"매장 {data['stores']} · 카드 {data['cards']}",
                     "db/002_seed_demo.sql 실행")
     )
+    index_label = f"승인 카드 매장 {data['approved_stores']} · 색인 매장 {data['indexed_stores']}"
     out.append(
-        _check("시드 임베딩", "live", f"{data['embeddings']}건")
-        if data["embeddings"]
-        else _check("시드 임베딩", "dead", "0건 — 검색이 전부 miss 가 된다",
-                    "api 에서 python scripts/seed_embeddings.py 한 번 실행")
+        _check("공개 색인", "live", index_label)
+        if data["indexed_stores"] >= data["approved_stores"]
+        else _check("공개 색인", "dead", f"{index_label} — 색인 없는 매장은 검색이 안 된다",
+                    "api 에서 python scripts/bootstrap_store_index.py --apply 실행")
     )
     return out
 

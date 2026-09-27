@@ -1,29 +1,36 @@
 """격리 실제 DB: 합성 카드 2장으로 W 공개 경로 전체를 통과시킨다 (Task 7).
 
 verify_r_schema_rebuild 가 만든 새 UUID DB(모든 migration 적용)의 연결만 받는다.
-외부 호출은 전부 합성이다 — R 색인 준비의 임베딩, 옛 색인 호환 임베딩, 점주 답변
-관계 분석(build_knowledge_plan)을 고정 대역으로 바꾼다. 실제 SQL·트리거·잠금·
+외부 호출은 전부 합성이다 — R 색인 준비의 임베딩과 점주 답변 관계 분석
+(build_knowledge_plan)을 고정 대역으로 바꾼다. 실제 SQL·트리거·잠금·
 savepoint·R 읽기 쪽 hash/manifest 검사는 그대로 돈다.
+마지막 12·13 구간만은 관계 분석을 대역 없이 돌려 R 의 활성 색인 후보 검색까지 통과시키고
+(질문 임베딩만 합성), 초기 색인 준비(bootstrap)를 확인한다.
 """
 import asyncio
 from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
+from fastapi import BackgroundTasks
+
 from app.cards import repository as card_repo
 from app.cards import router as card_router
+from app.cards import owner_answer_worker
 from app.cards.owner_answer_worker import process_next_owner_event
 from app.config import get_settings
 from app.contracts.usage import UsageContext
 from app.db_session import ShortSession
 from app.errors import ApiError
-from app.ingest.embed.service import PreparedEmbedding
-from app.learn import knowledge_apply
-from app.learn.knowledge_apply import approve_owner_proposal, publish_new_proposal
+from app.learn.knowledge_apply import (
+    approve_owner_proposal, prepare_proposal, publish_new_proposal)
+from app.ingest import router as ingest_router
+from app.ingest.schemas import CreateIngestJobRequest
 from app.learn.knowledge_loop import KnowledgePlan
 from app.learn.owner_delivery import submit_owner_answer
 from app.learn.owner_handoff import finish_owner_review
 from app.publish import approval
 from app.publish.approval import CardChange, publish_cards
+from app.publish.bootstrap import READY, bootstrap_store_index, index_status
 from app.publish.content import current_manifest
 from app.reg.hybrid import hybrid_search, read_current_index
 
@@ -50,12 +57,6 @@ async def verify(pool, admin):
         if between:
             await between.pop(0)()
         return [list(VECTOR) for _ in texts]
-
-    async def fake_prepare_embedding(store_id, title, content, **kwargs):
-        text = f"{title}\n{content}".strip()
-        settings = get_settings()
-        return PreparedEmbedding(store_id, text, list(VECTOR), settings.embedding_model,
-                                 settings.embedding_dim)
 
     @contextmanager
     def owner_answer_publish(on: bool):
@@ -147,8 +148,6 @@ async def verify(pool, admin):
 
     with ExitStack() as stack:
         stack.enter_context(patch("app.reg.index_preparation.recorded_embeddings", fake_embedder))
-        stack.enter_context(patch.object(card_router, "prepare_embedding", fake_prepare_embedding))
-        stack.enter_context(patch.object(knowledge_apply, "prepare_embedding", fake_prepare_embedding))
         stack.enter_context(patch.object(card_router, "get_pool", lambda: pool))
 
         s1 = await seed_store("W 공개")
@@ -558,9 +557,9 @@ async def verify(pool, admin):
               and await snapshot_count(s1) == count + 3
               and (await snapshot_versions(s1, pub["current_snapshot_id"]))[d] == d1)
         count += 2
-        check("11 approve route fills legacy card_embeddings",
+        check("11 approve route writes no legacy card_embeddings",
               await admin.fetchval(
-                  "select count(*) from card_embeddings where store_id=$1 and card_id=$2", s1["sid"], d) == 1)
+                  "select count(*) from card_embeddings where store_id=$1", s1["sid"]) == 0)
         again = await card_router.approve_card(d, ShortSession(pool), claims)
         check("11 approve route replay is idempotent",
               again.published_version_id == d1 and await snapshot_count(s1) == count + 1)
@@ -676,14 +675,13 @@ async def verify(pool, admin):
                    proposed_title,proposed_content,status)
             values($1,$2,'NEW',$3,'합성 레거시 카드','레거시 답변 원문','PENDING_REVIEW') returning proposal_id""",
             s1["sid"], legacy_answer, s1["category"])
-        expected = dict(await admin.fetchrow(
-            "select * from knowledge_change_proposals where store_id=$1 and proposal_id=$2",
-            s1["sid"], legacy_proposal))
-        prepared = await fake_prepare_embedding(s1["sid"], "합성 레거시 카드", "레거시 답변 원문")
         async with pool.acquire() as conn:
+            # R v1 답변 경로와 같은 호출. 옛 색인 준비(임베딩)는 더 이상 하지 않는다
+            preparation = await prepare_proposal(conn, s1["sid"], legacy_proposal)
             async with conn.transaction():
                 legacy_card, legacy_v = await publish_new_proposal(
-                    conn, s1["sid"], legacy_proposal, s1["uid"], preparation=(expected, prepared))
+                    conn, s1["sid"], legacy_proposal, s1["uid"], preparation=preparation)
+        check("legacy prepare_proposal makes no embedding call", preparation[1] is None)
         check("legacy publish_new_proposal moves pointer outside publish_cards",
               (await card_row(s1, legacy_card))["published_version_id"] == legacy_v
               and str(legacy_card) not in {x.card_id for x in (await current_index(s1)).cards})
@@ -728,4 +726,198 @@ async def verify(pool, admin):
         check("isolation other store snapshot unchanged",
               {x.card_id for x in other_snap.cards} == {str(other)} and other_snap.knowledge_revision == "1")
 
+    # -- 12. 승인 → 검색 → 점주 답변 (관계 분석 대역 없이) ----------------------
+    # 질문 임베딩만 합성이다. 후보 검색은 R 의 활성 공개 색인(published_owner_candidates)을
+    # 실제로 읽고, 본문이 같은 답은 모델 없이 IDENTICAL, 다른 답은 모델 없이 검수로 간다
+    with ExitStack() as stack:
+        stack.enter_context(patch("app.reg.index_preparation.recorded_embeddings", fake_embedder))
+        stack.enter_context(patch("app.learn.knowledge_loop.recorded_embeddings", fake_embedder))
+        stack.enter_context(patch.object(card_router, "get_pool", lambda: pool))
+        stack.enter_context(patch.object(get_settings(), "answer_mode", "extractive"))
+
+        s3 = await seed_store("W 종단")
+        claims3 = dict(role="OWNER", user_id=s3["uid"], store_id=s3["sid"])
+
+        async def owner_event3(key, text):
+            qid = await admin.fetchval(
+                """insert into pending_questions(store_id,member_id,question_text,contract_version,semantic_key)
+                values($1,$2,$3,'v2',$4) returning question_id""",
+                s3["sid"], s3["mid"], f"{key} 질문", f"synthetic-e2e-{key}")
+            reply = await submit_owner_answer(pool, store_id=s3["sid"], member_id=s3["mid"],
+                                              question_id=qid, request_id=f"w-e2e-{key}",
+                                              answer=text, expected_revision=0)
+            return int(reply["owner_answer_id"])
+
+        # 공개판이 없는 매장: worker 는 사건을 태우지 않고 미룬다
+        pending_first = await owner_event3("before-index", "색인 전 답변")
+        async with pool.acquire() as conn:
+            before = await index_status(conn, store_id=s3["sid"])
+        check("12 store without approved cards is EMPTY", before.status == "EMPTY")
+        warned = {}
+        check("12 worker defers store without active index",
+              not await owner_answer_worker._index_ready(pool, store_id=s3["sid"], warned=warned)
+              and warned == {s3["sid"]: "EMPTY"}
+              and await admin.fetchval(
+                  "select count(*) from outbox_consumptions where store_id=$1", s3["sid"]) == 0)
+
+        # 승인 → 검색
+        e2e = await seed_card(s3, "합성 종단 카드", "종단 카드 원문")
+        mutation = await card_router.approve_card(e2e, ShortSession(pool), claims3)
+        async with pool.acquire() as conn:
+            after = await index_status(conn, store_id=s3["sid"])
+        found = await hybrid_search(pool, store_id=s3["sid"], question="종단 카드", query_vector=VECTOR)
+        check("12 approve route publishes and index becomes READY",
+              mutation.review_status == "APPROVED" and after.status == READY)
+        check("12 approved card is found by R search",
+              str(e2e) in {c.card_id for c in found.candidates})
+
+        # 점주 답변: 공개 본문과 같은 답 → 모델 없이 IDENTICAL(LINKED)
+        check("12 worker now proceeds for READY store",
+              await owner_answer_worker._index_ready(pool, store_id=s3["sid"], warned=warned)
+              and warned == {})
+        embeds_before = len(embed_calls)
+        status = await process_next_owner_event(pool, store_id=s3["sid"])
+        check("12 answer queued before index is processed after approval",
+              status in ("REVIEW", "LINKED", "PUBLISHED")
+              and await admin.fetchval(
+                  "select count(*) from knowledge_change_proposals where store_id=$1 and answer_id=$2",
+                  s3["sid"], pending_first) == 1)
+        same = await owner_event3("same", "종단 카드 원문")
+        status = await process_next_owner_event(pool, store_id=s3["sid"])
+        check("12 identical owner answer links via active-index candidates",
+              status == "LINKED"
+              and await admin.fetchval("select card_id from owner_answers where answer_id=$1", same) == e2e
+              and any(c.stage == "EMBED" and "owner-plan" in c.logical_call_id
+                      for c in embed_calls[embeds_before:]))
+        differ = await owner_event3("differ", "종단 카드 원문과 다른 새 안내")
+        status = await process_next_owner_event(pool, store_id=s3["sid"])
+        proposal = await admin.fetchrow(
+            "select relation_type,status,target_card_id from knowledge_change_proposals "
+            "where store_id=$1 and answer_id=$2", s3["sid"], differ)
+        check("12 different owner answer goes to review against found card",
+              status == "REVIEW" and proposal["status"] == "PENDING_REVIEW"
+              and proposal["target_card_id"] == e2e)
+        check("12 still no legacy card_embeddings",
+              await admin.fetchval("select count(*) from card_embeddings where store_id=$1", s3["sid"]) == 0)
+
+        # -- 13. 초기 색인 준비(bootstrap) --------------------------------------
+        # 옛 색인 시절 승인만 된 매장(공개판·색인 없음)을 흉내 낸다
+        s4 = await seed_store("W 준비")
+        legacy_ok = await seed_card(s4, "합성 옛 승인 카드", "옛 승인 원문")
+        no_source = await seed_card(s4, "합성 출처 없는 카드", "출처 없는 원문", with_source=False)
+        await admin.execute(
+            "update knowledge_cards set is_verified=true where store_id=$1 and card_id = any($2::bigint[])",
+            s4["sid"], [legacy_ok, no_source])
+        async with pool.acquire() as conn:
+            missing = await index_status(conn, store_id=s4["sid"])
+        check("13 approved store without publication is MISSING",
+              missing.status == "MISSING" and missing.approved_cards == 2)
+        try:
+            await hybrid_search(pool, store_id=s4["sid"], question="옛 승인", query_vector=VECTOR)
+        except ApiError as exc:
+            unavailable = exc.code == "INDEX_UNAVAILABLE"
+        else:
+            unavailable = False
+        check("13 R search is unavailable before bootstrap", unavailable)
+        status4, result4 = await bootstrap_store_index(pool, store_id=s4["sid"])
+        async with pool.acquire() as conn:
+            ready = await index_status(conn, store_id=s4["sid"])
+        ids4 = {x.card_id for x in (await current_index(s4)).cards}
+        check("13 bootstrap publishes current approved cards",
+              status4.status == "MISSING" and result4.status == "PUBLISHED" and ready.status == READY
+              and str(legacy_ok) in ids4 and str(no_source) not in ids4)
+        found4 = await hybrid_search(pool, store_id=s4["sid"], question="옛 승인", query_vector=VECTOR)
+        check("13 R search works after bootstrap",
+              str(legacy_ok) in {c.card_id for c in found4.candidates})
+        again4, noop4 = await bootstrap_store_index(pool, store_id=s4["sid"])
+        check("13 bootstrap on READY store is a no-op",
+              again4.status == READY and noop4 is None
+              and await snapshot_count(s4) == 1)
+        check("13 bootstrap left other stores untouched",
+              {x.card_id for x in (await current_index(s2)).cards} == {str(other)})
+
+        # 데모 시드 재실행은 매장째 지운다. 공개판·색인이 삭제 결과를 바꾸지 않는지 본다
+        # (공개판이 없는 매장과 같은 결과여야 한다 — 다르면 새 행이 삭제를 막는 것이다)
+        async def try_delete(store_id):
+            try:
+                async with admin.transaction():
+                    await admin.execute("delete from stores where store_id=$1", store_id)
+                    raise _Rollback()
+            except _Rollback:
+                return "DELETED"
+            except Exception as exc:
+                return type(exc).__name__ + ":" + str(exc).split("\n")[0][:80]
+
+        plain = await seed_store("W 삭제 대조")
+        plain_outcome = await try_delete(plain["sid"])
+        published_outcome = await try_delete(s4["sid"])
+        print("store delete outcome: plain=", plain_outcome, "published=", published_outcome)
+        check("13 publication/index rows do not change store delete outcome",
+              plain_outcome == published_outcome)
+
+        # -- 14. 자료 삭제(D20) — tombstone, 원본 접근 해제, 카드·공개판 보존 ------------
+        src3 = await admin.fetchval(
+            "select source_id from knowledge_cards where store_id=$1 and card_id=$2", s3["sid"], e2e)
+        pub_before = await publication(s3)
+        try:
+            await ingest_router.delete_ingest_source(
+                src3, ShortSession(pool), dict(role="OWNER", user_id=s2["uid"], store_id=s2["sid"]))
+        except ApiError as exc:
+            cross = exc.status_code == 404
+        else:
+            cross = False
+        check("14 other store cannot delete the source", cross
+              and await admin.fetchval(
+                  "select source_availability from sources where source_id=$1", src3) == "AVAILABLE")
+        # 실제 처리 작업이 대기 중이면 삭제를 거절한다(자료 등록 호환 작업은 제외)
+        real_job = await admin.fetchval(
+            """insert into ingest_jobs(store_id,created_by,title,status,category_version,prompt_version)
+            values($1,$2,'합성 처리 작업','EXTRACTING',1,'extract-cards-v1') returning job_id""",
+            s3["sid"], s3["uid"])
+        await admin.execute(
+            "insert into ingest_job_sources(store_id,job_id,source_id,status) values($1,$2,$3,'EXTRACTING')",
+            s3["sid"], real_job, src3)
+        try:
+            await ingest_router.delete_ingest_source(src3, ShortSession(pool), claims3)
+        except ApiError as exc:
+            busy = exc.code == "SOURCE_IN_PROGRESS"
+        else:
+            busy = False
+        check("14 source being processed cannot be deleted", busy)
+        await admin.execute(
+            "update ingest_job_sources set status='SUCCEEDED' where store_id=$1 and job_id=$2",
+            s3["sid"], real_job)
+        removed = await ingest_router.delete_ingest_source(src3, ShortSession(pool), claims3)
+        row3 = await admin.fetchrow(
+            "select source_availability,deleted_at from sources where store_id=$1 and source_id=$2",
+            s3["sid"], src3)
+        check("14 delete leaves a tombstone",
+              removed.source_availability == "DELETED" and not removed.already_deleted
+              and row3["source_availability"] == "DELETED" and row3["deleted_at"] is not None)
+        again3 = await ingest_router.delete_ingest_source(src3, ShortSession(pool), claims3)
+        check("14 repeat delete is idempotent", again3.already_deleted)
+        card3 = await card_row(s3, e2e)
+        found3 = await hybrid_search(pool, store_id=s3["sid"], question="종단 카드", query_vector=VECTOR)
+        check("14 approved card, publication and R index are untouched",
+              card3["review_status"] == "APPROVED" and card3["published_version_id"] is not None
+              and await publication(s3) == pub_before
+              and str(e2e) in {c.card_id for c in found3.candidates})
+        async with pool.acquire() as conn:
+            card_src = await card_repo.get_card(conn, s3["sid"], e2e)
+        check("14 card source reports DELETED availability",
+              card_src["source_availability"] == "DELETED")
+        try:
+            await ingest_router.create_ingest_job(
+                CreateIngestJobRequest(source_ids=[src3]), BackgroundTasks(),
+                ShortSession(pool), claims3, None)
+        except ApiError as exc:
+            rejected = exc.code == "SOURCE_DELETED"
+        else:
+            rejected = False
+        check("14 deleted source cannot start a new job", rejected)
+
     print(f"Verified {len(passed)} W publish checks")
+
+
+class _Rollback(Exception):
+    """검사용 삭제를 되돌리는 신호."""

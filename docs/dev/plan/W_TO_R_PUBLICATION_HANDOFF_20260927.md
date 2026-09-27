@@ -186,13 +186,25 @@ W 플래그 (둘 다 기본 `false`, `api/app/config.py`):
 - **R이 설계할 것**: 색인 문서 표에는 수정·삭제를 막는 불변 trigger가 있다. "켜져 있지 않고 위 기준을 넘긴 준비본의 문서만 삭제 허용"하는 예외가 필요하다.
   정리는 이미 1시간마다 도는 R 진단 정리 루프(`R diagnostics retention sweep`)에 붙이는 것을 제안한다.
 
-## 6. 옛 색인(`card_embeddings`) 호환 쓰기 제거 조건
+## 6. 옛 색인(`card_embeddings`) 호환 쓰기 — 제거됨 (2026-09-27, 브랜치 `w/legacy-embed-cleanup`)
 
-- **무엇을**: 점주 답변 후보 검색 `knowledge_loop.find_owner_answer_candidates`(`api/app/learn/knowledge_loop.py:68`)가
-  `match_cards` (knowledge_loop.py:88) → `card_embeddings` 를 읽는다. 이를 새 공개판 색인으로 옮긴다.
-- **왜**: 그 전까지 W 는 모든 승인 경로(`approve_card`, `approve_owner_proposal`)에서 `prepare_embedding` 을 트랜잭션 밖에서,
-  `embed_card` 를 발행 hook 안에서 불러 옛 색인도 채운다. 임베딩 호출이 공개마다 한 번 더 든다.
-- **W 쪽 준비**: 두 경로 모두 `# 옛 색인 호환` 주석으로 표시해 두었다. R 이 옮기면 W 가 그 호출을 지운다.
+R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W 가 호환 쓰기를 지웠다.
+
+- **제거한 것**: `prepare_embedding`·`embed_card`·`PreparedEmbedding`, `ingest/repository.py` 의 `upsert_embedding`,
+  `POST /ingest/embed`, 승인 라우트·`approve_owner_proposal` 의 옛 색인 hook, `scripts/seed_embeddings.py`.
+  `card_usage_context`(비용 귀속)만 `app.ingest.embed` 에 남았다.
+- **남긴 것(R 호출부 호환)**: `prepare_proposal`·`publish_new_proposal`·`publish_existing_proposal` 은 R `learn/router.py` 가 import 하므로 남겼다.
+  옛 색인 쓰기와 임베딩 호출만 뺐고, `prepare_proposal` 의 두 번째 반환값은 `None` 이다.
+- **R 에 남은 것**:
+  - `learn/router.py:750` v1 점주 답변 경로가 NEW 를 `publish_new_proposal` 로 바로 공개한다. 이 카드는 **R 색인에 없다**
+    (다음 `publish_cards` 가 현재 포인터로 manifest 를 만들 때 실린다). 점주 답변 사건 worker 또는 `approve_owner_proposal` 로 옮겨 달라.
+    옮기면 W 가 위 세 함수를 지운다.
+  - `card_embeddings` 를 아직 **읽는** 곳: `reg/retrieve.py` 의 `retrieve_question`(→ `match_cards`)을 쓰는 `POST /reg/retrieve`,
+    평가 러너 `team/runner.py`·`team/baseline.py`, v1 채팅의 `_search_and_compose_chat`(라우트는 `V2_REQUIRED` 로 막혀 있다).
+    이제 새로 쓰지 않으므로 이 경로들은 옛 데이터만 본다. 정리하거나 새 색인으로 옮긴 뒤 테이블 삭제 migration 을 함께 정한다.
+  - **공개판이 없는 매장**(승인 카드 0장, 새 매장)은 `read_current_index` 가 `INDEX_UNAVAILABLE` 이라 첫 점주 답변을 분석할 수 없다.
+    후보가 없는 것이 정상인 상태이므로 공개판이 없으면 빈 후보를 돌려주는 쪽을 제안한다. 그 전까지 W worker 는 이 매장의 사건을
+    실패로 태우지 않고 미룬다(아래 §9).
 
 ## 7. 두 번째 공개 경로: 레거시 `/ingest/cards/*` — 제거됨 (2026-09-27, 브랜치 `w/publish-cleanup`)
 
@@ -207,8 +219,7 @@ W 플래그 (둘 다 기본 `false`, `api/app/config.py`):
   `approveCards`·`approveCard`·`unapproveCard`·`updateCard`·`ApproveResult` 타입. 화면에서 부르는 곳은 없었다.
 - **검증**: `api/tests/test_w_legacy_ingest_cards_removed.py` — 네 경로가 404/405 이고 OpenAPI 에 `/ingest/cards*` 가 없다.
 - **결과**: 카드 공개 경로는 `/cards/{id}/approve` 등 `publish_cards` 하나다. R 이 할 일은 없다.
-- **남은 것**: `POST /ingest/embed`(승인된 카드의 옛 색인을 다시 만든다)는 공개 포인터를 바꾸지 않아 이번 범위에서 두었다.
-  옛 색인 호환 쓰기 제거(§6)와 함께 정리한다.
+- **남은 것**: 없음. `POST /ingest/embed` 는 §6 과 함께 제거했다.
 
 ## 8. 알려진 한계 (문서화, 후속)
 
@@ -218,15 +229,36 @@ W 플래그 (둘 다 기본 `false`, `api/app/config.py`):
   편집본의 출처 규칙은 후속에서 정한다.
 - **제외·복원 재발행은 best-effort** 다. 실패하면 다음 공개까지 snapshot 이 상태를 늦게 따라간다(제외는 R 조회 필터로 즉시 반영, 복원은 다음 공개 때 돌아온다).
 
+## 9. worker 켜기 전 초기 색인 준비 (2026-09-27)
+
+- 옛 색인 시절 승인만 된 매장은 공개판·R 색인이 없다. 검색·후보 검색이 `INDEX_UNAVAILABLE` 이다.
+- `api/app/publish/bootstrap.py`: 매장 상태 `READY / MISSING / OUTDATED / EMPTY` 를 판정하고, MISSING·OUTDATED 면
+  현재 승인 카드 그대로 한 번 재발행(`publish_cards(changes=[])`)해 색인을 만든다. 출처 없는 레거시 카드는 빠진다(경고 로그).
+- `api/scripts/bootstrap_store_index.py`: 기본은 점검만 한다. `--apply` 를 붙여야 재발행한다(임베딩 비용).
+  **`W_OWNER_ANSWER_WORKER_ENABLED=true` 전에 한 번 돌린다.** 데모 시드(`demo_seed.py`)도 이 함수로 색인을 만든다.
+- worker 는 READY 가 아닌 매장의 사건을 건너뛰고 상태가 바뀔 때만 한 번 경고한다. 사건은 소비하지 않고 남는다.
+- 운영 점검 화면(`preflight`)의 "시드 임베딩" 항목을 "공개 색인"(승인 카드가 있는 매장 수 대비 색인 있는 매장 수)으로 바꿨다.
+
+## 10. 자료 삭제(D20)와 인용 끊김 (2026-09-27)
+
+- `DELETE /ingest/sources/{id}`(점주 전용): 자료를 `source_availability='DELETED'` tombstone 으로 남긴다.
+  사실·카드·공개판·R 색인은 그대로이고 승인 카드를 자동 제외하지 않는다. 처리 중 자료는 409 `SOURCE_IN_PROGRESS`.
+- 원본 접근 해제: 카드 근거의 열람 URL 을 발급하지 않고 `source.source_availability` 를 내려준다. 새 작업·재시도·옛 `/ingest/process` 가
+  삭제된 자료를 다시 처리하지 않는다. Storage 원본 파일의 물리 삭제는 개인정보 삭제 절차로 남겼다.
+- R 이 할 일은 없다. v2 인용은 이미 `sources.source_availability` 를 읽어 `인용 끊김` 을 표시한다.
+
 ---
 
 ## R 이 할 일 (우선순위 순)
 
-1. **`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체** (1·2번).
+1. ~~`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체~~ — 완료(PR #25) (1·2번).
    중복 카드와 "승인했는데 답에 안 나옴"이 이 교체로 함께 사라진다.
 2. **`RawSpan.source_id=None` 소비 경로 보완** (`answer_storage.py:221`, `:247`, `approved_renderer.py:32-33`, `Citation.source_id`) 뒤
    W 에 알려 `W_OWNER_ANSWER_RAW_PUBLISH=true` 로 켠다 (3번). 이 전에는 점주 답변 NEW 카드도, 기존 자료 카드에 얹은 점주 답변 판도 공개되지 않는다.
-3. **준비 단계에 벡터 복사 재사용(5-1)을 넣고, 옛 준비본 정리(5-2)는 구조만 만든다.** 카드 1장 승인에 전체 재임베딩이 나가는 비용을 없앤다.
+3. ~~준비 단계에 벡터 복사 재사용(5-1)~~ — 완료(PR #25, 현재 활성 공개판 재사용 범위). **옛 준비본 정리(5-2)는 R 후속, 구조만 만든다.** 카드 1장 승인에 전체 재임베딩이 나가는 비용을 없앤다.
    정리의 보관 개수·일수(N·M)는 W·R이 추후 함께 정하며, 그 전에는 정리를 켜지 않는다.
-4. **점주 답변 후보 검색을 새 색인으로 이전**하고 `expected_card_revisions` 계약을 결정한다 (4·6번).
-   이전이 끝나면 W 가 `card_embeddings` 호환 쓰기와 옛 `publish_new_proposal`/`publish_existing_proposal` 을 지운다.
+4. ~~점주 답변 후보 검색을 새 색인으로 이전~~ — 완료(PR #26). W 가 `card_embeddings` 호환 쓰기를 지웠다(§6).
+   `expected_card_revisions` 계약 결정은 남았다.
+5. **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). 옮기면 W 가 옛 함수 3개를 지운다.
+6. **`card_embeddings` 를 읽는 옛 경로(`/reg/retrieve`, 평가 러너) 정리 후 테이블 삭제 migration** 을 함께 정한다 (§6).
+7. **공개판이 없는 매장의 점주 답변 후보 검색은 빈 후보를 돌려준다** (§6). 새 매장의 첫 점주 답변이 막히지 않게 한다.

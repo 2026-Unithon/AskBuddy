@@ -24,8 +24,6 @@ from app.ingest.capabilities import get_capabilities
 from app.ingest.job_worker import process_ingest_job
 from app.ingest.preprocess import storage
 from app.ingest import repository as repo
-from app.ingest.embed import embed_card, prepare_embedding
-from app.ingest.embed.service import card_usage_context
 from app.ingest.schemas import (
     CategoryOut,
     CreateSourceRequest,
@@ -44,6 +42,7 @@ from app.ingest.schemas import (
     ReviewList,
     ScanMeta,
     SourceCreated,
+    SourceDeleted,
     StatusResponse,
     UpdateCategoriesRequest,
     UploadUrlRequest,
@@ -52,6 +51,7 @@ from app.ingest.schemas import (
     VoiceMeta,
 )
 from app.errors import ApiClaims, ApiError
+from app.publish.service import delete_source
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -290,6 +290,11 @@ async def create_ingest_job(
         sources = await job_repo.source_rows(db, store_id, req.source_ids)
         if len(sources) != len(req.source_ids):
             raise ApiError(404, "SOURCE_NOT_FOUND", "접근할 수 없는 자료가 포함되어 있습니다.")
+        deleted = [int(row["source_id"]) for row in sources
+                   if row["source_availability"] == "DELETED"]
+        if deleted:
+            raise ApiError(409, "SOURCE_DELETED", "삭제된 자료는 다시 처리할 수 없습니다.",
+                           details={"source_ids": deleted})
         unavailable = [
             int(row["source_id"])
             for row in sources
@@ -388,6 +393,7 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
                     if row["error_code"]
                     else None
                 ),
+                source_availability=row.get("source_availability") or "AVAILABLE",
             )
             for row in sources
         ],
@@ -399,6 +405,34 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
 async def get_ingest_job(job_id: int, db: Db, claims: ApiClaims) -> IngestJobDetail:
     _, store_id = _job_identity(claims)
     return await _job_detail(db, store_id, job_id)
+
+
+@router.delete("/sources/{source_id}", response_model=SourceDeleted)
+async def delete_ingest_source(source_id: int, db: Db, claims: ApiClaims) -> SourceDeleted:
+    """자료 삭제 (D20). 점주만.
+
+    자료를 tombstone 으로 남기고 원본 열람 URL 발급을 멈춘다. 사실·카드·과거 공개판·
+    인용은 그대로 두며 승인 카드를 자동 제외하지 않는다 — 근거 표시만 '인용 끊김' 이 된다.
+    Storage 의 원본 파일 물리 삭제는 개인정보 삭제 절차에서 따로 한다.
+    """
+    _, store_id = _job_identity(claims)
+    async with db.transaction():
+        row = await db.fetchrow(
+            "select source_id from sources where store_id = $1 and source_id = $2 for update",
+            store_id, source_id)
+        if row is None:
+            raise ApiError(404, "SOURCE_NOT_FOUND", "자료를 찾을 수 없습니다.")
+        if await job_repo.source_in_progress(db, store_id, source_id):
+            raise ApiError(409, "SOURCE_IN_PROGRESS",
+                           "처리 중인 자료는 삭제할 수 없습니다. 처리가 끝난 뒤 다시 시도해 주세요.",
+                           retryable=True)
+        outcome = await delete_source(db, store_id=store_id, source_id=source_id)
+        deleted_at = await db.fetchval(
+            "select deleted_at from sources where store_id = $1 and source_id = $2",
+            store_id, source_id)
+    return SourceDeleted(source_id=source_id, source_availability="DELETED",
+                         deleted_at=deleted_at.isoformat(),
+                         already_deleted=outcome == "ALREADY_DELETED")
 
 
 @router.post("/jobs/{job_id}/retry", response_model=IngestJobAccepted, status_code=202)
@@ -459,6 +493,9 @@ async def process(
     src = await repo.get_source(db, store_id, req.source_id)
     if src is None:
         raise HTTPException(404, f"source {req.source_id} not found")
+    if src.get("source_availability") == "DELETED":
+        # D20: 삭제된 자료는 원본 접근이 해제됐다. 다시 추출하지 않는다
+        raise HTTPException(409, "삭제된 자료는 다시 처리할 수 없습니다")
 
     if src["status"] == "PROCESSING":
         # 폴링 중 재호출. 새로 돌리지 않고 현재 상태를 그대로 돌려준다
@@ -493,38 +530,6 @@ async def _status_of(db, store_id: int, source_id: int) -> StatusResponse:
         processed_at=src["processed_at"].isoformat() if src["processed_at"] else None,
         card_count=await repo.count_cards(db, store_id, source_id),
     )
-
-
-@router.post("/embed")
-async def embed(
-    db: Db,
-    store_id: CurrentStoreId,
-    card_id: int = Query(..., description="승인된 카드의 card_id"),
-) -> dict:
-    """점주 승인 직후 호출한다. 승인 전 카드는 거부한다.
-
-    관호님 승인 플로우(/reg/*)에서 이 엔드포인트를 호출하면 된다.
-    """
-    try:
-        card = await repo.get_card(db, store_id, card_id)
-        if card is None:
-            raise LookupError("card not found")
-        if not card["is_verified"]:
-            raise ValueError("승인된 카드만 검색 대상이다")
-        context = await card_usage_context(db, store_id, card_id)
-        prepared = await prepare_embedding(store_id, card["title"], card["content"], cost_phase=context.cost_phase, context=context)
-        async with db.transaction():
-            current = await db.fetchrow(
-                "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
-                "where store_id=$1 and card_id=$2 for update",store_id,card_id)
-            if current is None or dict(current) != dict(card):
-                raise ValueError("임베딩 준비 중 카드 버전이 변경됐습니다")
-            chunks = await embed_card(db, store_id, card_id, prepared=prepared)
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(409, str(e)) from e
-    return {"card_id": card_id, "chunks": chunks}
 
 
 # ── 검수 (점주 승인) ───────────────────────────────────────────────────────
