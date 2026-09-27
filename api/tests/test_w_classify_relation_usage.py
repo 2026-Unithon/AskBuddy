@@ -175,7 +175,8 @@ class WUsageTest(unittest.IsolatedAsyncioTestCase):
         from app.learn.knowledge_loop import find_owner_answer_candidates
         db = NS(fetch=AsyncMock(return_value=[]))
         ctx = context("RELATION", question_id="13")
-        with patch("app.learn.knowledge_loop.recorded_embeddings", AsyncMock(return_value=[[.1]])) as embed:
+        with patch("app.learn.knowledge_loop.recorded_embeddings", AsyncMock(return_value=[[.1]])) as embed, \
+             patch("app.learn.knowledge_loop.published_owner_candidates", AsyncMock(return_value=[])):
             await find_owner_answer_candidates(db, 7, "원문 질문", "원문 답변",
                                               usage_context=ctx, usage_sink=Sink())
         child = embed.call_args.kwargs["context"]

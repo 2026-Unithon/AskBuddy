@@ -26,6 +26,7 @@ from app.contracts.errors import ERROR_TABLE, ErrorDetail
 from app.contracts.publication import ApplyOwnerAnswerResult
 from app.contracts.usage import UsageContext
 from app.errors import ApiError
+from app.db_session import ShortSession
 from app.learn.knowledge_apply import create_owner_answer_card
 from app.learn.knowledge_loop import build_knowledge_plan
 from app.learn.owner_handoff import (
@@ -460,12 +461,11 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
     card = None
     if proposal is None:
         await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
-        # 관계 분석은 모델을 부르는 동안 연결을 잡는다(build_knowledge_plan 계약)
-        async with pool.acquire() as conn:
-            plan = await build_knowledge_plan(
-                conn, store_id, source["question_text"], source["answer_text"],
-                usage_context=_usage_context(store_id, event_id, "RELATION", "relation"),
-                usage_sink=DbUsageSink(pool))
+        # 모델·임베딩 및 usage sink가 같은 풀을 사용할 수 있도록 연결을 반환한다.
+        plan = await build_knowledge_plan(
+            ShortSession(pool), store_id, source["question_text"], source["answer_text"],
+            usage_context=_usage_context(store_id, event_id, "RELATION", "relation"),
+            usage_sink=DbUsageSink(pool))
         await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
         async with pool.acquire() as conn:
             async with conn.transaction():

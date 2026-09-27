@@ -45,6 +45,8 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 
 ## docs/dev/review/ — 검증 결과
 
+R 점주 답변 후보 검색 이전: [R_OWNER_CANDIDATE_INDEX_20260927.md](review/R_OWNER_CANDIDATE_INDEX_20260927.md) — 활성 공개 색인·불변 승인판 회수, 오류 분리, 실제 W worker 단일 연결 풀 검증과 W 호환 쓰기 제거 인계.
+
 R0 반복 캠페인: [R_V2_CAMPAIGN_20260916.md](review/R_V2_CAMPAIGN_20260916.md) — 실행 동일성·반복 안전성·A/A 대조·외부 인수 경계.
 
 R0 단일 질문 수집·보고: [R_V2_EVALUATION_20260916.md](review/R_V2_EVALUATION_20260916.md) — 고정 질문 분모, 출력별 검토 연결, v2 실제 DB/API 인수.

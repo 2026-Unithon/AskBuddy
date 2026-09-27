@@ -246,7 +246,17 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         result, in_tx, _ = self.finished[0]
         self.assertEqual((result.status, result.error.code), ("FAILED", "INTERNAL_ERROR"))
         self.assertFalse(result.retryable)
+
         self.assertTrue(in_tx)
+
+    async def test_missing_candidate_index_is_retryable_failure_not_new(self):
+        with patch(f"{MOD}.build_knowledge_plan", AsyncMock(side_effect=ApiError(
+                503, 'INDEX_UNAVAILABLE', 'missing active index', retryable=True))):
+            self.assertEqual(await self._run(), 'FAILED')
+        result = self.finished[0][0]
+        self.assertEqual(result.error.code, 'INDEX_UNAVAILABLE')
+        self.assertTrue(result.retryable)
+        self.create.assert_not_awaited()
 
     async def test_hook_failure_rolls_back_publish_then_finishes_failed(self):
         async def finish(conn, *, store_id, event_id, claim_token, result):

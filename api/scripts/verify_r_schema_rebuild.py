@@ -61,6 +61,8 @@ async def main():
         pool = await asyncpg.create_pool(DSN.rsplit("/",1)[0]+"/"+name,min_size=1,max_size=3)
         try:
             await verify_w_publish(pool, fresh)
+            from verify_r_owner_candidates import verify as verify_owner_candidates
+            await verify_owner_candidates(pool, fresh)
         finally:
             await pool.close()
     finally:

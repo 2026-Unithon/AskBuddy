@@ -13,7 +13,9 @@ import asyncpg
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.reg.embeddings import recorded_embeddings, vector_literal
+from app.reg.embeddings import recorded_embeddings
+from app.reg.owner_candidates import published_owner_candidates
+from app.errors import ApiError
 from app.contracts.usage import UsageContext
 from app.usage import DbUsageSink
 from app.usage.gemini import UsageStartError, checked_context, recorded_generate
@@ -73,33 +75,16 @@ async def find_owner_answer_candidates(
     top_k: int = 5,
     *, usage_context=None, usage_sink=None,
 ) -> list[dict]:
-    """직원 질문과 점주 답변을 함께 임베딩해 현재 승인 카드만 찾는다."""
+    """질문+답변을 임베딩하고 활성 공개 색인에서 카드별 최고 cosine으로 회수한다."""
+    if type(top_k) is not int or not 1 <= top_k <= 100:
+        raise ValueError('candidate limit must be 1..100')
     context = checked_context(usage_context, usage_sink, "RELATION", store_id=store_id)
     embed_context = context.model_copy(update={"stage": "EMBED",
         "logical_call_id": f"owner-plan:{context.operation_id}:embed"})
     query_vec = (await recorded_embeddings([f"{question}\n{answer}"],
         context=embed_context, sink=usage_sink))[0]
-    rows = await db.fetch(
-        """
-        select m.card_id as id, m.title, m.content, m.score,
-               c.published_version_id as version_id,
-               c.category_id, c.assignment_type,
-               coalesce(tc.category_name, '') as category_name
-        from match_cards($1, $2::vector, $3) m
-        join knowledge_cards c
-          on c.store_id = $1 and c.card_id = m.card_id
-        left join task_categories tc
-          on tc.store_id = c.store_id and tc.category_id = c.category_id
-        where c.review_status = 'APPROVED'
-          and c.is_verified = true
-          and c.published_version_id is not null
-        order by m.score desc
-        """,
-        store_id,
-        vector_literal(query_vec),
-        top_k,
-    )
-    return [dict(row) for row in rows]
+    return await published_owner_candidates(db, store_id=store_id, query_vector=query_vec,
+        embedding_model=get_settings().embedding_model, top_k=top_k)
 
 
 def _safe_fallback_plan(
@@ -238,11 +223,11 @@ async def build_knowledge_plan(
     try:
         candidates = await find_owner_answer_candidates(db, store_id, question, answer,
             usage_context=context, usage_sink=usage_sink)
+    except (ApiError, UsageStartError):
+        raise
     except Exception as exc:
         logger.warning("owner-answer candidate search failed type=%s", type(exc).__name__)
-        return _safe_fallback_plan(
-            question, answer, categories, [], "유사 카드 검색 실패로 수동 검토 필요"
-        )
+        raise ApiError(503, 'INDEX_UNAVAILABLE', '공개 지식 후보를 조회하지 못했습니다.', retryable=True) from exc
 
     # 모델 판단과 무관하게 본문이 엄격히 같은 카드는 새 카드로 만들지 않는다.
     # 카테고리와 수동 배정 여부도 기존 카드 값을 그대로 유지한다.
