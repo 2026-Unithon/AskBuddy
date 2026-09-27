@@ -592,46 +592,6 @@ async def facts_for_cards(
     return grouped
 
 
-async def update_card(
-    conn: asyncpg.Connection,
-    store_id: int,
-    card_id: int,
-    title: str,
-    content: str,
-) -> bool:
-    """점주가 카드 글을 직접 고친다.
-
-    store_id 를 조건에 넣어 남의 매장 카드를 못 고치게 한다 (불변식 4).
-    """
-    row = await conn.fetchrow(
-        "update knowledge_cards set title = $3, content = $4, updated_at = now() "
-        "where store_id = $1 and card_id = $2 returning card_id",
-        store_id, card_id, title, content,
-    )
-    return row is not None
-
-
-async def set_card_verified(
-    conn: asyncpg.Connection, store_id: int, card_id: int, verified: bool
-) -> bool:
-    """점주 승인 토글. 카드에 딸린 facts 도 같이 뒤집는다.
-
-    승인 취소는 임베딩을 지우지 않는다. match_cards 가 is_verified=true 만
-    보므로 검색에서는 즉시 빠지고, 다시 승인하면 그대로 살아난다.
-    """
-    row = await conn.fetchrow(
-        "update knowledge_cards set is_verified = $3, updated_at = now() "
-        "where store_id = $1 and card_id = $2 returning card_id",
-        store_id, card_id, verified,
-    )
-    if row is None:
-        return False
-    await conn.execute(
-        "update facts set is_verified = $2 where card_id = $1", card_id, verified
-    )
-    return True
-
-
 async def set_assembly_state(
     conn: asyncpg.Connection, store_id: int, fact_ids: list[int], state: str
 ) -> None:

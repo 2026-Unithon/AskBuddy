@@ -258,6 +258,24 @@ async def verify(pool, admin):
         check("5 same key different body rejected",
               result.status == "STALE" and result.error_code == "IDEMPOTENCY_CONFLICT")
 
+        # -- 5b. 색인 준비 뒤 점유를 잃었다 → LEASE_LOST, 아무것도 쓰지 않는다 ----------
+        before_pub, before_count = await publication(s1), await snapshot_count(s1)
+        lease_calls = []
+
+        async def lease_lost():
+            lease_calls.append("after_prepare")
+            return False
+
+        result = await publish(s1, [change(a, a4)], "w-a-lease", after_prepare=lease_lost)
+        check("5b lease lost after prepare returns LEASE_LOST without publishing",
+              result.status == "LEASE_LOST" and lease_calls == ["after_prepare"]
+              and dict(await publication(s1)) == dict(before_pub)
+              and await snapshot_count(s1) == before_count
+              and (await card_row(s1, a))["published_version_id"] == a4
+              and not await admin.fetchval(
+                  "select exists(select 1 from operations where store_id=$1 and idempotency_key='w-a-lease')",
+                  s1["sid"]))
+
         # -- 6. A 제외 → R 검색에서 빠지고 과거 snapshot 은 남는다 --------------
         claims = dict(role="OWNER", user_id=s1["uid"], store_id=s1["sid"])
         count = await snapshot_count(s1)

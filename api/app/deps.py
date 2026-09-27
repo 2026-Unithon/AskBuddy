@@ -19,7 +19,9 @@ _pool: asyncpg.Pool | None = None
 async def init_pool() -> None:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(get_settings().supabase_db_url, min_size=1, max_size=10)
+        s = get_settings()
+        _pool = await asyncpg.create_pool(
+            s.supabase_db_url, min_size=s.db_pool_min_size, max_size=s.db_pool_max_size)
 
 
 async def close_pool() -> None:

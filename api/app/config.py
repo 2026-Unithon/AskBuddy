@@ -1,7 +1,7 @@
 """공용 — 환경변수 로딩. 수정 전 팀 합의."""
 from functools import lru_cache
 from typing import Literal
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_key: str = ""
     supabase_db_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+    # asyncpg 연결 풀 크기. 늘리기 전에 모델 호출 중 연결을 쥐고 있는 경로가 없는지 먼저 확인한다
+    db_pool_min_size: int = Field(default=1, ge=1)
+    db_pool_max_size: int = Field(default=10, ge=1)
 
     jwt_secret: str = "dev-only-change-me-32bytes-minimum"
     jwt_algorithm: str = "HS256"
@@ -110,6 +113,13 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_subject: str = ""
     push_guide_version: str = "push-guide-v1"
+
+    @model_validator(mode="after")
+    def _check_db_pool_sizes(self) -> "Settings":
+        # 최소가 최대보다 크면 asyncpg 가 시작 시점에 실패한다. 설정 단계에서 먼저 막는다
+        if self.db_pool_min_size > self.db_pool_max_size:
+            raise ValueError("db_pool_min_size must be <= db_pool_max_size")
+        return self
 
     @property
     def origins(self) -> list[str]:
