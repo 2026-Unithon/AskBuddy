@@ -86,13 +86,18 @@ class Citation(Contract):
     block_id: str = Field(min_length=1, max_length=40)
     fact_revision_id: EntityId | None = None
     raw_span_id: EntityId | None = None
-    source_id: EntityId
+    source_id: EntityId | None = None
+    owner_answer_id: EntityId | None = None
     source_availability: SourceAvailability = "AVAILABLE"
 
     @model_validator(mode="after")
     def _points_at_something(self) -> "Citation":
         if bool(self.fact_revision_id) == bool(self.raw_span_id):
             raise ValueError("인용은 사실이나 원문 구간 중 정확히 하나를 가리킨다")
+        if (self.source_id is None) == (self.owner_answer_id is None):
+            raise ValueError("인용 출처는 자료나 점주 답변 중 정확히 하나다")
+        if self.owner_answer_id is not None and self.raw_span_id is None:
+            raise ValueError("점주 답변 출처는 승인 원문 구간만 인용한다")
         return self
 
     @property
@@ -126,7 +131,7 @@ class ChatResponse(Contract):
         if self.action != "ESCALATE" and self.pending_id is not None:
             raise ValueError("pending 식별자는 ESCALATE에만 허용한다")
         keys = [(c.card_id, c.card_version_id, c.block_id, c.fact_revision_id,
-                 c.raw_span_id, c.source_id) for c in self.citations]
+                 c.raw_span_id, c.source_id, c.owner_answer_id) for c in self.citations]
         if len(keys) != len(set(keys)):
             raise ValueError("중복 인용 행")
         if self.action == "ANSWER":

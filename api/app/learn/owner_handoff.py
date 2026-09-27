@@ -121,6 +121,54 @@ async def finish_owner_event(conn, *, store_id:int,event_id:int,claim_token:str,
             values($1,$2,$3,$4)""",store_id,CONSUMER,event_id,'SKIPPED' if result.status=='FAILED' else 'APPLIED')
 
 
+async def finish_owner_review(conn, *, store_id: int, proposal_id: int,
+                              owner_answer_id: int, card_id: int,
+                              card_version_id: int, knowledge_revision: int) -> None:
+    """소비된 REVIEW 사건 대신, 공개 hook 안에서 제안별 완료를 기록한다.
+
+    publication → card → proposal → pending → knowledge state 순으로 잠근다.
+    예외는 호출자의 공개 transaction까지 전파해야 한다.
+    """
+    if not conn.is_in_transaction():
+        raise ValueError('W publication and review completion require one transaction')
+    result = ApplyOwnerAnswerResult(status='PUBLISHED', card_id=str(card_id),
+                                    knowledge_revision=str(knowledge_revision))
+    evidence = await publication_evidence(conn, store_id=store_id, result=result)
+    if evidence['published_card_version_id'] != str(card_version_id):
+        raise ApiError(409, 'STALE_KNOWLEDGE', '승인한 카드 버전과 공개 버전이 다릅니다.')
+    proposal = await conn.fetchrow('''select p.answer_id,p.status,p.result_card_id,
+            p.result_version_id,r.question_id,r.revision_no
+        from knowledge_change_proposals p join r_owner_answer_revisions r
+          on r.store_id=p.store_id and r.owner_answer_id=p.answer_id
+        where p.store_id=$1 and p.proposal_id=$2 for update of p''', store_id, proposal_id)
+    if proposal is None:
+        raise ApiError(404, 'NOT_FOUND', '검토 답변 제안을 찾을 수 없습니다.')
+    if (proposal['answer_id'] != owner_answer_id or proposal['status'] != 'PUBLISHED'
+            or proposal['result_card_id'] != card_id or proposal['result_version_id'] != card_version_id):
+        raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '제안의 승인 결과가 일치하지 않습니다.')
+    await conn.fetchval('''select question_id from pending_questions
+        where store_id=$1 and question_id=$2 for update''', store_id, proposal['question_id'])
+    latest = await conn.fetchval('''select max(revision_no) from r_owner_answer_revisions
+        where store_id=$1 and question_id=$2''', store_id, proposal['question_id'])
+    if latest != proposal['revision_no']:
+        raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '새 점주 답변이 있습니다. 이전 승인을 되돌려야 합니다.')
+    state = await conn.fetchrow('''select status,result from r_owner_knowledge_states
+        where store_id=$1 and owner_answer_id=$2 for update''', store_id, owner_answer_id)
+    payload = dict(result.model_dump(mode='json'), **evidence, review_proposal_id=str(proposal_id))
+    if state and state['status'] == 'PUBLISHED':
+        saved = json.loads(state['result']) if isinstance(state['result'], str) else state['result']
+        if saved == payload:
+            return
+        raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '이미 다른 결과로 완료된 검토입니다.')
+    if state is None or state['status'] != 'REVIEW':
+        raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '검토 대기 답변만 승인 완료할 수 있습니다.')
+    await conn.execute('''update r_owner_knowledge_states
+        set status='PUBLISHED',result=$3::jsonb,updated_at=now()
+        where store_id=$1 and owner_answer_id=$2''', store_id, owner_answer_id, json.dumps(payload))
+    await notify_publication(conn, store_id=store_id, question_id=proposal['question_id'],
+                             owner_answer_id=owner_answer_id)
+
+
 async def retry_owner_event(pool,*,store_id:int,member_id:int,event_id:int,request_id:str,reason:str) -> dict:
     """Explicit owner retry of the same business event, with durable audit/idempotency."""
     if not 8<=len(request_id)<=80 or not reason.strip() or len(reason)>300:

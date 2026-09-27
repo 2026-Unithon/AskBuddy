@@ -30,7 +30,9 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
             lines.append(span.text)
             citations.append(Citation(card_id=card.card_id,card_version_id=card.card_version_id,
                 block_id=selected.block_id,raw_span_id=span.raw_span_id,source_id=span.source_id,
-                source_availability=availability.get(span.source_id,"UNAVAILABLE")))
+                owner_answer_id=span.owner_answer_id,
+                source_availability=("AVAILABLE" if span.owner_answer_id is not None
+                                     else availability.get(span.source_id,"UNAVAILABLE"))))
         else:
             for fid in selected.fact_revision_ids:
                 fact=snapshot.fact(fid)

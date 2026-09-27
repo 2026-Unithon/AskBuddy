@@ -1,5 +1,7 @@
 # W → R 공개 연결 인계 (2026-09-27)
 
+> **R 로컬 후속(2026-09-27):** §1~3의 REVIEW 완료·출처 소비는 [통합 검증](../review/R_OWNER_CITATION_INTEGRATION_20260927.md)을 진행했고, 사용자 요청으로 §5 재사용은 **A 방식**을 구현했다. 전체 manifest를 유지하며 현재 공개 색인과 카드 버전·블록·실제 입력 및 모델/사전/설정이 같은 벡터만 복사한다. [재사용 검증·제한](../review/R_INDEX_REUSE_20260927.md). 아래 “매번 전체 재임베딩”은 PR #24 당시 동작이며, 이번 로컬 변경 이후는 불일치 블록만 재임베딩한다. 아직 commit/push되지 않았고 §6의 옛 색인 호환 호출은 별개로 남아 있다.
+
 > 받는 사람: 김선재 (R 담당). 이 문서만 읽고 R 쪽 변경을 시작할 수 있게 썼다.
 > W 는 R 소유 파일(`api/app/reg/*`, `api/app/learn/router.py`, `answering.py`,
 > `answer_storage.py`, `owner_handoff.py`, `owner_publication.py`, `approved_renderer.py`,

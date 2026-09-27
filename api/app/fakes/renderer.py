@@ -89,6 +89,7 @@ class FakeRenderer:
                     card_id=card.card_id, card_version_id=card.card_version_id,
                     block_id=block.block_id, raw_span_id=span.raw_span_id,
                     source_id=span.source_id,
+                    owner_answer_id=span.owner_answer_id,
                     source_availability=availability.get(span.source_id,
                                                          "AVAILABLE")))
                 continue

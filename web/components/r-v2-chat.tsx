@@ -17,7 +17,7 @@ function Citation({ receipt, order, broken }: { receipt: string; order: number; 
   const citation = useQuery(rCitationQuery(state.token, state.storeId, state.userId, receipt, order, open));
   return <div className="mt-3"><button className={button} onClick={() => setOpen(!open)} aria-expanded={open}>근거 {order} 확인{broken && " · 인용 끊김"}</button>
     {open && <div className="space-y-2 border-l-2 pl-3">{citation.isLoading && <RLoading />}{citation.error && <RError error={citation.error} retry={() => void citation.refetch()} />}
-      {citation.data && <><p className="font-semibold">{citation.data.title}</p><p className="whitespace-pre-wrap">{citation.data.text}</p>{citation.data.source_availability !== "AVAILABLE" && <p>원본 자료를 열람할 수 없습니다. 당시 승인된 내용은 보존되어 있습니다.</p>}</>}
+      {citation.data && <><p className="font-semibold">{citation.data.title}</p>{citation.data.owner_answer_id && <p data-testid="owner-answer-citation">출처: 점주 답변 · 승인된 내용</p>}<p className="whitespace-pre-wrap">{citation.data.text}</p>{citation.data.source_availability !== "AVAILABLE" && <p>원본 자료를 열람할 수 없습니다. 당시 승인된 내용은 보존되어 있습니다.</p>}</>}
     </div>}
   </div>;
 }

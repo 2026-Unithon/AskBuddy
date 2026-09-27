@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from app.errors import ApiError
 from app.learn.owner_delivery import submit_owner_answer
-from app.learn.owner_handoff import claim_owner_event,heartbeat_owner_event,finish_owner_event,retry_owner_event
+from app.learn.owner_handoff import claim_owner_event,heartbeat_owner_event,finish_owner_event,retry_owner_event,finish_owner_review
 from app.contracts.publication import ApplyOwnerAnswerResult
 
 
@@ -165,4 +165,63 @@ async def verify(pool,admin,seed):
         rows=await v2_faq_rows(admin,store_id=store_id)
         check('withdrawn card removes owner FAQ association',not receipt_ids & {str(r['receipt_id']) for r in rows})
         await admin.execute('update knowledge_cards set published_version_id=$3 where store_id=$1 and card_id=$2',store_id,int(card.card_id),int(card.card_version_id))
+    # REVIEW is already consumed; later approval must use a separate, atomic receiver.
+    review_reply = await submit('owner-review-followup', '합성 검토 후 승인', 4)
+    review_answer = int(review_reply['owner_answer_id'])
+    review_claim = await claim_owner_event(pool, store_id=store_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await finish_owner_event(conn, store_id=store_id, event_id=int(review_claim['event_id']),
+                claim_token=review_claim['claim_token'], result=ApplyOwnerAnswerResult(status='REVIEW'))
+    proposal_id = await admin.fetchval('''insert into knowledge_change_proposals
+        (store_id,answer_id,relation_type,category_id,proposed_title,proposed_content,status)
+        values($1,$2,'NEW',$3,'합성 검토','합성 검토 후 승인','PENDING_REVIEW') returning proposal_id''',
+        store_id, review_answer, category)
+    review_args = dict(store_id=store_id, proposal_id=proposal_id, owner_answer_id=review_answer,
+        card_id=int(card.card_id), card_version_id=int(card.card_version_id),
+        knowledge_revision=int(snapshot.knowledge_revision))
+
+    async def finish_review(**overrides):
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.fetchval('select store_id from knowledge_publications where store_id=$1 for update', store_id)
+                await conn.execute('''update knowledge_change_proposals set status='PUBLISHED',
+                    result_card_id=$3,result_version_id=$4 where store_id=$1 and proposal_id=$2''',
+                    store_id, proposal_id, int(card.card_id), int(card.card_version_id))
+                await finish_owner_review(conn, **dict(review_args, **overrides))
+
+    try:
+        with patch('app.learn.owner_publication.create_notification_event', side_effect=RuntimeError('review failure')):
+            await finish_review()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('review notification failure not injected')
+    check('review notification failure rolls back proposal and state',
+        await admin.fetchval('select status from knowledge_change_proposals where store_id=$1 and proposal_id=$2',
+            store_id, proposal_id) == 'PENDING_REVIEW' and
+        await admin.fetchval('select status from r_owner_knowledge_states where store_id=$1 and owner_answer_id=$2',
+            store_id, review_answer) == 'REVIEW')
+    for overrides in (dict(card_version_id=999999), dict(owner_answer_id=aid), dict(proposal_id=999999)):
+        try:
+            await finish_review(**overrides)
+        except ApiError:
+            check('review mismatched publication or proposal rejected', True)
+        else:
+            raise AssertionError('invalid review accepted')
+    await finish_review()
+    count = await admin.fetchval('''select count(*) from notification_events
+        where store_id=$1 and aggregate_id=$2 and dedupe_key like 'r-knowledge-ready:%' ''', store_id, review_answer)
+    await finish_review()
+    check('review replay does not duplicate notifications', count > 0 and count == await admin.fetchval('''
+        select count(*) from notification_events where store_id=$1 and aggregate_id=$2
+        and dedupe_key like 'r-knowledge-ready:%' ''', store_id, review_answer))
+    check('review does not reopen consumed event', await claim_owner_event(pool, store_id=store_id) is None)
+    await submit('owner-review-superseded', '새 점주 답변', 5)
+    try:
+        await finish_review()
+    except ApiError:
+        check('superseded review completion rejected', True)
+    else:
+        raise AssertionError('old review revision accepted')
     print(f'Verified {len(passed)} owner delivery checks')

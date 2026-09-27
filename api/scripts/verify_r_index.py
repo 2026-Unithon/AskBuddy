@@ -127,6 +127,8 @@ async def verify(pool, admin):
             await activate_prepared_index(admin,store_id=sid,prepared_id=pid,snapshot_id=published.snapshot_id)
         check("W publication and index commit once",await admin.fetchval(
             "select count(*) from r_index_publications where store_id=$1",sid)==1)
+        from verify_r_index_reuse import verify as verify_reuse
+        await verify_reuse(pool, admin, args=args)
         lexical_question = snap.cards[0].title
         query_vector = [0.0,1.0]+[0.0]*1534
         found = await hybrid_search(pool,store_id=sid,question=lexical_question,query_vector=query_vector)
@@ -183,6 +185,9 @@ async def verify(pool, admin):
         else:
             raise AssertionError("cross store search")
         args["expected_publication_revision"] = 7
+        # 공급자 장애/lease 검사는 재사용 가능한 입력 대신 실제 cache miss로 실행한다.
+        miss_card = content.cards[0].model_copy(update=dict(title=content.cards[0].title+' 새 입력'))
+        args['content'] = content.model_copy(update=dict(cards=(miss_card, *content.cards[1:])))
         entered, release = asyncio.Event(),asyncio.Event()
         async def slow(texts,**kw):
             entered.set()

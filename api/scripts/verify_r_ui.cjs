@@ -50,7 +50,7 @@ const path = require('node:path');
         payload = { messages: rows, next_before: available.length > 100 ? rows[0].message_id : null,
           has_pending_updates: (state.pending && !state.answers.length) || state.answers.some(a => ['PENDING', 'REVIEW'].includes(a.knowledge_status)) };
       }
-      else if (p.includes('/citations/')) payload = { title: '합성 라테', text: 'HOT 합성 라테 물 225ml', source_availability: 'AVAILABLE', card_version_id: '2' };
+      else if (p.includes('/citations/')) payload = { title: '합성 라테', text: 'HOT 합성 라테 물 225ml', source_availability: 'AVAILABLE', card_version_id: '2', owner_answer_id: '17' };
       else if (p === '/learn/v2/chat') {
         state.calls++;
         if (state.failNext) { state.failNext = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: '합성 장애: 다시 시도해 주세요.' } }) }); return; }
@@ -107,6 +107,14 @@ const path = require('node:path');
     await page.getByRole('button', { name: '근거 1 확인' }).click();
     await page.getByText('합성 라테', { exact: true }).waitFor();
     check('approved citation expands', true);
+    await page.getByTestId('owner-answer-citation').waitFor();
+    check('owner answer source is labeled without broken-file warning',
+      await page.getByTestId('owner-answer-citation').innerText() === '출처: 점주 답변 · 승인된 내용'
+      && await page.getByText('원본 자료를 열람할 수 없습니다.', { exact: false }).count() === 0);
+    await page.reload();
+    await page.getByRole('button', { name: '근거 1 확인' }).click();
+    await page.getByTestId('owner-answer-citation').waitFor();
+    check('owner source survives history reload', true);
     state.failNext = true;
     await page.getByLabel('업무 질문').fill('미확인 업무');
     await page.getByRole('button', { name: '질문하기', exact: true }).click();

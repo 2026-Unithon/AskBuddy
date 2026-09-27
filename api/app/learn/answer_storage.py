@@ -79,13 +79,15 @@ async def _receipt(conn, *, store_id: int,member_id: int,request_id: str,body_ha
 
 async def current_source_overlay(conn,*,store_id:int,response:ChatResponse) -> ChatResponse:
     """인용 내용·버전은 보존하고 현재 원본 열람 상태만 조회 시점에 덧입힌다(D20)."""
-    ids=sorted({int(c.source_id) for c in response.citations})
-    if not ids:return response
-    rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",store_id,ids)
+    ids=sorted({int(c.source_id) for c in response.citations if c.source_id is not None})
+    rows=(await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",store_id,ids)
+          if ids else [])
     availability={str(r['source_id']):r['source_availability'] for r in rows}
     payload=response.model_dump(mode='json')
     for citation in payload['citations']:
-        citation['source_availability']=availability.get(citation['source_id'],'UNAVAILABLE')
+        # 점주 답변은 불변 RAW 구간과 FK로 보존된다. 파일 삭제 상태와 무관하다.
+        citation['source_availability']=('AVAILABLE' if citation['owner_answer_id'] is not None
+                                         else availability.get(citation['source_id'],'UNAVAILABLE'))
     return ChatResponse.model_validate(payload)
 
 
@@ -218,7 +220,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 # 앱 알림이 durable 전달 원장이다. 민감 원문을 preview에 복제하지 않는다.
                 await create_pending_question_notification(conn,store_id,pending_id,"업무 질문의 확인 요청이 도착했습니다.",contract_version='v2')
             source_ids=sorted({int(p.source_id) for f in snapshot.fact_revisions for p in f.provenance}
-                              | {int(r.source_id) for r in snapshot.raw_spans})
+                              | {int(r.source_id) for r in snapshot.raw_spans if r.source_id is not None})
             rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",
                                   store_id,source_ids)
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
@@ -241,10 +243,13 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 user_message,buddy_message,pending_id,response.model_dump_json(),json.dumps(execution_metadata or {}))
             for order,citation in enumerate(response.citations,1):
                 await conn.execute("""insert into r_answer_citations(store_id,receipt_id,citation_order,card_id,
-                    card_version_id,block_id,fact_revision_id,raw_span_id,source_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    card_version_id,block_id,fact_revision_id,raw_span_id,source_id,owner_answer_id)
+                    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""",
                     store_id,receipt_id,order,int(citation.card_id),int(citation.card_version_id),citation.block_id,
                     int(citation.fact_revision_id) if citation.fact_revision_id else None,
-                    int(citation.raw_span_id) if citation.raw_span_id else None,int(citation.source_id))
+                    int(citation.raw_span_id) if citation.raw_span_id else None,
+                    int(citation.source_id) if citation.source_id else None,
+                    int(citation.owner_answer_id) if citation.owner_answer_id else None)
         return StoredReply(response,str(receipt_id),False,context.state_revision if context and plan.action=="CLARIFY" else None)
 
 

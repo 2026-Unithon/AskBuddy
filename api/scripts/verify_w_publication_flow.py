@@ -21,6 +21,7 @@ from app.learn import knowledge_apply
 from app.learn.knowledge_apply import approve_owner_proposal, publish_new_proposal
 from app.learn.knowledge_loop import KnowledgePlan
 from app.learn.owner_delivery import submit_owner_answer
+from app.learn.owner_handoff import finish_owner_review
 from app.publish import approval
 from app.publish.approval import CardChange, publish_cards
 from app.publish.content import current_manifest
@@ -39,11 +40,13 @@ async def verify(pool, admin):
         print("PASS W publish", name)
 
     embed_calls = []
+    embed_inputs = []
     # 준비와 공개 트랜잭션 사이에 끼워 넣을 동작(시나리오 3)
     between = []
 
     async def fake_embedder(texts, *, context, sink=None):
         embed_calls.append(context)
+        embed_inputs.append(list(texts))
         if between:
             await between.pop(0)()
         return [list(VECTOR) for _ in texts]
@@ -184,7 +187,11 @@ async def verify(pool, admin):
 
         # -- 2. A만 수정·재승인 -------------------------------------------------
         a2 = await edit(s1, a, "합성 카드 A", "A 둘째 원문")
+        calls_before_edit = len(embed_calls)
         result = await publish(s1, [change(a, a2)], "w-a-second")
+        check("2 only changed A is embedded while B vector is reused",
+              len(embed_calls) == calls_before_edit+1
+              and embed_inputs[-1] == ['합성 카드 A\nA 둘째 원문'])
         versions = await snapshot_versions(s1, result.snapshot_id)
         check("2 re-approval moves only A",
               result.status == "PUBLISHED" and versions == {a: a2, b: b1}
@@ -419,6 +426,11 @@ async def verify(pool, admin):
         notified = []
 
         async def notify_r(conn, answer_id, card_id, version_id, knowledge_revision):
+            pid = await conn.fetchval('''select proposal_id from knowledge_change_proposals
+                where store_id=$1 and answer_id=$2''', s1['sid'], answer_id)
+            await finish_owner_review(conn, store_id=s1['sid'], proposal_id=pid,
+                owner_answer_id=answer_id, card_id=card_id, card_version_id=version_id,
+                knowledge_revision=knowledge_revision)
             notified.append((conn.is_in_transaction(), answer_id, card_id, version_id, knowledge_revision))
 
         async def approve():
@@ -437,6 +449,23 @@ async def verify(pool, admin):
               and await admin.fetchval(
                   "select status from knowledge_change_proposals where store_id=$1 and proposal_id=$2",
                   s1["sid"], proposal["proposal_id"]) == "PENDING_REVIEW")
+        # 실제 W 공개 hook의 R 알림 실패가 카드·snapshot·제안까지 되돌리는지 확인한다.
+        count_before = await snapshot_count(s1)
+        try:
+            with owner_answer_publish(True), patch('app.learn.owner_handoff.notify_publication',
+                    side_effect=RuntimeError('synthetic review notification failure')):
+                await approve()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('R review failure did not abort W publication')
+        check("10 R completion failure rolls back W publication and review",
+              dict(await publication(s1)) == before_pub
+              and await snapshot_count(s1) == count_before
+              and (await card_row(s1, b))['published_version_id'] == b1
+              and (await knowledge_state(supplement))['status'] == 'REVIEW'
+              and await admin.fetchval('''select status from knowledge_change_proposals
+                  where store_id=$1 and proposal_id=$2''', s1['sid'], proposal['proposal_id']) == 'PENDING_REVIEW')
         with owner_answer_publish(True):
             result = await approve()
         b2 = (await card_row(s1, b))["published_version_id"]
@@ -473,6 +502,12 @@ async def verify(pool, admin):
               and review_row["published_version_id"] == review_row["draft_version_id"]
               and (await snapshot_versions(s1, result.snapshot_id)).get(review_card) == review_row["draft_version_id"]
               and notified[-1][:3] == (True, review_new, review_card))
+        check("10 real R receiver completes both reviewed proposals",
+              (await knowledge_state(supplement))['status'] == 'PUBLISHED'
+              and (await knowledge_state(review_new))['status'] == 'PUBLISHED')
+        from verify_r_owner_citations import verify as verify_owner_citations
+        await verify_owner_citations(pool, admin, store=s1, card_id=review_card,
+                                     owner_answer_id=review_new, other_answer_id=answer_other)
 
         # -- 11. HTTP 승인 라우트 ----------------------------------------------
         d = await seed_card(s1, "합성 카드 D", "D 원문")

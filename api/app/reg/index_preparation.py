@@ -63,6 +63,49 @@ def _prepared(row) -> PrepareIndexResult:
         expires_at=row["expires_at"])
 
 
+def _valid_vector(vector) -> bool:
+    return (isinstance(vector, list) and len(vector) == 1536
+            and all(type(x) in (int, float) and math.isfinite(x) for x in vector)
+            and any(x != 0 for x in vector))
+
+
+def _document_key(doc: IndexDocument) -> str:
+    # 승인 원문뿐 아니라 제목·조건 등 실제 임베딩 입력까지 묶는다.
+    return digest(dict(card_id=doc.card_id, card_version_id=doc.card_version_id,
+        block_id=doc.block_id, approved_text=doc.approved_text, retrieval_text=doc.retrieval_text))
+
+
+async def _reusable_vectors(conn, *, store_id: int, content: KnowledgeContent,
+                            model: str, docs: tuple[IndexDocument, ...]) -> dict[str, str]:
+    """현재 공개된 불변 색인만 읽는다. TTL은 새 준비의 활성화와 별개다."""
+    rows = await conn.fetch('''select d.card_id,d.card_version_id,d.block_id,
+            d.approved_text,d.retrieval_text,d.embedding::text as vector
+        from knowledge_publications k
+        join r_index_publications p on p.store_id=k.store_id and p.snapshot_id=k.current_snapshot_id
+        join r_index_preparations i on i.store_id=p.store_id and i.prepared_id=p.prepared_id
+        join r_index_documents d on d.store_id=i.store_id and d.prepared_id=i.prepared_id
+        where k.store_id=$1 and i.state='CONSUMED' and i.embedding_model=$2
+          and i.index_config_version=$3 and i.content->>'glossary_version'=$4
+          and i.content->>'renderer_version'=$5''',
+        store_id, model, INDEX_CONFIG_VERSION, content.glossary_version, content.renderer_version)
+    wanted = {_document_key(doc): doc for doc in docs}
+    reused = {}
+    for row in rows:
+        doc = IndexDocument(str(row['card_id']), str(row['card_version_id']), row['block_id'],
+                            row['approved_text'], row['retrieval_text'])
+        key = _document_key(doc)
+        if wanted.get(key) != doc:
+            continue
+        try:
+            vector = json.loads(row['vector'])
+        except (TypeError, ValueError):
+            continue
+        if _valid_vector(vector):
+            # 기존 float32 벡터를 다시 반올림하지 않고 그대로 복사한다.
+            reused[key] = row['vector']
+    return reused
+
+
 async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key: str,
                         expected_publication_revision: int, content: KnowledgeContent,
                         usage_context: UsageContext, embedder=None, request_binding: str | None = None) -> PrepareIndexResult:
@@ -130,16 +173,20 @@ async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key:
                            clock_timestamp()+interval '45 seconds',clock_timestamp()+interval '15 minutes') returning *""",
                     store_id,member_id,idempotency_key,request_hash,content_hash,content.model_dump_json(),
                     expected_publication_revision,model,INDEX_CONFIG_VERSION,claim)
+            reused = await _reusable_vectors(conn, store_id=store_id, content=content,
+                                              model=model, docs=docs)
     prepared_id = row["prepared_id"]
     context = usage_context.model_copy(update=dict(operation_id=f"index:{prepared_id}",
         logical_call_id=f"index:{prepared_id}:embed", attempt_no=row["attempt_no"]))
     try:
-        vectors = await asyncio.wait_for((embedder or recorded_embeddings)(
-            [d.retrieval_text for d in docs], context=context, sink=DbUsageSink(pool)), timeout=30)
-        if len(vectors) != len(docs) or any(len(v) != 1536 or any(
-                type(x) not in (int,float) or not math.isfinite(x) for x in v)
-                or not any(x != 0 for x in v) for v in vectors):
+        missing = [doc for doc in docs if _document_key(doc) not in reused]
+        vectors = (await asyncio.wait_for((embedder or recorded_embeddings)(
+            [d.retrieval_text for d in missing], context=context, sink=DbUsageSink(pool)), timeout=30)
+            if missing else [])
+        if len(vectors) != len(missing) or any(not _valid_vector(v) for v in vectors):
             raise ValueError("invalid embedding response")
+        complete = dict(reused)
+        complete.update((_document_key(doc), vector_literal(vector)) for doc, vector in zip(missing, vectors))
     except Exception as exc:
         code = "INDEX_PREPARE_TIMEOUT" if isinstance(exc, TimeoutError) else "INDEX_PREPARE_FAILED"
         async with pool.acquire() as conn:
@@ -153,11 +200,11 @@ async def prepare_index(pool, *, store_id: int, member_id: int, idempotency_key:
                 where store_id=$1 and prepared_id=$2 for update""",store_id,prepared_id)
             if row["claim_id"] != claim or row["state"] != "PREPARING" or row["expires_at"] <= row["checked_at"]:
                 return _failed("INDEX_PREPARE_TIMEOUT",idempotency_key)
-            for doc, vector in zip(docs,vectors):
+            for doc in docs:
                 await conn.execute("""insert into r_index_documents(store_id,prepared_id,card_id,card_version_id,
                     block_id,approved_text,retrieval_text,embedding) values($1,$2,$3,$4,$5,$6,$7,$8::vector)""",
                     store_id,prepared_id,int(doc.card_id),int(doc.card_version_id),doc.block_id,
-                    doc.approved_text,doc.retrieval_text,vector_literal(vector))
+                    doc.approved_text,doc.retrieval_text,complete[_document_key(doc)])
             row = await conn.fetchrow("""update r_index_preparations set state='PREPARED'
                 where store_id=$1 and prepared_id=$2 returning *""",store_id,prepared_id)
     return _prepared(row)

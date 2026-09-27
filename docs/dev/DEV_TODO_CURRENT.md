@@ -1,5 +1,13 @@
 # AskBuddy 현재 개발 TODO
 
+2026-09-27 사용자 이미지 요청 우선 처리: 전체 manifest 계약을 유지하고 현재 공개 색인의 동일 블록 벡터를 재사용하는 A 방식을 구현했다. A만 수정 시 A 블록만 새로 임베딩하며, 전체 동일 입력은 0회 호출. 단위 1,124개·재사용 DB 11개·W 공개 66개 통과. [검증·재사용 조건](review/R_INDEX_REUSE_20260927.md). 다음은 점주 답변 후보 검색 이전이며 옛 색인 호환 임베딩은 별도 잔여다.
+
+2026-09-27 Docker 검증 후속: REVIEW 완료 DB 검증과 점주 답변 출처 인용의 계약·migration·저장·이력·UI를 연결했다. 단위 1,110개, 브라우저 42+36개, migration 33개 및 실제 W→R 완료·인용 합성 DB 경로 통과. [최신 검증·배포 순서·남은 작업](review/R_OWNER_CITATION_INTEGRATION_20260927.md). 다음 R 작업은 점주 답변 후보 검색의 새 색인 이전이다. 공동 계약 전체·운영 인수는 미완료이며 W 플래그는 변경하지 않았다.
+
+2026-09-27 PR #24 동기화 후 R 후속: `b22be50`의 W 생산·승인 조정자·worker를 확인하고 `finish_owner_review`와 제안 승인 라우트를 로컬 연결했다. 전체 단위 1,104개 / 131 subtests 통과(4 xfailed), schema·fixture 최신. Docker 엔진 미실행으로 실제 DB 검증은 대기하며 완료 인수로 간주하지 않는다. [검증·남은 작업](review/R_OWNER_REVIEW_HANDOFF_20260927.md). 다음은 점주 답변 출처 인용 소비와 실제 W 승인→R 완료→재질문 통합이다. 운영 플래그는 변경하지 않았다.
+
+2026-09-27 공동 작업 재개: [W/R 공동 작업 실행 절차](plan/WR_JOINT_WORKFLOW.md)를 따른다. [W 계약 검토 자료](plan/W_CONTRACT_INPUT_20260927.md)를 입력으로 카드별 버전 매핑·전체 manifest·공개 transaction·점주 답변 결과·REVIEW 이후 완료의 다섯 계약을 먼저 확정한다. PR #23은 W 재시도 원가 ID와 R timeout 검증 보완을 main에 통합한 것이며, 실제 W snapshot/승인 조정자/OWNER_ANSWER worker 공동 연결 완료를 뜻하지 않는다.
+
 2026-09-26 W 재시도 보완: W `ef51787`의 PARTIAL/API/집계/연결 수정 위에 조립 대기 추출 복구본, 입력 지문 검사, 카드·구간·완료 원자 저장을 추가했다. [검증·migration 선행·기존 자료 제한](review/W_RETRY_SAFETY_VERIFICATION_20260926.md). 단위 944개/119 subtests, 30개 migration 및 R/W 격리 DB 검증 통과. 실제 W snapshot/OWNER_ANSWER worker와 영속 작업 회수·실자료/운영 인수는 별도다.
 
 2026-09-21 R 이력·갱신 보완: R-F01 최신 메시지/선택지 표시, R-F02 세션 전체 대기 요약·자동 갱신 종료, R-V01 브라우저 오류 선택자를 수정했다. [조회 계약·배포 순서](plan/R_HISTORY_READ_CONTRACT.md), [검증 결과](review/R_HISTORY_FIX_VERIFICATION_20260921.md): 단위 913개·119 subtests, v2 API 157 checks, 브라우저 40+36 checks 및 전체 격리 DB runner 통과. 이전 감사는 수정 전 관찰이며, W 구현과 사람 정답/유료 평가 대기는 이번 R 수정과 별도다.
