@@ -57,6 +57,12 @@ async def main():
             await pool.close()
         from verify_w_ingest_recovery import verify as verify_w_recovery
         await verify_w_recovery(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
+        from verify_w_publication_flow import verify as verify_w_publish
+        pool = await asyncpg.create_pool(DSN.rsplit("/",1)[0]+"/"+name,min_size=1,max_size=3)
+        try:
+            await verify_w_publish(pool, fresh)
+        finally:
+            await pool.close()
     finally:
         if fresh is not None:
             await fresh.close()

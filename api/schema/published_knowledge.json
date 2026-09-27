@@ -450,6 +450,20 @@
             "type": "WHOLE_SOURCE"
           }
         },
+        "owner_answer_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Answer Id"
+        },
         "raw_span_id": {
           "maxLength": 19,
           "pattern": "^[0-9]+$",
@@ -457,10 +471,18 @@
           "type": "string"
         },
         "source_id": {
-          "maxLength": 19,
-          "pattern": "^[0-9]+$",
-          "title": "Source Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
         },
         "text": {
           "maxLength": 4000,
@@ -471,7 +493,6 @@
       },
       "required": [
         "raw_span_id",
-        "source_id",
         "text"
       ],
       "title": "RawSpan",

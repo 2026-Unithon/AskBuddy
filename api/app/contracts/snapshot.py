@@ -93,9 +93,17 @@ class RawSpan(FrozenContract):
     """
 
     raw_span_id: EntityId
-    source_id: EntityId
+    source_id: EntityId | None = None
+    # 점주가 직접 답한 원문이 출처인 경우 (D 2026-09-27). 자료 출처와 동시에 두지 않는다
+    owner_answer_id: EntityId | None = None
     text: RawText = Field(min_length=1, max_length=4000)
     locator: EvidenceLocator = EvidenceLocator()
+
+    @model_validator(mode="after")
+    def _exactly_one_origin(self) -> "RawSpan":
+        if (self.source_id is None) == (self.owner_answer_id is None):
+            raise ValueError("원문 구간은 자료나 점주 답변 중 정확히 하나를 출처로 가진다")
+        return self
 
 
 class PublishedCard(FrozenContract):

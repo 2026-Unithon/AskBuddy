@@ -360,6 +360,7 @@
     {
       "raw_span_id": "700",
       "source_id": "600",
+      "owner_answer_id": null,
       "text": "  마감 전 점검표\n  1) 냉장고 온도 확인\n",
       "locator": {
         "type": "WHOLE_SOURCE",

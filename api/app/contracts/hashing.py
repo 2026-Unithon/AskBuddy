@@ -131,6 +131,8 @@ def knowledge_content_payload(snapshot) -> dict:
                 "source_id": r.source_id,
                 "text": r.text,
                 "locator": r.locator.model_dump(),
+                # 점주 답변이 출처일 때만 싣는다. 기존 4키 payload 의 hash 를 흔들지 않는다
+                **({"owner_answer_id": r.owner_answer_id} if r.owner_answer_id else {}),
             }
             for r in _by_id(snapshot.raw_spans, "raw_span_id")
         ],

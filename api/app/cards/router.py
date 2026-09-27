@@ -21,14 +21,19 @@ from app.cards.schemas import (
     CategoryUpdateRequest,
     DraftUpdateRequest,
 )
-from app.deps import Db
+from app.deps import Db, get_pool
 from app.errors import ApiClaims, ApiError
 from app.ingest.embed import embed_card, prepare_embedding
 from app.ingest.embed.service import card_usage_context
 from app.ingest.preprocess.storage import create_signed_read_url
+from app.publish import CardChange, publish_cards
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# R 준비·공개 경합에서 진 요청의 오류 코드. 재시도로 풀리는 충돌이라 409 로 돌려준다
+_PREPARE_RACE_CODES = frozenset({"STALE_PUBLICATION", "STALE_KNOWLEDGE", "IDEMPOTENCY_CONFLICT"})
 
 
 def _identity(claims: dict[str, Any], *, owner_only: bool = False) -> tuple[int, int, str]:
@@ -268,6 +273,11 @@ async def update_draft(
 async def approve_card(
     card_id: int, db: Db, claims: OwnerClaims
 ) -> CardMutationResult:
+    """승인 → `publish_cards` 조정자로 판을 올린다 (즉시 색인 직행 경로 제거).
+
+    사전 CAS 검사는 요청 커넥션(`db`)으로 끝내고, `publish_cards` 는 자기
+    풀을 스스로 관리한다. `db` 에 열린 트랜잭션·잠금을 쥔 채로 넘기지 않는다.
+    """
     user_id, store_id, _ = _identity(claims, owner_only=True)
     try:
         expected = await db.fetchrow(
@@ -275,50 +285,83 @@ async def approve_card(
             "where store_id = $1 and card_id = $2", store_id, card_id)
         if expected is None:
             raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
-        if expected["draft_version_id"] is None:
+        draft_version_id = expected["draft_version_id"]
+        if draft_version_id is None:
             raise ApiError(409, "CARD_DRAFT_MISSING", "승인할 초안이 없습니다.")
         if expected["review_status"] == "EXCLUDED":
             raise ApiError(409, "CARD_EXCLUDED", "제외된 카드를 먼저 복원해 주세요.")
-        draft = await repo.get_version(db, store_id, expected["draft_version_id"])
+
+        member_id = await db.fetchval(
+            "select member_id from store_members where store_id = $1 and user_id = $2 "
+            "and member_role = 'OWNER'",
+            store_id,
+            user_id,
+        )
+        if member_id is None:
+            raise ApiError(403, "OWNER_ONLY", "카드는 사장님만 검수할 수 있습니다.")
+
+        draft = await repo.get_version(db, store_id, draft_version_id)
         context = await card_usage_context(db, store_id, card_id)
+        # 옛 색인 호환: R 의 점주답변 후보 검색(knowledge_loop.match_cards)이
+        # 아직 card_embeddings 를 읽는다. 후보 검색이 새 색인으로 옮겨질 때까지
+        # publish_cards 의 in_transaction hook 에서 옛 색인도 함께 채운다.
+        # (트랜잭션 밖에서 미리 준비 — 임베딩 호출은 연결을 잡지 않는다)
         prepared = await prepare_embedding(store_id, draft["title"], draft["content"],
                                            cost_phase=context.cost_phase, context=context)
-        async with db.transaction():
-            card = await repo.get_card_for_update(db, store_id, card_id)
-            if card is None:
-                raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
-            if card["draft_version_id"] is None:
-                raise ApiError(409, "CARD_DRAFT_MISSING", "승인할 초안이 없습니다.")
-            if any(card[key] != expected[key] for key in expected.keys()):
-                raise ApiError(409, "CARD_VERSION_CONFLICT", "임베딩 준비 중 카드가 변경됐습니다.")
-            action = (
-                "PUBLISH_EDIT"
-                if card["published_version_id"] is not None
-                and card["published_version_id"] != card["draft_version_id"]
-                else "APPROVE"
+
+        async def _reindex_legacy(conn, snapshot_id: int, knowledge_revision: int) -> None:
+            # publish_cards 가 이미 review_status 를 APPROVED 로 바꾼 뒤 불리므로
+            # embed_card 의 is_verified 검사를 통과한다
+            await embed_card(conn, store_id, card_id, prepared=prepared)
+
+        result = await publish_cards(
+            get_pool(),
+            store_id=store_id,
+            member_id=int(member_id),
+            actor_user_id=user_id,
+            changes=[CardChange(
+                card_id=card_id,
+                expected_draft_version_id=draft_version_id,
+                target_card_version_id=draft_version_id,
+            )],
+            idempotency_key=f"approve:{card_id}:{draft_version_id}",
+            usage_context=context,
+            in_transaction=_reindex_legacy,
+        )
+
+        if result.status in ("PUBLISHED", "ALREADY_APPLIED"):
+            return _mutation(await repo.mutation_row(db, store_id, card_id))
+        if result.status == "NO_PROVENANCE":
+            raise ApiError(
+                409,
+                "CARD_NO_PROVENANCE",
+                "출처를 확인할 수 없는 카드는 아직 공개할 수 없습니다.",
             )
-            await db.execute(
-                """
-                update knowledge_cards
-                set review_status = 'APPROVED', published_version_id = draft_version_id,
-                    excluded_at = null, excluded_by = null, needs_review_reason = null
-                where store_id = $1 and card_id = $2
-                """,
-                store_id,
-                card_id,
+        if result.status == "INVALID_CONTENT":
+            raise ApiError(
+                409,
+                "CARD_CONTENT_INVALID",
+                "카드 내용이 비어 있거나 너무 길어 공개할 수 없습니다.",
             )
-            await embed_card(db, store_id, card_id, prepared=prepared)
-            await repo.add_event(
-                db,
-                store_id,
-                card_id,
-                user_id,
-                action,
-                from_status=card["review_status"],
-                to_status="APPROVED",
-                metadata={"published_version_id": card["draft_version_id"]},
+        if result.status == "STALE" or (
+            result.status == "PREPARE_FAILED" and result.error_code in _PREPARE_RACE_CODES
+        ):
+            # 준비 사이 다른 공개가 먼저 판을 올렸다 — 경합에서 진 것이지 장애가 아니다
+            raise ApiError(
+                409,
+                "CARD_VERSION_CONFLICT",
+                "다른 변경 사항이 먼저 저장되었습니다. 최신 내용을 다시 확인해 주세요.",
             )
-            row = await repo.mutation_row(db, store_id, card_id)
+        if result.status == "PREPARE_FAILED":
+            raise ApiError(
+                502,
+                "CARD_PUBLISH_FAILED",
+                "카드를 공개하지 못했습니다. 기존 공개 상태는 유지됩니다.",
+                retryable=True,
+            )
+        # 계약에 없는 status 는 조용히 PREPARE_FAILED 취급하지 않고 크게 실패시킨다.
+        # 아래 except Exception 이 잡아 502 CARD_PUBLISH_FAILED 로 매핑한다
+        raise RuntimeError(f"publish_cards 가 알 수 없는 상태를 반환했다: {result.status}")
     except ApiError:
         raise
     except Exception as exc:
@@ -329,7 +372,51 @@ async def approve_card(
             "카드를 공개하지 못했습니다. 기존 공개 상태는 유지됩니다.",
             retryable=True,
         ) from exc
-    return _mutation(row)
+
+
+async def _republish_after_status_change(
+    db: Db, *, store_id: int, user_id: int, card_id: int, kind: str, event_id: int
+) -> None:
+    """제외·복원 커밋 뒤 현재 공개 포인터로 공개판을 다시 올린다 (best-effort).
+
+    제외·복원은 카드 공개 포인터를 옮기지 않고 실릴 카드 집합만 바꾼다. 그래서
+    `publish_cards(changes=[])` 로 현재 포인터 그대로 재발행해 R 색인을 맞춘다.
+    상태 변경은 이미 커밋됐고, 재발행이 실패해도 요청은 성공으로 돌려준다:
+      - 제외는 R 조회가 이미 `review_status` 로 걸러 즉시 반영된다.
+      - 복원은 다음 공개(아무 카드 승인·재발행)가 현재 포인터로 manifest 를
+        만들므로 스스로 회복된다.
+    실패는 크게 로그로 남긴다. 멱등 키는 검수 사건 id 로 행동마다 유일하다.
+    재발행 임베딩 비용은 이 카드의 비용 귀속(card_usage_context)으로 잡힌다.
+    """
+    try:
+        member_id = await db.fetchval(
+            "select member_id from store_members where store_id = $1 and user_id = $2 "
+            "and member_role = 'OWNER'",
+            store_id,
+            user_id,
+        )
+        if member_id is None:
+            raise LookupError("점주 멤버십을 찾을 수 없다")
+        context = await card_usage_context(db, store_id, card_id)
+        result = await publish_cards(
+            get_pool(),
+            store_id=store_id,
+            member_id=int(member_id),
+            actor_user_id=user_id,
+            changes=[],
+            idempotency_key=f"{kind}:{card_id}:{event_id}",
+            usage_context=context,
+        )
+    except Exception:
+        logger.exception(
+            "카드 %s 뒤 공개판 재발행 실패 — 다음 공개에서 회복된다 card=%s store=%s",
+            kind, card_id, store_id)
+        return
+    if result.status not in ("PUBLISHED", "ALREADY_APPLIED", "EMPTY_MANIFEST"):
+        logger.warning(
+            "카드 %s 뒤 공개판 재발행을 하지 못했다 — 다음 공개에서 회복된다 "
+            "card=%s store=%s status=%s code=%s",
+            kind, card_id, store_id, result.status, result.error_code)
 
 
 @router.post("/{card_id}/exclude", response_model=CardMutationResult)
@@ -354,7 +441,7 @@ async def exclude_card(
             card_id,
             user_id,
         )
-        await repo.add_event(
+        event_id = await repo.add_event(
             db,
             store_id,
             card_id,
@@ -365,6 +452,12 @@ async def exclude_card(
             metadata={"undo_until": undo_until.isoformat()},
         )
         row = await repo.mutation_row(db, store_id, card_id)
+    # 상태 변경 커밋 뒤 R 색인에서도 빼도록 재발행한다. 실패해도 요청은 성공이다.
+    # 한 번도 공개되지 않은 카드는 어느 판에도 없으므로 재발행하지 않는다
+    if card["published_version_id"] is not None:
+        await _republish_after_status_change(
+            db, store_id=store_id, user_id=user_id, card_id=card_id,
+            kind="exclude", event_id=event_id)
     return _mutation(row, undo_until=undo_until)
 
 
@@ -390,7 +483,7 @@ async def restore_card(
             card_id,
             target,
         )
-        await repo.add_event(
+        event_id = await repo.add_event(
             db,
             store_id,
             card_id,
@@ -400,6 +493,12 @@ async def restore_card(
             to_status=target,
         )
         row = await repo.mutation_row(db, store_id, card_id)
+    # 공개 포인터가 있던 카드는 복원 즉시 R 색인에 돌아오도록 재발행한다.
+    # 초안만 있던 카드(PENDING 복귀)는 manifest 가 그대로라 재발행하지 않는다
+    if target == "APPROVED":
+        await _republish_after_status_change(
+            db, store_id=store_id, user_id=user_id, card_id=card_id,
+            kind="restore", event_id=event_id)
     return _mutation(row)
 
 
