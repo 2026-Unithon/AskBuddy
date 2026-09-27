@@ -137,6 +137,26 @@ def sha(path: Path) -> str:
         hashlib.sha256(str(path).encode()).hexdigest()
 
 
+async def archive_demo_store(c, slug: str, emails: list[str]) -> int | None:
+    """옛 데모 매장을 보관 처리해 같은 slug·이메일·초대코드로 새로 만들 수 있게 한다.
+
+    매장을 지우지 않는다. 비용 원장(ai_usage_attempts)은 매장 삭제를 막는 영구 기록이고
+    (D21), 공개 색인을 만들면 임베딩 비용이 기록된다. 그래서 slug·이메일을 바꿔 비켜 두고
+    초대코드만 지운다. 보관된 매장은 로그인·초대로 닿지 않는다.
+    """
+    old = await c.fetchval("select store_id from stores where store_slug = $1", slug)
+    if old is not None:
+        await c.execute(
+            "update stores set store_slug = left($2 || '-archived-' || store_id, 50) "
+            "where store_id = $1", old, slug)
+        await c.execute("delete from invite_codes where store_id = $1", old)
+    # 옛 계정도 지우지 않는다(매장·기록이 참조한다). 이메일만 비켜 둔다
+    await c.execute(
+        "update users set email = left(email || '.archived-' || user_id, 255) "
+        "where email = any($1::text[])", emails)
+    return old
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--yes", action="store_true", help="확인 없이 진행")
@@ -170,13 +190,8 @@ async def main() -> int:
     c = await asyncpg.connect(url)
     try:
         async with c.transaction():
-            # ── 초기화: 데모 매장만 지운다 ──────────────────────────────
-            old = await c.fetchval("select store_id from stores where store_slug = $1", SLUG)
-            if old:
-                await c.execute("delete from stores where store_id = $1", old)
-            await c.execute(
-                "delete from users where email = any($1::text[])",
-                [OWNER[1]] + [x[1] for x in STAFF])
+            # ── 초기화: 옛 데모 매장은 지우지 않고 보관한다 ─────────────────
+            await archive_demo_store(c, SLUG, [OWNER[1]] + [x[1] for x in STAFF])
 
             # ── 사람 ──────────────────────────────────────────────────
             pw = bcrypt.hashpw(PW.encode(), bcrypt.gensalt(rounds=12)).decode()  # auth/router 와 같은 방식

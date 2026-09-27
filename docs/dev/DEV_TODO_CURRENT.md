@@ -209,7 +209,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
       `인용 끊김` 으로 표시한다. 개인정보 삭제 요청은 별도 절차로 다룬다.
 - [x] `인용 끊김`의 API/UI 설계를 결정서 §4.4에 고정했다. occurrence별 source_availability overlay와 승인 카드 접근을 제공한다.
 - [~] D20의 source tombstone·보존 FK를 구현하고 source 삭제가 facts/occurrence를 지우지 않는 것을 실제 DB에서 확인했다 (CP-04 M1). 근거로 쓰이는 자료는 물리 삭제를 거절한다.
-  - 2026-09-27: 점주 자료 삭제 `DELETE /ingest/sources/{id}`(tombstone, 처리 중 거절), 삭제 자료의 원본 열람 URL 미발급·재처리 차단, 카드 근거·직원 항목·작업 상세의 `인용 끊김`/`삭제됨` 표시를 넣었다 (`api/app/ingest/router.py`, `web/app/owner/jobs/[jobId]/page.tsx`, 실제 DB `verify_w_publication_flow.py` 14). 남은 것: Storage 원본 파일 물리 삭제(개인정보 삭제 절차)와 브라우저 확인.
+  - 2026-09-27: 점주 자료 삭제 `DELETE /ingest/sources/{id}`(tombstone, 처리 중 거절), 삭제 자료의 원본 열람 URL 미발급·재처리 차단, 카드 근거·직원 항목·작업 상세의 `인용 끊김`/`삭제됨` 표시를 넣었다 (`api/app/ingest/router.py`, `web/app/owner/jobs/[jobId]/page.tsx`, 실제 DB `verify_w_publication_flow.py` 14). 남은 것: Storage 원본 파일 물리 삭제 여부(2026-09-27 사용자: 추후 논의로 결정)와 브라우저 확인.
 - [x] 멱등성 키·schema version·content hash·발행 실패 코드·timeout·재시도 상한을 계약과 DB로 고정했다 (CP-02 `errors.py`·`hashing.py`, CP-04 `operations`). 재시도 가능 여부는 표가 정하고 호출부가 바꾸지 못한다. 미확정 항목이 있으면 실험은 탐색으로 표시하고 승격하지 않는다.
 - [~] W의 지식·발행 schema(M0·M1)를 작성했고 적용된 migration은 수정하지 않았다 — 기존 CASCADE는 새 migration에서 제약만 교체했다. **R의 질문·인용 schema(M2·M3)와 상호 검토는 남아 있다.**
 - [x] 공유 config/schema/router/의존성/UI/query key의 초기 주 작성자와 변경 묶음별 단일 편집 규칙을 결정서 §2에 지정했다. 실제 변경마다 준수 여부는 별도 확인한다.

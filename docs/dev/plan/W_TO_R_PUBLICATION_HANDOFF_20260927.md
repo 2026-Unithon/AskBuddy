@@ -244,7 +244,7 @@ R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W
 - `DELETE /ingest/sources/{id}`(점주 전용): 자료를 `source_availability='DELETED'` tombstone 으로 남긴다.
   사실·카드·공개판·R 색인은 그대로이고 승인 카드를 자동 제외하지 않는다. 처리 중 자료는 409 `SOURCE_IN_PROGRESS`.
 - 원본 접근 해제: 카드 근거의 열람 URL 을 발급하지 않고 `source.source_availability` 를 내려준다. 새 작업·재시도·옛 `/ingest/process` 가
-  삭제된 자료를 다시 처리하지 않는다. Storage 원본 파일의 물리 삭제는 개인정보 삭제 절차로 남겼다.
+  삭제된 자료를 다시 처리하지 않는다. Storage 원본 파일의 물리 삭제 여부는 추후 논의로 결정한다(2026-09-27 사용자).
 - R 이 할 일은 없다. v2 인용은 이미 `sources.source_availability` 를 읽어 `인용 끊김` 을 표시한다.
 
 ---
