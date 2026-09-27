@@ -836,24 +836,30 @@ async def verify(pool, admin):
         check("13 bootstrap left other stores untouched",
               {x.card_id for x in (await current_index(s2)).cards} == {str(other)})
 
-        # 데모 시드 재실행은 매장째 지운다. 공개판·색인이 삭제 결과를 바꾸지 않는지 본다
-        # (공개판이 없는 매장과 같은 결과여야 한다 — 다르면 새 행이 삭제를 막는 것이다)
-        async def try_delete(store_id):
-            try:
-                async with admin.transaction():
-                    await admin.execute("delete from stores where store_id=$1", store_id)
-                    raise _Rollback()
-            except _Rollback:
-                return "DELETED"
-            except Exception as exc:
-                return type(exc).__name__ + ":" + str(exc).split("\n")[0][:80]
-
-        plain = await seed_store("W 삭제 대조")
-        plain_outcome = await try_delete(plain["sid"])
-        published_outcome = await try_delete(s4["sid"])
-        print("store delete outcome: plain=", plain_outcome, "published=", published_outcome)
-        check("13 publication/index rows do not change store delete outcome",
-              plain_outcome == published_outcome)
+        # 데모 시드 재실행: 비용 기록(색인 준비의 임베딩)이 있는 매장은 지울 수 없다(비용 원장은 영구).
+        # 지우지 않고 보관 처리해 같은 slug·이메일·초대코드로 새 매장을 만들 수 있어야 한다
+        from demo_seed import archive_demo_store
+        slug, email = "synthetic-demo", "synthetic-demo-owner@example.invalid"
+        await admin.execute("update stores set store_slug=$2 where store_id=$1", s4["sid"], slug)
+        await admin.execute("update users set email=$2 where user_id=$1", s4["uid"], email)
+        await admin.execute(
+            "insert into invite_codes(store_id,code,expires_at) values($1,'SYN-DEMO',now()+interval '1 day')",
+            s4["sid"])
+        usage_before = await admin.fetchval("select count(*) from ai_usage_attempts where store_id=$1", s4["sid"])
+        async with admin.transaction():
+            archived = await archive_demo_store(admin, slug, [email])
+            new_uid = await admin.fetchval(
+                "insert into users(name,role,email) values('합성 새 데모 점주','OWNER',$1) returning user_id", email)
+            new_sid = await admin.fetchval(
+                "insert into stores(owner_id,store_slug,store_name,business_type) values($1,$2,'합성 새 데모','CAFE') returning store_id",
+                new_uid, slug)
+            await admin.execute(
+                "insert into invite_codes(store_id,code,expires_at) values($1,'SYN-DEMO',now()+interval '1 day')", new_sid)
+        check("13 demo reseed archives old store instead of deleting it",
+              archived == s4["sid"] and usage_before > 0
+              and await admin.fetchval("select count(*) from ai_usage_attempts where store_id=$1", s4["sid"]) == usage_before
+              and await admin.fetchval("select store_slug from stores where store_id=$1", s4["sid"]) != slug
+              and await admin.fetchval("select store_id from stores where store_slug=$1", slug) == new_sid)
 
         # -- 14. 자료 삭제(D20) — tombstone, 원본 접근 해제, 카드·공개판 보존 ------------
         src3 = await admin.fetchval(
@@ -918,6 +924,3 @@ async def verify(pool, admin):
 
     print(f"Verified {len(passed)} W publish checks")
 
-
-class _Rollback(Exception):
-    """검사용 삭제를 되돌리는 신호."""
