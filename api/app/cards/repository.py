@@ -229,13 +229,15 @@ async def add_event(
     from_category_id: int | None = None,
     to_category_id: int | None = None,
     metadata: dict | None = None,
-) -> None:
-    await conn.execute(
+) -> int:
+    """검수 사건을 남기고 그 event_id 를 돌려준다 (제외·복원 재발행의 멱등 키에 쓴다)."""
+    return await conn.fetchval(
         """
         insert into card_review_events (
           store_id, card_id, actor_id, action, from_status, to_status,
           from_category_id, to_category_id, metadata
         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+        returning event_id
         """,
         store_id,
         card_id,

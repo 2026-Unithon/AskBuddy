@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.bootstrap.router import router as bootstrap_router
+from app.cards.owner_answer_worker import run_owner_answer_worker
 from app.cards.router import router as cards_router
 from app.categories.router import (
     reclassification_router,
@@ -44,9 +45,23 @@ logging.getLogger("app").setLevel(logging.INFO)
 async def lifespan(app: FastAPI):
     await init_pool()
     retention = asyncio.create_task(retention_loop(get_pool()))
+    # 점주 답변 반영 worker 는 플래그가 켜졌을 때만 돈다
+    owner_worker_stop = asyncio.Event()
+    owner_worker = None
+    if get_settings().w_owner_answer_worker_enabled:
+        owner_worker = asyncio.create_task(
+            run_owner_answer_worker(get_pool(), stop=owner_worker_stop))
     try:
         yield
     finally:
+        if owner_worker is not None:
+            owner_worker_stop.set()
+            try:
+                await asyncio.wait_for(owner_worker, timeout=30)
+            except asyncio.TimeoutError:
+                owner_worker.cancel()
+                with suppress(asyncio.CancelledError):
+                    await owner_worker
         retention.cancel()
         with suppress(asyncio.CancelledError):
             await retention

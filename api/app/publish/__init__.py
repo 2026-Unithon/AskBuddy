@@ -1,4 +1,5 @@
 """발행 경로의 트랜잭션 서비스 (W, CP-04)."""
+from app.publish.approval import CardChange, PublishCardsResult, publish_cards
 from app.publish.service import (
     IdempotencyConflict,
     PublishOutcome,
@@ -12,4 +13,5 @@ from app.publish.service import (
 
 __all__ = ["IdempotencyConflict", "PublishOutcome", "SourceInUse",
            "claim_operation", "finish_operation", "publish_knowledge",
-           "set_card_visibility", "delete_source"]
+           "set_card_visibility", "delete_source",
+           "CardChange", "PublishCardsResult", "publish_cards"]

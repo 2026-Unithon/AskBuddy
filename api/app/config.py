@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # 직원 답변은 기본적으로 근거 제한 LLM을 사용하되, 호출/검증 실패 시 카드 원문으로 폴백한다.
     answer_mode: Literal["extractive", "grounded_llm"] = "grounded_llm"
     frame_interval_sec: int = 3
+    # R이 출처 없는 원문 인용을 처리하기 전까지 점주 답변 출처 카드를 공개하지 않는다
+    w_owner_answer_raw_publish: bool = False
+    # 점주 답변 반영 worker. 켜면 lifespan 이 주기마다 OWNER_ANSWER_SUBMITTED 사건을 소비한다
+    w_owner_answer_worker_enabled: bool = False
+    w_owner_answer_worker_interval_sec: int = 10
 
     # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.
     ingest_voice_max_bytes: int | None = None
