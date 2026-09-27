@@ -49,10 +49,15 @@ class FakeConn:
 class FakePool:
     def __init__(self, log: list):
         self.log = log
+        self.held = 0   # 지금 빌려 간 연결 수
 
     @asynccontextmanager
     async def acquire(self):
-        yield FakeConn(self.log)
+        self.held += 1
+        try:
+            yield FakeConn(self.log)
+        finally:
+            self.held -= 1
 
 
 def _plan(relation, *, target=None, auto_publish=False):
@@ -277,6 +282,53 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("tx_rollback", self.log)
         result = self.finished[0][0]
         self.assertEqual((result.error.code, result.retryable), ("STALE_KNOWLEDGE", True))
+
+    async def test_new_publish_extends_lease_after_prepare(self):
+        """색인 준비 뒤 heartbeat 로 점유를 연장한다. 준비가 길면 lease 가 끝났을 수 있다."""
+        async def publish(pool, **kw):
+            before = self.heartbeat.await_count
+            self.assertTrue(await kw["after_prepare"]())
+            self.assertEqual(self.heartbeat.await_count, before + 1)
+            self.assertEqual(self.heartbeat.await_args.kwargs,
+                             dict(store_id=STORE, event_id=41, claim_token="tok"))
+            conn = FakeConn(self.log)
+            async with conn.transaction():
+                await kw["in_transaction"](conn, 300, 13)
+            return PublishCardsResult(status="PUBLISHED", snapshot_id=300, knowledge_revision=13)
+
+        with self._plan_mock(_plan("NEW", auto_publish=True)), \
+                patch(f"{MOD}.publish_cards", side_effect=publish):
+            self.assertEqual(await self._run(), "PUBLISHED")
+
+    async def test_new_publish_lease_lost_after_prepare_stops_without_finish(self):
+        async def publish(pool, **kw):
+            # 준비 뒤 heartbeat 가 점유 상실을 알린다 → publish_cards 는 LEASE_LOST
+            self.heartbeat.return_value = False
+            if not await kw["after_prepare"]():
+                return PublishCardsResult(status="LEASE_LOST")
+            raise AssertionError("after_prepare 가 False 를 돌려줘야 한다")
+
+        with self._plan_mock(_plan("NEW", auto_publish=True)), \
+                patch(f"{MOD}.publish_cards", side_effect=publish):
+            self.assertEqual(await self._run(), "FAILED")
+        # 다른 worker 몫이다. FAILED 보고도 하지 않는다
+        self.assertEqual(self.finished, [])
+
+    async def test_relation_analysis_does_not_hold_pool_connection(self):
+        """관계 분석(모델 호출)은 ShortSession 으로 받아 호출 중 연결을 쥐지 않는다."""
+        from app.db_session import ShortSession
+        seen = {}
+
+        async def plan(db, store_id, question, answer, **kw):
+            seen["db"] = db
+            seen["held"] = self.pool.held
+            return _plan("SUPPLEMENT", target=55)
+
+        with patch(f"{MOD}.build_knowledge_plan", side_effect=plan):
+            self.assertEqual(await self._run(), "REVIEW")
+        self.assertIsInstance(seen["db"], ShortSession)
+        self.assertIs(seen["db"].pool, self.pool)
+        self.assertEqual(seen["held"], 0)
 
     async def test_heartbeat_lost_stops_without_finish(self):
         self.heartbeat.return_value = False

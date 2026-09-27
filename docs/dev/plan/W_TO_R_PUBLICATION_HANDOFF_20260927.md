@@ -194,17 +194,21 @@ W 플래그 (둘 다 기본 `false`, `api/app/config.py`):
   `embed_card` 를 발행 hook 안에서 불러 옛 색인도 채운다. 임베딩 호출이 공개마다 한 번 더 든다.
 - **W 쪽 준비**: 두 경로 모두 `# 옛 색인 호환` 주석으로 표시해 두었다. R 이 옮기면 W 가 그 호출을 지운다.
 
-## 7. 두 번째 공개 경로: 레거시 `/ingest/cards/*` (W 후속 제거 대상)
+## 7. 두 번째 공개 경로: 레거시 `/ingest/cards/*` — 제거됨 (2026-09-27, 브랜치 `w/publish-cleanup`)
 
-- **무엇을**: `api/app/ingest/router.py` 의 옛 카드 엔드포인트가 아직 살아 있다. 모두 `publish_cards` 를 거치지 않고
-  `is_verified`·공개 포인터·`card_embeddings` 만 직접 바꾼다.
-  - `POST /ingest/cards/{card_id}/approve` (`:641`, 본문 `_approve_one` `:616`)
-  - `POST /ingest/cards/approve` 일괄 (`:711`)
-  - `POST /ingest/cards/{card_id}/unapprove` (`:653`)
-  - `PATCH /ingest/cards/{card_id}` (`:665`, 승인 카드 글을 고치고 옛 색인만 다시 만든다)
-- **영향**: 이 경로로 바뀐 카드는 바로 공개판에 오르지 않는다. manifest 가 현재 포인터를 따르므로 **다음 `publish_cards` 공개에서 따라잡는다**.
-  그 사이 R `hybrid` 는 `published_version_id = snapshot 판` 조건 때문에 포인터만 옮겨진 카드를 보지 못할 수 있다.
-- **W 후속**: 이 엔드포인트들은 W 파일이라 이 브랜치 밖 후속 작업에서 W 가 제거(또는 `/cards/*` 로 위임)한다. R 이 할 일은 없다.
+- **무엇이었나**: `api/app/ingest/router.py` 의 옛 카드 엔드포인트 4개가 `publish_cards` 를 거치지 않고
+  `is_verified`·공개 포인터·`card_embeddings` 만 직접 바꿨다.
+  - `POST /ingest/cards/{card_id}/approve` (본문 `_approve_one`)
+  - `POST /ingest/cards/approve` 일괄
+  - `POST /ingest/cards/{card_id}/unapprove`
+  - `PATCH /ingest/cards/{card_id}`
+- **제거한 것**: 위 4개 라우트와 전용 helper `_approve_one`, 전용 schema `ApproveResult`·`BulkApproveRequest`·`CardUpdateRequest`,
+  전용 저장 함수 `ingest/repository.py` 의 `update_card`·`set_card_verified`, 웹 클라이언트 `web/lib/api.ts` 의
+  `approveCards`·`approveCard`·`unapproveCard`·`updateCard`·`ApproveResult` 타입. 화면에서 부르는 곳은 없었다.
+- **검증**: `api/tests/test_w_legacy_ingest_cards_removed.py` — 네 경로가 404/405 이고 OpenAPI 에 `/ingest/cards*` 가 없다.
+- **결과**: 카드 공개 경로는 `/cards/{id}/approve` 등 `publish_cards` 하나다. R 이 할 일은 없다.
+- **남은 것**: `POST /ingest/embed`(승인된 카드의 옛 색인을 다시 만든다)는 공개 포인터를 바꾸지 않아 이번 범위에서 두었다.
+  옛 색인 호환 쓰기 제거(§6)와 함께 정리한다.
 
 ## 8. 알려진 한계 (문서화, 후속)
 

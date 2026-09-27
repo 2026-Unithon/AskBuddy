@@ -25,8 +25,8 @@ from app.config import get_settings
 from app.contracts.errors import ERROR_TABLE, ErrorDetail
 from app.contracts.publication import ApplyOwnerAnswerResult
 from app.contracts.usage import UsageContext
-from app.errors import ApiError
 from app.db_session import ShortSession
+from app.errors import ApiError
 from app.learn.knowledge_apply import create_owner_answer_card
 from app.learn.knowledge_loop import build_knowledge_plan
 from app.learn.owner_handoff import (
@@ -402,14 +402,22 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
                       status="PUBLISHED", card_id=card_id,
                       knowledge_revision=knowledge_revision)
 
+    async def extend_lease() -> bool:
+        # 색인 준비(임베딩)가 길면 lease 가 끝났을 수 있다. 공개 트랜잭션 전에 연장한다
+        return await heartbeat_owner_event(pool, store_id=store_id, event_id=event_id,
+                                           claim_token=token)
+
     result = await publish_cards(
         pool, store_id=store_id, member_id=int(owner["member_id"]),
         actor_user_id=int(owner["user_id"]),
         changes=[CardChange(card_id, draft_version_id, draft_version_id)],
         idempotency_key=f"owner-answer:{answer_id}",
         usage_context=_usage_context(store_id, event_id, "EMBED", "embed"),
-        in_transaction=hook)
+        in_transaction=hook, after_prepare=extend_lease)
 
+    if result.status == "LEASE_LOST":
+        # 다른 worker 몫이다. 공개도 보고도 하지 않는다(기존 lease 상실 처리와 같다)
+        raise _LeaseLost()
     if result.status == "PUBLISHED":
         return "PUBLISHED"
     if result.status == "ALREADY_APPLIED":
@@ -461,7 +469,8 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
     card = None
     if proposal is None:
         await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
-        # 모델·임베딩 및 usage sink가 같은 풀을 사용할 수 있도록 연결을 반환한다.
+        # 관계 분석은 모델을 부른다. 쿼리마다 연결을 짧게 빌리는 ShortSession 을 넘겨
+        # 모델 호출 중에는 풀 연결을 쥐지 않는다(build_knowledge_plan 은 트랜잭션을 쓰지 않는다)
         plan = await build_knowledge_plan(
             ShortSession(pool), store_id, source["question_text"], source["answer_text"],
             usage_context=_usage_context(store_id, event_id, "RELATION", "relation"),

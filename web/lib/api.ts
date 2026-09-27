@@ -349,57 +349,6 @@ export async function listReviewCards(
   return res;
 }
 
-// 승인 = 검색 노출. 백엔드가 승인과 임베딩을 한 트랜잭션에 묶으므로,
-// 200 이 오면 벡터까지 들어간 것이다. 실패한 카드만 error 를 달고 돌아온다.
-export type ApproveResult = {
-  card_id: number;
-  is_verified: boolean;
-  chunks?: number;
-  error?: string | null;
-};
-
-export async function approveCards(cardIds: number[], token: string) {
-  // 카드마다 임베딩 호출이 붙는다. 기본 6초로는 못 끝난다.
-  return fetchJson<ApproveResult[]>("/ingest/cards/approve", {
-    method: "POST",
-    headers: authHeader(token),
-    body: JSON.stringify({ card_ids: cardIds }),
-    timeoutMs: 90000,
-  });
-}
-
-// 카드 한 장씩. 점주가 카드별로 넣고 뺀다.
-export async function approveCard(cardId: number, token: string) {
-  // 승인 한 건마다 임베딩 호출이 붙는다. 기본 타임아웃으로는 못 끝난다
-  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}/approve`, {
-    method: "POST",
-    headers: authHeader(token),
-    timeoutMs: 30000,
-  });
-}
-
-export async function unapproveCard(cardId: number, token: string) {
-  // 임베딩은 남기고 검색에서만 뺀다. 다시 넣으면 그대로 살아난다
-  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}/unapprove`, {
-    method: "POST",
-    headers: authHeader(token),
-  });
-}
-
-export async function updateCard(
-  cardId: number,
-  body: { title: string; content: string },
-  token: string
-) {
-  // 승인된 카드를 고치면 백엔드가 임베딩까지 다시 만든다
-  return fetchJson<ApproveResult>(`/ingest/cards/${cardId}`, {
-    method: "PATCH",
-    headers: authHeader(token),
-    body: JSON.stringify(body),
-    timeoutMs: 30000,
-  });
-}
-
 // ---- /learn/roadmap — 승인된 공개 카드 기반 직원 학습 ----
 
 export type LearningStatus = "NOT_STARTED" | "DONE" | "RECONFIRM_REQUIRED";

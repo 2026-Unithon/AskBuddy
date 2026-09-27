@@ -310,14 +310,23 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 
 ## W4. 승인 스냅샷과 발행 — R 필수 검토
 
-- [ ] `card_version → fact_revision`과 렌더링 블록을 고정해 `PublishedKnowledgeSnapshot`을 만든다. 원장 전체를 R에 넘기지 않는다.
+2026-09-27 갱신. 근거는 PR #24(공개 연결, `api/app/publish/approval.py`·`content.py`·`service.py`)와 브랜치 `w/publish-cleanup`(뒷정리)이다. `[~]` 는 부분 구현이며 남은 것을 한 줄로 적는다.
+
+- [~] `card_version → fact_revision`과 렌더링 블록을 고정해 `PublishedKnowledgeSnapshot`을 만든다. 원장 전체를 R에 넘기지 않는다.
+  - 구현: 카드 버전 원문을 불변 RAW 블록으로 고정해 manifest 단위 snapshot 으로 공개한다(`api/app/publish/content.py` `ensure_raw_blocks`·`build_knowledge_content`). 남은 것: fact_revision 블록 고정은 미구현.
 - [ ] 점주에게 숫자·조건·예외·순서와 답변에 사용할 내용을 모두 보여준다. 요약만 검수하고 숨은 facts를 승인 처리하지 않는다.
-- [ ] W가 발행 조정을 소유하고 R의 인덱스 준비 어댑터를 호출한다. 임베딩은 단일 진입점 `app.reg.embeddings.embed_texts`를 유지한다.
-- [ ] 임베딩/payload를 먼저 준비한 뒤 짧은 DB 트랜잭션에서 CAS로 승인 대상 revision을 확인하고 공개 포인터·index·fact refs·`knowledge_revision`을 원자적으로 바꾼다. 모델 호출 동안 DB lock/연결을 점유하지 않는다.
-- [ ] 동시 수정·승인·제외의 stale 발행을 거절한다. 실패하면 기존 공개본을 유지하고 중복 요청이 중복 발행하지 않게 한다.
-- [ ] 공개·제외 이벤트를 R에 전달하며 색인/cache 지연은 최종 공개 재검사로 차단한다.
-- [ ] legacy 승인 카드는 승인 RAW 원문·버전을 보존하는 호환 경로로 제공한다. 역추출 facts를 자동 승인하지 않는다.
-- [ ] 과거 인용은 이력으로 보존하고 신규 검색·답변은 현재 공개본만 사용한다.
+- [~] W가 발행 조정을 소유하고 R의 인덱스 준비 어댑터를 호출한다. 임베딩은 단일 진입점 `app.reg.embeddings.embed_texts`를 유지한다.
+  - 구현: `api/app/publish/approval.py` `publish_cards` → `prepare_index_request`·`activate_prepared_index`(R 어댑터). 승인·제외·복원·점주 제안 승인·점주 답변 worker 가 이 조정자를 거친다. 레거시 `/ingest/cards/*` 직접 공개 경로는 제거했다(`api/app/ingest/router.py`, `api/tests/test_w_legacy_ingest_cards_removed.py`). 남은 것: 레거시 점주 답변 경로(`api/app/learn/router.py` → `publish_new_proposal`, R 소유 파일)가 아직 `publish_cards` 밖에서 포인터를 옮긴다.
+- [~] 임베딩/payload를 먼저 준비한 뒤 짧은 DB 트랜잭션에서 CAS로 승인 대상 revision을 확인하고 공개 포인터·index·fact refs·`knowledge_revision`을 원자적으로 바꾼다. 모델 호출 동안 DB lock/연결을 점유하지 않는다.
+  - 구현: 준비는 연결 없이, 공개는 한 트랜잭션에서 카드 CAS·`publish_knowledge`·공개 포인터·`activate_prepared_index` 를 함께 커밋한다(`approval.py`). 점주 답변 worker 의 관계 분석은 `ShortSession` 으로 모델 호출 중 연결을 쥐지 않고, 색인 준비 뒤 `after_prepare` 로 점유를 연장한다(`api/app/cards/owner_answer_worker.py`). 풀 크기는 `DB_POOL_MIN_SIZE`·`DB_POOL_MAX_SIZE` 설정(`api/app/config.py`). 남은 것: fact refs 원자 전환은 fact_revision 블록과 함께 미구현.
+- [x] 동시 수정·승인·제외의 stale 발행을 거절한다. 실패하면 기존 공개본을 유지하고 중복 요청이 중복 발행하지 않게 한다.
+  - 근거: `approval.py` `_cas_holds`·멱등 키(`operations`), `api/tests/test_w_publish_approval.py`, 실제 DB `api/scripts/verify_w_publication_flow.py` 시나리오 3~5·경합.
+- [~] 공개·제외 이벤트를 R에 전달하며 색인/cache 지연은 최종 공개 재검사로 차단한다.
+  - 구현: 제외·복원은 `publish_cards(changes=[])` 재발행으로 R 색인에 반영한다(`api/app/cards/router.py`). 남은 것: R 쪽 cache 지연 최종 재검사의 종단 확인.
+- [x] legacy 승인 카드는 승인 RAW 원문·버전을 보존하는 호환 경로로 제공한다. 역추출 facts를 자동 승인하지 않는다.
+  - 근거: `content.py` `ensure_raw_blocks` 가 레거시 카드 원문을 RAW 블록으로 싣고, 공개할 수 없는 레거시 카드는 manifest 에서 뺀다(`approval.py` `_fix_blocks`). facts 는 만들지 않는다.
+- [~] 과거 인용은 이력으로 보존하고 신규 검색·답변은 현재 공개본만 사용한다.
+  - 구현: 과거 snapshot·블록은 불변으로 남고 R 색인은 현재 공개판만 활성화한다(`verify_w_publication_flow.py` 시나리오 2·6). 남은 것: 과거 인용 조회 화면/API 종단 확인.
 
 검증: 임베딩 실패·동시 수정·제외·중복 요청, 미승인 정정값과 공개 구버전, 과거 인용 조회를 통합 테스트한다. 저장·검색·화면이 같은 공개 버전을 가리키는 실제 snapshot을 R에 인계한다.
 

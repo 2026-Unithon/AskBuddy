@@ -51,6 +51,8 @@ PREPARE_KEY_WINDOW_SECONDS = 600
 MAX_IDEMPOTENCY_KEY = 40
 
 InTransactionHook = Callable[[asyncpg.Connection, int, int], Awaitable[None]]
+# 색인 준비 직후·공개 트랜잭션 전에 부른다. False 면 공개하지 않는다(점유 연장 실패 등)
+AfterPrepareHook = Callable[[], Awaitable[bool]]
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class PublishCardsResult:
     # PUBLISHED | ALREADY_APPLIED | STALE | PREPARE_FAILED | NO_PROVENANCE
     # | INVALID_CONTENT (변경 카드 원문이 비었거나 너무 길다)
     # | EMPTY_MANIFEST (changes=[] 재발행인데 실을 승인 카드가 하나도 없다)
+    # | LEASE_LOST (after_prepare 가 False — 호출부가 작업 점유를 잃었다. 아무것도 쓰지 않았다)
     status: str
     snapshot_id: int | None = None
     knowledge_revision: int | None = None
@@ -283,6 +286,7 @@ async def publish_cards(
     pool, *, store_id: int, member_id: int, actor_user_id: int,
     changes: list[CardChange], idempotency_key: str, usage_context,
     in_transaction: InTransactionHook | None = None,
+    after_prepare: AfterPrepareHook | None = None,
 ) -> PublishCardsResult:
     """카드 버전을 공개판으로 올린다. 색인 준비와 공개 전환을 한 묶음으로 닫는다.
 
@@ -291,6 +295,10 @@ async def publish_cards(
     공개 포인터 이동·검수 사건은 없고, manifest 전체 잠금과 제외 확인, 멱등 키는
     그대로 적용된다. 실을 카드가 하나도 없으면 R 준비 계약(card_ids ≥ 1)을 맞출
     수 없으므로 아무것도 쓰지 않고 EMPTY_MANIFEST 를 돌려준다.
+
+    `after_prepare` 는 R 준비가 PREPARED 로 끝난 직후, 공개 트랜잭션을 열기 전에
+    부른다(연결을 잡지 않은 상태). 색인 준비가 길어 worker 점유가 끊겼을 수 있으므로
+    여기서 점유를 연장한다. False 면 트랜잭션을 열지 않고 LEASE_LOST 를 돌려준다.
     """
     if member_id is None:
         raise ValueError("색인 준비에는 member_id 가 필요하다")
@@ -362,6 +370,10 @@ async def publish_cards(
     if prepared.status != "PREPARED":
         return PublishCardsResult(status="PREPARE_FAILED",
                                   error_code=prepared.error.code)
+
+    # 2-1. 색인 준비 뒤 점유 확인 — 연결을 잡지 않은 채 부른다
+    if after_prepare is not None and not await after_prepare():
+        return PublishCardsResult(status="LEASE_LOST")
 
     card_versions = sorted(manifest.items())
 

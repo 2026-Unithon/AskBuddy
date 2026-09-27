@@ -27,9 +27,6 @@ from app.ingest import repository as repo
 from app.ingest.embed import embed_card, prepare_embedding
 from app.ingest.embed.service import card_usage_context
 from app.ingest.schemas import (
-    ApproveResult,
-    BulkApproveRequest,
-    CardUpdateRequest,
     CategoryOut,
     CreateSourceRequest,
     CreateIngestJobRequest,
@@ -532,8 +529,9 @@ async def embed(
 
 # ── 검수 (점주 승인) ───────────────────────────────────────────────────────
 #
-# 추출된 카드는 항상 is_verified=false 로 쌓인다. 점주가 여기서 확인하고
-# 승인해야 검색(match_cards)에 노출된다. 승인 즉시 임베딩까지 끝낸다.
+# 추출된 카드는 항상 is_verified=false 로 쌓인다. 여기서는 검수 목록 조회만 한다.
+# 승인·수정·공개는 /cards/{id}/approve 등 publish_cards 경로 하나로만 한다.
+# (레거시 /ingest/cards/* 승인·취소·수정·일괄 승인은 2026-09-27 제거)
 
 async def require_owner(claims: Claims) -> int:
     """승인은 점주만. 신입(STAFF)은 미승인 카드를 보지도 못한다."""
@@ -611,118 +609,3 @@ async def review(
             for r in rows
         ],
     )
-
-
-async def _approve_one(db, store_id: int, card_id: int) -> ApproveResult:
-    """승인과 임베딩을 한 트랜잭션에 묶는다.
-
-    임베딩이 실패했는데 승인만 남으면 검색에 안 잡히는 유령 카드가 된다.
-    그래서 실패하면 승인까지 되돌리고 점주에게 다시 누르게 한다.
-    """
-    expected = await repo.get_card(db, store_id, card_id)
-    if expected is None:
-        raise LookupError("card not found")
-    context = await card_usage_context(db, store_id, card_id)
-    prepared = await prepare_embedding(store_id, expected["title"], expected["content"],
-                                       cost_phase=context.cost_phase, context=context)
-    async with db.transaction():
-        current = await db.fetchrow(
-            "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
-            "where store_id = $1 and card_id = $2 for update", store_id, card_id)
-        if current is None or dict(current) != dict(expected):
-            raise ValueError("임베딩 준비 중 카드가 변경됐습니다")
-        if not await repo.set_card_verified(db, store_id, card_id, True):
-            raise LookupError(f"card {card_id} not found in store {store_id}")
-        chunks = await embed_card(db, store_id, card_id, prepared=prepared)
-    logger.info("승인 card=%s store=%s chunks=%d", card_id, store_id, chunks)
-    return ApproveResult(card_id=card_id, is_verified=True, chunks=chunks)
-
-
-@router.post("/cards/{card_id}/approve", response_model=ApproveResult)
-async def approve_card(card_id: int, db: Db, store_id: OwnerStoreId) -> ApproveResult:
-    """점주가 '승인' 을 누른다. 이 순간부터 검색에 노출된다."""
-    try:
-        return await _approve_one(db, store_id, card_id)
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    except Exception as e:
-        logger.exception("승인 실패 card=%s", card_id)
-        raise HTTPException(502, f"승인은 됐으나 임베딩에 실패해 되돌렸다: {e}") from e
-
-
-@router.post("/cards/{card_id}/unapprove", response_model=ApproveResult)
-async def unapprove_card(card_id: int, db: Db, store_id: OwnerStoreId) -> ApproveResult:
-    """승인 취소. 임베딩은 남기고 검색에서만 뺀다 (match_cards 가 승인분만 본다).
-
-    다시 승인하면 임베딩을 새로 만들지 않고 그대로 살아난다.
-    """
-    if not await repo.set_card_verified(db, store_id, card_id, False):
-        raise HTTPException(404, f"card {card_id} not found in store {store_id}")
-    logger.info("승인 취소 card=%s store=%s", card_id, store_id)
-    return ApproveResult(card_id=card_id, is_verified=False)
-
-
-@router.patch("/cards/{card_id}", response_model=ApproveResult)
-async def update_card(
-    card_id: int, req: CardUpdateRequest, db: Db, store_id: OwnerStoreId
-) -> ApproveResult:
-    """점주가 카드 글을 고친다.
-
-    이미 승인된 카드라면 임베딩이 옛 글로 남아 있다. 그대로 두면 고친 내용이
-    검색에 반영되지 않으므로 같은 트랜잭션에서 다시 만든다.
-    """
-    title = req.title.strip()
-    content = req.content.strip()
-    if not title or not content:
-        raise HTTPException(422, "제목과 내용은 비울 수 없다")
-    try:
-        expected = await repo.get_card(db, store_id, card_id)
-        if expected is None:
-            raise LookupError("card not found")
-        context = await card_usage_context(db, store_id, card_id) if expected["is_verified"] else None
-        if context is not None:
-            context = context.model_copy(update={"cost_phase": "OPERATING"})
-        prepared = await prepare_embedding(store_id, title, content, cost_phase="OPERATING", context=context) if context else None
-        async with db.transaction():
-            current = await db.fetchrow(
-                "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
-                "where store_id = $1 and card_id = $2 for update", store_id, card_id)
-            if current is None or dict(current) != dict(expected):
-                raise HTTPException(409, "카드가 변경됐습니다. 다시 확인해 주세요.")
-            if not await repo.update_card(db, store_id, card_id, title, content):
-                raise LookupError(f"card {card_id} not found in store {store_id}")
-            card = await repo.get_card(db, store_id, card_id)
-            chunks = 0
-            if card and card["is_verified"]:
-                chunks = await embed_card(db, store_id, card_id, prepared=prepared)
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("카드 수정 실패 card=%s", card_id)
-        raise HTTPException(502, f"수정한 내용을 검색에 반영하지 못해 되돌렸다: {e}") from e
-    logger.info("카드 수정 card=%s store=%s chunks=%d", card_id, store_id, chunks)
-    return ApproveResult(
-        card_id=card_id, is_verified=bool(card and card["is_verified"]), chunks=chunks
-    )
-
-
-@router.post("/cards/approve", response_model=list[ApproveResult])
-async def approve_cards(
-    req: BulkApproveRequest, db: Db, store_id: OwnerStoreId
-) -> list[ApproveResult]:
-    """일괄 승인. 한 건이 실패해도 나머지는 진행하고 실패분만 error 로 돌려준다.
-
-    자료 하나에서 카드가 열 장 넘게 나오므로 '이 자료 전부 승인' 이 필요하다.
-    """
-    results: list[ApproveResult] = []
-    for card_id in req.card_ids:
-        try:
-            results.append(await _approve_one(db, store_id, card_id))
-        except Exception as e:
-            logger.warning("일괄 승인 중 실패 card=%s: %s", card_id, e)
-            results.append(ApproveResult(
-                card_id=card_id, is_verified=False, error=f"{type(e).__name__}: {e}"
-            ))
-    return results

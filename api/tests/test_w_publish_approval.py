@@ -190,12 +190,12 @@ class Harness:
             p.start()
             test.addCleanup(p.stop)
 
-    async def run(self, hook=None, changes=None):
+    async def run(self, hook=None, changes=None, **kwargs):
         return await publish_cards(
             self.pool, store_id=STORE, member_id=2, actor_user_id=3,
             changes=changes if changes is not None else [CardChange(5, 50, 50)],
             idempotency_key="approve-key-0001", usage_context=object(),
-            in_transaction=hook)
+            in_transaction=hook, **kwargs)
 
 
 class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
@@ -229,6 +229,33 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["glossary_version"], "glossary/v1")
         self.assertEqual(call["snapshot_hash"],
                          snapshot_hash_for(_content({7: 70, 5: 50}), 4))
+
+    async def test_after_prepare_runs_after_prepare_before_transaction(self):
+        async def after_prepare():
+            # R 준비 뒤·공개 트랜잭션 전이고, 연결을 잡고 있지 않다
+            self.h.log.append(f"after_prepare:held={self.h.pool.held}")
+            return True
+
+        result = await self.h.run(after_prepare=after_prepare)
+        self.assertEqual(result.status, "PUBLISHED")
+        self.assertEqual(self._after_prepare()[:3],
+                         ["prepare", "after_prepare:held=0", "acquire"])
+
+    async def test_after_prepare_false_is_lease_lost_without_publish(self):
+        result = await self.h.run(after_prepare=AsyncMock(return_value=False))
+        self.assertEqual(result, PublishCardsResult(status="LEASE_LOST"))
+        self.assertEqual(self.h.publish_calls, [])
+        # 공개 트랜잭션을 열지 않는다
+        self.assertNotIn("tx_begin", self._after_prepare())
+        self.assertNotIn("lock_publication", self.h.log)
+
+    async def test_after_prepare_not_called_when_prepare_fails(self):
+        self.h.prepare_result = PrepareIndexResult(status="FAILED", error=ErrorDetail(
+            code="INDEX_PREPARE_FAILED", message="실패", request_id="k", retryable=False))
+        after_prepare = AsyncMock(return_value=True)
+        result = await self.h.run(after_prepare=after_prepare)
+        self.assertEqual(result.status, "PREPARE_FAILED")
+        after_prepare.assert_not_awaited()
 
     async def test_prepare_request_matches_content(self):
         await self.h.run()
