@@ -2,9 +2,11 @@
 
 기준: PR #24의 W 인계 §4~8, 공동 작업 절차 J-C01~05, R REVIEW·인용·재사용 구현 및 검증. 구현 완료와 운영 인수를 구분한다.
 
-## 1. R이 먼저 진행할 작업
+2026-09-27 후속: PR #25 병합 main `bbce36a`에서 새 브랜치 `codex/r-owner-candidate-index`로 아래 R 선행 구현·로컬 검증을 완료했다. [검증 및 W 인계](../review/R_OWNER_CANDIDATE_INDEX_20260927.md). 통합 후 다음 구현 담당은 W이며, 운영 인수는 별도다.
 
-`knowledge_loop.find_owner_answer_candidates`는 아직 `match_cards → card_embeddings`를 읽는다. 질문+점주 답변의 query 임베딩은 유지하고, 후보 조회를 새 활성 공개 색인으로 옮긴다.
+## 1. R 선행 작업 — 구현·로컬 검증 완료
+
+`knowledge_loop.find_owner_answer_candidates`를 `match_cards → card_embeddings`에서 활성 `r_index_documents` 조회로 옮겼다. 질문+점주 답변의 query 임베딩은 유지한다. 아래 조건을 구현·검증했으며, W worker에는 외부 모델 호출 중 연결을 반환하는 최소 호출부 변경을 함께 적용했다.
 
 - 같은 매장의 현재 공개 snapshot·카드 버전만 후보로 사용한다.
 - 블록 검색 결과를 카드 단위로 묶고, W가 사용하는 `id/title/content/score/version_id/category_id/assignment_type/category_name` 반환 의미를 보존한다.
@@ -16,7 +18,9 @@
 
 ## 2. R 완료 후 W 작업
 
-R이 후보 검색 이전과 회귀 검증을 완료하면 W가 `approve_card`와 `approve_owner_proposal`의 옛 `prepare_embedding`/`embed_card` 호환 쓰기를 제거한다. 그 전에 제거하면 점주 답변 후보 조회가 누락되거나 낡은 상태를 읽을 수 있다.
+R 후보 검색 이전 브랜치를 검토·통합한 뒤 W가 `approve_card`와 `approve_owner_proposal`의 옛 `prepare_embedding`/`embed_card` 호환 쓰기를 제거한다. 그 전에 제거하면 점주 답변 후보 조회가 누락되거나 낡은 상태를 읽을 수 있다. 현재 브랜치에서는 호환 쓰기를 유지했다.
+
+활성 공개 색인이 없는 매장은 후보 없음으로 처리하지 않고 재시도 가능한 `INDEX_UNAVAILABLE`을 반환한다. W worker 활성화 전에 대상 매장의 공개 snapshot·색인을 준비해야 한다. 첫 매장/빈 공개판 초기화는 아래 빈 manifest 계약과 함께 확인한다.
 
 R의 A 방식 재사용은 새 공개 색인에만 적용된다. 이 W 정리를 끝내야 승인마다 추가되던 옛 색인 임베딩 1회도 사라진다. `publish_new_proposal`/`publish_existing_proposal`은 남은 레거시 호출자를 확인한 뒤 제거해야 한다.
 
@@ -25,6 +29,10 @@ R의 A 방식 재사용은 새 공개 색인에만 적용된다. 이 W 정리를
 - `/ingest/cards/*`의 직접 공개 경로를 정리하거나 새 승인 경로로 위임한다.
 - 점주 답변 판을 편집할 때 `owner_answer_id`가 사라지는 출처 문제를 해결한다. 혼합 원문을 어떻게 표시할지는 R 인용 의미와 함께 합의한다.
 - 이미 PUBLISHED이지만 R 완료 원장이 없는 과거 제안, v2 revision/REVIEW 원장이 없는 레거시 제안의 이관 방식을 R과 정한다. 현재 fast path 재요청은 과거 누락 복구가 아니다.
+
+### 최신 W 인계에 추가된 R 후속
+
+main `9ef7897`의 W 인계 §5-2는 옛 준비본 벡터 정리 구조를 R 후속으로 추가했다. 현재 활성 준비본·PREPARING·만료 전 PREPARED·직전 N개를 보호하고, 나머지 중 M일이 지난 문서 행만 정리하는 설정 및 불변 trigger 예외를 설계해야 한다. N·M은 W/R 공동 결정 전까지 미정이며 정리는 기본 비활성으로 둔다. 이번 후보 검색 이전에는 포함하지 않았고, W의 옛 색인 호환 쓰기 제거를 막는 선행 조건은 아니다.
 
 ## 4. 먼저 공동 결정할 계약
 
