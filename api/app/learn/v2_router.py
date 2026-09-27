@@ -95,7 +95,9 @@ async def citation_detail(receipt_id:EntityId,order:int,claims:Claims,user_id:Cu
                 text='\n'.join((fact.assertion,*fact.conditions,*fact.exceptions))
             await conn.execute("insert into access_logs(store_id,user_id,card_id,action_type) values($1,$2,$3,'VIEW')",store_id,user_id,row['card_id'])
             return dict(contract_version='v2',title=card.title,text=text,card_version_id=card.card_version_id,
-                        source_availability=row['source_availability'] or 'UNAVAILABLE')
+                        owner_answer_id=str(row['owner_answer_id']) if row['owner_answer_id'] is not None else None,
+                        source_availability=('AVAILABLE' if row['owner_answer_id'] is not None
+                                             else row['source_availability'] or 'UNAVAILABLE'))
 
 
 @router.get('/v2/sessions')

@@ -70,7 +70,7 @@ export const rOwnerAnswer = (token: string, id: string, body: ROwnerInput) =>
 export const rOwnerRetry = (token: string, id: string, body: RRetryInput) =>
   request<{ event_id: string; status: string }>(`/owner-events/${encodeURIComponent(id)}/retry`, token, undefined, body);
 export const rCitation = (token: string, receipt: string, order: number, signal?: AbortSignal) =>
-  request<{ title: string; text: string; card_version_id: string; source_availability: string }>(`/receipts/${encodeURIComponent(receipt)}/citations/${order}`, token, signal);
+  request<{ title: string; text: string; card_version_id: string; source_availability: string; owner_answer_id?: string | null }>(`/receipts/${encodeURIComponent(receipt)}/citations/${order}`, token, signal);
 export const rNotifications = (token: string, after: string | null, signal?: AbortSignal) =>
   request<{ notifications: RNotification[]; next_after: string | null }>(`/notifications${after ? `?after=${after}` : ""}`, token, signal);
 export const rReadNotification = (token: string, id: string) =>

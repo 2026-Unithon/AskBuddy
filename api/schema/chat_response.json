@@ -36,6 +36,20 @@
           "default": null,
           "title": "Fact Revision Id"
         },
+        "owner_answer_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Answer Id"
+        },
         "raw_span_id": {
           "anyOf": [
             {
@@ -61,17 +75,24 @@
           "type": "string"
         },
         "source_id": {
-          "maxLength": 19,
-          "pattern": "^[0-9]+$",
-          "title": "Source Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
         }
       },
       "required": [
         "card_id",
         "card_version_id",
-        "block_id",
-        "source_id"
+        "block_id"
       ],
       "title": "Citation",
       "type": "object"

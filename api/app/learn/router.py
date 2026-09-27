@@ -27,10 +27,12 @@ from app.config import get_settings
 from app.learn.answering import AnswerComposition, compose_grounded_answer
 from app.learn.faq import list_faqs as list_faq_rows
 from app.learn.knowledge_apply import (
+    approve_owner_proposal,
     prepare_proposal,
     publish_existing_proposal,
     publish_new_proposal,
 )
+from app.learn.owner_handoff import finish_owner_review
 from app.learn.knowledge_loop import build_knowledge_plan
 from app.learn import roadmap as roadmap_repo
 from app.notifications.service import (
@@ -844,36 +846,44 @@ async def approve_knowledge_proposal(
 ):
     if claims.get("role") != "OWNER":
         raise HTTPException(403, "owner only")
-    relation = await db.fetchval(
-        """
-        select relation_type from knowledge_change_proposals
-        where store_id = $1 and proposal_id = $2
-        """,
-        store_id,
-        proposal_id,
-    )
-    if relation is None:
-        raise HTTPException(404, "knowledge proposal not found")
+    member_id = await db.fetchval('''select member_id from store_members
+        where store_id=$1 and user_id=$2 and member_role='OWNER' ''', store_id, user_id)
+    if member_id is None:
+        raise HTTPException(403, "owner only")
+
+    async def notify_r(conn, answer_id, card_id, version_id, revision):
+        await finish_owner_review(conn, store_id=store_id, proposal_id=proposal_id,
+            owner_answer_id=answer_id, card_id=card_id, card_version_id=version_id,
+            knowledge_revision=revision)
+
     try:
-        preparation = await prepare_proposal(db, store_id, proposal_id)
-        async with db.transaction():
-            if relation == "NEW":
-                card_id, version_id = await publish_new_proposal(
-                    db, store_id, proposal_id, user_id, preparation=preparation
-                )
-            else:
-                card_id, version_id = await publish_existing_proposal(
-                    db, store_id, proposal_id, user_id, preparation=preparation
-                )
+        result = await approve_owner_proposal(get_pool(), store_id=store_id,
+            member_id=int(member_id), actor_user_id=user_id, proposal_id=proposal_id,
+            usage_context=UsageContext(store_id=str(store_id), stage='EMBED',
+                cost_phase='OPERATING', cost_purpose='PRODUCT',
+                logical_call_id=f'owner-proposal:{proposal_id}:{uuid4().hex}',
+                operation_id=f'owner-proposal:{proposal_id}'), notify_r=notify_r)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    if result.status in ('NO_PROVENANCE', 'INVALID_CONTENT', 'EMPTY_MANIFEST', 'STALE'):
+        raise HTTPException(409, result.status)
+    if result.status == 'PREPARE_FAILED':
+        if result.error_code in ('STALE_PUBLICATION', 'STALE_KNOWLEDGE', 'IDEMPOTENCY_CONFLICT'):
+            raise HTTPException(409, result.error_code)
+        raise ApiError(502, 'CARD_PUBLISH_FAILED', '제안을 공개하지 못했습니다.', retryable=True)
+    if result.status not in ('PUBLISHED', 'ALREADY_APPLIED'):
+        raise RuntimeError(f'unknown proposal publication status: {result.status}')
+    proposal = await db.fetchrow('''select result_card_id,result_version_id
+        from knowledge_change_proposals where store_id=$1 and proposal_id=$2''', store_id, proposal_id)
+    if proposal is None or proposal['result_card_id'] is None or proposal['result_version_id'] is None:
+        raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '승인 결과를 확인할 수 없습니다.')
     return {
         "proposal_id": proposal_id,
         "status": "PUBLISHED",
-        "card_id": card_id,
-        "version_id": version_id,
+        "card_id": int(proposal['result_card_id']),
+        "version_id": int(proposal['result_version_id']),
     }
 
 

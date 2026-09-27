@@ -33,6 +33,13 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 | [W1_MEASUREMENT_PLAN.md](plan/W1_MEASUREMENT_PLAN.md) | 채점기 교정과 측정 구조 (①~⑤) |
 | [W_EVAL_CAMPAIGN_V1.md](plan/W_EVAL_CAMPAIGN_V1.md) | W 평가 캠페인 사전등록·잠금 계약 |
 | [R_IMPLEMENTATION_PLAN.md](plan/R_IMPLEMENTATION_PLAN.md) | R0~R5 항목별 순서·완료 기준과 반복 평가 계약 |
+| [WR_JOINT_WORKFLOW.md](plan/WR_JOINT_WORKFLOW.md) | W/R 첫 계약 검토 → 승인·색인 → 점주 답변 왕복의 담당·선행 조건·검증·재개 절차 |
+| [W_TO_R_PUBLICATION_HANDOFF_20260927.md](plan/W_TO_R_PUBLICATION_HANDOFF_20260927.md) | PR #24 W 구현과 R 후속 연결 우선순위 |
+| [R_OWNER_REVIEW_HANDOFF_20260927.md](review/R_OWNER_REVIEW_HANDOFF_20260927.md) | R REVIEW 완료·승인 라우트 로컬 연결 검증과 DB/출처 인용 잔여 |
+| [R_OWNER_CITATION_INTEGRATION_20260927.md](review/R_OWNER_CITATION_INTEGRATION_20260927.md) | Docker 재검증·점주 답변 인용·실제 W/R 합성 통합·배포 순서 |
+| [R_INDEX_REUSE_20260927.md](review/R_INDEX_REUSE_20260927.md) | 전체 manifest 유지·변경 블록만 임베딩하는 A 방식과 DB 검증 |
+| [R_W_NEXT_AFTER_INDEX_REUSE_20260927.md](plan/R_W_NEXT_AFTER_INDEX_REUSE_20260927.md) | R 후보 검색 이전 → W 호환 쓰기 제거와 공동 결정·배포 선행 조건 |
+| [W_CONTRACT_INPUT_20260927.md](plan/W_CONTRACT_INPUT_20260927.md) | 첫 공동 계약 검토용 W 현재 구조와 미확정 제안 |
 | [R_TO_W_HANDOFF_20260917.md](plan/R_TO_W_HANDOFF_20260917.md) | R 누적 구현 push 인계·W 연결점·통합 검증과 잔여 |
 | [C0_W_START_HANDOFF.md](plan/C0_W_START_HANDOFF.md) | R 계측 접점과 W 착수 인계 |
 
