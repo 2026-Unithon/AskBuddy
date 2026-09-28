@@ -5,7 +5,7 @@
 """
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 SourceType = Literal["VOICE", "VIDEO", "KAKAO", "SCAN"]
 SourceStatus = Literal["UPLOADED", "PROCESSING", "DONE", "FAILED"]
@@ -40,6 +40,13 @@ class ExtractedCard(BaseModel):
 class ExtractionResult(BaseModel):
     cards: list[ExtractedCard] = []
     unresolved: list[str] = []
+    # 서버가 채운다 (W1-1). 필드가 아니라 모델에 보내는 response_schema 에 실리지 않는다
+    _raw_response_id: int | None = PrivateAttr(default=None)
+
+    @property
+    def raw_response_id(self) -> int | None:
+        """이 결과를 만든 원래 응답 행. 기록하지 않은 호출(미리보기)이면 None."""
+        return self._raw_response_id
 
 
 # ── 사실 추출 (W1) ─────────────────────────────────────────────────────────
@@ -69,6 +76,19 @@ class ExtractedAssertion(BaseModel):
     confidence: float = Field(ge=0, le=1)
     # 서버가 채운다. 모델이 보내는 값이 아니다 — 어느 구간에서 나왔는지 표시용
     segment_id: str | None = None
+    # 서버가 채운다 (W1-4). 이 사실이 나온 원래 응답 행. 필드가 아니라 schema 에 실리지 않는다
+    _raw_response_id: int | None = PrivateAttr(default=None)
+    # 서버가 채운다 (W1-4 최종 수정). 서버 검사 판정 목록 — 근거 위치 행의 check_flags 로 남는다.
+    # 필드가 아니라 schema 에 실리지 않는다(요청 스키마 불변)
+    _check_flags: list[dict] = PrivateAttr(default_factory=list)
+
+    @property
+    def raw_response_id(self) -> int | None:
+        return self._raw_response_id
+
+    @property
+    def check_flags(self) -> list[dict]:
+        return self._check_flags
 
     def as_variant(self) -> str | None:
         return self.variant.strip().upper() or None
@@ -80,6 +100,34 @@ class ExtractedAssertion(BaseModel):
 class FactExtractionResult(BaseModel):
     assertions: list[ExtractedAssertion] = []
     unresolved: list[str] = []
+    # 서버가 채운다 (W1-1). 필드가 아니라 모델에 보내는 response_schema 에 실리지 않는다
+    _raw_response_id: int | None = PrivateAttr(default=None)
+
+    @property
+    def raw_response_id(self) -> int | None:
+        """이 결과를 만든 원래 응답 행. 기록하지 않은 호출(미리보기)이면 None."""
+        return self._raw_response_id
+
+
+# ── 위치 표지 판 (W1-4, 플래그 extract_locator_hints) ─────────────────────
+# 플래그가 꺼져 있으면 위의 원래 스키마를 그대로 보낸다 — 요청이 이전과 바이트 단위로 같다(D16).
+# 켜면 이 판을 보낸다. 서버 코드는 두 판을 같은 사실로 다룬다(하위 클래스).
+
+class LocatedEvidence(Evidence):
+    """근거 위치 + 쪽·메시지 번호. 모르면 0 (Gemini schema 가 nullable 을 잘 못 다룬다).
+
+    전처리 표지(PDF `[N쪽]`, 카톡 `[#N]`)의 번호를 옮긴다. 서버가 입력에 없는 번호를 거절한다.
+    """
+    page: int = 0
+    line: int = 0
+
+
+class LocatedAssertion(ExtractedAssertion):
+    evidence: LocatedEvidence = LocatedEvidence()
+
+
+class LocatedFactExtractionResult(FactExtractionResult):
+    assertions: list[LocatedAssertion] = []
 
 
 # ── 요청 ───────────────────────────────────────────────────────────────────

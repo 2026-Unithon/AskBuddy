@@ -57,6 +57,10 @@ async def main():
             await pool.close()
         from verify_w_ingest_recovery import verify as verify_w_recovery
         await verify_w_recovery(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
+        from verify_w_raw_responses import verify as verify_w_raw
+        await verify_w_raw(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
+        from verify_w_fact_occurrences import verify as verify_w_occurrences
+        await verify_w_occurrences(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
         from verify_w_publication_flow import verify as verify_w_publish
         pool = await asyncpg.create_pool(DSN.rsplit("/",1)[0]+"/"+name,min_size=1,max_size=3)
         try:

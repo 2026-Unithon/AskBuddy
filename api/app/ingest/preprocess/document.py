@@ -113,3 +113,14 @@ def read_pdf(path: Path) -> PdfRead:
 
 def is_image(path: Path) -> bool:
     return path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+
+
+def pdf_page_count(path: Path) -> int:
+    """PDF 쪽 수. 읽지 못하면 0 이다 — 모르는 쪽 번호를 참으로 받지 않는다 (W1-4)."""
+    import pypdf
+
+    try:
+        return len(pypdf.PdfReader(str(path)).pages)
+    except Exception:
+        logger.warning("PDF 쪽 수를 읽지 못했다 path=%s — 첨부 문서의 쪽 번호를 받지 않는다", path.name)
+        return 0

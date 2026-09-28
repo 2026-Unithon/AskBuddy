@@ -315,11 +315,11 @@ async def insert_source_facts(
             f.get("assembly_state") or "PENDING",
         )
         if fact_id is None:
-            # 같은 사실이 이미 있다. 새로 만들지 않고 그 행에 잇는다
+            # 같은 사실이 이미 있다. 새로 만들지 않고 그 행에 잇는다 (D1 — 이 매장 행만)
             fact_id = await conn.fetchval(
                 "select fact_id from source_facts "
-                "where source_id = $1 and content_hash = $2",
-                source_id, digest,
+                "where source_id = $1 and content_hash = $2 and store_id = $3",
+                source_id, digest, store_id,
             )
         if fact_id is not None:
             ids.append(int(fact_id))
