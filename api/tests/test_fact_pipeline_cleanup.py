@@ -51,7 +51,8 @@ async def test_real_fact_and_assembly_prompts_have_separate_inputs():
     from app.ingest.extract import gemini
     raw = json.dumps({"assertions": [dict(local_ref="f1", original_assertion="음료Z ICE 우유 120ml",
                                          subject="음료Z", variant="ICE", attribute="우유량", value="120ml", confidence=.9)]})
-    measured = AsyncMock(side_effect=[(raw, {}), (ExtractionResult().model_dump_json(), {})])
+    measured = AsyncMock(side_effect=[gemini.CallResult(raw, {}, "STOP"),
+                                      gemini.CallResult(ExtractionResult().model_dump_json(), {}, "STOP")])
     with patch.object(extract, "get_settings", return_value=NS(ingest_mode="real")), \
          patch.object(gemini, "get_settings", return_value=NS(gemini_api_key="synthetic")), \
          patch.object(gemini, "_measured_call", measured):

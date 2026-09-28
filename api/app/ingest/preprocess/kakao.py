@@ -48,8 +48,12 @@ def _ts(m: re.Match, day: tuple[int, int, int] | None = None) -> datetime:
     return datetime(y, mo, d, _hour(m), int(m.group("mi")), tzinfo=KST)
 
 
-def parse(raw: str) -> dict:
-    """반환: room_name, participants, message_count, period_start/end, parsed_text"""
+def parse(raw: str, *, message_numbers: bool = False) -> dict:
+    """반환: room_name, participants, message_count, period_start/end, parsed_text
+
+    `message_numbers` 를 켜면(W1-4 extract_locator_hints) 메시지마다 `[#N]` 표지를 붙인다.
+    끄면 이전과 같은 글이다.
+    """
     lines = raw.replace("\r\n", "\n").split("\n")
 
     room = None
@@ -95,8 +99,12 @@ def parse(raw: str) -> dict:
         )
 
     participants = sorted({who for _, who, _ in messages})
+    # 켜면 메시지마다 번호 표지 `[#N]` 를 붙인다 (W1-4). 추출이 근거 위치(LINE)로 이 번호를
+    # 옮기고, 서버는 표지에 없는 번호를 거절한다. 여러 줄 메시지는 번호 하나다
     parsed_text = "\n".join(
-        f"[{t.strftime('%m-%d %H:%M')}] {who}: {msg}" for t, who, msg in messages)
+        (f"[#{n}] " if message_numbers else "")
+        + f"[{t.strftime('%m-%d %H:%M')}] {who}: {msg}"
+        for n, (t, who, msg) in enumerate(messages, start=1))
 
     logger.info("카톡 파싱 %d건 참여자 %d명 (%s ~ %s)",
                 len(messages), len(participants),

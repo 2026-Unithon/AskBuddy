@@ -276,11 +276,13 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 - [ ] PDF는 페이지별 텍스트 품질과 표 행·열 관계를 확인하고 필요한 페이지 이미지를 전달한다. 일부 텍스트가 읽힌다고 모든 이미지를 생략하지 않는다.
 - [ ] 영상은 frame ID·시각과 STT 구간, 음성은 앞뒤 문맥·timestamp, 카톡은 화자·날짜·질문/답변과 번복 문맥을 보존한다.
 - [x] `extract_facts` 전용 프롬프트·schema를 만들었다. 카드가 아니라 사실만 뽑는다 — 카드 스키마로 뽑으면 "한 카드에 한 대상" 규칙 때문에 카드 1장이 사실 1개가 되어 조립이 합칠 것이 없었다.
-- [~] 파싱 결과를 카드 조립 **전에** 원장에 저장한다. 원장에 `original_assertion`·`unit`·`polarity`·`conditions`·`exceptions`·`step_order`·`requires`·`local_ref`·`segment_id`·`assembly_state`를 추가했다. **남은 것: 원시 응답 본문 보존과 출력 잘림 복구.**
-- [ ] 단위·규격·조건의 추정 채우기와 존재하지 않는 segment 참조를 거절한다. 텍스트 인용 존재 검사와 이미지/의미 정확도 평가를 구분한다.
-- [ ] 입력/출력 token 상한, 구간 크기·중첩, 동시 호출 수·timeout·retry를 제한한다. 잘린 출력은 재분할/이어받기로 복구하고 조용히 성공 처리하지 않는다.
-- [ ] 같은 요청 재시도는 중복을 만들지 않고 모델·프롬프트 변경 재추출은 별도 run으로 남긴다. 중복 canonical fact여도 각 evidence occurrence를 보존한다.
-- [ ] 재사용 키에 매장·원본/segment 해시·모델·프롬프트·schema·설정 버전을 포함한다. 평가 정답을 런타임 추출 입력에 넣지 않는다.
+- [~] 파싱 결과를 카드 조립 **전에** 원장에 저장한다. 원장에 `original_assertion`·`unit`·`polarity`·`conditions`·`exceptions`·`step_order`·`requires`·`local_ref`·`segment_id`·`assembly_state`를 추가했다. 원시 응답 본문(`extraction_raw_responses`)도 저장하고 파싱 실패 응답도 행이 남는다. **남은 것: 잘림(`finish_reason=MAX_TOKENS`)을 성공 처리하지 않는 거절은 항상 켜져 있으나, 구간 분할 재추출은 플래그(`extract_truncation_split_max_depth`) 기본 꺼짐·실제 모델(`INGEST_MODE=real`) 미실측.**
+- [~] 단위·규격·조건의 추정 채우기와 존재하지 않는 segment(`requires`) 참조를 검사한다(`app/ingest/occurrences.py: validate_assertions`). 없는 `requires` 참조는 항상 빼고, 근거 없는 단위·규격은 기본으로 값을 남긴 채 판정만 `source_fact_occurrences.check_flags`·unresolved 에 기록한다(비우기는 플래그 `extract_clear_ungrounded_values` 기본 꺼짐, 미디어 동반 입력은 켜도 "이미지 확인 필요"로 남긴다). **남은 것(2026-09-29): 조건(`conditions`)은 검사하지 않는다, 단위·규격 판정은 합성 시나리오로만 검증해 실제 모델 미실측, 비우기 플래그 기본 꺼짐.**
+- [~] 출력 token 상한·구간 크기·중첩·동시 호출 수·timeout 을 설정으로 모았다(`extract_max_output_tokens`·`assemble_max_output_tokens`·`video_segment_overlap_sec`·`extract_segment_concurrency`·`gemini_file_active_timeout_sec`·`gemini_file_poll_sec`). 잘린 출력은 항상 성공 처리하지 않는다. **남은 것: 출력 상한 기본값은 실측 전이라 None(공급자 기본값), 재분할 복구는 위와 같이 플래그 기본 꺼짐.**
+- [~] 같은 요청 재시도는 `source_facts`의 `unique(source_id, content_hash)`와 원래 응답 기록으로 중복을 만들지 않고, 모델·프롬프트·설정이 바뀌면 재사용 키가 달라져 새 실행으로 남는다(실제 DB 검증). 같은 canonical fact 여도 신규 `source_fact_occurrences` 로 evidence 위치를 남긴다. **남은 것(2026-09-29): 기본 설정에서는 재시도가 모델을 다시 부르고(재사용 플래그 꺼짐) 멱등은 `unique(source_id, content_hash)`에만 기댄다. PDF·카톡 위치는 `extract_locator_hints` 를 켜지 않으면 `WHOLE_SOURCE` 하나로 모인다.**
+- [~] 재사용 키(`app/ingest/reuse.py`)에 매장·source_id·구간 내용/첨부 hash·모델·모드·프롬프트·schema 버전·온도·max_output_tokens 등 설정을 포함했다. 평가 정답은 키 입력에 없다(테스트로 고정). 키 적중 시 모델을 다시 부르지 않고 원장에 재사용(비용 0)으로 기록한다. 제품 경로는 기본 켜짐(2026-09-29), 평가 실행은 `extract_reuse_for_evaluation` 을 따로 켜야만 재사용한다. **남은 것: 실제 모델 미실측.**
+
+> 2026-09-29: 항상 켜진 서버 검사(없는 `requires` 참조 제거)와 새 기록(원래 응답·근거 위치·check_flags)은 브랜치 이전 기준선과 원장 내용을 바꾸므로 전후 추출 수치를 직접 비교하지 않는다. 값 비우기는 기본 꺼짐이다.
 
 검증: 한 구간·조립 호출 실패에도 성공 구간의 facts가 남고 재처리로 복구된다. 동일 재시도는 facts·job 결과를 중복 생성하지 않으며 숫자·부정·조건과 segment 연결을 검사한다.
 

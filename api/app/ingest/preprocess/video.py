@@ -108,7 +108,7 @@ def frame_time_sec(frame: Path) -> int:
 
 
 def split_by_time(
-    segments: list[dict], frames: list[Path], window_sec: int
+    segments: list[dict], frames: list[Path], window_sec: int, *, overlap_sec: int = 0,
 ) -> list[tuple[str, list[Path]]]:
     """전사 구간과 프레임을 같은 시간 창으로 묶는다.
 
@@ -116,6 +116,8 @@ def split_by_time(
     요약해버리고 세부를 버린다 (store-a 실측: 영상 사실 62건 중 61건 미추출).
 
     창마다 그 시간대의 전사문과 프레임만 들어간다. 창 밖은 보이지 않는다.
+    `overlap_sec` 을 주면 앞 창의 끝 부분을 그만큼 함께 본다(구간 경계 보호).
+    창의 개수와 시작점은 겹침과 무관하다 — 구간 번호 seg{i} 는 그대로다.
     """
     if window_sec <= 0:
         return []
@@ -138,9 +140,10 @@ def split_by_time(
         lines = [
             f"[{int(sg['start']) // 60:02d}:{int(sg['start']) % 60:02d}] {sg['text']}"
             for sg in segments
-            if start <= float(sg.get("start", 0) or 0) < end
+            if start - overlap_sec <= float(sg.get("start", 0) or 0) < end
         ]
-        window_frames = [f for f in frames if start <= frame_time_sec(f) < end]
+        window_frames = [f for f in frames
+                         if start - overlap_sec <= frame_time_sec(f) < end]
         if lines or window_frames:
             head = (f"(영상 {start // 60}분 {start % 60}초 ~ "
                     f"{min(int(end), int(last)) // 60}분 {min(int(end), int(last)) % 60}초 구간)")

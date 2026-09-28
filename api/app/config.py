@@ -81,6 +81,41 @@ class Settings(BaseSettings):
     # 프레임을 20→200 장으로 올려도 개선이 0건이었다 — 볼 게 없어서가 아니라
     # 한 호출에 38분을 담으라는 요구 자체가 무리다
     video_segment_sec: int = 0
+    # 이웃 구간과 겹쳐 볼 초. 0 이면 겹치지 않는다(기존 동작). 겹치면 경계 사실이
+    # 두 구간에서 함께 뽑힐 수 있다 — 켜기 전에 중복을 하네스로 확인한다 (W1-2)
+    video_segment_overlap_sec: int = Field(default=0, ge=0)
+    # 구간 추출을 몇 개까지 동시에 부를지. 1 이면 앞 구간부터 차례대로(기존 동작) (W1-2)
+    extract_segment_concurrency: int = Field(default=1, ge=1)
+
+    # 출력 token 상한 (W1-2). None 이면 넘기지 않는다 — 공급자 기본값(기존 동작).
+    # 측정 전이라 값을 가정하지 않는다. 상한에 닿아 잘린 응답(MAX_TOKENS)은
+    # 상한 설정과 무관하게 언제나 성공으로 처리하지 않는다
+    extract_max_output_tokens: int | None = Field(default=None, ge=1)
+    assemble_max_output_tokens: int | None = Field(default=None, ge=1)
+    # 잘린 추출을 반으로 나눠 다시 뽑는 깊이 상한 (W1-2). 0 이면 나누지 않는다(기본, 꺼 둠).
+    # 깊이 d 까지 나누면 한 구간이 최대 2^(d+1)-1 번 호출된다 — 비용 상한을 함께 본다
+    extract_truncation_split_max_depth: int = Field(default=0, ge=0, le=4)
+    # 같은 입력 재사용 (W1-3). 켜면 같은 매장·같은 재사용 키로 파싱에 성공한 지난 응답이
+    # 있을 때 모델을 부르지 않고 그 응답을 되쓴다(원장에 REUSED·비용 0). 기본 켜짐 —
+    # 입력·모델·프롬프트·설정이 모두 같을 때만 적중하므로 제품 경로에서 켜 둔다(2026-09-29 사용자 결정).
+    # 키 자체는 꺼져 있어도 원래 응답 행에 언제나 남긴다 — 켜는 순간부터 찾을 수 있다
+    extract_reuse_enabled: bool = True
+    # 평가 실행(EVALUATION·extraction_run_id)은 모델의 흔들림을 잰다. 지난 응답을 되쓰면
+    # 반복(D17/D18)이 전부 같아져 변동 측정이 무너진다. 이 플래그를 따로 켤 때만 재사용한다
+    extract_reuse_for_evaluation: bool = False
+    # W1-4 근거 위치 표지. 켜면 사실 추출에 쪽·메시지 번호(page·line)를 받는다 —
+    # 위치 표지 프롬프트(extract_facts_locator.ko.txt)·스키마(LocatedFactExtractionResult)·
+    # 카톡 `[#N]` 표지를 쓰고, 서버가 그 번호를 검사해 PAGE·LINE 위치로 남긴다.
+    # 끄면 추출 요청이 이전과 같다(D16 비교 기준 유지). 근거 위치 표 기록·서버 검사는 플래그와 무관하다
+    extract_locator_hints: bool = False
+    # W1-4 근거 없는 단위·규격 값 비우기. 기본 꺼짐 — 판정만 근거 위치 행(check_flags)과
+    # unresolved 에 남기고 값은 그대로 둔다. 글만 있는 입력(음성 전사·카톡·TEXT PDF)의 판정은
+    # 오탐이 있고, 값을 비우면 content_hash 가 바뀌며 HOT/ICE 가 합쳐질 수 있다(D19·D16).
+    # 켜면 글만 있는 입력의 근거 없는 값을 비운다(첨부가 있는 입력은 켜도 남기고 표시만 한다)
+    extract_clear_ungrounded_values: bool = False
+    # Files API 업로드가 ACTIVE 가 될 때까지 기다리는 한도·폴링 간격 (gemini.py 에서 옮김)
+    gemini_file_active_timeout_sec: int = Field(default=600, ge=0)
+    gemini_file_poll_sec: int = Field(default=5, ge=0)
 
     # 추출 온도. 답변 생성은 D12 로 0.0 이 못 박혀 있는데 추출만 0.2 였다.
     # 근거가 문서 어디에도 없었고, 같은 자료를 두 번 돌리면 손실률이 8%p 가까이 흔들렸다.
@@ -119,6 +154,9 @@ class Settings(BaseSettings):
         # 최소가 최대보다 크면 asyncpg 가 시작 시점에 실패한다. 설정 단계에서 먼저 막는다
         if self.db_pool_min_size > self.db_pool_max_size:
             raise ValueError("db_pool_min_size must be <= db_pool_max_size")
+        # 겹침이 창보다 크거나 같으면 구간마다 앞 구간 전체를 다시 본다
+        if self.video_segment_sec > 0 and self.video_segment_overlap_sec >= self.video_segment_sec:
+            raise ValueError("video_segment_overlap_sec must be < video_segment_sec")
         return self
 
     @property

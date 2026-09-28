@@ -93,7 +93,8 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
     persist = AsyncMock(return_value=0)
     set_status = AsyncMock()
     settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
-                  video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID')
+                  video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID',
+                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1)
     get_source = get_source or AsyncMock(return_value=_row())
 
     with patch.object(pipeline, "get_pool", return_value=pool), \
@@ -231,7 +232,8 @@ async def _run_inner(pool, tmp_path, *, job_id):
         return ExtractionResult(cards=[], unresolved=[])
 
     settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
-                  video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID')
+                  video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID',
+                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1)
 
     with patch("app.config.get_settings", return_value=settings), \
          patch.object(pipeline, "get_pool", return_value=pool), \

@@ -17,6 +17,7 @@ from typing import NamedTuple
 import asyncpg
 
 from app.deps import get_pool
+from app.ingest import occurrences
 from app.ingest import repository as repo
 from app.ingest import recovery
 from app.ingest.preprocess import audio, document, kakao, storage, video
@@ -53,10 +54,13 @@ async def process_source(
     `run_tag` 는 같은 작업을 다시 돌릴 때 실행 하나를 가르는 표지다 (job_worker 가
     자료 시작 시각에서 만든다). 없으면 논리 호출 ID 가 작업 단위로만 묶인다.
     """
+    from app.ingest.raw_responses import DbRawResponseSink
     from app.usage import DbUsageSink
 
     pool = get_pool()
     usage_sink = DbUsageSink(pool)
+    # 모델 원래 응답 기록 (W1-1). mock 도 같은 기록을 남긴다. 저장 실패는 추출을 멈춘다
+    raw_sink = DbRawResponseSink(pool, run_tag=run_tag)
     started = time.perf_counter()
     recovery_enabled = job_id is not None and extraction_run_id is None and cost_purpose == 'PRODUCT'
     previous = None
@@ -152,13 +156,15 @@ async def process_source(
             outcome = ExtractionOutcome(
                 [ExtractedAssertion.model_validate(a) for a in cached['assertions']],
                 cached['unresolved'], cached['segments_total'], cached['segments_failed'],
-                cached['failed_segment_ids'])
+                cached['failed_segment_ids'],
+                # 복구본에는 원래 응답 ID 가 없다. 인스턴스마다 새 dict 를 준다
+                {})
             ledger_ids = previous['ledger_ids']
         else:
             outcome = await _extract_facts_all(
                 source_id=source_id, source_type=src["source_type"], text=text, media=media,
                 glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
-                checkpoint=_checkpoint,
+                raw_sink=raw_sink, checkpoint=_checkpoint,
                 only_segments=set(retry_segments) if retry_segments is not None else None,
             )
             if recovery_enabled:
@@ -184,7 +190,7 @@ async def process_source(
             source_id=source_id, assertions=assertions,
             categories=list(categories), glossary=glossary,
             usage_sink=usage_sink, usage_base=usage_base,
-            strict=True,
+            raw_sink=raw_sink, strict=True,
         )
         if assertions and not result.cards:
             raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
@@ -439,7 +445,9 @@ async def _preprocess_video(
 
     # 긴 영상은 시간 창으로 쪼개 map 한다 (13.4). 창 밖은 그 호출에 보이지 않는다.
     window = get_settings().video_segment_sec
-    segments = video.split_by_time(stt_segments, frames, window) if window > 0 else []
+    segments = (video.split_by_time(stt_segments, frames, window,
+                                    overlap_sec=get_settings().video_segment_overlap_sec)
+                if window > 0 else [])
     if segments:
         logger.info("영상 %d초 창으로 %d구간 분할 source=%s", window, len(segments), source_id)
     return text, video.sample_for_model(frames), segments
@@ -466,8 +474,12 @@ async def _preprocess_kakao(
             )
         return "(카카오톡 대화 캡처. 첨부한 그림을 읽고 판단할 것)", [path], []
 
+    from app.config import get_settings
+
     raw = path.read_text(encoding="utf-8", errors="replace")
-    parsed = kakao.parse(raw)
+    # 번호 표지는 W1-4 플래그를 켰을 때만. 끄면 이전과 같은 글이다
+    parsed = kakao.parse(
+        raw, message_numbers=bool(getattr(get_settings(), "extract_locator_hints", False)))
 
     async with pool.acquire() as conn:
         await repo.update_kakao_result(
@@ -587,12 +599,17 @@ class ExtractionOutcome(NamedTuple):
     segments_total: int
     segments_failed: int
     failed_segment_ids: list[str]
+    # 구간 → 원래 응답 행 (W1-1). 구간 없는 자료는 키가 None 이다.
+    # 기본값은 None 이다 — NamedTuple 기본값은 모든 인스턴스가 한 객체를 공유하므로
+    # 가변 dict 를 두지 않는다. None 은 "모른다"(복구본·대역)이고 호출부는 빈 것으로 읽는다
+    raw_response_ids: dict[str | None, int] | None = None
 
 
 async def _extract_facts_all(
     *, source_id: int, source_type: str, text: str, media: list[Path],
     glossary: list[dict], segments: list[tuple[str, list[Path]]],
     usage_sink=None, usage_base: tuple | None = None,
+    raw_sink=None,
     checkpoint=None,
     only_segments: set[str] | None = None,
 ) -> ExtractionOutcome:
@@ -613,73 +630,214 @@ async def _extract_facts_all(
     그대로 두고 목록에 든 구간만 뽑는다. 실패 수·목록은 다시 시도한 구간만 센다.
     대상이 전부 다시 실패해도 예외를 올리지 않는다 — 이미 만든 카드가 있다.
     """
+    from app.config import get_settings
     from app.ingest.extract import extract_facts
 
-    def _tag(items, segment: str | None):
+    settings = get_settings()
+    max_depth = settings.extract_truncation_split_max_depth
+    # W1-4 — 끄면 모델이 준 쪽·메시지 번호를 보지 않는다(스키마에도 없다)
+    hints = bool(getattr(settings, "extract_locator_hints", False))
+    # W1-4 최종 수정 — 끄면(기본) 근거 없는 단위·규격을 비우지 않고 판정만 남긴다
+    clear_ungrounded = bool(getattr(settings, "extract_clear_ungrounded_values", False))
+
+    def _tag(items, prefix: str | None, segment: str | None):
+        # prefix 는 하위 경로까지 붙은 이름(seg3.2), segment 는 부모 구간(seg3)이다
         for a in items:
-            if segment:
-                a.local_ref = f"{segment}:{a.local_ref}"
-                a.requires = [f"{segment}:{r}" for r in a.requires]
+            if prefix:
+                a.local_ref = f"{prefix}:{a.local_ref}"
+                a.requires = [f"{prefix}:{r}" for r in a.requires]
             a.segment_id = segment
         return items
+
+    async def _extract_part(part_text, part_media, segment):
+        """구간 하나를 뽑는다. 잘리면 반으로 나눠 다시 뽑는다 (W1-2).
+
+        [(하위 경로 이름, 결과)] 를 돌려준다. 하나라도 끝내 잘리면 `TruncatedOutputError`
+        를 올린다 — 반쪽만 건진 결과는 쓰지 않는다. PARTIAL 재시도가 구간 전체를 다시
+        뽑으므로, 반쪽을 원장에 적으면 재시도 때 겹친다.
+        """
+        return await _extract_with_split(
+            part_text, part_media, segment=segment, path="", depth=0,
+            max_depth=max_depth,
+            call=lambda text, media, label: extract_facts(
+                source_id=source_id, source_type=source_type, text=text,
+                glossary=glossary, media=media, usage_sink=usage_sink,
+                usage_context=_ctx_for(usage_base, source_id, "EXTRACT", segment_id=label),
+                raw_sink=raw_sink,
+            ))
+
+    def _collect(parts, segment, part_text, part_media):
+        """하위 결과를 합치고 서버 검사(W1-4)를 한다. 원장에 적기 **전에** 부른다.
+
+        검사는 그 구간 입력 글을 근거로 한다. 사실마다 나온 원래 응답 행을 붙인다 —
+        근거 위치(occurrence)가 그 행을 가리킨다.
+        """
+        assertions, unresolved, raw_ids = [], [], {}
+        for label, result in parts:
+            raw_id = _raw_id_of(result)
+            for a in _tag(result.assertions, label, segment):
+                a._raw_response_id = raw_id
+                assertions.append(a)
+            unresolved.extend(result.unresolved)
+            raw_ids[label] = raw_id
+        unresolved.extend(occurrences.validate_assertions(
+            assertions, source_type=source_type, text=part_text, media=list(part_media or []),
+            locator_hints=hints, clear_ungrounded=clear_ungrounded))
+        return assertions, unresolved, raw_ids
 
     if not segments:
         if only_segments is not None:
             # 호출부가 구간 구성을 먼저 확인한다. 여기 오면 자료 전체를 다시 뽑아 카드가 겹친다
             raise RuntimeError("구간 없는 자료는 잃은 구간만 다시 뽑을 수 없다")
-        result = await extract_facts(
-            source_id=source_id, source_type=source_type, text=text,
-            glossary=glossary, media=media, usage_sink=usage_sink,
-            usage_context=_ctx_for(usage_base, source_id, "EXTRACT"),
-        )
-        tagged = _tag(result.assertions, None)
+        # 구간 없는 자료가 끝내 잘리면 잃은 구간으로 남길 곳이 없다 — 예외로 멈춘다(FAILED)
+        parts = await _extract_part(text, media, None)
+        tagged, unresolved, raw_ids = _collect(parts, None, text, media)
         if checkpoint is not None:
             await checkpoint(tagged, None)
-        return ExtractionOutcome(tagged, list(result.unresolved), 1, 0, [])
+        return ExtractionOutcome(tagged, unresolved, 1, 0, [], _raw_ids(raw_ids))
 
-    merged, unresolved, failed_ids = [], [], []
-    for index, (seg_text, seg_media) in enumerate(segments, start=1):
+    async def _one_segment(index, seg_text, seg_media):
+        """구간 하나를 뽑고 바로 원장에 적는다. (사실, 미해결, 원래 응답 ID) 또는 None(잃음)."""
         segment = f"seg{index}"
-        if only_segments is not None and segment not in only_segments:
-            continue
         try:
-            part = await extract_facts(
-                source_id=source_id, source_type=source_type, text=seg_text,
-                glossary=glossary, media=seg_media, usage_sink=usage_sink,
-                usage_context=_ctx_for(usage_base, source_id, "EXTRACT",
-                                       segment_id=segment),
-            )
+            parts = await _extract_part(seg_text, seg_media, segment)
         except Exception as exc:
-            failed_ids.append(segment)
             logger.warning("구간 %d/%d 사실 추출 실패 source=%s: %s",
                            index, len(segments), source_id, exc)
-            continue
-
-        tagged = _tag(part.assertions, segment)
+            return None
+        tagged, part_unresolved, part_raw = _collect(parts, segment, seg_text, seg_media)
         if checkpoint is not None:
             # 뽑은 즉시 적는다. 적지 못하면 그 구간은 잃은 것으로 센다
             try:
                 await checkpoint(tagged, segment)
             except Exception as exc:
-                failed_ids.append(segment)
                 logger.warning("구간 %d/%d 원장 저장 실패 source=%s: %s",
                                index, len(segments), source_id, exc)
-                continue
+                return None
+        logger.info("구간 %d/%d 사실 %d건", index, len(segments), len(tagged))
+        return tagged, part_unresolved, part_raw
+
+    todo = [(index, seg_text, seg_media)
+            for index, (seg_text, seg_media) in enumerate(segments, start=1)
+            if only_segments is None or f"seg{index}" in only_segments]
+    concurrency = settings.extract_segment_concurrency
+    if concurrency <= 1:
+        # 기존 동작 — 앞 구간부터 차례대로
+        results = [await _one_segment(*item) for item in todo]
+    else:
+        gate = asyncio.Semaphore(concurrency)
+
+        async def _gated(item):
+            async with gate:
+                return await _one_segment(*item)
+        results = await asyncio.gather(*(_gated(item) for item in todo))
+
+    # 동시에 돌려도 합치는 순서는 구간 번호 순이다
+    merged, unresolved, failed_ids = [], [], []
+    raw_ids: dict[str | None, int | None] = {}
+    for (index, _, _), got in zip(todo, results):
+        if got is None:
+            failed_ids.append(f"seg{index}")
+            continue
+        tagged, part_unresolved, part_raw = got
         merged.extend(tagged)
-        unresolved.extend(part.unresolved)
-        logger.info("구간 %d/%d 사실 %d건", index, len(segments), len(part.assertions))
+        unresolved.extend(part_unresolved)
+        raw_ids.update(part_raw)
 
     failed = len(failed_ids)
     if only_segments is not None:
         if failed:
             logger.warning("재시도 구간 %d/%d 다시 실패 source=%s",
                            failed, len(only_segments), source_id)
-        return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids)
+        return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids,
+                                 _raw_ids(raw_ids))
     if failed == len(segments):
         raise RuntimeError(f"모든 구간({failed}개) 사실 추출이 실패했다")
     if failed:
         logger.warning("구간 %d/%d 실패 — 나머지로 진행한다", failed, len(segments))
-    return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids)
+    return ExtractionOutcome(merged, unresolved, len(segments), failed, failed_ids,
+                             _raw_ids(raw_ids))
+
+
+# 구간 없는 자료를 나눌 때 하위 경로 앞에 붙이는 이름. `whole.1:f1` 처럼 쓴다
+_WHOLE_SOURCE_LABEL = "whole"
+
+
+def _sub_label(segment: str | None, path: str) -> str | None:
+    """하위 경로 이름. seg3 + '2.1' → seg3.2.1, 구간 없음 + '1' → whole.1, 나누지 않았으면 그대로."""
+    if not path:
+        return segment
+    return f"{segment or _WHOLE_SOURCE_LABEL}.{path}"
+
+
+async def _extract_with_split(text, media, *, segment, path, depth,
+                              max_depth, call):
+    """잘리면 반으로 나눠 다시 뽑는다. 깊이 상한·더 못 나눔이면 `TruncatedOutputError`.
+
+    잘림은 호출 예외가 아니다 — `_call` 의 재시도가 같은 입력을 되풀이하지 않는다.
+    나누기는 여기(호출 위)에서만 한다. 한 반쪽이 끝내 잘리면 나머지는 부르지 않는다.
+    """
+    from app.ingest.raw_responses import TruncatedOutputError
+
+    label = _sub_label(segment, path)
+    try:
+        return [(label, await call(text, media, label))]
+    except TruncatedOutputError as exc:
+        where = label or "자료 전체"
+        if depth >= max_depth:
+            raise TruncatedOutputError(
+                f"{where} 출력이 잘렸고 분할 깊이 상한({max_depth})에 닿았다: {exc}") from exc
+        halves = _split_input(text, media)
+        if halves is None:
+            raise TruncatedOutputError(
+                f"{where} 출력이 잘렸고 더 나눌 수 없다: {exc}") from exc
+        logger.warning("%s 출력 잘림 — 반으로 나눠 다시 뽑는다 (깊이 %d/%d)",
+                       where, depth + 1, max_depth)
+        parts = []
+        for i, (half_text, half_media) in enumerate(halves, start=1):
+            parts.extend(await _extract_with_split(
+                half_text, half_media, segment=segment,
+                path=f"{path}.{i}" if path else str(i), depth=depth + 1,
+                max_depth=max_depth, call=call))
+        return parts
+
+
+def _split_input(text: str, media: list[Path]):
+    """입력을 앞/뒤 반으로 나눈다. 더 나눌 수 없으면 None.
+
+    - 글은 줄 경계에서 반으로 나눈다(앞쪽이 짧거나 같다).
+    - 첨부 목록(영상 프레임 등)은 앞/뒤 반씩 나눈다.
+    - 첨부가 하나(문서·캡처 한 장)면 나누지 않는다 — 글만 나눠도 그 첨부가 매번
+      통째로 들어가 출력이 줄지 않는다.
+    - 글이 한 줄이고 첨부가 둘 이상이면 글은 양쪽에 그대로 두고 첨부만 나눈다.
+    """
+    media = list(media or [])
+    if len(media) == 1:
+        return None
+    lines = (text or "").splitlines()
+    text_halves = None
+    if len(lines) >= 2:
+        mid = len(lines) // 2
+        text_halves = ("\n".join(lines[:mid]), "\n".join(lines[mid:]))
+    media_halves = None
+    if len(media) >= 2:
+        mid = len(media) // 2
+        media_halves = (media[:mid], media[mid:])
+    if text_halves is None and media_halves is None:
+        return None
+    text_halves = text_halves or (text, text)
+    media_halves = media_halves or ([], [])
+    return [(text_halves[0], media_halves[0]), (text_halves[1], media_halves[1])]
+
+
+def _raw_id_of(result) -> int | None:
+    """추출 결과에 붙은 원래 응답 행. 대역(fake)이 돌려준 결과에는 없을 수 있다."""
+    return getattr(result, "raw_response_id", None)
+
+
+def _raw_ids(ids: dict) -> dict:
+    """기록하지 않은 구간(None 값)은 뺀다."""
+    return {k: v for k, v in ids.items() if v is not None}
 
 
 async def _record_segment_failures(
@@ -716,6 +874,9 @@ async def _persist_ledger(
 
     {local_ref: fact_id} 를 돌려준다. 조립이 고른 사실을 원장 행에 잇는 열쇠다.
 
+    근거 위치(W1-4)도 같은 트랜잭션에서 사실마다 하나씩 남긴다. 같은 사실이 두 자리에
+    나오면 원장은 한 행(처음 위치), 위치는 두 행이다. 다시 돌려도 같은 자리는 늘지 않는다.
+
     여기서 적지 않으면 조립이 버린 사실은 어디에도 남지 않는다. 그러면 추출이
     못 뽑은 것과 조립이 버린 것이 같은 숫자로 합쳐져, 무엇을 고쳐야 할지 알 수 없다.
     """
@@ -728,13 +889,11 @@ async def _persist_ledger(
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
     rows = []
     for a in assertions:
-        # 근거 위치는 사실마다 다르다. 영상·음성은 시각, 나머지는 자료 전체
-        if source_type in ("VOICE", "VIDEO") and a.evidence.timestamp_sec:
-            locator_type = "TIMESTAMP"
-            locator = {"timestamp_sec": max(0, a.evidence.timestamp_sec)}
-        else:
-            locator_type = "WHOLE_SOURCE"
-            locator = {}
+        # 근거 위치는 사실마다 다르다. 영상·음성은 시각, 문서는 쪽, 카톡은 메시지 번호.
+        # 쓸 번호가 없으면(서버 검사가 지운 것 포함) 자료 전체다
+        locator_type, locator = occurrences.locator_for(
+            source_type, a.evidence,
+            locator_hints=bool(getattr(s, "extract_locator_hints", False)))
         rows.append({
             "subject": a.subject,
             "variant": a.as_variant(),
@@ -760,6 +919,13 @@ async def _persist_ledger(
         locator_type="WHOLE_SOURCE", locator={},
         extract_version=extract_version,
     )
+    await occurrences.insert_occurrences(conn, store_id, [
+        {"fact_id": fid, "segment_id": row["segment_id"], "local_ref": row["local_ref"],
+         "locator_type": row["locator_type"], "locator": row["locator"],
+         "raw_response_id": getattr(a, "raw_response_id", None),
+         "check_flags": list(getattr(a, "check_flags", None) or [])}
+        for a, row, fid in zip(assertions, rows, fact_ids)
+    ])
     return {a.local_ref: fid for a, fid in zip(assertions, fact_ids)}
 
 
@@ -767,6 +933,7 @@ async def assemble_assertions(
     *, source_id: int, assertions: list,
     categories: list[str], glossary: list[dict],
     usage_sink=None, usage_base: tuple | None = None, strict: bool = False,
+    raw_sink=None,
 ):
     """추출된 사실을 대상 단위로 묶어 카드로 만든다. 등록과 미리보기에서 공유한다.
 
@@ -801,6 +968,7 @@ async def assemble_assertions(
             category_names=categories, glossary=glossary,
             usage_sink=usage_sink,
             usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
+            raw_sink=raw_sink,
         )
     except Exception as exc:
         if strict:
@@ -897,8 +1065,11 @@ async def _persist(
     # 조립이 무엇을 싣고 무엇을 버렸는지 원장에 표시한다 (W1).
     # **버린 것이 남아야 조립 손실을 셀 수 있다.**
     if ledger:
-        linked = [ledger[r] for r in linked_refs]
-        dropped = [fid for r, fid in ledger.items() if r not in linked_refs]
+        # 같은 사실이 이름표 둘로 들어올 수 있다(두 자리에 나온 사실, W1-4). 한 이름표라도
+        # 실렸으면 그 사실은 실린 것이다 — 다른 이름표로 버림을 덮어쓰지 않는다
+        linked = sorted({ledger[r] for r in linked_refs})
+        dropped = sorted({fid for r, fid in ledger.items()
+                          if r not in linked_refs} - set(linked))
         await repo.set_assembly_state(conn, store_id, linked, "LINKED")
         await repo.set_assembly_state(conn, store_id, dropped, "DROPPED")
         logger.info("조립 결과 source=%s 사실 %d건 중 실림 %d · 버림 %d%s",
