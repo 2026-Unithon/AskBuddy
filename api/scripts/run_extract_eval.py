@@ -48,6 +48,7 @@ from app.deps import get_pool, init_pool, close_pool  # noqa: E402
 from app.ingest import repository as ingest_repo  # noqa: E402
 from app.ingest.pipeline import process_source  # noqa: E402
 from app.ingest.preprocess import storage  # noqa: E402
+from app.team.scoring_rules import DEFAULT_RULES
 from app.team.extraction import (  # noqa: E402
     ExtractionReport, aggregate, judge_run_health, match_fact,
     match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION, score_expected_fact,
@@ -258,7 +259,7 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         json.dumps({"run_id": run_id, "store": slug, "label": label,
                     "truth_confidence": truth_confidence, "settings": snapshot,
                     "metrics": metrics, "results": rows,
-                    "scorer_version": SCORER_VERSION,
+                    "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
                     "inputs": _PARTIAL.get("score_inputs")},
                    ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -413,7 +414,7 @@ def _drifted_sources(store_dir: pathlib.Path, manifest: dict) -> list[str]:
 def _campaign_settings(s: Any, args: argparse.Namespace) -> dict[str, Any]:
     """후보가 바뀌면 결과도 바뀌는 값만 비밀 없이 고정한다."""
     return {
-        "scorer_version": SCORER_VERSION,
+        "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
         "code_version": code_version(),
         "extract_prompt_version": prompt_digest("extract_facts.ko.txt"),
         "assemble_prompt_version": prompt_digest("assemble_cards.ko.txt"),
@@ -593,7 +594,7 @@ async def main() -> int:
 
     # 스윕하는 값은 반드시 여기 남아야 한다. 없으면 결과를 설정에 귀속시킬 수 없다
     snapshot = {
-        "scorer_version": SCORER_VERSION,
+        "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
         "truth_hash": "sha256:" + hashlib.sha256(json.dumps(truth, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         "code_version": code_version(),
         "prompt_version": prompt_digest("extract_facts.ko.txt"),
