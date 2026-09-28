@@ -6,6 +6,7 @@ import re
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from app.team.scoring_rules import DEFAULT_RULES
 from app.team.extraction import (ExtractionReport, SCORER_VERSION, aggregate, applicability,
                                 normalize, variant_axis, score_expected_fact, match_fact_in_ledger, score_output, apply_evaluation_policy)
 
@@ -30,7 +31,8 @@ def rescore(data, policy=None):
     metrics=aggregate(report.rows,card_count=len(cards))
     metrics["output"]=score_output(ledger,truth)
     return dict(run_id=data["run_id"],store=data["store"],label=data["label"],
-                scorer_version=SCORER_VERSION, results=report.rows, metrics=metrics,
+                scorer_version=SCORER_VERSION, scoring_rules=DEFAULT_RULES.domain,
+                results=report.rows, metrics=metrics,
                 scorer_code_hash="sha256:"+hashlib.sha256((Path(__file__).resolve().parents[1]/"app/team/extraction.py").read_bytes()).hexdigest(),
                 evaluation_policy=policy, evaluation_policy_hash="sha256:"+hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest(),
                 input_hash="sha256:"+hashlib.sha256(json.dumps(inputs,sort_keys=True,ensure_ascii=False,separators=(",",":")).encode()).hexdigest(),

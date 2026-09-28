@@ -15,57 +15,81 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal
 
+from app.team.scoring_rules import DEFAULT_RULES, ScoringRules
+
 Verdict = Literal["COVERED", "PARTIAL", "MISSING", "UNDETERMINED"]
 
-SCORER_VERSION = "w_fact_score/v3"
+# v4: 공통/업종 규칙 분리, 띄어쓰기 무시, 생략 주어 문장, 값이 드러내는 속성, 순서 값 비교 (2026-09-28)
+SCORER_VERSION = "w_fact_score/v4"
 
-# 후보의 속성과 값을 같은 문장 안에서 확인한다. dev 사실 ID와 무관한 업무 표현이다.
-_CARD_ATTRIBUTE_MARKERS = {
-    "스팀우유량": ("스팀우유",), "우유량": ("우유",),
-    "온수량": ("뜨거운물", "온수"), "침지시간": ("담가", "담근", "침지"),
-    "샷 수": ("샷",), "소분 단위": ("소분", "나눠", "나누어"),
-    "보관위치": ("보관", "위치", "냉장고"),
-    "종료시각": ("영업 종료", "마감 시간", "마감 시각"),
-    "약품 투입량": ("약품",), "처리주체": ("직원", "아르바이트", "알바", "점주"),
-    "세척제": ("세제", "세척제"), "제조순서": ("순서", "추출"),
-}
+# 속성 표현·규격 동의어·ICE 표기 같은 표현 목록은 app.team.scoring_rules 에 있다.
+# 공통 규칙은 항상, 업종 규칙은 그 위에 덧붙여 적용한다. 기본은 공통 + 카페(평가 자료가 카페).
 
 
-def _attribute_markers(fact):
+def _attribute_markers(fact, rules: ScoringRules = DEFAULT_RULES):
     attribute = fact.get("attribute") or ""
-    return _CARD_ATTRIBUTE_MARKERS.get(attribute, (attribute,))
+    return rules.attribute_markers.get(attribute, (attribute,))
 
 
-def _has_attribute(fact, text):
-    return any(normalize(marker) in normalize(text) for marker in _attribute_markers(fact) if marker)
+def _compact(text: str) -> str:
+    return normalize(text).replace(" ", "")
 
 
-def _card_context(fact, card):
-    title, content = card.get("title") or "", card.get("content") or ""
+def _has_attribute(fact, text, rules: ScoringRules = DEFAULT_RULES):
+    # 띄어쓰기는 흔들린다("발주요일" ↔ "발주 요일"). 붙여서 비교한다
+    return any(_compact(marker) in _compact(text)
+               for marker in _attribute_markers(fact, rules) if marker)
+
+
+_CLAUSE = re.compile(r"[.!?](?!\d)|[;\n]|이며|하며")
+
+
+def _clauses(content: str) -> list[str]:
     # 소수점은 문장 경계로 자르지 않는다.
-    clauses = re.split(r"[.!?](?!\d)|[;\n]|이며|하며", content)
-    relevant = [c for c in clauses if _has_attribute(fact, c)]
+    return [c for c in _CLAUSE.split(content or "")]
+
+
+def _subject_scope(subject: str, clauses: list[str]) -> list[str]:
+    """대상이 나오는 문장과, 그 바로 뒤의 숫자 없는 문장.
+
+    한국어는 앞 문장의 대상을 뒤 문장에서 생략한다("환불 요청 시 … / 반드시 점주 확인 후 처리").
+    숫자가 있는 뒤 문장은 다른 대상의 값일 수 있으므로 넣지 않는다.
+    """
+    scope: list[str] = []
+    for i, clause in enumerate(clauses):
+        if _subject_in(subject, clause):
+            scope.append(clause)
+            nxt = clauses[i + 1] if i + 1 < len(clauses) else ""
+            if nxt.strip() and not re.search(r"\d", nxt) and not _subject_in(subject, nxt):
+                scope.append(nxt)
+    return scope
+
+
+def _card_context(fact, card, rules: ScoringRules = DEFAULT_RULES):
+    title, content = card.get("title") or "", card.get("content") or ""
+    clauses = _clauses(content)
+    relevant = [c for c in clauses if _has_attribute(fact, c, rules)]
     if fact.get("attribute") == "종료시각":
         # '영업 종료 전까지 20:00부터 주문'은 종료시각의 값 지정이 아니다.
         assigned = [c for c in relevant if re.search(
             r"(?:영업\s*종료(?:\s*(?:시각|시간))?|마감\s*(?:시각|시간))\s*(?:은|는|이|:)?\s*\d", c)]
         if assigned:
             relevant = assigned
-    subject_clauses = [c for c in relevant if _subject_in(fact.get("subject") or "", c)]
+    subject_clauses = [c for c in _subject_scope(fact.get("subject") or "", clauses)
+                       if c in relevant]
     if subject_clauses:
         relevant = subject_clauses
     # 제목은 대상 연결에만 사용한다. 제목의 숫자는 본문 값을 대신하지 않는다.
     return title + " " + " ".join(relevant or clauses)
 
 
-def requires_ice_label(fact):
-    if (fact.get("variant") or "").upper() == "ICE" or fact.get("recipe_uses_ice") is True:
-        return True
-    if fact.get("category_hint") != "음료제작" and fact.get("kind") != "RECIPE":
-        return False
-    assertion = fact.get("original_assertion") or ""
-    return bool(re.search(r"얼음.{0,12}(넣|투입|갈아|갈고|믹싱)", assertion)
-                and not re.search(r"얼음.{0,12}(않|말|금지|제외|없)", assertion))
+def required_labels(fact, rules: ScoringRules = DEFAULT_RULES) -> set[str]:
+    """업종 규칙이 카드에 요구하는 규격 표기(예: 카페의 ICE)."""
+    return {label for rule in rules.label_rules if (label := rule(fact))}
+
+
+def requires_ice_label(fact, rules: ScoringRules = DEFAULT_RULES):
+    return "ICE" in required_labels(fact, rules)
 
 
 def apply_evaluation_policy(truth, overrides):
@@ -86,23 +110,28 @@ def apply_evaluation_policy(truth, overrides):
             raise ValueError("invalid fact applicability")
     return [{**f, **overrides.get(f["fact_id"], {})} for f in truth]
 
-_ATTRIBUTE_ALIASES = {
-    "우유량": ("우유량", "우유 용량", "스팀우유량"),
-    "사용기한": ("사용기한", "사용 기한"),
-    "발주주기": ("발주주기", "발주 주기"),
-}
-
-
-def _attribute_key(text):
+def _attribute_key(text, rules: ScoringRules = DEFAULT_RULES):
     normalized = normalize(text or "")
-    for key, aliases in _ATTRIBUTE_ALIASES.items():
+    for key, aliases in rules.attribute_aliases.items():
         if normalized in [normalize(a) for a in aliases]:
             return key
     return normalized
 
 
 def applicability(fact, has_variant_axis):
-    scope = fact.get("applicability", "UNKNOWN" if has_variant_axis else "NOT_APPLICABLE")
+    """사실의 규격 적용 범위. 사람이 붙인 라벨이 있으면 그것을 쓴다.
+
+    라벨이 없을 때 (2026-09-28 사용자 확정, 공통 규칙):
+    - 규격 축이 있고 사실에 규격이 적혀 있으면 **그 규격 전용(SPECIFIC)** 이다. 정답지의 규격은
+      원본(예: 레시피표의 HOT/ICE 칸)에서 옮긴 것이므로 카드도 그 규격을 밝혀야 한다.
+    - 원본에 규격이 없어 레시피북을 따르는 사실은 사람이 COMMON 라벨을 붙인다(9/27 b-0045).
+    - 규격 축이 있는데 사실에 규격이 없으면 여전히 모른다(UNKNOWN).
+    """
+    if has_variant_axis:
+        default = "SPECIFIC" if fact.get("variant") else "UNKNOWN"
+    else:
+        default = "NOT_APPLICABLE"
+    scope = fact.get("applicability", default)
     if scope not in {"SPECIFIC", "COMMON", "NOT_APPLICABLE", "UNKNOWN"}:
         raise ValueError("invalid fact applicability")
     return scope
@@ -122,12 +151,6 @@ _TAIL = (
 # 한 글자여도 근거가 되는 말이 있다 — 물·샷·컵·잔.
 # 아래 글자들만 근거가 못 된다고 본다 (reg/retrieve.py 의 _STOP1 과 같은 취지)
 _STOP1 = set("것거때곳수개몇왜뭐등안잘좀더또그이저첫한두세네위밑앞뒤옆말일분초년월를을은는가에의도만로와과")
-
-# 규격 표기 흔들림. HOT 카드와 ICE 카드가 뒤섞이는 것을 막는다
-_VARIANT_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "HOT": ("hot", "핫", "따뜻", "뜨거", "온음료"),
-    "ICE": ("ice", "아이스", "냉", "차가", "찬"),
-}
 
 # 값 비교에서 의미를 갖지 못하는 말들
 _VALUE_STOP = {
@@ -198,12 +221,13 @@ def numbers_in(text: str) -> list[str]:
     return out
 
 
-def variant_present(variant: str | None, card_text: str) -> bool:
+def variant_present(variant: str | None, card_text: str,
+                    rules: ScoringRules = DEFAULT_RULES) -> bool:
     """규격이 카드에 드러나는가. 규격이 없는 사실은 항상 통과."""
     if not variant:
         return True
     haystack = normalize(card_text)
-    for token in _VARIANT_SYNONYMS.get(variant.upper(), (variant.lower(),)):
+    for token in rules.variant_synonyms.get(variant.upper(), (variant.lower(),)):
         if token in haystack:
             return True
     return False
@@ -241,6 +265,91 @@ def variant_axis(truth_facts: list[dict[str, Any]]) -> dict[str, bool]:
             for subject, variants in seen.items()}
 
 
+# 숫자와 바로 뒤 단위(한글 또는 영문 한 덩어리). "3잔을" → ("3", "잔"), "21:30" → ("21:30", "")
+_NUMBER_UNIT = re.compile(r"(\d+(?:[.,:]\d+)*)\s*([A-Za-z%]+|[가-힣]+)?")
+
+
+def _value_units(value: str) -> list[tuple[str, str]]:
+    pairs = []
+    for number, unit in _NUMBER_UNIT.findall(value or ""):
+        unit = unit or ""
+        if unit and re.fullmatch(r"[가-힣]+", unit):
+            unit = stem(unit)
+        pairs.append((number, unit))
+    return pairs
+
+
+def _bound(number: str, unit: str, text: str) -> bool:
+    """숫자가 같은 단위와 붙어 나오는가. "3잔" 은 "3잔" 이어야 하고 "3번" 으로는 안 된다."""
+    head = rf"(?<![\d.,:]){re.escape(number)}"
+    if unit:
+        return re.search(head + rf"\s*{re.escape(unit)}", text, re.I) is not None
+    return re.search(head + r"(?![\d:])", text) is not None
+
+
+def _value_words(value: str) -> list[str]:
+    out = []
+    for raw in normalize(value).split():
+        if raw in _VALUE_STOP or _NUMBER.fullmatch(raw):
+            continue
+        word = stem(raw)
+        if not word or word in _VALUE_STOP or (len(word) == 1 and word in _STOP1):
+            continue
+        out.append(word)
+    return out
+
+
+def _word_present(word: str, text_words: list[str]) -> bool:
+    """활용이 흔들려도 같은 말로 본다("처리" ↔ "처리해야"). 두 글자 이상만 앞부분 일치."""
+    for w in text_words:
+        if w == word or stem(w) == word or (len(word) >= 2 and w.startswith(word)):
+            return True
+    return False
+
+
+def _value_words_present(value: str, text: str) -> bool:
+    words = normalize(text).split()
+    return all(_word_present(word, words) for word in _value_words(value))
+
+
+def _sequence_in_order(value: str, text: str) -> bool | None:
+    """값이 "A → B → C" 면 항목이 같은 순서로 나오는지. 순서 값이 아니면 None."""
+    steps = [step for step in re.split(r"→|->", value or "") if step.strip()]
+    if len(steps) < 2:
+        return None
+    words = normalize(text).split()
+    position = -1
+    for step in steps:
+        keys = normalize(step).split()
+        if not keys:
+            return False
+        key = stem(keys[0])
+        found = next((i for i in range(position + 1, len(words))
+                      if words[i] == key or stem(words[i]) == key
+                      or (len(key) >= 2 and words[i].startswith(key))), None)
+        if found is None:
+            return False
+        position = found
+    return True
+
+
+def _value_states_attribute(fact: dict[str, Any], scope: str) -> bool:
+    """속성 이름이 카드에 없어도 값이 그 속성을 드러내는가.
+
+    속성 이름은 정답지를 쓴 사람이 붙인 라벨이라 카드 문장에 거의 나오지 않는다.
+    대상이 나오는 문장 안에 값이 온전히 있으면 속성 관계를 인정한다 — 숫자는 단위까지
+    붙어 있어야 한다. 표현이 정해진 속성(규칙의 attribute_markers)에는 쓰지 않는다.
+    """
+    value = fact.get("value") or ""
+    order = _sequence_in_order(value, scope)
+    if order is not None:
+        return order
+    pairs = _value_units(value)
+    if pairs:
+        return all(_bound(number, unit, scope) for number, unit in pairs)
+    return bool(_value_words(value)) and _value_words_present(value, scope)
+
+
 @dataclass(frozen=True)
 class FactMatch:
     verdict: Verdict
@@ -254,7 +363,9 @@ class FactMatch:
 
 
 def _score_one(fact: dict[str, Any], card_text: str,
-               require_variant: bool = True) -> FactMatch:
+               require_variant: bool = True,
+               rules: ScoringRules = DEFAULT_RULES,
+               body: str | None = None) -> FactMatch:
     subject = fact.get("subject") or ""
     value = fact.get("value") or ""
     variant = fact.get("variant")
@@ -262,16 +373,25 @@ def _score_one(fact: dict[str, Any], card_text: str,
     subject_hit = _subject_in(subject, card_text)
     # 규격 축이 없는 대상은 규격을 안 적어도 헷갈릴 것이 없다.
     # 축이 없는데 감점하면 자가 틀린 것이지 카드가 틀린 것이 아니다
-    variant_hit = variant_present(variant, card_text) if require_variant else True
-    if requires_ice_label(fact):
-        variant_hit = bool(re.search(r"(?<![A-Za-z])ICE(?![A-Za-z])", card_text, re.I))
+    variant_hit = variant_present(variant, card_text, rules) if require_variant else True
+    labels = required_labels(fact, rules)
+    if labels:
+        # 업종 규칙이 요구하는 표기는 동의어가 아니라 그 글자 그대로 있어야 한다
+        variant_hit = all(re.search(rf"(?<![A-Za-z]){re.escape(label)}(?![A-Za-z])", card_text, re.I)
+                          for label in labels)
     if variant and fact.get("applicability") != "COMMON":
         opposite = "ICE" if variant.upper() == "HOT" else "HOT" if variant.upper() == "ICE" else None
-        if opposite and variant_present(opposite, card_text) and not variant_present(variant, card_text):
+        if (opposite and variant_present(opposite, card_text, rules)
+                and not variant_present(variant, card_text, rules)):
             return FactMatch("PARTIAL", None, 0.0, "명시적인 반대 규격", subject_hit, False, False)
 
     want_numbers = numbers_in(value)
-    if want_numbers:
+    in_order = _sequence_in_order(value, card_text)
+    if in_order is not None:
+        # 순서 값은 낱말이 아니라 항목의 순서로 비교한다
+        ratio = 1.0 if in_order else 0.0
+        value_hit = in_order
+    elif want_numbers:
         have = set(numbers_in(card_text))
         matched = [n for n in want_numbers if n in have]
         ratio = len(matched) / len(want_numbers)
@@ -288,8 +408,11 @@ def _score_one(fact: dict[str, Any], card_text: str,
         uncertainty = None
         attribute = fact.get("attribute") or ""
         # 자유 문장에서는 속성의 생략/별칭을 확정할 수 없으면 보류한다.
-        if attribute and not _has_attribute(fact, card_text):
-            return FactMatch("PARTIAL", None, ratio, "대상·값은 있으나 속성 관계 미확인", True, False, variant_hit, ratio)
+        if attribute and not _has_attribute(fact, card_text, rules):
+            scope = (" ".join(_subject_scope(subject, _clauses(body)))
+                     if body is not None else card_text)
+            if attribute in rules.attribute_markers or not _value_states_attribute(fact, scope):
+                return FactMatch("PARTIAL", None, ratio, "대상·값은 있으나 속성 관계 미확인", True, False, variant_hit, ratio)
         if re.search(r"잘못|틀린|아니라|대신|넣지|않|금지|제외|not\b|never\b", card_text, re.I):
             uncertainty = "부정·정정·예외 문맥은 사람 확인 필요"
         quantities = re.findall(r"(\d+(?:\.\d+)?)\s*(ml|㎖|g|kg|일|분|초|days?|minutes?)", value, re.I)
@@ -299,13 +422,13 @@ def _score_one(fact: dict[str, Any], card_text: str,
             others = re.findall(rf"(\d+(?:\.\d+)?)\s*{re.escape(unit)}", card_text, re.I)
             if any(n not in numbers_in(value) for n in others):
                 uncertainty = "같은 단위의 다른 값 혼재"
-        if variant and sum(variant_present(v, card_text) for v in ("HOT", "ICE")) > 1:
+        if variant and sum(variant_present(v, card_text, rules) for v in ("HOT", "ICE")) > 1:
             uncertainty = "복수 규격의 값 결합은 사람 확인 필요"
         if fact.get("applicability") == "UNKNOWN":
             uncertainty = "사실 적용 범위 미확인"
         if any(normalize(c) not in normalize(card_text) for c in fact.get("conditions", [])):
             uncertainty = "필수 조건 미확인"
-        if not want_numbers and not _tokens(value).issubset(_tokens(card_text)):
+        if in_order is None and not want_numbers and not _value_words_present(value, card_text):
             uncertainty = "일부 값 토큰만 일치: 전체 의미 확인 필요"
         if uncertainty:
             return FactMatch("UNDETERMINED", None, ratio, uncertainty,
@@ -330,7 +453,8 @@ _RANK = {"COVERED": 3, "UNDETERMINED": 2, "PARTIAL": 1, "MISSING": 0}
 
 
 def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
-               require_variant: bool = True) -> FactMatch:
+               require_variant: bool = True, *,
+               rules: ScoringRules = DEFAULT_RULES) -> FactMatch:
     """사실 하나를 카드 전체와 대조해 가장 좋은 판정을 돌려준다.
 
     카드를 가로질러 합치지 않는다. **한 카드 안에** 대상과 값이 같이 있어야 한다.
@@ -347,30 +471,30 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
     best = FactMatch("MISSING", None, 0.0, "대조할 카드가 없음")
     best_attribute = False
     for card in cards:
-        text = _card_context(fact, card)
+        text = _card_context(fact, card, rules)
         subject = fact.get("subject") or ""
         subject_matches = _subject_in(subject, text)
-        if subject == "영업" and fact.get("attribute") == "종료시각" and _has_attribute(fact, text):
+        if subject == "영업" and fact.get("attribute") == "종료시각" and _has_attribute(fact, text, rules):
             subject_matches = _subject_in("매장", text)
             if subject_matches:
                 text = "영업 " + text
         if not subject_matches:
             full_text = f"{card.get('title') or ''} {card.get('content') or ''}"
-            if _subject_in(subject, full_text) and _has_attribute(fact, text):
+            if _subject_in(subject, full_text) and _has_attribute(fact, text, rules):
                 candidate = FactMatch("UNDETERMINED", int(card["card_id"]), 0.0,
                                       "대상과 속성이 서로 다른 문장: 관계 미확인", True, False, False)
                 if _RANK[candidate.verdict] > _RANK[best.verdict]:
                     best = candidate
                     best_attribute = True
             continue
-        m = _score_one(fact, text, require_variant)
+        m = _score_one(fact, text, require_variant, rules, body=card.get("content") or "")
         full_text = f"{card.get('title') or ''} {card.get('content') or ''}"
         if m.verdict == "COVERED" and re.search(r"잘못|틀린|아니라|대신|넣지|않|금지|제외|not\b|never\b", full_text, re.I):
             m = FactMatch("UNDETERMINED", None, m.score, "다른 문장의 부정·정정·예외 확인 필요",
                           m.subject_hit, m.value_hit, m.variant_hit, m.number_ratio)
         # 같은 판정 안에서는 값이 든 카드를 먼저 집는다.
         # 대상 이름만 겹치는 카드가 값을 담은 카드를 밀어내면 진단이 뒤집힌다
-        attribute_hit = _has_attribute(fact, text)
+        attribute_hit = _has_attribute(fact, text, rules)
         if (_RANK[m.verdict], attribute_hit, m.value_hit, m.score) > (
             _RANK[best.verdict], best_attribute, best.value_hit, best.score
         ):
@@ -382,10 +506,11 @@ def match_fact(fact: dict[str, Any], cards: list[dict[str, Any]],
     return best
 
 
-def score_expected_fact(fact, cards, truth, require_variant=True):
+def score_expected_fact(fact, cards, truth, require_variant=True, *,
+                        rules: ScoringRules = DEFAULT_RULES):
     """명시적 ABSENT 라벨만 최종 카드 제외 검사로 처리한다. 원장 이력은 삭제하지 않는다."""
     if fact.get("expectation", "PRESENT") == "PRESENT":
-        return match_fact(fact, cards, require_variant)
+        return match_fact(fact, cards, require_variant, rules=rules)
     if fact.get("expectation") != "ABSENT":
         raise ValueError("invalid fact expectation")
     successors = [f for f in truth if f.get("fact_id") == fact.get("superseded_by")]
@@ -395,13 +520,13 @@ def score_expected_fact(fact, cards, truth, require_variant=True):
     if normalize(successor.get("subject")) != normalize(fact.get("subject")):
         return FactMatch("UNDETERMINED", None, 0.0, "정정 대상 불일치")
     old = {**fact, "attribute": (fact.get("attribute") or "").replace("(이전)", "")}
-    if _attribute_key(old["attribute"]) != _attribute_key(successor.get("attribute")):
+    if _attribute_key(old["attribute"], rules) != _attribute_key(successor.get("attribute"), rules):
         return FactMatch("UNDETERMINED", None, 0.0, "정정 속성 불일치")
-    old_match = match_fact(old, cards, require_variant=False)
+    old_match = match_fact(old, cards, require_variant=False, rules=rules)
     if old_match.verdict in {"COVERED", "UNDETERMINED"}:
         return FactMatch("PARTIAL" if old_match.verdict == "COVERED" else "UNDETERMINED",
                          old_match.card_id, 0.0, "이전 지시의 잔존 또는 정정 문맥 확인 필요")
-    latest = match_fact(successor, cards, require_variant=False)
+    latest = match_fact(successor, cards, require_variant=False, rules=rules)
     if latest.verdict != "COVERED":
         return FactMatch(latest.verdict, latest.card_id, latest.score, "최신 정정 지시 미확인")
     return FactMatch("COVERED", latest.card_id, 1.0, "이전 지시 제외·최신 지시 확인")
