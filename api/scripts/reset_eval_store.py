@@ -29,9 +29,39 @@ from app.config import get_settings  # noqa: E402
 # FK 순서대로 지운다. 자식부터 부모로
 STEPS = [
     ("facts",              "delete from facts where card_id in (select card_id from knowledge_cards where store_id=$1)"),
+    # W2 대상·사실 판. 원장에서 만든 추출 산물이라 원장과 함께 비운다.
+    # 판·판 메타·대상 이력은 불변 트리거가 지우기를 막는다 — 이 트랜잭션 안에서만 끄고 다시 켠다
+    # (DDL 도 트랜잭션에 묶이므로 중간에 실패하면 끈 상태도 되돌아간다).
+    # 판은 W 가 만든 것(knowledge_facts 가 가리키는 fact_id)만 지운다
+    # W2-4 업로드 검수 제안 — 판·사실·대상·자료를 가리키므로 먼저 지운다
+    ("upload_change_proposal_facts", "delete from upload_change_proposal_facts where store_id=$1"),
+    ("upload_change_proposals", "delete from upload_change_proposals where store_id=$1"),
+    ("fact_conflicts",     "delete from fact_conflicts where store_id=$1"),
+    ("fact_owner_answer_links", "delete from fact_owner_answer_links where store_id=$1"),
+    ("source_fact_revision_links", "delete from source_fact_revision_links where store_id=$1"),
+    ("fact_occurrences",   "delete from fact_occurrences where store_id=$1"),
+    ("fact_revision_requires", "delete from fact_revision_requires where store_id=$1 and fact_revision_id in "
+                               "(select fact_revision_id from fact_revisions where store_id=$1 and fact_id in "
+                               "(select fact_id from knowledge_facts where store_id=$1))"),
+    ("판 불변 해제",         "alter table fact_revision_meta disable trigger trg_fact_revision_meta_immutable"),
+    ("fact_revision_meta", "delete from fact_revision_meta where store_id=$1"),
+    ("판 불변 복구",         "alter table fact_revision_meta enable trigger trg_fact_revision_meta_immutable"),
+    ("사실 판 포인터 해제",   "update knowledge_facts set head_revision_id=null where store_id=$1"),
+    ("판 불변 해제 2",       "alter table fact_revisions disable trigger trg_fact_revision_immutable"),
+    ("fact_revisions",     "delete from fact_revisions where store_id=$1 and fact_id in "
+                           "(select fact_id from knowledge_facts where store_id=$1)"),
+    ("판 불변 복구 2",       "alter table fact_revisions enable trigger trg_fact_revision_immutable"),
+    ("knowledge_facts",    "delete from knowledge_facts where store_id=$1"),
+    ("knowledge_entity_candidates", "delete from knowledge_entity_candidates where store_id=$1"),
+    ("이력 불변 해제",       "alter table knowledge_entity_events disable trigger trg_entity_event_immutable"),
+    ("knowledge_entity_events", "delete from knowledge_entity_events where store_id=$1"),
+    ("이력 불변 복구",       "alter table knowledge_entity_events enable trigger trg_entity_event_immutable"),
+    ("knowledge_entity_aliases", "delete from knowledge_entity_aliases where store_id=$1"),
+    ("카드 대상 해제",       "update knowledge_cards set entity_id=null where store_id=$1"),
+    ("knowledge_entities", "delete from knowledge_entities where store_id=$1"),
     # 원장은 자료 소유지만 추출 산물이다. 다시 추출할 것이므로 같이 비운다.
     # 운영에서는 지우지 않는다 — 평가용 재실행에서만 하는 일이다
-    ("card_facts",         "delete from card_facts where store_id=$1"),
+    ("card_facts",        "delete from card_facts where store_id=$1"),
     ("source_facts",       "delete from source_facts where store_id=$1"),
     ("card_evidence",      "delete from card_evidence where store_id=$1"),
     ("card_review_events", "delete from card_review_events where store_id=$1"),
@@ -97,6 +127,11 @@ async def main() -> int:
 
         async with conn.transaction():
             for name, sql in steps:
+                if "$1" not in sql:
+                    # 트리거 끄기·켜기(DDL)는 매개변수를 받지 않는다. 같은 트랜잭션에서 다시 켜고,
+                    # 중간에 실패하면 끈 것도 함께 되돌아간다
+                    await conn.execute(sql)
+                    continue
                 result = await conn.execute(sql, store_id)
                 n = result.rsplit(" ", 1)[-1]
                 if n not in ("0",):

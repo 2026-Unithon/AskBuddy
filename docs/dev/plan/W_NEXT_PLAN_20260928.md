@@ -57,7 +57,7 @@
 검증 명령(보고 전에 해당하는 것을 모두 돌리고 결과를 사실대로 적는다):
 
 ```bash
-cd api && .venv/bin/python -m pytest -q tests          # 기준: 1177 passed, 4 xfailed (2026-09-28)
+cd api && .venv/bin/python -m pytest -q tests          # 기준: 1502 passed, 4 xfailed (2026-09-29)
 docker run -d --rm --name askbuddy-w-verify -p 127.0.0.1:55439:5432 \
   -e POSTGRES_PASSWORD=synthetic-local-test -e POSTGRES_DB=usage_verify pgvector/pgvector:pg17
 cd api && PYTHONPATH=. PYTHONUTF8=1 .venv/bin/python -B scripts/verify_r_schema_rebuild.py   # 실제 DB 전체 검증
@@ -171,28 +171,45 @@ TODO 근거: `docs/dev/DEV_TODO_CURRENT.md` W1 절(원시 응답 보존·잘림 
 
 TODO 근거: W2 절 전체. 스키마는 M1 의 `fact_revisions`·`fact_occurrences` 를 **쓴다**(새로 만들지 않는다). 대상 테이블만 새로 만든다.
 
+> 2026-09-29 상태: 구현·단위 테스트(전체 1502 passed, 4 xfailed)·실제 DB 검증(`api/scripts/verify_w_entity_revision.py`, 스키마 재구축 통과)을 마쳤다.
+> **수집 경로의 W2 동작은 모두 플래그 `w_entity_revision_enabled`·`w_upload_proposals_enabled` 뒤에 있고 기본 꺼짐이다(제안 플래그는 앞 플래그가 있어야 켠다). 실제 모델(`INGEST_MODE=real`)로는 재지 않았다.**
+> 기존 카드·사실은 소급 채우지(backfill) 않는다. 새 표는 `20260930090000`·`20260930100000`·`20260930110000` migration 이다.
+
 ### Task W2-1. 대상(entity) 도입
-- [ ] migration: `knowledge_entities`(store_id, entity_id, canonical_name, kind, created_at) +
+- [x] migration: `knowledge_entities`(store_id, entity_id, canonical_name, kind, created_at) +
       `knowledge_entity_aliases`(store_id, alias_norm, entity_id, origin `SYSTEM|OWNER`, 매장 안에서 alias 유일).
       `knowledge_cards.entity_id` nullable 추가(기존 카드는 비워 두고 이관은 별도 Task).
-- [ ] 대상 결정 규칙은 §3 결정에 따른다. 기본: 정규화 이름·별칭 일치만 자동, 애매하면 새 대상 + 검수 대기.
+      (`api/app/ingest/entities.py`·`entity_names.py`. 기존 카드는 비어 있다.)
+- [x] 대상 결정 규칙은 §3 결정에 따른다. 기본: 정규화 이름·별칭 일치만 자동, 애매하면 새 대상 + 검수 대기.
       **규격(HOT/ICE·사이즈)은 대상 이름에 섞지 않는다** — `variant_temperature`·`variant_size` 로 따로 둔다.
-- [ ] 매장 격리: 별칭 표는 매장별이다. 다른 매장 별칭이 섞이지 않는 실제 DB 검사.
+      (이름이 비슷하면 '같은 대상일 수 있음' 후보로만 제안하고 자동 병합하지 않는다.)
+- [x] 매장 격리: 별칭 표는 매장별이다. 다른 매장 별칭이 섞이지 않는 실제 DB 검사.
 
 ### Task W2-2. 원장 → 사실 revision·occurrence 연결
-- [ ] `_persist_ledger` 뒤(같은 트랜잭션)에서 각 사실을 대상에 붙이고 `fact_revisions` 한 판 + `fact_occurrences` 한 건을 만든다.
+- [~] `_persist_ledger` 뒤(같은 트랜잭션)에서 각 사실을 대상에 붙이고 `fact_revisions` 한 판 + `fact_occurrences` 한 건을 만든다.
       같은 대상·규격·속성·값이면 같은 `fact_id` 의 새 occurrence(재추출 중복 금지), 값이 다르면 다른 `fact_id` 로 **둘 다** 남기고 충돌로 표시한다.
-- [ ] `source_facts` 는 이관 호환을 위해 당분간 계속 쓴다. 두 표의 연결 키를 남긴다.
-- [ ] 점주 답변(OWNER_ANSWER)에서 온 사실은 파일 출처를 만들지 않는다 — 점주 답변 출처로 남긴다.
+      (`api/app/ingest/fact_ledger.py`, 플래그 꺼짐이면 DB 쓰기가 이전과 같다. 합성 데이터 실제 DB 검증.)
+      **남은 것: 플래그 `w_entity_revision_enabled` 기본 꺼짐, 실제 모델 미실측.**
+- [x] `source_facts` 는 이관 호환을 위해 당분간 계속 쓴다. 두 표의 연결 키를 남긴다. (연결 키 스키마는 실제 DB 검증. 키가 채워지는 것은 플래그 켜짐일 때다.)
+- [~] 점주 답변(OWNER_ANSWER)에서 온 사실은 파일 출처를 만들지 않는다 — 점주 답변 출처로 남긴다.
+      출처는 `fact_occurrences` 가 아니라 W 소유 `fact_revision_meta`·`fact_owner_answer_links` 에 있다(공유 M1 표의 `source_id` 제약을 풀지 않음).
+      **남은 것: `record_owner_answer_fact` 를 부르는 곳(점주 답변 worker) 없음.**
 
 ### Task W2-3. 수정은 새 revision
-- [ ] 점주 정정·편집은 `supersedes_revision_id` 로 이어지는 새 판을 만든다. 옛 판은 불변(트리거가 막는다).
+- [~] 점주 정정·편집은 `supersedes_revision_id` 로 이어지는 새 판을 만든다. 옛 판은 불변(트리거가 막는다).
       추출 원문·점주 정정·적용 시점을 구분한다. `corrected_value` 는 이관 입력일 뿐 공개 근거 포인터가 아니다.
+      (`api/app/ingest/fact_revisions.py`. 서비스 함수·불변 트리거는 실제 DB 검증.)
+      **남은 것: `revise_fact` 호출 경로(정정 API·검수 화면) 없음. 옛 `corrected_value` 이관이 점주 정정 위에 쌓일 수 있음 — W3 로.**
 
 ### Task W2-4. 영향받는 카드만 다시 조립
-- [ ] 새 사실의 대상·규격·의존 조건으로 영향 카드 목록을 계산한다. 영향 없는 카드의 ID·공개 버전·수동 분류(`assignment_type='MANUAL'`)는 건드리지 않는다.
-- [ ] 업로드도 기존 `IDENTICAL | NEW | SUPPLEMENT | CONFLICT` 제안을 재사용해 검수로 보낸다(점주 답변 쪽 구현 `knowledge_apply.py` 참고).
-- [ ] 잘못 합친 대상의 분리·재연결도 이력을 남기고 공개본을 자동 변경하지 않는다.
+- [~] 새 사실의 대상·규격·의존 조건으로 영향 카드 목록을 계산한다. 영향 없는 카드의 ID·공개 버전·수동 분류(`assignment_type='MANUAL'`)는 건드리지 않는다.
+      (`api/app/ingest/impact.py`. 영향 카드를 계산해 제안에 담기만 하고 기존 카드 행은 쓰지 않는다. **남은 것: 실제 재조립은 W3. 플래그 `w_upload_proposals_enabled` 기본 꺼짐.**)
+- [~] 업로드도 기존 `IDENTICAL | NEW | SUPPLEMENT | CONFLICT` 제안을 재사용해 검수로 보낸다(점주 답변 쪽 구현 `knowledge_apply.py` 참고).
+      (`upload_change_proposals` 별도 표. 관계 어휘·판정 순서만 재사용하고 점주 답변 제안 표와는 분리.)
+      **남은 것: 제안 저장까지만. 네 관계·카드·근거를 보여주는 API·검수 화면 없음, 플래그 `w_upload_proposals_enabled` 기본 꺼짐.**
+- [~] 잘못 합친 대상의 분리·재연결도 이력을 남기고 공개본을 자동 변경하지 않는다.
+      (`api/app/ingest/entity_admin.py`: 병합·분리·재연결. 서비스 함수는 실제 DB 검증.)
+      **남은 것: 서비스 함수만 있다. 호출 경로(API·검수 화면) 없음.**
 
 **W2 검증:** 영상의 순서 + PDF 수량이 한 대상으로 모인다. HOT/ICE 는 분리된다. 수치 충돌은 양쪽이 남는다. 매장별 별칭 격리.
 같은 자료 재투입은 중복이 없다. 사람 검토 사례(스캔 표 원칙 + 음성 응대 방법 → 한 대상)를 합성 데이터로 재현해 테스트한다.
@@ -231,6 +248,20 @@ TODO 근거: W3 절 + W4 의 "fact_revision 블록 고정" 남은 것. **이 Pha
       숫자가 없는 금지·예외도 숨기지 않는다. 수정·추가·제외를 허용한다.
 - [ ] 편집으로 업무 의미가 바뀌면 새 점주 작성 사실 revision 으로 기록하고 재승인한다(§3 결정).
 - [ ] web 변경 후 `pnpm check` 와 저장소 스킬 `web-async-state-check`·`ui-state-walkthrough` 를 쓴다. 브라우저를 못 띄웠으면 그렇게 보고한다.
+
+### W2 에서 넘어온 것
+- [ ] 병합 뒤 재처리하면 병합된 대상 아래의 옛 PENDING 업로드 제안과 남은 대상 아래의 새 PENDING 제안이 중복된다.
+- [ ] 병합된 대상이 낀 다른 PENDING 같은 대상 후보(병합된 것, 제3 대상)가 그대로 PENDING 으로 남는다.
+- [ ] `import_legacy_correction` 이 점주 정정 판 위에 더 오래된 `corrected_value` 를 새 head 로 얹을 수 있다(적용 시각과 head 순서 불일치).
+- [ ] 같은 순위로 다시 처리하면 제안의 `matched_cards` 가 갱신되지 않는다.
+- [ ] 기존 카드·사실은 소급 채우지 않았다(`knowledge_cards.entity_id` 비어 있음, 옛 `source_facts` 의 대상·판 없음). 소급 이관을 정한다.
+
+**플래그 켜기 전 점검** (`w_entity_revision_enabled`·`w_upload_proposals_enabled`)
+- [ ] 한 자료에 HOT/ICE 가 함께 나오면 규격 없음 slot 으로 들어간다. 표시는 `VARIANT_MULTI` 사유뿐이다 — 켜기 전에 처리 방식을 정한다.
+- [ ] 연결·같은 대상 후보 처리량이 매장 advisory lock 하나에 묶인다. 켜기 전에 먼저 잰다.
+- [ ] `owner_answer_id` FK 는 R 소유 `owner_answers` 에 대해 `on delete restrict` 다. 점주 답변 삭제 경로와 맞춘다(인계 문서 R 이 할 일).
+- [ ] 호출 경로를 붙이기 전에 `import_legacy_correction` 적용 순서(위 항목)를 먼저 고친다.
+- [ ] 두 플래그를 모두 켜고 구간을 동시에 처리하는 합성 종단 검증을 한 번 돌린다.
 
 **W3 검증:** 다른 매장/존재하지 않는 참조, HOT/ICE 수치 교환, 부정·조건·예외 삭제, 순서 변경을 차단한다.
 승인 미리보기와 저장 콘텐츠가 같다. occurrence 가 처리 결과 없이 사라지지 않는다. 실제 DB 로 사실 블록 카드 승인 → R 검색·답변 인용까지(`verify_w_publication_flow.py`).

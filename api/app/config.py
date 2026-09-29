@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # 점주 답변 반영 worker. 켜면 lifespan 이 주기마다 OWNER_ANSWER_SUBMITTED 사건을 소비한다
     w_owner_answer_worker_enabled: bool = False
     w_owner_answer_worker_interval_sec: int = 10
+    # W2 — 원장 사실을 서버 대상·불변 판·occurrence 로 잇는다. 끄면 수집 DB 쓰기가 이전과 같다
+    w_entity_revision_enabled: bool = False
+    # W2 — 같은 대상 후보 제안 상한(새 대상 하나당). 0 이면 제안하지 않는다
+    w_entity_candidate_max: int = Field(default=5, ge=0, le=20)
+    # W2-4 — 업로드 사실의 IDENTICAL|NEW|SUPPLEMENT|CONFLICT 검수 제안. w_entity_revision_enabled 가 필요하다
+    w_upload_proposals_enabled: bool = False
 
     # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.
     ingest_voice_max_bytes: int | None = None
@@ -157,6 +163,9 @@ class Settings(BaseSettings):
         # 겹침이 창보다 크거나 같으면 구간마다 앞 구간 전체를 다시 본다
         if self.video_segment_sec > 0 and self.video_segment_overlap_sec >= self.video_segment_sec:
             raise ValueError("video_segment_overlap_sec must be < video_segment_sec")
+        # 업로드 제안은 대상·판 연결 결과를 읽는다. 연결이 꺼져 있으면 비교할 사실이 없다
+        if self.w_upload_proposals_enabled and not self.w_entity_revision_enabled:
+            raise ValueError("w_upload_proposals_enabled requires w_entity_revision_enabled")
         return self
 
     @property

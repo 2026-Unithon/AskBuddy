@@ -42,6 +42,14 @@ TENANT_TABLES = {
     "quality_evaluations", "reclassification_jobs", "reclassification_results",
     "roadmap_stages", "sources", "store_glossary", "store_members",
     "task_categories",
+    # W2 대상·원장·판 (가산)
+    "knowledge_entities", "knowledge_entity_aliases", "knowledge_entity_candidates",
+    "knowledge_entity_events", "fact_revisions", "fact_occurrences",
+    "fact_revision_requires", "source_facts", "card_facts",
+    "knowledge_facts", "fact_revision_meta", "source_fact_revision_links", "fact_conflicts",
+    "fact_owner_answer_links",
+    # W2-4 업로드 검수 제안 (가산)
+    "upload_change_proposals", "upload_change_proposal_facts",
 }
 CONN_HINTS = ("asyncpg.Connection", "Connection", "Db")
 # 라우트 핸들러는 store_id 를 인자가 아니라 JWT 에서 꺼내는 것이 정답이다 (불변식 4).

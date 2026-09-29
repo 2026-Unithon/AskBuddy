@@ -926,6 +926,11 @@ async def _persist_ledger(
          "check_flags": list(getattr(a, "check_flags", None) or [])}
         for a, row, fid in zip(assertions, rows, fact_ids)
     ])
+    if getattr(s, "w_entity_revision_enabled", False):
+        # W2-2 — 같은 트랜잭션에서 원장 사실을 대상·판·occurrence 로 잇는다.
+        # 끄면 이 줄을 건너뛰어 DB 쓰기가 이전과 같다
+        from app.ingest import fact_ledger
+        await fact_ledger.link_source_facts(conn, store_id, source_id, sorted(set(fact_ids)))
     return {a.local_ref: fid for a, fid in zip(assertions, fact_ids)}
 
 
@@ -1006,6 +1011,14 @@ async def _persist(
         store_id,
         source_id,
     )
+    # W2-2 — 켜면 새 카드에 대상 id 를 단다. 기존 카드는 건드리지 않는다
+    entity_revision = bool(getattr(get_settings(), "w_entity_revision_enabled", False))
+    if entity_revision or getattr(get_settings(), "w_upload_proposals_enabled", False):
+        # 잠금 순서: 매장 잠금 → 대상 행. insert_card(entity_id=E) 가 대상 행에 FOR KEY SHARE 를
+        # 먼저 잡고 나중에 매장 잠금을 기다리면, 매장 잠금 → FOR UPDATE 순인 merge_entities 와
+        # 교착한다. 그래서 카드를 넣기 전에 매장 잠금을 먼저 잡는다(같은 트랜잭션 재진입은 무해)
+        from app.ingest import entities
+        await entities.lock_store_knowledge(conn, store_id)
     for card in result.cards:
         category_id = categories.get(card.category_name) or categories.get("기타")
         if category_id is None:
@@ -1017,6 +1030,15 @@ async def _persist(
                 source_id,
             )
 
+        # 카드 ↔ 원장 잇기 — 조립이 고른 사실의 ref 로 찾는다 (W1).
+        # 카드 저장 전에 계산한다 — W2 에서 카드의 대상을 정하는 데도 쓴다 (순수 dict 연산)
+        refs = [f.ref for f in card.facts if getattr(f, "ref", "")]
+        fact_ids = [ledger[r] for r in refs if r in ledger]
+        entity_id = None
+        if entity_revision:
+            from app.ingest import fact_ledger
+            entity_id = await fact_ledger.card_entity_for(conn, store_id, fact_ids)
+
         card_id = await repo.insert_card(
             conn, store_id,
             category_id=category_id,
@@ -1026,6 +1048,7 @@ async def _persist(
             confidence=_to_percent(card.confidence),
             origin_job_id=job_id,
             category_version=category_version,
+            entity_id=entity_id,
         )
         # legacy facts — 코드 이전이 끝나면 끊는다 (13.3-1)
         await repo.insert_facts(conn, card_id, [
@@ -1040,9 +1063,6 @@ async def _persist(
             locator_type = "WHOLE_SOURCE"
             locator = {}
 
-        # 카드 ↔ 원장 잇기 — 조립이 고른 사실의 ref 로 찾는다 (W1)
-        refs = [f.ref for f in card.facts if getattr(f, "ref", "")]
-        fact_ids = [ledger[r] for r in refs if r in ledger]
         linked_refs.update(r for r in refs if r in ledger)
         unmatched.extend(r for r in refs if r and r not in ledger)
         if refs and not fact_ids:
@@ -1075,6 +1095,12 @@ async def _persist(
         logger.info("조립 결과 source=%s 사실 %d건 중 실림 %d · 버림 %d%s",
                     source_id, len(ledger), len(linked), len(dropped),
                     f" · 못 이은 참조 {len(unmatched)}" if unmatched else "")
+
+    if getattr(get_settings(), "w_upload_proposals_enabled", False):
+        # W2-4 — 같은 트랜잭션에서 이 자료가 이은 모든 판으로 검수 제안을 남긴다.
+        # 기존 카드 행은 쓰지 않는다(결정 G). 다시 처리해도 행이 늘지 않는다
+        from app.ingest import impact
+        await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)
 
     for item in result.unresolved:
         logger.info("unresolved source=%s: %s", source_id, item)

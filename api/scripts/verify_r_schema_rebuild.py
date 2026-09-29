@@ -61,6 +61,7 @@ async def main():
         await verify_w_raw(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
         from verify_w_fact_occurrences import verify as verify_w_occurrences
         await verify_w_occurrences(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
+        from verify_w_entity_revision import verify as verify_w_entities; await verify_w_entities(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
         from verify_w_publication_flow import verify as verify_w_publish
         pool = await asyncpg.create_pool(DSN.rsplit("/",1)[0]+"/"+name,min_size=1,max_size=3)
         try:
