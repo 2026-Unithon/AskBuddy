@@ -204,15 +204,20 @@ async def insert_card(
     confidence: float,
     origin_job_id: int | None = None,
     category_version: int = 1,
+    entity_id: int | None = None,
 ) -> int:
-    """추출 카드는 항상 is_verified=false. 점주 승인 전에는 검색에 노출되지 않는다."""
+    """추출 카드는 항상 is_verified=false. 점주 승인 전에는 검색에 노출되지 않는다.
+
+    entity_id 는 W2 플래그를 켰을 때만 채운다(새 카드만). None 이면 이전과 같은 null 이다.
+    """
     return await conn.fetchval(
         "insert into knowledge_cards "
         "  (store_id, category_id, source_id, title, content, confidence, is_verified, "
-        "   origin_job_id, category_version) "
-        "values ($1, $2, $3, $4, $5, $6, false, $7, $8) returning card_id",
+        "   origin_job_id, category_version, entity_id) "
+        "values ($1, $2, $3, $4, $5, $6, false, $7, $8, $9) returning card_id",
         store_id, category_id, source_id,
         title[:MAX_TITLE_LEN], content, confidence, origin_job_id, category_version,
+        entity_id,
     )
 
 
