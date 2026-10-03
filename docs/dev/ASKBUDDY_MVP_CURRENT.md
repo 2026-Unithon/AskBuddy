@@ -298,9 +298,9 @@ D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/ha
 
 | ID | 화면 | 핵심 역할 | 현재 MVP |
 |---|---|---|---|
-| A01 | 로그인·가입 | 이메일·비밀번호 인증, 목적지 복원 | 필수 |
+| A01 | 로그인·가입 | 단일 로그인 화면: 카카오 로그인(기본)·이메일(보조), 새 계정은 가입 직후 역할 1회 선택, 90일 세션, 목적지 복원 | 필수 |
 | A02 | 매장 초기 설정 | 매장명·업종·초기 카테고리 | 필수 |
-| A03 | 직원 합류 | 초대코드로 가입·매장 합류 | 필수 |
+| A03 | 직원 합류 | 초대 링크 → 가입 → 점주 승인 대기 | 필수 |
 | O01 | 업로드 | 파일 추가, 자료·작업 상태 | 필수 |
 | O02 | 처리 현황 | 자료별 실제 서버 상태, 재시도 | 필수 |
 | O03 | 답변 대기 | 질문 목록·원문 보존·답변 | 필수 |
@@ -308,7 +308,7 @@ D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/ha
 | O05 | 카드 목록 | 상태·카테고리 필터, 검색 | 필수 |
 | O06 | 카드 상세 | 초안·공개본·근거·버전·수정 | 필수 |
 | O07 | 카테고리 관리 | 추가·삭제·재분류 상태 | 필수 |
-| O08 | 알림·초대 | Push 설정, 앱 내 알림, 초대 | 필수 |
+| O08 | 알림·직원 관리 | Push 설정, 앱 내 알림 / 초대 링크·합류 승인·직원 목록·내보내기(`/owner/members`) | 필수 |
 | O09 | 촬영·녹음 안내 | 첫 자료 업로드의 백지 공포 완화 | Figma 후 결정 |
 | O10 | 지식 제안 검토 | 보완·충돌 제안 승인·기각 | 필수 |
 | O14 | 월간 리포트 | 대신 답한 질문, 빈도, 점주 답변 수 | 후반 MVP |
@@ -335,10 +335,11 @@ D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/ha
   → 목적지 없을 때 역할별 기본 화면
 ```
 
+- 로그인 → (새 계정) 역할 선택 → 역할별 첫 화면 순서다. 역할 선택 화면(`/role`)을 로그인 앞에 두지 않는다.
 - 사장님이며 매장이 없으면 A02다.
 - 사장님이며 최초 승인 카드가 없으면 O01이다.
 - 최초 가이드 완료 후 일반 재방문은 O03을 기본안으로 한다.
-- 직원이 합류 전이면 A03, 합류 후면 S01이다.
+- 직원이 합류 전이면 A03(승인 대기 포함), 합류 후면 S01이다.
 - 권한 없는 다른 매장 링크는 대상 내용을 노출하지 않는다.
 - 이미 답변·제외된 딥링크는 현재 상태를 알려주고 해당 목록으로 이동한다.
 - 사용자가 직접 다른 탭으로 이동했으면 온보딩 조건으로 강제 복귀시키지 않는다.
@@ -625,7 +626,11 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 
 | 영역 | API |
 |---|---|
-| 인증 | `/auth/signup`, `/auth/login`, `/auth/join`, `/auth/stores`, `/auth/invites`, 운영자 `/ops/login` |
+| 인증 | `/auth/signup`, `/auth/login`, `/auth/stores`, 운영자 `/ops/login` (`/auth/join`·`/auth/invites`는 제거, 아래 초대·합류로 대체) |
+| 카카오·세션 | `GET /auth/kakao/start`, `GET /auth/kakao/callback`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/role` |
+| 초대·합류 | 공개 `GET /auth/invites/{token}`, `POST /auth/join-requests`, `GET /auth/join-status` |
+| 직원 관리(점주) | `GET /members/invite-link`, `POST /members/invite-link/rotate`, `GET /members`, `POST /members/requests/{request_id}/approve`, `POST /members/requests/{request_id}/reject`, `POST /members/{user_id}/remove` |
+| 로그인 사용자 Push | `GET /notifications/push-key`, `POST /notifications/my-subscriptions` (매장 없는 알바 포함) |
 | 진입 | `GET /app/bootstrap` |
 | 카테고리 | `GET/POST/DELETE /categories`, `/reclassification-jobs/*`, 기존 `/ingest/categories` 호환 |
 | 업로드 | `GET /ingest/capabilities`, `/ingest/upload-url`, `/ingest/sources` |
@@ -662,6 +667,9 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 - 요청 본문이나 URL의 임의 store ID로 권한을 우회할 수 없어야 한다.
 - 모든 카드·질문·알림·작업 조회는 동일 매장 제약을 갖는다.
 - 현재 레거시 `/reg/retrieve`, `/reg/cards`는 store slug/ID를 직접 받는 구조가 남아 있으므로 공개 제품 경로에서 제거하거나 인증형으로 전환해야 한다.
+- 합류 대기자는 `store_join_requests`에만 존재한다. 승인 전에는 `store_members`에 넣지 않는다.
+- 내보낸 직원(`removed_at` 기록)은 `get_store_id`에서 남은 access token으로도 403이다.
+- refresh 토큰은 SHA-256 해시만 저장하고 사용 때마다 회전한다. 이미 회전된 토큰이 재사용되면 그 family 전체를 폐기한다.
 - 운영자(`users.role = 'OPERATOR'`)는 어느 매장에도 소속되지 않는다. 운영자 토큰(`aud=askbuddy-ops`, `store_id` 없음, 60분)은 매장 API에 쓸 수 없다. 제품 `get_claims`가 `aud` 있는 토큰을 거부한다.
 - 운영자 의존성은 요청마다 `users.role`을 다시 확인한다. 역할을 회수하면 남은 토큰도 403이 된다. 운영자의 매장 데이터 열람 범위는 CS 설계에서 따로 정한다.
 
@@ -812,8 +820,8 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 | 영역 | 서비스 | Root Directory | 주소 |
 |---|---|---|---|
 | DB | Supabase | `supabase/` | project ref `xuthckbkdeblvrrsynlo` |
-| API | Railway | `api` | `https://askbuddy-production.up.railway.app` |
-| Web | Vercel | `web` | `https://ask-buddy-iota.vercel.app` |
+| API | AWS EC2 + Caddy | `api` | `https://api.askbuddy.kr` |
+| Web | Vercel | `web` | `https://askbuddy.kr` |
 
 배포 순서는 `Database → API → Web`이다. 스키마는 먼저 하위 호환 형태로 적용한다.
 
@@ -1014,7 +1022,8 @@ C0부터 계약 테스트와 축소 E2E 뼈대를 공동으로 작성한다. W/R
 
 현재 15단계가 끝난 뒤 검토한다.
 
-- 카카오 SSO, 매직링크, MFA
+- 매직링크, MFA
+- 카카오 SSO는 2026-10-03 범위로 당김 — [KAKAO_AUTH_DESIGN.md](plan/KAKAO_AUTH_DESIGN.md)
 - 문자·카카오 알림톡과 수신자 에스컬레이션
 - 점장·선임 직원 위임 답변
 - 위험 질문 전용 분류와 즉시 연락 경로의 고도화
@@ -1120,6 +1129,14 @@ C0부터 계약 테스트와 축소 E2E 뼈대를 공동으로 작성한다. W/R
 | 충돌 제안 | 기존 내용과 다른 부분이 있어요. 공개하기 전에 확인해주세요 |
 | 접근 불가 | 접근할 수 없는 매장이에요 |
 | 로그인 실패 | 이메일 또는 비밀번호가 달라요 |
+| `KAKAO_CANCELLED` | 카카오 로그인을 취소했어요. |
+| `KAKAO_FAILED` | 카카오 로그인에 실패했어요. 잠시 후 다시 시도해 주세요. |
+| `OAUTH_STATE_INVALID` | 로그인 시간이 지났어요. 처음부터 다시 시도해 주세요. |
+| `ROLE_CONFLICT` | 이 계정은 다른 역할로 가입되어 있어요. |
+| `ROLE_ALREADY_SET` | 이미 역할을 골랐어요. |
+| `INVITE_INVALID` | 더 이상 쓸 수 없는 초대 링크예요. 사장님께 새 링크를 받아 주세요. |
+| `ALREADY_IN_OTHER_STORE` | 이미 다른 매장에 합류한 계정이에요. |
+| `KAKAO_NOT_CONFIGURED` | 지금은 카카오 로그인을 쓸 수 없어요. 이메일로 계속해 주세요. |
 | 알림 거절 | 알림을 허용하지 않아도 앱 안에서 새 소식을 확인할 수 있어요 |
 | Push 미지원 | 이 기기에서는 푸시 알림을 지원하지 않아요. 앱 안 알림은 계속 사용할 수 있어요 |
 | 오래된 딥링크 | 이미 처리된 항목이에요. 현재 결과를 보여드릴게요 |
