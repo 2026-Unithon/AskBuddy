@@ -9,7 +9,8 @@ function authHeader(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-type FetchJsonInit = RequestInit & { timeoutMs?: number };
+// sessionExpiry=false: 운영자 호출의 401 이 같은 탭의 제품 로그인을 끊지 않게 한다
+type FetchJsonInit = RequestInit & { timeoutMs?: number; sessionExpiry?: boolean };
 
 export const SESSION_EXPIRED_EVENT = "askbuddy:session-expired";
 export type ApiErrorKind = "http" | "timeout" | "offline" | "network" | "aborted";
@@ -72,7 +73,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 }
 
 async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
-  const { timeoutMs = TIMEOUT_MS, ...fetchInit } = init ?? {};
+  const { timeoutMs = TIMEOUT_MS, sessionExpiry = true, ...fetchInit } = init ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const clientRequestId = requestId();
@@ -120,7 +121,7 @@ async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
       } catch {
         // 본문이 JSON 이 아니면 상태 코드만으로 판단한다
       }
-      if (res.status === 401 && new Headers(fetchInit.headers).has("Authorization")) {
+      if (sessionExpiry && res.status === 401 && new Headers(fetchInit.headers).has("Authorization")) {
         emitSessionExpired(path);
       }
       throw new ApiError(res.status, detail, path, {
@@ -175,11 +176,27 @@ export type PreflightReport = {
   }>;
 };
 
-export async function getPreflight(deep: boolean, signal?: AbortSignal) {
+// /preflight 는 운영자 전용이다. 운영자 토큰은 제품 세션과 따로 다룬다.
+export async function getPreflight(deep: boolean, token: string, signal?: AbortSignal) {
   return fetchJson<PreflightReport>(`/preflight${deep ? "?deep=1" : ""}`, {
     cache: "no-store",
     timeoutMs: deep ? 60_000 : TIMEOUT_MS,
     signal,
+    headers: authHeader(token),
+    sessionExpiry: false,
+  });
+}
+
+export type OperatorLogin = {
+  token: string;
+  operator: { user_id: number; name: string; email: string };
+};
+
+export async function opsLogin(email: string, password: string) {
+  return fetchJson<OperatorLogin>("/ops/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+    sessionExpiry: false,
   });
 }
 

@@ -140,6 +140,12 @@ env 파일을 바꾼 뒤에는 **컨테이너를 다시 만든다.** `docker com
 cd ~/deploy && docker compose up -d --force-recreate api
 ```
 
+§12-5 서버 전환을 마친 뒤에는 위치가 바뀌므로 아래 명령을 쓴다.
+
+```bash
+cd ~/askbuddy/deploy && docker compose up -d --force-recreate api
+```
+
 ## 6. Caddy (API HTTPS)
 
 ```
@@ -174,6 +180,7 @@ api.askbuddy.kr {
 | HTTPS 인증서 | 새 서버의 Caddy가 자동 발급 |
 | Vercel `NEXT_PUBLIC_API_URL` | 도메인을 쓰면 그대로 |
 | Supabase | 그대로 |
+| 자동 배포 | 자동 배포를 쓰면 새 서버로 옮긴 뒤 `api-production`의 `EC2_INSTANCE_ID`와 배포 역할 정책의 인스턴스 ARN을 바꾼다 (§12) |
 
 전환 순서: 새 서버 기동 → `/health` 확인 → 처리 중인 업로드가 없는지 확인 → DNS 변경 → **옛 서버 즉시 중지**.
 두 서버가 동시에 떠 있으면 서버 내부 worker와 주기 작업이 양쪽에서 함께 돈다. 현재 코드는 서버가 한 대라고 가정한다.
@@ -189,8 +196,12 @@ dig +short api.askbuddy.kr
 # 2) HTTPS와 API 기동
 curl https://api.askbuddy.kr/health
 
-# 3) DB·Storage·키 연결 상태 (LLM 실호출 없음)
-curl https://api.askbuddy.kr/preflight
+# 3) DB·Storage·키 연결 상태 (LLM 실호출 없음). 운영자 토큰이 필요하다. 없으면 401이다
+#    운영자 계정: docker compose exec api python scripts/create_operator.py --email <운영자-이메일> --name <이름>
+#    토큰: POST /ops/login 의 응답 token
+curl -X POST https://api.askbuddy.kr/ops/login -H "Content-Type: application/json" \
+  -d '{"email":"<운영자-이메일>","password":"<비밀번호>"}'
+curl -H "Authorization: Bearer <token>" https://api.askbuddy.kr/preflight
 
 # 4) CORS. Origin에는 브라우저 주소창의 origin을 넣는다
 curl -i -X OPTIONS https://api.askbuddy.kr/auth/signup \
@@ -200,7 +211,7 @@ curl -i -X OPTIONS https://api.askbuddy.kr/auth/signup \
 
 - 3)의 응답에서 `blocking`이 비어 있어야 한다. 스키마·시드·색인 항목이 `dead`면 §4-2를 확인한다.
 - 4)의 응답 헤더에 `access-control-allow-origin: https://askbuddy.kr`이 있어야 한다. 400이면 `ALLOWED_ORIGINS` 문제다.
-- 마지막으로 브라우저에서 로그인 → 질문 → 업로드를 한 번씩 해 본다. Web 화면 `/preflight`에서도 같은 진단을 볼 수 있다.
+- 마지막으로 브라우저에서 로그인 → 질문 → 업로드를 한 번씩 해 본다. `https://askbuddy.kr/preflight`에 운영자 계정으로 로그인해도 같은 진단을 볼 수 있다.
 
 ## 10. 자주 나는 오류
 
@@ -217,7 +228,129 @@ curl -i -X OPTIONS https://api.askbuddy.kr/auth/signup \
 
 ## 11. 남은 위험
 
-- **`GET /preflight?deep=1`이 인증 없이 열려 있고 호출할 때마다 실제 LLM을 부른다.** 도메인을 아는 누구나 반복 호출해 비용을 쓰게 할 수 있다.
-  운영 공개 전에 막는 방법(인증 요구, 운영에서 deep 비활성화 등)을 정해야 한다. 이 문서 작성 시점에는 조치하지 않았다.
-- `docs/dev`의 일부 문서와 Web `/preflight` 화면의 안내 문구가 아직 Railway를 운영 환경으로 가리킨다.
+- ~~`GET /preflight?deep=1`이 인증 없이 열려 있고 호출할 때마다 실제 LLM을 부른다.~~ 해결(이슈 #33): 운영자 로그인(`POST /ops/login`)과 운영자 토큰을 요구한다.
+- ~~`docs/dev`의 일부 문서와 Web `/preflight` 화면의 안내 문구가 Railway를 운영 환경으로 가리킨다.~~ Web `/preflight` 화면은 해결(이슈 #33). `docs/dev`의 일부 문서는 남아 있다.
 - AWS 무료 이용 기간이 끝나기 전에 다음 서버 위치를 정해야 한다. 옮길 때는 §8을 따른다.
+
+## 12. 자동 배포
+
+`main`에 머지되고 `R validation`이 성공하면 백업 → migration → 서버 배포 → health 확인이 자동으로 돈다.
+GitHub Actions가 AWS에 **OIDC**로 접속하므로 저장소에 AWS 키를 두지 않는다. 서버에는 SSH를 열지 않고 SSM으로 명령한다.
+
+### 12-1. S3 백업 버킷
+
+1. S3 → Create bucket → 이름 `askbuddy-db-backups-<계정ID>` · 리전 `ap-northeast-2`
+2. Block all public access 켜짐, Default encryption SSE-S3
+3. 버킷 → Management → Create lifecycle rule → Prefix `db/` → Expire current versions after 30 days
+
+### 12-2. GitHub OIDC 공급자
+
+계정에 한 번만 만든다. IAM → Identity providers → Add provider → OpenID Connect
+
+- Provider URL `https://token.actions.githubusercontent.com`
+- Audience `sts.amazonaws.com`
+
+### 12-3. 배포 역할 `askbuddy-github-deploy`
+
+IAM → Roles → Create role → Web identity → 위 공급자, audience `sts.amazonaws.com` → 만든 뒤 Trust relationships를 아래로 교체한다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Federated": "arn:aws:iam::<계정ID>:oidc-provider/token.actions.githubusercontent.com" },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:2026-Unithon/AskBuddy:environment:api-production"
+      }
+    }
+  }]
+}
+```
+
+인라인 권한 정책:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ec2:ap-northeast-2:<계정ID>:instance/<인스턴스ID>",
+        "arn:aws:ssm:ap-northeast-2::document/AWS-RunShellScript"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations", "ssm:CancelCommand"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::askbuddy-db-backups-<계정ID>/db/*"
+    }
+  ]
+}
+```
+
+### 12-4. GitHub `api-production` 환경
+
+저장소 Settings → Environments → New environment `api-production`
+
+- Deployment branches: Selected branches → `main`
+- Variables: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`=`ap-northeast-2`, `EC2_INSTANCE_ID`, `DB_BACKUP_BUCKET`, `API_HEALTH_URL`=`https://api.askbuddy.kr/health`
+- Secrets: `PROD_DB_URL` (Session pooler 연결 문자열)
+
+### 12-5. 서버 1회 전환
+
+기존 `~/deploy`에서 저장소의 `deploy/`로 옮긴다.
+
+**순서.** `deploy/` 는 main 에 병합돼야 서버가 받아 올 수 있다. 그래서 아래 순서로 한다.
+
+1. §12-4(`api-production` 변수·시크릿)를 **비워 둔 채** main 에 병합한다. Deploy API workflow 는 첫 단계(AWS 인증)에서 실패하고 백업·migration·서버는 건드리지 않는다.
+2. 이 절의 전환을 한다. 옛 `~/deploy` 의 Caddy 가 80/443 을 잡고 있으므로 전환 전에 자동 배포가 돌면 안 된다.
+3. §12-1~12-4 를 설정하고 Actions 에서 Deploy API 를 수동 실행(workflow_dispatch)해 처음부터 끝까지 확인한다.
+
+사전 확인(서버, ubuntu 사용자).
+
+```bash
+git -C ~/askbuddy remote get-url origin   # https://github.com/2026-Unithon/AskBuddy.git (공개 저장소라 https 는 키가 필요 없다)
+ls -l ~/askbuddy.env                      # 있어야 하고 권한은 600 (chmod 600 ~/askbuddy.env). 옛 스택이 다른 곳의 env 를 읽었다면 먼저 여기로 복사한다
+id ubuntu                                 # groups 에 docker 포함
+df -h /                                   # 여유 5GB 이상. 빌드 캐시가 루트 디스크를 채우면 SSM Agent 도 연결하지 못한다
+```
+
+`~/askbuddy` 가 저장소 clone 이 아니면 `git clone https://github.com/2026-Unithon/AskBuddy.git ~/askbuddy` 로 만든다.
+
+전환. 중단 시간을 줄이려고 빌드를 먼저 끝내 둔다.
+
+```bash
+sudo su - ubuntu
+cd ~/askbuddy && git fetch origin && git checkout --force origin/main
+cd ~/askbuddy/deploy && docker compose build
+cd ~/deploy && docker compose down
+cd ~/askbuddy/deploy && docker compose up -d
+docker compose logs -f caddy   # certificate obtained 확인
+```
+
+볼륨 이름이 바뀌어 HTTPS 인증서를 한 번 새로 받는다. 확인 후 `mv ~/deploy ~/deploy.old-<날짜>` 로 치워 두고, 며칠 문제가 없으면 지운다.
+되돌릴 때는 `cd ~/askbuddy/deploy && docker compose down` 후 옛 폴더에서 `docker compose up -d`.
+
+### 12-6. 동작 방식과 실패 대응
+
+동작 순서와 실패 시 처리는 [설계 §3·§6](plan/API_AUTO_DEPLOY_DESIGN.md)을 따른다.
+백업은 배포 역할이 아니라 **관리자 계정**으로 내려받는다.
+
+```bash
+aws s3 cp s3://<버킷>/db/<파일>.dump ./restore.dump
+```
+
+migration 규칙. `supabase db push` 는 원격에 적용된 최신 migration 보다 오래된 로컬 migration 이 있으면 거부한다.
+순서가 뒤바뀐 채 병합된 migration 은 배포의 migration 단계에서 실패하며, 이때 서버는 이전 코드 그대로라 안전하다.
+migration 파일의 타임스탬프를 최신으로 바꿔 다시 병합해 고친다.

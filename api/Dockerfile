@@ -1,4 +1,4 @@
-# Railway 배포 전용. 로컬 개발은 uvicorn 네이티브 실행이다 (핫리로드 속도)
+# API 서버 이미지 (EC2 의 deploy/compose.yml 이 빌드한다). 로컬 개발은 uvicorn 네이티브 실행이다 (핫리로드 속도)
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \

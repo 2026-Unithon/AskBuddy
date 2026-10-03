@@ -148,6 +148,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me-32bytes-minimum"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
+    # 운영자 토큰(/ops/login). 진단 화면 전용이라 제품 토큰보다 짧게 둔다
+    ops_token_expire_minutes: int = 60
+    # 같은 IP+이메일 실패가 이 횟수에 닿으면 lock 시간 동안 로그인을 막는다
+    ops_login_max_failures: int = 5
+    ops_login_lock_minutes: int = 15
 
     # 앱 내부 알림은 키 없이도 동작한다. 세 값이 모두 있을 때만 Web Push를 추가 전송한다.
     vapid_public_key: str = ""

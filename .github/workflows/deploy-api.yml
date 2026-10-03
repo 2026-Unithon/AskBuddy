@@ -1,0 +1,73 @@
+name: Deploy API
+on:
+  workflow_run:
+    workflows: ["R validation"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# 배포는 하나씩. migration 도중에 끊기지 않게 진행 중인 배포를 취소하지 않는다
+concurrency:
+  group: deploy-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # main push 에서 테스트가 성공했을 때, 또는 main 에서 수동 실행했을 때만
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: api-production
+    env:
+      # 테스트를 통과한 바로 그 커밋. 그 사이 main 이 더 나아가도 섞지 않는다
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: 운영 DB 백업
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+          DB_BACKUP_BUCKET: ${{ vars.DB_BACKUP_BUCKET }}
+        run: bash .github/scripts/backup_db.sh "$DB_BACKUP_BUCKET" "$DEPLOY_SHA"
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.115.0
+
+      - name: migration 적용
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+        run: supabase db push --db-url "$PROD_DB_URL" --yes
+
+      - name: 서버 배포
+        env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: bash .github/scripts/ssm_deploy.sh "$EC2_INSTANCE_ID" "$DEPLOY_SHA"
+
+      - name: health 확인
+        env:
+          API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
+        run: |
+          [[ -n "$API_HEALTH_URL" ]] || { echo "API_HEALTH_URL 이 비어 있다" >&2; exit 1; }
+          for attempt in $(seq 1 12); do
+            if curl -fsS --max-time 10 "$API_HEALTH_URL"; then exit 0; fi
+            echo "health 대기 ${attempt}/12"
+            sleep 10
+          done
+          echo "health 확인 실패" >&2
+          exit 1

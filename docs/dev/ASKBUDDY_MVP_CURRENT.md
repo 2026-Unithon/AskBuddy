@@ -625,7 +625,7 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 
 | 영역 | API |
 |---|---|
-| 인증 | `/auth/signup`, `/auth/login`, `/auth/join`, `/auth/stores`, `/auth/invites` |
+| 인증 | `/auth/signup`, `/auth/login`, `/auth/join`, `/auth/stores`, `/auth/invites`, 운영자 `/ops/login` |
 | 진입 | `GET /app/bootstrap` |
 | 카테고리 | `GET/POST/DELETE /categories`, `/reclassification-jobs/*`, 기존 `/ingest/categories` 호환 |
 | 업로드 | `GET /ingest/capabilities`, `/ingest/upload-url`, `/ingest/sources` |
@@ -636,7 +636,7 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 | 지식 제안 | `/learn/knowledge-proposals`, approve, dismiss |
 | FAQ | `GET /learn/faqs` |
 | 알림 | support, subscriptions, list, read |
-| 진단 | `/health`, `/preflight` |
+| 진단 | `/health`(공개), `/preflight`(운영자 전용, `/ops/login` 토큰) |
 
 ## 18-2. 중요 응답 계약
 
@@ -662,6 +662,8 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 - 요청 본문이나 URL의 임의 store ID로 권한을 우회할 수 없어야 한다.
 - 모든 카드·질문·알림·작업 조회는 동일 매장 제약을 갖는다.
 - 현재 레거시 `/reg/retrieve`, `/reg/cards`는 store slug/ID를 직접 받는 구조가 남아 있으므로 공개 제품 경로에서 제거하거나 인증형으로 전환해야 한다.
+- 운영자(`users.role = 'OPERATOR'`)는 어느 매장에도 소속되지 않는다. 운영자 토큰(`aud=askbuddy-ops`, `store_id` 없음, 60분)은 매장 API에 쓸 수 없다. 제품 `get_claims`가 `aud` 있는 토큰을 거부한다.
+- 운영자 의존성은 요청마다 `users.role`을 다시 확인한다. 역할을 회수하면 남은 토큰도 403이 된다. 운영자의 매장 데이터 열람 범위는 CS 설계에서 따로 정한다.
 
 ## 19-2. 오류
 

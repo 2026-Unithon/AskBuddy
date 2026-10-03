@@ -1,0 +1,27 @@
+name: Deploy checks
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/scripts/**"
+      - ".github/workflows/deploy-*.yml"
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 셸 스크립트 검사
+        run: shellcheck -S warning deploy/remote_deploy.sh .github/scripts/*.sh .github/scripts/tests/*.sh
+      - name: 배포 스크립트 테스트
+        run: |
+          bash .github/scripts/tests/ssm_deploy_test.sh
+          bash .github/scripts/tests/backup_db_test.sh
+      - name: compose 문법
+        run: ASKBUDDY_ENV_FILE=/dev/null docker compose -f deploy/compose.yml config -q
+      - name: workflow 문법
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color .github/workflows/deploy-api.yml .github/workflows/deploy-checks.yml

@@ -18,6 +18,8 @@ C0/W0~W5 전체 AI 구조 완성을 릴리스 목표로 확대하지 않는다. 
 | [plan/INTERACTION_AND_VISUAL_POLICY.md](plan/INTERACTION_AND_VISUAL_POLICY.md) | REL-G3 버튼·입력·상태·타이포·모바일 계약 |
 | [PAGE_REVIEW_CURRENT.md](PAGE_REVIEW_CURRENT.md) | 페이지별 사용자 의견과 검토 진행 현황 |
 | [DEPLOY_ACCESS_SETUP.md](DEPLOY_ACCESS_SETUP.md) | 새 운영 환경의 DNS·DB·환경변수·CORS·Web 연결 설정과 확인 순서 |
+| [plan/API_AUTO_DEPLOY_DESIGN.md](plan/API_AUTO_DEPLOY_DESIGN.md) | API 자동 배포 설계: 백업·migration·서버 배포 순서와 권한 |
+| [plan/API_AUTO_DEPLOY_PLAN.md](plan/API_AUTO_DEPLOY_PLAN.md) | API 자동 배포 구현 계획 |
 | [review/INITIAL_CODE_REVIEW_20260916.md](review/INITIAL_CODE_REVIEW_20260916.md) | 최초 코드 관찰과 아직 확인하지 않은 사항 |
 | [review/GLOBAL_FOUNDATION_REVIEW_20260916.md](review/GLOBAL_FOUNDATION_REVIEW_20260916.md) | 전역 구조 코드 검토와 선행 문제 |
 | [review/REL_G1_REVIEW_20260916.md](review/REL_G1_REVIEW_20260916.md) | REL-G1 진입·인증·서버 진실성 구현 검증 |

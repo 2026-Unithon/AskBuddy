@@ -97,7 +97,7 @@ runuser -l ubuntu -c '
 - 신뢰 정책: 발급자 `token.actions.githubusercontent.com`, `aud = sts.amazonaws.com`, `sub = repo:2026-Unithon/AskBuddy:environment:api-production`
 - 허용:
   - `ssm:SendCommand`: 운영 인스턴스 ARN 하나와 `AWS-RunShellScript` 문서
-  - `ssm:GetCommandInvocation`, `ssm:ListCommandInvocations`
+  - `ssm:GetCommandInvocation`, `ssm:ListCommandInvocations`, `ssm:CancelCommand` (시간 초과 시 명령 취소)
   - `s3:PutObject`: 백업 버킷의 `db/*`
 - 백업을 읽거나 지우는 권한은 주지 않는다. 배포 역할이 털려도 기존 백업을 지울 수 없다.
 
