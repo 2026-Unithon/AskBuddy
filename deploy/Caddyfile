@@ -1,0 +1,4 @@
+# HTTPS 인증서는 Caddy 가 자동 발급·갱신한다. 80·443 이 열려 있어야 한다.
+api.askbuddy.kr {
+    reverse_proxy api:8000
+}

@@ -1,3 +1,4 @@
+
 """일회용 localhost DB 안의 임시 schema에서 R 원자 제한 migration을 검증한다."""
 import asyncio
 import sys

@@ -3,26 +3,44 @@
 '로컬은 되는데 배포하면 안 됨' 을 30초 안에 진단하는 것이 목적이다.
 그래서 "키가 있다/없다" 가 아니라 실제로 찔러보고 결과를 돌려준다.
 
-    GET /preflight        DB·Storage·시드·검색까지 실제 호출 (무료)
+    GET /preflight        DB·Storage·시드·검색까지 실제 호출 (임베딩 1회)
     GET /preflight?deep=1 위 + OpenAI·Gemini 실호출 (돈이 든다. 각 1회)
+
+운영자 전용이다 (이슈 #33). /ops/login 이 발급한 토큰만 받는다. /health 는 공개다.
 """
 import asyncio
 import logging
-import os
 import time
 from typing import Any, Literal
+from uuid import uuid4
 
 import asyncpg
 import httpx
 from fastapi import APIRouter, Query
 
 from app.config import get_settings
+from app.contracts.usage import UsageContext
+from app.deps import get_pool
+from app.ops.deps import OperatorId
+from app.reg.retrieve import retrieve_question
+from app.usage import DbUsageSink
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["preflight"])
 
 State = Literal["live", "dead", "warn"]
 PROBE_TIMEOUT = 8.0
+
+# 진단이 읽거나, 없으면 제품이 바로 깨지는 테이블. 없으면 migration 이 덜 적용된 것이다
+REQUIRED_TABLES = (
+    "users", "stores", "store_members", "invite_codes", "knowledge_cards", "card_embeddings",
+    "ingest_jobs", "pending_questions", "owner_answers", "notification_events",
+    "ai_usage_attempts", "knowledge_publications", "r_index_publications", "r_index_documents",
+    "source_facts", "source_fact_occurrences", "fact_revisions", "knowledge_entities",
+    "extraction_raw_responses", "upload_change_proposals",
+)
+DEMO_STORE_SLUG = "demo-cafe"
+DEMO_QUESTION = "우유 어디 보관해요?"
 
 
 def _check(
@@ -44,58 +62,71 @@ async def _timed(coro):
 
 # ── 개별 점검 ──────────────────────────────────────────────────────────────
 
+async def _missing_tables(conn) -> list[str]:
+    rows = await conn.fetch(
+        "select t.name from unnest($1::text[]) with ordinality as t(name, i) "
+        "where to_regclass('public.' || t.name) is null order by t.i",
+        list(REQUIRED_TABLES))
+    return [r["name"] for r in rows]
+
+
+async def _counts(conn) -> dict[str, Any]:
+    return {
+        "stores": await conn.fetchval("select count(*) from stores"),
+        # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
+        "cards": await conn.fetchval("select count(*) from knowledge_cards"),
+        # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
+        "approved_stores": await conn.fetchval(
+            "select count(distinct store_id) from knowledge_cards "
+            "where review_status = 'APPROVED' and is_verified "
+            "and published_version_id is not null"),
+        # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
+        "indexed_stores": await conn.fetchval(
+            "select count(*) from knowledge_publications p "
+            "join r_index_publications a on a.store_id = p.store_id "
+            "and a.snapshot_id = p.current_snapshot_id"),
+        "vector_ext": await conn.fetchval(
+            "select count(*) from pg_extension where extname = 'vector'"),
+        "match_cards": await conn.fetchval(
+            "select count(*) from pg_proc where proname = 'match_cards'"),
+    }
+
+
 async def _probe_db(s) -> list[dict]:
-    async def run():
-        conn = await asyncpg.connect(s.supabase_db_url, timeout=PROBE_TIMEOUT)
-        try:
-            return {
-                "tables": await conn.fetchval(
-                    "select count(*) from information_schema.tables "
-                    "where table_schema = 'public'"),
-                "stores": await conn.fetchval("select count(*) from stores"),
-                "cards": await conn.fetchval("select count(*) from knowledge_cards"),
-                "verified": await conn.fetchval(
-                    "select count(*) from knowledge_cards where is_verified"),
-                # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
-                "approved_stores": await conn.fetchval(
-                    "select count(distinct store_id) from knowledge_cards "
-                    "where review_status = 'APPROVED' and is_verified "
-                    "and published_version_id is not null"),
-                # store-isolation-ok: 운영 점검 화면의 전체 매장 집계
-                "indexed_stores": await conn.fetchval(
-                    "select count(*) from knowledge_publications p "
-                    "join r_index_publications a on a.store_id = p.store_id "
-                    "and a.snapshot_id = p.current_snapshot_id"),
-                "vector_ext": await conn.fetchval(
-                    "select count(*) from pg_extension where extname = 'vector'"),
-                "match_cards": await conn.fetchval(
-                    "select count(*) from pg_proc where proname = 'match_cards'"),
-            }
-        finally:
-            await conn.close()
-
-    data, err, ms = await _timed(run())
+    """연결과 스키마를 따로 본다. 테이블이 없는 것을 연결 문제로 안내하지 않는다."""
     host = s.supabase_db_url.split("@")[-1].split("/")[0] if "@" in s.supabase_db_url else "?"
-
+    conn, err, ms = await _timed(asyncpg.connect(s.supabase_db_url, timeout=PROBE_TIMEOUT))
     if err:
         return [_check("데이터베이스", "dead", host,
                        "SUPABASE_DB_URL 확인. 호스팅은 Connection pooling 문자열을 쓴다"
                        f" — {err}", ms)]
+    try:
+        out = [_check("데이터베이스", "live", host, ms=ms)]
 
-    out = [_check("데이터베이스", "live", f"{host} · 테이블 {data['tables']}개", ms=ms)]
+        missing, err, ms = await _timed(_missing_tables(conn))
+        if err:
+            out.append(_check("스키마", "dead", str(err)[:90], "DB 계정 권한을 확인한다", ms))
+            return out
+        if missing:
+            out.append(_check("스키마", "dead", "없는 테이블: " + ", ".join(missing),
+                              "밀린 migration 을 적용한다 (supabase db push)", ms))
+            # 아래 집계는 이 테이블들을 읽으므로 돌리지 않는다
+            return out
+        out.append(_check("스키마", "live", f"필수 테이블 {len(REQUIRED_TABLES)}개 있음", ms=ms))
 
-    out.append(
-        _check("스키마", "live", f"테이블 {data['tables']}개")
-        if data["tables"] >= 24
-        else _check("스키마", "dead", f"테이블 {data['tables']}개 (24개여야 함)",
-                    "db/001_init_schema.sql 을 SQL Editor 에서 실행")
-    )
+        data, err, ms = await _timed(_counts(conn))
+        if err:
+            out.append(_check("집계", "dead", str(err)[:90], "", ms))
+            return out
+    finally:
+        await conn.close()
+
     out.append(
         _check("pgvector", "live", "확장 + match_cards() 준비됨")
         if data["vector_ext"] and data["match_cards"]
         else _check("pgvector", "dead",
                     f"extension={bool(data['vector_ext'])} match_cards={bool(data['match_cards'])}",
-                    "001_init_schema.sql 이 끝까지 실행됐는지 확인")
+                    "밀린 migration 을 적용한다 (supabase db push)")
     )
     out.append(
         _check("시드 데이터", "live", f"매장 {data['stores']} · 카드 {data['cards']}")
@@ -192,48 +223,53 @@ async def _probe_gemini(s, deep: bool) -> dict:
 
 
 async def _probe_retrieve(s) -> dict:
-    """검색 게이트가 실제로 hit 을 내는지. 데모의 6번 시나리오다.
+    """검색 게이트가 실제로 hit 을 내는지. 데모 매장으로 확인한다.
 
-    자기 자신을 HTTP 로 부른다 — 라우터·임베딩·pgvector 를 한 번에 통과시켜야
-    의미가 있기 때문이다. Railway 는 포트를 PORT 로 준다.
+    HTTP 로 자기 자신을 부르지 않는다 — /reg/retrieve 는 매장 JWT 가 필요하다.
+    retrieve_question 을 직접 불러 임베딩·pgvector·게이트를 한 번에 통과시킨다.
+    임베딩 비용은 개발 목적으로 기록해 고객 월 운영비(D21)에 섞지 않는다.
     """
-    port = os.environ.get("PORT", "8000")
+    try:
+        pool = get_pool()
+    except RuntimeError as e:
+        return _check("검색 게이트", "dead", str(e), "위 데이터베이스 줄을 먼저 본다")
 
     async def run():
-        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as c:
-            r = await c.post(f"http://127.0.0.1:{port}/reg/retrieve",
-                             json={"store_id": "demo-cafe",
-                                   "question": "우유 어디 보관해요?", "top_k": 3})
-            try:
-                return r.status_code, r.json()
-            except ValueError:
-                # 500 이면 본문이 JSON 이 아니다. 그 텍스트가 원인을 말해준다
-                return r.status_code, {"_raw": r.text[:120]}
+        # store-isolation-ok: 데모 매장 slug 로 점검 대상 store_id 를 찾는다
+        store_id = await pool.fetchval(
+            "select store_id from stores where store_slug = $1", DEMO_STORE_SLUG)
+        if store_id is None:
+            return None
+        store_id = int(store_id)
+        return await retrieve_question(
+            pool, store_id, DEMO_QUESTION, 3,
+            usage_context=UsageContext(
+                store_id=str(store_id), cost_phase="OPERATING", cost_purpose="DEVELOPMENT",
+                stage="QUERY", logical_call_id=f"preflight:{uuid4().hex}"),
+            usage_sink=DbUsageSink(pool))
 
-    data, err, ms = await _timed(run())
+    result, err, ms = await _timed(run())
     if err:
-        return _check("검색 게이트", "dead", str(err)[:80],
-                      f"api 가 127.0.0.1:{port} 에서 응답하는지 확인", ms)
-
-    code, body = data
-    if code != 200:
-        return _check("검색 게이트", "dead", f"HTTP {code} {body.get('_raw', body)}",
+        return _check("검색 게이트", "dead", str(err)[:90],
                       "대개 임베딩 호출 실패다. 위 OpenAI 줄을 먼저 본다", ms)
-
-    kind = body.get("kind")
-    if kind == "hit":
-        top = (body.get("candidates") or [{}])[0].get("score", 0)
+    if result is None:
+        return _check("검색 게이트", "warn", f"데모 매장({DEMO_STORE_SLUG}) 없음 — 점검 생략",
+                      "운영 DB 에는 시드가 없을 수 있다", ms)
+    if result["kind"] == "hit":
+        top = (result.get("candidates") or [{}])[0].get("score", 0)
         return _check("검색 게이트", "live", f"hit · 최고점 {float(top):.3f}", ms=ms)
     return _check("검색 게이트", "dead",
-                  f"miss ({body.get('reason')}) — 임계 {s.retrieval_threshold}",
+                  f"miss ({result.get('reason')}) — 임계 {s.retrieval_threshold}",
                   "시드 임베딩이 없거나 RETRIEVAL_THRESHOLD 가 너무 높다", ms)
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────
 
 @router.get("/preflight")
-async def preflight(deep: bool = Query(False, description="LLM 실호출 포함. 돈이 든다")):
+async def preflight(operator_id: OperatorId,
+                    deep: bool = Query(False, description="LLM 실호출 포함. 돈이 든다")):
     s = get_settings()
+    logger.info("preflight operator=%s deep=%s", operator_id, deep)
 
     db_checks, storage, openai_c, gemini_c, retrieve = await asyncio.gather(
         _probe_db(s), _probe_storage(s), _probe_openai(s, deep), _probe_gemini(s, deep),

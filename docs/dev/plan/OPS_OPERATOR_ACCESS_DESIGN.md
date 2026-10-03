@@ -1,6 +1,6 @@
 # 운영자 역할과 진단 화면 접근 설계
 
-2026-10-02 · 상태: **설계만 확정, 구현 보류.** 구현은 [GitHub 이슈 #33](https://github.com/2026-Unithon/AskBuddy/issues/33)으로 추적한다.
+2026-10-02 · 상태: **구현됨, 운영 반영 전.** 구현 계획 [OPS_OPERATOR_ACCESS_PLAN.md](OPS_OPERATOR_ACCESS_PLAN.md). 구현은 [GitHub 이슈 #33](https://github.com/2026-Unithon/AskBuddy/issues/33)으로 추적한다.
 
 ## 1. 배경
 
@@ -40,6 +40,9 @@
 - 계정이 없을 때도 bcrypt 비교를 한 번 수행해 응답 시간으로 계정 존재 여부를 알 수 없게 한다.
 - 같은 IP+이메일 조합으로 실패가 반복되면 일정 시간 차단한다. 서버가 한 대라 프로세스 메모리에서 센다.
   서버를 여러 대로 늘리면 저장 위치를 다시 정한다.
+- Caddy 뒤에서 uvicorn 을 `--proxy-headers` 없이 띄우면 IP 는 프록시 주소로 고정돼, 잠금은 사실상 이메일 단위다.
+  운영자 이메일을 아는 사람은 누구나 그 계정을 15분간 잠글 수 있다. 나중에 `--proxy-headers` 를 켜면
+  신뢰할 프록시만 `--forwarded-allow-ips` 로 지정하고 `'*'` 는 쓰지 않는다.
 - 응답: `{ token, operator: { user_id, name, email } }`
 
 ### 4-2. 운영자 토큰

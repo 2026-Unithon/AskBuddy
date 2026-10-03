@@ -1,0 +1,33 @@
+# 운영 API 서버 구성. 비밀값은 저장소 밖 env 파일에만 둔다.
+# 최상위 name 으로 프로젝트 이름을 고정해 폴더 위치가 바뀌어도 같은 컨테이너·볼륨을 쓴다.
+name: askbuddy
+
+services:
+  api:
+    build: ../api
+    env_file: ${ASKBUDDY_ENV_FILE:-/home/ubuntu/askbuddy.env}
+    environment:
+      PORT: "8000"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

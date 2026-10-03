@@ -1,4 +1,5 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { withOpsSession } from "@/lib/ops-session";
 import { rSessions, rHistory, rPendingList, rPendingDetail, rCitation, rNotifications } from "./r-v2-api";
 
 export function rCitationQuery(token: string | null, store: number | null, user: number | null, receipt: string, order: number, open: boolean) {
@@ -49,6 +50,7 @@ import {
   getNotificationSupport,
   getBootstrap,
   getPreflight,
+  ApiError,
   getLearnItem,
   getIngestJob,
   getProductCard,
@@ -69,11 +71,14 @@ import {
   type CardFilters,
 } from "@/lib/api";
 
-export function preflightQuery() {
+export function preflightQuery(token: string) {
   return queryOptions({
-    queryKey: ["preflight", false] as const,
-    queryFn: ({ signal }) => getPreflight(false, signal),
+    queryKey: ["preflight", token, false] as const,
+    queryFn: ({ signal }) => withOpsSession(() => getPreflight(false, token, signal)),
     staleTime: 10_000,
+    // 인증 실패는 다시 시도해도 같다. 바로 로그인 폼으로 돌린다
+    retry: (count, error) =>
+      !(error instanceof ApiError && (error.status === 401 || error.status === 403)) && count < 2,
   });
 }
 

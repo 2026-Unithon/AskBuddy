@@ -25,6 +25,7 @@ from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
 from app.learn.metadata_retention import retention_loop
 from app.notifications.router import router as notifications_router
+from app.ops.router import router as ops_router
 from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
 from app.team.router import router as team_router
@@ -82,6 +83,7 @@ app.add_middleware(
 
 app.include_router(preflight_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(ops_router, prefix="/ops", tags=["ops"])
 app.include_router(bootstrap_router, prefix="/app", tags=["app"])
 app.include_router(cards_router, prefix="/cards", tags=["cards"])
 app.include_router(categories_router, prefix="/categories", tags=["categories"])
