@@ -94,7 +94,7 @@ runuser -l ubuntu -c '
 ## 5. 권한 범위
 
 **AWS 배포 역할 `askbuddy-github-deploy`**
-- 신뢰 정책: 발급자 `token.actions.githubusercontent.com`, `aud = sts.amazonaws.com`, `sub = repo:2026-Unithon/AskBuddy:environment:api-production`
+- 신뢰 정책: 발급자 `token.actions.githubusercontent.com`, `aud = sts.amazonaws.com`, `sub = repo:2026-Unithon@320988116/AskBuddy@1346078857:environment:api-production` (저장소가 불변 식별자 sub 를 쓴다. 조직·저장소 숫자 ID 가 붙는다)
 - 허용:
   - `ssm:SendCommand`: 운영 인스턴스 ARN 하나와 `AWS-RunShellScript` 문서
   - `ssm:GetCommandInvocation`, `ssm:ListCommandInvocations`, `ssm:CancelCommand` (시간 초과 시 명령 취소)

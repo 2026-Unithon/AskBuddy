@@ -253,6 +253,8 @@ GitHub Actions가 AWS에 **OIDC**로 접속하므로 저장소에 AWS 키를 두
 ### 12-3. 배포 역할 `askbuddy-github-deploy`
 
 IAM → Roles → Create role → Web identity → 위 공급자, audience `sts.amazonaws.com` → 만든 뒤 Trust relationships를 아래로 교체한다.
+콘솔 기본값 `ref:refs/heads/main` 을 그대로 두면 안 된다. workflow 가 `environment` 를 쓰므로 `sub` 는 환경 기준이고,
+이 저장소는 불변 식별자 sub 를 써서 조직·저장소 숫자 ID 가 붙는다. 실제 접두사는 `gh api repos/2026-Unithon/AskBuddy/actions/oidc/customization/sub` 로 확인한다.
 
 ```json
 {
@@ -264,7 +266,7 @@ IAM → Roles → Create role → Web identity → 위 공급자, audience `sts.
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:2026-Unithon/AskBuddy:environment:api-production"
+        "token.actions.githubusercontent.com:sub": "repo:2026-Unithon@320988116/AskBuddy@1346078857:environment:api-production"
       }
     }
   }]
