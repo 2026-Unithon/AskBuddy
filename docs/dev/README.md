@@ -45,6 +45,8 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 
 ## docs/dev/review/ — 검증 결과
 
+카드 사실 추가·수정·삭제: [WR_CARD_EDIT_FACT_REVIEW_20261005.md](review/WR_CARD_EDIT_FACT_REVIEW_20261005.md) — 현재 구현 대조, 사실·문장 단위 편집과 새 사실 텍스트 입력·순서 변경, 점주 답변 텍스트 원본·정상 빈 상태 및 W/R 후속 작업.
+
 R 점주 답변 후보 검색 이전: [R_OWNER_CANDIDATE_INDEX_20260927.md](review/R_OWNER_CANDIDATE_INDEX_20260927.md) — 활성 공개 색인·불변 승인판 회수, 오류 분리, 실제 W worker 단일 연결 풀 검증과 W 호환 쓰기 제거 인계.
 
 R0 반복 캠페인: [R_V2_CAMPAIGN_20260916.md](review/R_V2_CAMPAIGN_20260916.md) — 실행 동일성·반복 안전성·A/A 대조·외부 인수 경계.
