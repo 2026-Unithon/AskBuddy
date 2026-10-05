@@ -1,6 +1,7 @@
 """Server-only diagnostics cleanup, including stores without new questions."""
 import asyncio
 import logging
+from app.reg.index_retention import purge_expired_index_documents
 
 logger = logging.getLogger(__name__)
 SWEEP_SECONDS = 3600
@@ -31,4 +32,10 @@ async def retention_loop(pool):
         except Exception as exc:
             # Error type only: driver messages can contain query/body fragments.
             logger.error('R diagnostics retention failed type=%s', type(exc).__name__)
+        try:
+            count = await purge_expired_index_documents(pool)
+            if count:
+                logger.info('R index retention sweep removed=%d', count)
+        except Exception as exc:
+            logger.error('R index retention failed type=%s', type(exc).__name__)
         await asyncio.sleep(SWEEP_SECONDS)

@@ -399,6 +399,10 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                 completed=await saved_reply(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                     request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id)
                 if completed is None:
+                    from app.publish.empty import ensure_initial_publication
+                    if req.policy_receipt_id is None:
+                        await ensure_initial_publication(pool, store_id=store_id,
+                            member_id=member_id, user_id=user_id)
                     for requery in range(2):
                         usage=None
                         async with pool.acquire() as conn:
@@ -420,7 +424,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if context:
                             slots=context.context.confirmed_slots
                             question=context.context.original_question+" "+req.question
-                        if req.policy_receipt_id is not None or policy_action(question):
+                        if not snapshot.cards or req.policy_receipt_id is not None or policy_action(question):
                             search=SearchResult(snapshot,index_revision,(),question)
                         else:
                             remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,

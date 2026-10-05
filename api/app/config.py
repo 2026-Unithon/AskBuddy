@@ -9,6 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # 신규 v2 API는 DB/의미 인수 후 별도 활성화한다. v1 동작을 암묵 전환하지 않는다.
     r_v2_enabled: bool = False
+    # N/M are deliberately unset until an operating retention policy is agreed.
+    r_index_gc_enabled: bool = False
+    r_index_gc_keep_previous: int | None = Field(default=None, ge=0)
+    r_index_gc_min_age_days: int | None = Field(default=None, ge=1)
     r_reranker_enabled: bool = False
     r_reviewed_semantics_enabled: bool = False
     r_reviewed_semantics_path: str = ''

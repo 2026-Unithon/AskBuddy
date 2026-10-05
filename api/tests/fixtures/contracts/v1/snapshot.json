@@ -89,6 +89,7 @@
         {
           "occurrence_id": "5900",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -128,6 +129,7 @@
         {
           "occurrence_id": "5901",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -168,6 +170,7 @@
         {
           "occurrence_id": "5902",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -202,6 +205,7 @@
         {
           "occurrence_id": "5903",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -238,6 +242,7 @@
         {
           "occurrence_id": "5904",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -272,6 +277,7 @@
         {
           "occurrence_id": "5905",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -308,6 +314,7 @@
         {
           "occurrence_id": "5906",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",
@@ -344,6 +351,7 @@
         {
           "occurrence_id": "5907",
           "source_id": "600",
+          "owner_answer_id": null,
           "source_content_hash": null,
           "locator": {
             "type": "WHOLE_SOURCE",

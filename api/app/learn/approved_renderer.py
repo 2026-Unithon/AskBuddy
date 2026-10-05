@@ -39,8 +39,12 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
                 heading=" / ".join(s for s in (card.title,fact.variant.temperature,fact.variant.size) if s)
                 # 승인 부정문을 휴리스틱으로 덧쓰거나 뒤집지 않는다.
                 lines.extend((heading,fact.assertion,*fact.conditions,*fact.exceptions))
-                source=fact.provenance[0].source_id
-                citations.append(Citation(card_id=card.card_id,card_version_id=card.card_version_id,
-                    block_id=selected.block_id,fact_revision_id=fid,source_id=source,
-                    source_availability=availability.get(source,"UNAVAILABLE")))
+                for origin in fact.provenance:
+                    citation = Citation(card_id=card.card_id,card_version_id=card.card_version_id,
+                        block_id=selected.block_id,fact_revision_id=fid,source_id=origin.source_id,
+                        owner_answer_id=origin.owner_answer_id,
+                        source_availability=("AVAILABLE" if origin.owner_answer_id is not None
+                                             else availability.get(origin.source_id,"UNAVAILABLE")))
+                    if citation not in citations:
+                        citations.append(citation)
     return ChatResponse(**fields,message="\n".join(lines),citations=tuple(citations))

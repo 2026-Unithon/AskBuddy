@@ -66,7 +66,7 @@ class CardChange:
 class PublishCardsResult:
     # PUBLISHED | ALREADY_APPLIED | STALE | PREPARE_FAILED | NO_PROVENANCE
     # | INVALID_CONTENT (변경 카드 원문이 비었거나 너무 길다)
-    # | EMPTY_MANIFEST (changes=[] 재발행인데 실을 승인 카드가 하나도 없다)
+    # | EMPTY_MANIFEST (승인 카드는 있지만 출처 실패로 모두 manifest에서 빠졌다)
     # | LEASE_LOST (after_prepare 가 False — 호출부가 작업 점유를 잃었다. 아무것도 쓰지 않았다)
     status: str
     snapshot_id: int | None = None
@@ -287,14 +287,14 @@ async def publish_cards(
     changes: list[CardChange], idempotency_key: str, usage_context,
     in_transaction: InTransactionHook | None = None,
     after_prepare: AfterPrepareHook | None = None,
+    initialize_empty: bool = False,
 ) -> PublishCardsResult:
     """카드 버전을 공개판으로 올린다. 색인 준비와 공개 전환을 한 묶음으로 닫는다.
 
     `changes=[]` 는 "현재 공개 포인터 그대로 다시 발행" 이다 — 제외·복원처럼 카드
     공개 포인터는 그대로 두고 실릴 카드 집합만 바뀐 경우에 쓴다. 이때 카드 CAS·
     공개 포인터 이동·검수 사건은 없고, manifest 전체 잠금과 제외 확인, 멱등 키는
-    그대로 적용된다. 실을 카드가 하나도 없으면 R 준비 계약(card_ids ≥ 1)을 맞출
-    수 없으므로 아무것도 쓰지 않고 EMPTY_MANIFEST 를 돌려준다.
+    그대로 적용된다. 승인 카드가 없으면 문서 0개의 정상 공개판을 발행한다.
 
     `after_prepare` 는 R 준비가 PREPARED 로 끝난 직후, 공개 트랜잭션을 열기 전에
     부른다(연결을 잡지 않은 상태). 색인 준비가 길어 worker 점유가 끊겼을 수 있으므로
@@ -338,6 +338,9 @@ async def publish_cards(
                 return PublishCardsResult(status="STALE")
 
         manifest = await current_manifest(conn, store_id=store_id)
+        if initialize_empty and (manifest or publication['current_snapshot_id'] is not None or changes):
+            return PublishCardsResult(status="STALE")
+        had_approved_cards = bool(manifest)
         for change in changes:
             manifest[change.card_id] = change.target_card_version_id
 
@@ -351,8 +354,8 @@ async def publish_cards(
             return PublishCardsResult(status="NO_PROVENANCE")
         except _ChangedInvalidContent:
             return PublishCardsResult(status="INVALID_CONTENT")
-        if not manifest:
-            # 변경 카드가 있으면 manifest 에 반드시 남는다. 여기는 재발행 전용이다
+        if not manifest and had_approved_cards:
+            # 출처 실패로 모든 카드를 잃은 상태를 정상적인 빈 공개판으로 숨기지 않는다.
             return PublishCardsResult(status="EMPTY_MANIFEST")
 
         content = await build_knowledge_content(
@@ -382,6 +385,9 @@ async def publish_cards(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 current = await _lock_publication(conn, store_id)
+                if initialize_empty and (current['current_snapshot_id'] is not None
+                        or await current_manifest(conn, store_id=store_id)):
+                    raise _Stale()
                 # manifest 전체를 card_id 오름차순으로 잠근다(변경 카드 포함)
                 locked = await _read_cards(conn, store_id=store_id,
                                            card_ids=sorted(manifest),

@@ -447,12 +447,15 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "STALE")
         self.assertEqual(self.h.publish_calls, [])
 
-    async def test_empty_changes_with_nothing_approved_writes_nothing(self):
+    async def test_empty_changes_publishes_empty_manifest_and_index(self):
         self.h.manifest = {}
+        self.h.card_states = [{}]
         result = await self.h.run(changes=[])
-        self.assertEqual(result, PublishCardsResult(status="EMPTY_MANIFEST"))
-        self.assertEqual(self.h.prepare_calls, [])
-        self.assertEqual(self.h.publish_calls, [])
+        self.assertEqual(result.status, "PUBLISHED")
+        self.assertEqual(self.h.prepare_calls[0][0].card_ids, ())
+        self.assertEqual(self.h.prepare_calls[0][1].cards, ())
+        self.assertEqual(self.h.publish_calls[0]['card_versions'], [])
+        self.assertIn('activate:44:12', self.h.log)
 
     async def test_unchanged_card_pointer_moved_during_prepare_is_stale(self):
         # 준비 사이 레거시 경로가 7 의 공개 포인터를 옮겼다 — 옛 버전을 싣지 않는다

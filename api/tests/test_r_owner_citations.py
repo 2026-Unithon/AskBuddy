@@ -38,9 +38,9 @@ def test_exactly_one_origin(origin):
         Citation(card_id='1', card_version_id='2', block_id='b', raw_span_id='3', **origin)
 
 
-def test_owner_origin_cannot_claim_typed_fact():
-    with pytest.raises(ValidationError):
-        Citation(card_id='1', card_version_id='2', block_id='b', fact_revision_id='3', owner_answer_id='17')
+def test_owner_origin_can_cite_w3_typed_fact():
+    citation = Citation(card_id='1', card_version_id='2', block_id='b', fact_revision_id='3', owner_answer_id='17')
+    assert citation.source_id is None and not citation.is_broken
 
 
 @pytest.mark.asyncio

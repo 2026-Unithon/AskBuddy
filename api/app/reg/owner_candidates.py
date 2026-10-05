@@ -16,6 +16,10 @@ async def published_owner_candidates(db, *, store_id: int, query_vector: list[fl
         raise ValueError('invalid owner candidate vector or limit')
     # 임베딩은 호출 전에 끝났다. 포인터·문서·카드 본문을 같은 판에서 읽는다.
     async with db.transaction(isolation='repeatable_read', readonly=True):
+        if not await db.fetchval('''select exists(select 1 from knowledge_cards
+            where store_id=$1 and review_status='APPROVED' and is_verified=true
+              and published_version_id is not null)''', store_id):
+            return []
         snapshot, pid, _ = await read_current_index(db, store_id=store_id)
         metadata = await db.fetchrow('''select embedding_model,index_config_version
             from r_index_preparations where store_id=$1 and prepared_id=$2''', store_id, pid)

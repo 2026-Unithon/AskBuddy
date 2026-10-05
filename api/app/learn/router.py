@@ -28,9 +28,6 @@ from app.learn.answering import AnswerComposition, compose_grounded_answer
 from app.learn.faq import list_faqs as list_faq_rows
 from app.learn.knowledge_apply import (
     approve_owner_proposal,
-    prepare_proposal,
-    publish_existing_proposal,
-    publish_new_proposal,
 )
 from app.learn.owner_handoff import finish_owner_review
 from app.learn.knowledge_loop import build_knowledge_plan
@@ -745,22 +742,21 @@ async def answer_pending(
     knowledge_status = proposal_status
     if proposal_status == "ANALYZED":
         try:
-            preparation = await prepare_proposal(db, store_id, proposal_id)
-            async with db.transaction():
-                card_id, version_id = await publish_new_proposal(
-                    db, store_id, proposal_id, user_id, preparation=preparation
-                )
+            published = await approve_knowledge_proposal(
+                proposal_id=proposal_id, db=db, claims=claims,
+                store_id=store_id, user_id=user_id)
+            card_id, version_id = published['card_id'], published['version_id']
             knowledge_status = "PUBLISHED"
         except Exception as exc:
             await db.execute(
                 """
                 update knowledge_change_proposals
                 set status = 'FAILED', error = $3::jsonb
-                where store_id = $1 and proposal_id = $2
+                where store_id = $1 and proposal_id = $2 and status <> 'PUBLISHED'
                 """,
                 store_id,
                 proposal_id,
-                json.dumps({"message": str(exc)[:500]}, ensure_ascii=False),
+                json.dumps({"type": type(exc).__name__}),
             )
             knowledge_status = "FAILED"
 

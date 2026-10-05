@@ -119,8 +119,10 @@ def knowledge_content_payload(snapshot) -> dict:
                         "source_id": p.source_id,
                         "source_content_hash": p.source_content_hash,
                         "locator": p.locator.model_dump(),
+                        **({"owner_answer_id": p.owner_answer_id} if p.owner_answer_id else {}),
                     }
-                    for p in _by_id(f.provenance, "occurrence_id")
+                    for p in sorted(f.provenance, key=lambda p: (
+                        p.owner_answer_id is not None, int(p.occurrence_id or p.owner_answer_id)))
                 ],
             }
             for f in _by_id(snapshot.fact_revisions, "fact_revision_id")

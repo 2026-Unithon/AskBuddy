@@ -137,8 +137,11 @@ async def finish_owner_review(conn, *, store_id: int, proposal_id: int,
     if evidence['published_card_version_id'] != str(card_version_id):
         raise ApiError(409, 'STALE_KNOWLEDGE', '승인한 카드 버전과 공개 버전이 다릅니다.')
     proposal = await conn.fetchrow('''select p.answer_id,p.status,p.result_card_id,
-            p.result_version_id,r.question_id,r.revision_no
-        from knowledge_change_proposals p join r_owner_answer_revisions r
+            p.result_version_id,r.question_id,r.revision_no,q.contract_version
+        from knowledge_change_proposals p
+        join owner_answers a on a.answer_id=p.answer_id
+        join pending_questions q on q.question_id=a.question_id and q.store_id=p.store_id
+        left join r_owner_answer_revisions r
           on r.store_id=p.store_id and r.owner_answer_id=p.answer_id
         where p.store_id=$1 and p.proposal_id=$2 for update of p''', store_id, proposal_id)
     if proposal is None:
@@ -146,6 +149,9 @@ async def finish_owner_review(conn, *, store_id: int, proposal_id: int,
     if (proposal['answer_id'] != owner_answer_id or proposal['status'] != 'PUBLISHED'
             or proposal['result_card_id'] != card_id or proposal['result_version_id'] != card_version_id):
         raise ApiError(409, 'IDEMPOTENCY_CONFLICT', '제안의 승인 결과가 일치하지 않습니다.')
+    if proposal['revision_no'] is None and proposal['contract_version'] == 'v1':
+        # v1은 원문 전달을 이미 저장했다. 공개 증거는 위에서 검증하며 v2 원장을 꾸미지 않는다.
+        return
     await conn.fetchval('''select question_id from pending_questions
         where store_id=$1 and question_id=$2 for update''', store_id, proposal['question_id'])
     latest = await conn.fetchval('''select max(revision_no) from r_owner_answer_revisions

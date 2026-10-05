@@ -95,13 +95,16 @@ async def read_current_index(conn, *, store_id: int):
         """,store_id)
     if row is None:
         raise ApiError(503,"INDEX_UNAVAILABLE","공개 지식의 색인이 준비되지 않았습니다.",retryable=True)
-    content = json.loads(row["content"]) if isinstance(row["content"],str) else row["content"]
-    snapshot = PublishedKnowledgeSnapshot(**content,snapshot_id=str(row["snapshot_id"]),
-        knowledge_revision=str(row["knowledge_revision"]),snapshot_hash=row["snapshot_hash"],created_at=row["created_at"])
+    try:
+        content = json.loads(row["content"]) if isinstance(row["content"],str) else row["content"]
+        snapshot = PublishedKnowledgeSnapshot(**content,snapshot_id=str(row["snapshot_id"]),
+            knowledge_revision=str(row["knowledge_revision"]),snapshot_hash=row["snapshot_hash"],created_at=row["created_at"])
+        verify_snapshot_hash(snapshot)
+    except (ValueError, TypeError) as exc:
+        raise ApiError(503,"INDEX_UNAVAILABLE","공개 색인의 무결성을 확인하지 못했습니다.",retryable=True) from exc
     if (snapshot.store_id != str(store_id) or snapshot.glossary_version != row["glossary_version"]
             or snapshot.renderer_version != row["renderer_version"]):
         raise ApiError(503,"INDEX_UNAVAILABLE","공개 색인 구성이 일치하지 않습니다.",retryable=True)
-    verify_snapshot_hash(snapshot)
     return snapshot,row["prepared_id"],row["index_revision"]
 
 
