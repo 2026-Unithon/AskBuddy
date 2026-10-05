@@ -219,7 +219,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                     values($1,$2,$3)""",pending_id,member_id,user_message)
                 # 앱 알림이 durable 전달 원장이다. 민감 원문을 preview에 복제하지 않는다.
                 await create_pending_question_notification(conn,store_id,pending_id,"업무 질문의 확인 요청이 도착했습니다.",contract_version='v2')
-            source_ids=sorted({int(p.source_id) for f in snapshot.fact_revisions for p in f.provenance}
+            source_ids=sorted({int(p.source_id) for f in snapshot.fact_revisions for p in f.provenance if p.source_id is not None}
                               | {int(r.source_id) for r in snapshot.raw_spans if r.source_id is not None})
             rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",
                                   store_id,source_ids)

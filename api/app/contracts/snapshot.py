@@ -39,11 +39,20 @@ class FactProvenance(FrozenContract):
     근거로 답한다" 를 검사할 수 없고, 자료를 지운 뒤 인용 끊김 표시도 못 한다 (D20).
     """
 
-    occurrence_id: EntityId
-    source_id: EntityId
+    occurrence_id: EntityId | None = None
+    source_id: EntityId | None = None
+    owner_answer_id: EntityId | None = None
     # 자료 내용의 지문. 자료를 지워도 남아 어느 판본에서 나온 말인지 대조한다 (D9·D20)
     source_content_hash: HashRef | None = None
     locator: EvidenceLocator = EvidenceLocator()
+
+    @model_validator(mode="after")
+    def _origin(self) -> "FactProvenance":
+        if (self.source_id is None) == (self.owner_answer_id is None):
+            raise ValueError("사실 출처는 자료나 점주 답변 중 정확히 하나다")
+        if (self.occurrence_id is None) != (self.source_id is None):
+            raise ValueError("파일 출처에만 occurrence_id가 필요하다")
+        return self
 
     # 자료가 지금 열람 가능한지는 **여기 담지 않는다**. 가변 상태를 불변 묶음에
     # 넣으면 내용이 같은 두 발행의 hash 가 달라진다. 현재 상태는 조회 시 덧입힌다

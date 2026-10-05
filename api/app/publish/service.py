@@ -91,7 +91,7 @@ async def _lock_publication(conn, store_id: int):
         """, store_id)
     return await conn.fetchrow(
         """
-        select publication_revision, knowledge_revision
+        select publication_revision, knowledge_revision, current_snapshot_id
         from knowledge_publications where store_id = $1 for update
         """, store_id)
 

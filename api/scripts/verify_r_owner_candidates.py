@@ -45,12 +45,7 @@ async def verify(pool, admin):
                                                   usage_context=context, usage_sink=sink)
     with patch('app.reg.index_preparation.recorded_embeddings', vectors), \
             patch('app.learn.knowledge_loop.recorded_embeddings', vectors):
-        try:
-            await query()
-        except ApiError as exc:
-            check('missing active index is an error not empty candidates', exc.code == 'INDEX_UNAVAILABLE')
-        else:
-            raise AssertionError('missing index hidden')
+        check('draft-only store has no approved candidates', await query() == [])
         result = await publish_cards(pool, store_id=sid, member_id=mid, actor_user_id=uid,
             changes=[CardChange(cid, vid, vid) for cid, vid in cards], idempotency_key='candidate-first-publication',
             usage_context=context.model_copy(update=dict(stage='EMBED')))
@@ -99,7 +94,10 @@ async def verify(pool, admin):
                     where store_id=$1 and owner_answer_id=$2''', sid, int(reply['owner_answer_id'])) == 'LINKED')
         finally:
             await single.close()
-        for other_store, model in [(sid+99999, get_settings().embedding_model), (sid, 'different-model')]:
+        check('foreign store sees no candidates', await published_owner_candidates(db,
+            store_id=sid+99999, query_vector=[1.0]+[0.0]*1535,
+            embedding_model=get_settings().embedding_model, top_k=2) == [])
+        for other_store, model in [(sid, 'different-model')]:
             try:
                 await published_owner_candidates(db, store_id=other_store, query_vector=[1.0]+[0.0]*1535,
                                                    embedding_model=model, top_k=2)

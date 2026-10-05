@@ -63,7 +63,6 @@
         "type": "string"
       },
       "maxItems": 500,
-      "minItems": 1,
       "title": "Card Ids",
       "type": "array"
     },

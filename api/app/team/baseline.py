@@ -9,7 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from app.contracts.hashing import verify_snapshot_hash
 from app.contracts.snapshot import PublishedKnowledgeSnapshot
@@ -48,18 +48,13 @@ async def record_baseline(fixture_dir: Path) -> dict:
                     fact = facts[fid]
                     lines.append("\n".join((fact.assertion, *fact.conditions, *fact.exceptions)))
         candidates.append(dict(id=int(card.card_id), version_id=int(card.card_version_id),
-                               title=card.title, content="\n".join(lines), category="", score=1.0))
+                               title=card.title, content="\n".join(lines), category_name="", score=1.0))
 
-    class FixtureCandidates:
-        async def fetch(self, sql, store_id, vector, limit):
-            if str(store_id) != snapshot.store_id:
-                raise ValueError("fixture tenant mismatch")
-            return candidates[:limit]
-
-    settings = SimpleNamespace(retrieval_threshold=.35, answer_mode="extractive")
+    settings = SimpleNamespace(retrieval_threshold=.35, answer_mode="extractive", embedding_model="synthetic")
     rows = []
     # Only isolated single-process CLI/tests use this harness. It is never called by product routes.
     with patch("app.reg.retrieve.embed_text", return_value=[0.0]), \
+         patch("app.reg.retrieve.published_owner_candidates", AsyncMock(return_value=candidates[:5])), \
          patch("app.reg.retrieve.get_settings", return_value=settings), \
          patch("app.learn.answering.get_settings", return_value=settings):
         for case in cases:
@@ -69,7 +64,7 @@ async def record_baseline(fixture_dir: Path) -> dict:
                 rows.append(row | dict(status="NOT_A_QUESTION", output=None))
                 continue
             try:
-                result = await retrieve_question(FixtureCandidates(), int(snapshot.store_id), case["question"])
+                result = await retrieve_question(object(), int(snapshot.store_id), case["question"])
                 composition = (await compose_grounded_answer(case["question"], result["candidates"])
                                if result["kind"] == "hit" else None)
                 rows.append(row | dict(status="RECORDED", legacy_kind=result["kind"],
