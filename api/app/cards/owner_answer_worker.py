@@ -36,7 +36,7 @@ from app.learn.owner_handoff import (
     heartbeat_owner_event,
 )
 from app.publish.approval import CardChange, publish_cards
-from app.publish.bootstrap import READY, index_status
+from app.publish.bootstrap import READY, EMPTY, index_status
 from app.publish.content import current_manifest
 from app.usage import DbUsageSink
 from app.usage.gemini import UsageStartError
@@ -515,15 +515,15 @@ async def process_next_owner_event(pool, *, store_id: int) -> str | None:
 
 
 async def _index_ready(pool, *, store_id: int, warned: dict[int, str]) -> bool:
-    """활성 공개 색인이 있는 매장만 처리한다.
+    """활성 공개 색인이 있거나 승인 카드가 없는 매장의 사건을 처리한다.
 
-    색인이 없으면 후보 검색이 INDEX_UNAVAILABLE 로 실패해 사건이 실패로 끝난다.
+    승인 지식이 있는데 색인이 없으면 INDEX_UNAVAILABLE 장애로 구분한다.
     사건을 태우지 않고 남겨 둔 채 건너뛰고, 상태가 바뀔 때만 한 번 경고한다.
     준비는 scripts/bootstrap_store_index.py 로 한다.
     """
     async with pool.acquire() as conn:
         status = await index_status(conn, store_id=store_id)
-    if status.status == READY:
+    if status.status in (READY, EMPTY):
         warned.pop(store_id, None)
         return True
     if warned.get(store_id) != status.status:

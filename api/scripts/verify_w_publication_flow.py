@@ -748,17 +748,20 @@ async def verify(pool, admin):
                                               answer=text, expected_revision=0)
             return int(reply["owner_answer_id"])
 
-        # 공개판이 없는 매장: worker 는 사건을 태우지 않고 미룬다
+        # 승인 카드가 없는 매장: worker가 첫 답변을 NEW로 분석할 수 있다.
         pending_first = await owner_event3("before-index", "색인 전 답변")
         async with pool.acquire() as conn:
             before = await index_status(conn, store_id=s3["sid"])
         check("12 store without approved cards is EMPTY", before.status == "EMPTY")
         warned = {}
-        check("12 worker defers store without active index",
-              not await owner_answer_worker._index_ready(pool, store_id=s3["sid"], warned=warned)
-              and warned == {s3["sid"]: "EMPTY"}
+        check("12 worker accepts empty store without active index",
+              await owner_answer_worker._index_ready(pool, store_id=s3["sid"], warned=warned)
+              and warned == {}
               and await admin.fetchval(
                   "select count(*) from outbox_consumptions where store_id=$1", s3["sid"]) == 0)
+        first_status = await process_next_owner_event(pool, store_id=s3["sid"])
+        check("12 first owner answer is processed before any approved card",
+              first_status in ("REVIEW", "PUBLISHED"))
 
         # 승인 → 검색
         e2e = await seed_card(s3, "합성 종단 카드", "종단 카드 원문")
@@ -777,8 +780,8 @@ async def verify(pool, admin):
               and warned == {})
         embeds_before = len(embed_calls)
         status = await process_next_owner_event(pool, store_id=s3["sid"])
-        check("12 answer queued before index is processed after approval",
-              status in ("REVIEW", "LINKED", "PUBLISHED")
+        check("12 first owner answer is not consumed twice after approval",
+              status is None
               and await admin.fetchval(
                   "select count(*) from knowledge_change_proposals where store_id=$1 and answer_id=$2",
                   s3["sid"], pending_first) == 1)

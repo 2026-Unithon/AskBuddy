@@ -12,7 +12,8 @@ from typing import Any
 import asyncpg
 
 from app.config import get_settings
-from app.reg.embeddings import embed_text, vector_literal, recorded_embeddings
+from app.reg.embeddings import embed_text, recorded_embeddings
+from app.reg.owner_candidates import published_owner_candidates
 from app.contracts.usage import UsageContext
 from app.usage import UsageSink
 
@@ -84,6 +85,8 @@ async def retrieve_question(
     usage_sink: UsageSink | None = None,
 ) -> dict[str, Any]:
     """hit/miss 만 판정한다. miss 면 LLM 을 부르지 않는다."""
+    if type(top_k) is not int or not 1 <= top_k <= 100:
+        raise ValueError("candidate limit must be 1..100")
     if (usage_context is None) != (usage_sink is None):
         raise ValueError("검색 계측 context/sink는 함께 필요하다")
     if usage_context is not None and usage_context.store_id != str(store_id):
@@ -112,28 +115,8 @@ async def retrieve_question(
         query_vec = await asyncio.to_thread(embed_text, question)
     # pool 경로는 임베딩 호출이 끝난 뒤 조회 동안만 연결을 빌린다.
     async with (db.acquire() if hasattr(db, "acquire") else nullcontext(db)) as conn:
-        rows = await conn.fetch(
-            """
-            select
-              m.card_id as id,
-              m.content,
-              m.title,
-              c.published_version_id as version_id,
-              coalesce(tc.category_name, '') as category,
-              m.score
-            from match_cards($1, $2::vector, $3) m
-            join knowledge_cards c on c.card_id = m.card_id
-            left join task_categories tc on tc.category_id = c.category_id
-            where c.store_id = $1
-              and c.review_status = 'APPROVED'
-              and c.is_verified = true
-              and c.published_version_id is not null
-            order by m.score desc
-            """,
-            store_id,
-            vector_literal(query_vec),
-            top_k,
-        )
+        rows = await published_owner_candidates(conn, store_id=store_id,
+            query_vector=query_vec, embedding_model=get_settings().embedding_model, top_k=top_k)
 
     settings = get_settings()
     threshold = settings.retrieval_threshold
@@ -155,7 +138,7 @@ async def retrieve_question(
                 "version_id": int(r["version_id"]),
                 "content": r["content"],
                 "title": r["title"] or "",
-                "category": r["category"],
+                "category": r["category_name"],
                 "score": score,
             }
         )

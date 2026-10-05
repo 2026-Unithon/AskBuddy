@@ -96,8 +96,6 @@ class Citation(Contract):
             raise ValueError("인용은 사실이나 원문 구간 중 정확히 하나를 가리킨다")
         if (self.source_id is None) == (self.owner_answer_id is None):
             raise ValueError("인용 출처는 자료나 점주 답변 중 정확히 하나다")
-        if self.owner_answer_id is not None and self.raw_span_id is None:
-            raise ValueError("점주 답변 출처는 승인 원문 구간만 인용한다")
         return self
 
     @property

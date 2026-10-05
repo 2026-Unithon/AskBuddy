@@ -33,7 +33,7 @@ PROBE_TIMEOUT = 8.0
 
 # 진단이 읽거나, 없으면 제품이 바로 깨지는 테이블. 없으면 migration 이 덜 적용된 것이다
 REQUIRED_TABLES = (
-    "users", "stores", "store_members", "invite_codes", "knowledge_cards", "card_embeddings",
+    "users", "stores", "store_members", "invite_codes", "knowledge_cards",
     "ingest_jobs", "pending_questions", "owner_answers", "notification_events",
     "ai_usage_attempts", "knowledge_publications", "r_index_publications", "r_index_documents",
     "source_facts", "source_fact_occurrences", "fact_revisions", "knowledge_entities",
@@ -87,8 +87,6 @@ async def _counts(conn) -> dict[str, Any]:
             "and a.snapshot_id = p.current_snapshot_id"),
         "vector_ext": await conn.fetchval(
             "select count(*) from pg_extension where extname = 'vector'"),
-        "match_cards": await conn.fetchval(
-            "select count(*) from pg_proc where proname = 'match_cards'"),
     }
 
 
@@ -122,10 +120,10 @@ async def _probe_db(s) -> list[dict]:
         await conn.close()
 
     out.append(
-        _check("pgvector", "live", "확장 + match_cards() 준비됨")
-        if data["vector_ext"] and data["match_cards"]
+        _check("pgvector", "live", "공개 블록 색인용 확장 준비됨")
+        if data["vector_ext"]
         else _check("pgvector", "dead",
-                    f"extension={bool(data['vector_ext'])} match_cards={bool(data['match_cards'])}",
+                    f"extension={bool(data['vector_ext'])}",
                     "밀린 migration 을 적용한다 (supabase db push)")
     )
     out.append(

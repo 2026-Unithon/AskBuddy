@@ -84,6 +84,24 @@ async def test_notification_failure_propagates_to_publication(review):
         await handoff.finish_owner_review(conn, **args)
 
 
+@pytest.mark.asyncio
+async def test_legacy_review_uses_publication_evidence_without_fabricating_v2_state(review):
+    conn, proposal, _, evidence, notify, args = review
+    proposal.update(revision_no=None, contract_version='v1')
+    await handoff.finish_owner_review(conn, **args)
+    evidence.assert_awaited_once()
+    notify.assert_not_called()
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v2_missing_revision_cannot_use_legacy_completion(review):
+    conn, proposal, _, _, _, args = review
+    proposal.update(revision_no=None, contract_version='v2')
+    with pytest.raises(ApiError):
+        await handoff.finish_owner_review(conn, **args)
+
+
 @pytest.fixture
 def route(monkeypatch):
     db = MagicMock()

@@ -58,6 +58,7 @@ async def test_index_model_mismatch_fails_closed(monkeypatch):
     db.transaction.return_value.__aenter__ = AsyncMock()
     db.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     db.fetchrow = AsyncMock(return_value=dict(embedding_model='old', index_config_version='r-block-index/v1'))
+    db.fetchval = AsyncMock(return_value=True)
     monkeypatch.setattr('app.reg.owner_candidates.read_current_index', AsyncMock(return_value=(None, 2, 3)))
     with pytest.raises(ApiError) as caught:
         await published_owner_candidates(db, store_id=1, query_vector=[1.0]+[0.0]*1535,

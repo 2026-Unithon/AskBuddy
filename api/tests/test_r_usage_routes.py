@@ -255,8 +255,13 @@ class PoolSearchTest(unittest.IsolatedAsyncioTestCase):
         def embed(question):
             self.assertEqual(pool.active, 0)
             return [0.0]
+        async def search(conn, *, store_id, **kwargs):
+            self.assertEqual(pool.active, 1)
+            pool.stores.append(store_id)
+            return []
         with patch("app.reg.retrieve.embed_text", embed), \
-             patch("app.reg.retrieve.get_settings", return_value=NS(retrieval_threshold=.35)):
+             patch("app.reg.retrieve.published_owner_candidates", search), \
+             patch("app.reg.retrieve.get_settings", return_value=NS(retrieval_threshold=.35, embedding_model='synthetic')):
             result = await retrieve_question(pool, 7, "우유 보관")
         self.assertEqual(result["kind"], "miss")
         self.assertEqual(pool.stores, [7])

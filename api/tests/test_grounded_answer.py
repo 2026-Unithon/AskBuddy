@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from app.learn.answering import (
     GroundedAnswerPayload,
@@ -113,10 +113,10 @@ class GroundedAnswerValidationTest(unittest.IsolatedAsyncioTestCase):
                     }
                 ]
 
-        settings = SimpleNamespace(retrieval_threshold=0.35)
+        settings = SimpleNamespace(retrieval_threshold=0.35, embedding_model='synthetic')
         with (
             patch("app.reg.retrieve.embed_text", return_value=[0.0]),
-            patch("app.reg.retrieve.vector_literal", return_value="[0]"),
+            patch("app.reg.retrieve.published_owner_candidates", AsyncMock(return_value=await FakeDb().fetch())),
             patch("app.reg.retrieve.get_settings", return_value=settings),
         ):
             result = await retrieve_question(FakeDb(), 1, "주차장은 어디예요?")

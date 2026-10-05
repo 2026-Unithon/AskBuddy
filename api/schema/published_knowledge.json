@@ -161,10 +161,32 @@
           }
         },
         "occurrence_id": {
-          "maxLength": 19,
-          "pattern": "^[0-9]+$",
-          "title": "Occurrence Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurrence Id"
+        },
+        "owner_answer_id": {
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Answer Id"
         },
         "source_content_hash": {
           "anyOf": [
@@ -179,16 +201,20 @@
           "title": "Source Content Hash"
         },
         "source_id": {
-          "maxLength": 19,
-          "pattern": "^[0-9]+$",
-          "title": "Source Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 19,
+              "pattern": "^[0-9]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
         }
       },
-      "required": [
-        "occurrence_id",
-        "source_id"
-      ],
       "title": "FactProvenance",
       "type": "object"
     },

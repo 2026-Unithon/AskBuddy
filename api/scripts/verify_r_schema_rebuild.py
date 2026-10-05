@@ -68,6 +68,12 @@ async def main():
             await verify_w_publish(pool, fresh)
             from verify_r_owner_candidates import verify as verify_owner_candidates
             await verify_owner_candidates(pool, fresh)
+            from verify_r_index_retention import verify as verify_index_retention
+            await verify_index_retention(pool, fresh)
+            from verify_r_w3_consumer import verify as verify_w3_consumer
+            await verify_w3_consumer(pool, fresh)
+            from verify_r_legacy_publication import verify as verify_legacy_publication
+            await verify_legacy_publication(pool, fresh)
         finally:
             await pool.close()
     finally:

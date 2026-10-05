@@ -63,7 +63,7 @@ class PrepareIndexRequest(Contract):
     scope: TrustedScope
     idempotency: IdempotencyKey
     # 준비 단위는 공개 요청의 변경 카드 묶음 전체다. 일부만 준비하고 공개하지 않는다
-    card_ids: tuple[EntityId, ...] = Field(min_length=1, max_length=500)
+    card_ids: tuple[EntityId, ...] = Field(max_length=500)
     content_hash: HashRef
     expected_publication_revision: RevisionId
     expected_card_revisions: tuple[RevisionId, ...] = ()
