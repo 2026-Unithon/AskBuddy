@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 async def measured_call(*, settings, model: str, caller: Callable[[], Awaitable[CallResult]],
                         prompt: str, media: list[Path], schema, sink, context,
-                        prompt_hash: str | None, raw_sink, max_output_tokens: int | None) -> CallResult:
+                        prompt_hash: str | None, raw_sink, max_output_tokens: int | None,
+                        thinking_level: str | None = None) -> CallResult:
     """계측을 감싼 호출. context 가 없으면 계측·원래 응답 기록 없이 그대로 부른다.
 
     원래 응답은 **호출이 끝나고 파싱하기 전에** 남긴다 (W1-1). 저장은 짧은 연결로 하고
@@ -31,7 +32,8 @@ async def measured_call(*, settings, model: str, caller: Callable[[], Awaitable[
     if raw_sink is not None and context is not None:
         key = await reuse.key_for(context, s, model=model, mode=s.ingest_mode,
                                   prompt=prompt, media=media, schema=schema,
-                                  max_output_tokens=max_output_tokens)
+                                  max_output_tokens=max_output_tokens,
+                                  thinking_level=thinking_level)
         if reuse.lookup_allowed(context, s):
             hit = await reuse.find(raw_sink, context, key, schema)
             if hit is not None:

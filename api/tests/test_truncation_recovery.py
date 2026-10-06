@@ -40,7 +40,7 @@ def _ctx(stage="EXTRACT"):
 
 def _gemini_settings(**kw):
     return NS(**({"gemini_api_key": "synthetic", "gemini_model": "gemini-synthetic",
-                  "ingest_mode": "real", "extract_temperature": 0.0,
+                  "ingest_mode": "real", "extract_temperature": 0.0, "gemini_request_timeout_sec": 300,
                   "extract_max_output_tokens": 4000, "assemble_max_output_tokens": 6000} | kw))
 
 

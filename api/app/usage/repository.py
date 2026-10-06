@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import time
+
 import asyncpg
 
 from app.contracts.usage import UsageAttempt
@@ -33,6 +35,7 @@ async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
     먼저 남겨야 프로세스가 죽어도 "돈은 나갔는데 기록이 없는" 구멍이 안 생긴다.
     """
     c = attempt.context
+    started = time.monotonic()
     try:
         async with pool.acquire() as conn:
             return int(await conn.fetchval(
@@ -64,7 +67,10 @@ async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
         raise UsageWriteError(
             f"이미 기록된 시도다 (call={c.logical_call_id} attempt={c.attempt_no})")
     except Exception as exc:
-        raise UsageWriteError(f"시작 receipt 저장 실패: {exc}") from exc
+        # 메시지가 빈 예외(TimeoutError 등)도 원인을 가를 수 있게 종류와 걸린 시간을 남긴다
+        raise UsageWriteError(
+            f"시작 receipt 저장 실패: {type(exc).__name__} {exc} "
+            f"({time.monotonic() - started:.1f}s)") from exc
 
 
 async def finalize_attempt(

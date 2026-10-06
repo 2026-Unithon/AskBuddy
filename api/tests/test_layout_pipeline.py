@@ -349,6 +349,7 @@ async def test_residual_row_flags_become_unresolved_and_counted(tmp_path):
     with patch.object(layout.transcribe, "transcribe_table", AsyncMock(return_value=table)), \
          patch.object(layout.recheck, "recheck_rows", AsyncMock(return_value=table)), \
          patch.object(layout.recheck, "resolve_cells", AsyncMock(return_value=None)), \
+         patch.object(layout.groups, "resolve_groups", AsyncMock(return_value=[])), \
          patch.object(layout.expand, "expand_table", AsyncMock(return_value=([], ["[전개 미반영] x"]))):
         _, unresolved, _ = await layout._process_region(region, None, tmp_path, lambda l: None,
                                                         None, [], 9, None, None, stats)

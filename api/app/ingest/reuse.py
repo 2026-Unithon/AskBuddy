@@ -62,7 +62,8 @@ def media_digests(media) -> list[list[str]]:
 
 def reuse_key(*, store_id, source_id, stage: str, model: str, mode: str,
               prompt: str, media_digests: list, schema_version: str | None,
-              temperature, max_output_tokens, pdf_input_mode, video_input_mode) -> str:
+              temperature, max_output_tokens, pdf_input_mode, video_input_mode,
+              thinking_level: str | None = None) -> str:
     """모델 입력 전체의 hash. 같은 입력이면 같은 키, 하나라도 다르면 다른 키."""
     payload = dict(
         store_id=str(store_id), source_id=None if source_id is None else str(source_id),
@@ -72,12 +73,15 @@ def reuse_key(*, store_id, source_id, stage: str, model: str, mode: str,
         temperature=temperature, max_output_tokens=max_output_tokens,
         pdf_input_mode=pdf_input_mode, video_input_mode=video_input_mode,
     )
+    # 사고 수준은 정한 경우에만 넣는다 — 넣지 않은 기존 호출의 키는 바뀌지 않는다
+    if thinking_level is not None:
+        payload["thinking_level"] = thinking_level
     body = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return KEY_PREFIX + hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 async def key_for(context, settings, *, model: str, mode: str, prompt: str, media,
-                  schema, max_output_tokens) -> str | None:
+                  schema, max_output_tokens, thinking_level: str | None = None) -> str | None:
     """호출 문맥에서 키를 만든다. 매장 문맥이 없으면(미리보기) 키도 없다.
 
     큰 첨부(영상)의 hash 는 이벤트 루프를 막지 않게 스레드에서 계산한다.
@@ -97,6 +101,7 @@ async def key_for(context, settings, *, model: str, mode: str, prompt: str, medi
             max_output_tokens=max_output_tokens,
             pdf_input_mode=getattr(settings, "pdf_input_mode", None),
             video_input_mode=getattr(settings, "video_input_mode", None),
+            thinking_level=thinking_level,
         )
     except Exception as exc:
         logger.warning("재사용 키 계산 실패 — 키 없이 추출을 계속한다 type=%s: %s",
