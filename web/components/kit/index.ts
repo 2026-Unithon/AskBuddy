@@ -6,6 +6,7 @@ export { CheckRow } from "@/components/kit/checkbox";
 export { AskBar, Composer, ComposerTool } from "@/components/kit/composer";
 export { HeroCard, HeroClock, HeroProgress } from "@/components/kit/hero";
 export { Icon, type IconName } from "@/components/kit/icon";
+export { NumberedContent } from "@/components/kit/numbered-content";
 export { Caption, PageHeader, Screen, SectionTitle } from "@/components/kit/screen";
 export { Sheet } from "@/components/kit/sheet";
 export { Empty, ErrorInline, RefreshingHint, Skeleton } from "@/components/kit/states";

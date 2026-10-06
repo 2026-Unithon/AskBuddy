@@ -1,390 +1,329 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Card, Input, Select, Textarea, TopBar } from "@/components/ui";
+import { useParams } from "next/navigation";
+import { useState } from "react";
 import {
-  ApiError,
-  moveProductCard,
-  mutateProductCard,
-  updateProductCardDraft,
-} from "@/lib/api";
+  BackButton,
+  Button,
+  ButtonLink,
+  Caption,
+  Chip,
+  Empty,
+  ErrorInline,
+  NumberedContent,
+  Screen,
+  Sheet,
+  Skeleton,
+  Surface,
+  TextButton,
+  focusRing,
+} from "@/components/kit";
+import { ApiError, apiErrorMessage, moveProductCard, mutateProductCard, updateProductCardDraft, type CardDetailDto } from "@/lib/api";
 import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
-import { CardStatusBadge } from "@/components/owner/status-badge";
-import { TaskCardDetail } from "@/components/owner/task-card-detail";
-import { InlineError } from "@/components/owner/inline-error";
-import { SkeletonList } from "@/components/owner/skeleton-list";
+const STATUS: Record<CardDetailDto["review_status"], { label: string; tone: "brand" | "warn" | "neutral" | "danger" }> = {
+  PENDING: { label: "공개 전", tone: "neutral" },
+  NEEDS_REVIEW: { label: "확인이 필요해요", tone: "warn" },
+  APPROVED: { label: "공개 중", tone: "brand" },
+  EXCLUDED: { label: "지운 카드", tone: "danger" },
+};
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(iso).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" });
 }
 
-export default function CardDetailPage() {
+// O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
+// 사실 단위 편집(10-05 결정)은 W3 API 가 생기면 이 화면의 "고치기"에 붙인다.
+export default function OwnerCardPage() {
   const params = useParams<{ cardId: string }>();
-  const router = useRouter();
   const cardId = /^\d+$/.test(params.cardId) ? Number(params.cardId) : 0;
   const { state } = useApp();
-  const queryClient = useQueryClient();
-
+  const client = useQueryClient();
   const detail = useQuery(cardQuery(state.token, state.storeId, cardId));
-  const categories = useQuery(productCategoriesQuery(state.token, state.storeId));
-
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ title: "", content: "" });
+  const [form, setForm] = useState({ title: "", content: "" });
+  const [confirmExclude, setConfirmExclude] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
 
-  function refreshRelated() {
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.card(state.storeId, cardId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: queryKeys.card(state.storeId, cardId) }),
+      client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
     ]);
-  }
-
-  const saveDraft = useMutation({
-    mutationFn: () => {
-      const version = detail.data?.draft?.version_id;
-      if (!version) throw new Error("저장할 초안 버전을 찾지 못했어요.");
-      return updateProductCardDraft(cardId, draft.title, draft.content, version, state.token!);
-    },
-    onSuccess: () => {
-      setEditing(false);
-      refreshRelated();
-    },
-    onError: async (error) => {
-      if (error instanceof ApiError && error.status === 409) await detail.refetch();
-    },
-  });
-
-  const statusMutation = useMutation({
-    mutationFn: (action: "approve" | "exclude" | "restore") =>
-      mutateProductCard(cardId, action, state.token!),
-    onSuccess: refreshRelated,
-    onError: async (error) => {
-      if (error instanceof ApiError && error.status === 409) await detail.refetch();
-    },
-  });
-
-  const moveCategory = useMutation({
-    mutationFn: (categoryId: number) =>
-      moveProductCard(cardId, categoryId, detail.data!.updated_at, state.token!),
-    onSuccess: refreshRelated,
-    onError: async (error) => {
-      if (error instanceof ApiError && error.status === 409) await detail.refetch();
-    },
-  });
+  const onConflict = async (error: unknown) => {
+    if (error instanceof ApiError && error.status === 409) await detail.refetch();
+  };
 
   const card = detail.data;
-  const title = card?.draft?.title ?? card?.published?.title ?? "";
-  const content = card?.draft?.content ?? card?.published?.content ?? "";
-  const hasUnpublishedDraft = Boolean(
-    card?.draft && card.draft.version_id !== card.published?.version_id
-  );
+  const saveDraft = useMutation({
+    mutationFn: () => {
+      const version = card?.draft?.version_id ?? card?.published?.version_id;
+      if (!version) throw new Error("고칠 버전을 찾지 못했어요.");
+      return updateProductCardDraft(cardId, form.title, form.content, version, state.token!);
+    },
+    onSuccess: async () => {
+      setEditing(false);
+      await refresh();
+    },
+    onError: onConflict,
+  });
+  const status = useMutation({
+    mutationFn: (action: "approve" | "exclude" | "restore") => mutateProductCard(cardId, action, state.token!),
+    onSuccess: async () => {
+      setConfirmExclude(false);
+      await refresh();
+    },
+    onError: onConflict,
+  });
 
-  const requestError = detail.error ?? saveDraft.error ?? statusMutation.error ?? moveCategory.error;
-  const errorMessage =
-    requestError instanceof ApiError
-      ? requestError.detail || "요청을 처리하지 못했어요."
-      : requestError
-      ? "서버에 연결할 수 없습니다."
-      : null;
+  if (!cardId) {
+    return (
+      <Screen>
+        <BackButton href="/owner/cards" label="카드" />
+        <Empty title="잘못된 카드 주소예요" action={<ButtonLink href="/owner/cards">카드 목록으로</ButtonLink>} />
+      </Screen>
+    );
+  }
+  if (detail.isLoading) {
+    return (
+      <Screen>
+        <BackButton href="/owner/cards" label="카드" />
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-40" />
+      </Screen>
+    );
+  }
+  if (detail.error || !card) {
+    const missing = detail.error instanceof ApiError && [403, 404].includes(detail.error.status);
+    return (
+      <Screen>
+        <BackButton href="/owner/cards" label="카드" />
+        {missing ? (
+          <Empty title="이 카드를 볼 수 없어요" description="다른 매장의 카드이거나 없는 카드예요." action={<ButtonLink href="/owner/cards">카드 목록으로</ButtonLink>} />
+        ) : (
+          <ErrorInline message={apiErrorMessage(detail.error, "카드를 불러오지 못했어요.")} onRetry={() => void detail.refetch()} retrying={detail.isRefetching} />
+        )}
+      </Screen>
+    );
+  }
+
+  const shown = card.draft ?? card.published;
+  const title = shown?.title ?? "";
+  const content = shown?.content ?? "";
+  const unpublishedDraft = Boolean(card.draft && card.published && card.draft.version_id !== card.published.version_id);
+  const excluded = card.review_status === "EXCLUDED";
+  const canPublish = card.review_status === "PENDING" || card.review_status === "NEEDS_REVIEW" || unpublishedDraft;
+  const sourceDeleted = card.source?.source_availability === "DELETED";
+  const statusView = STATUS[card.review_status];
+  const actionError = status.error;
+
+  const startEdit = () => {
+    setForm({ title, content });
+    setEditing(true);
+    saveDraft.reset();
+  };
+
+  if (editing) {
+    return (
+      <Screen
+        footer={
+          <>
+            {saveDraft.error && (
+              <ErrorInline
+                message={
+                  saveDraft.error instanceof ApiError && saveDraft.error.status === 409
+                    ? "그사이 카드가 바뀌었어요. 최신 내용을 확인한 뒤 다시 저장해 주세요. 입력 내용은 그대로 두었어요."
+                    : apiErrorMessage(saveDraft.error, "이 변경은 저장되지 않았어요. 입력 내용은 그대로 두었어요.")
+                }
+              />
+            )}
+            <Button loading={saveDraft.isPending} disabled={!form.title.trim() || !form.content.trim()} onClick={() => saveDraft.mutate()}>
+              고친 내용 저장
+            </Button>
+            <Button variant="secondary" disabled={saveDraft.isPending} onClick={() => setEditing(false)}>
+              그만두기
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink">고치기</p>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[13px] font-medium text-ink-muted">제목</span>
+          <input
+            value={form.title}
+            onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
+            className={`min-h-12 rounded-[16px] bg-surface px-4 text-[16px] text-ink shadow-card ${focusRing}`}
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1.5">
+          <span className="text-[13px] font-medium text-ink-muted">내용 · 한 줄에 하나씩</span>
+          <textarea
+            value={form.content}
+            onChange={(event) => setForm((prev) => ({ ...prev, content: event.target.value }))}
+            rows={8}
+            className={`min-h-48 rounded-[16px] bg-surface p-4 text-[16px] leading-[1.6] text-ink shadow-card ${focusRing}`}
+          />
+        </label>
+        <Caption>저장하면 고친 내용은 공개 전 상태로 남아요. 공개하기를 눌러야 직원에게 보여요.</Caption>
+      </Screen>
+    );
+  }
 
   return (
-    <div className="flex-1 flex flex-col w-full bg-background min-h-dvh relative">
-      {/* 상단 TopBar */}
-      <TopBar title="카드 상세" backHref="/owner/cards" />
-
-      {/* 메인 스크롤 영역 (하단 엄지 CTA 바 고려 pb-36) */}
-      <main className="flex-1 space-y-4 overflow-y-auto px-4 py-3 pb-36">
-        {/* 오류 알림 */}
-        {errorMessage && (
-          <InlineError
-            message={errorMessage}
-            isRetrying={detail.isFetching}
-            onRetry={() => void detail.refetch()}
-          />
-        )}
-
-        {/* 로딩 스켈레톤 */}
-        {detail.isLoading && (
-          <div className="space-y-4 pt-1">
-            <SkeletonList count={3} heightClass="h-28" label="카드 상세 불러오는 중" />
-          </div>
-        )}
-
-        {/* 카드 상세 본문 */}
-        {card && (
-          <>
-            {/* 상태 및 메타 배지 */}
-            <div className="flex items-center justify-between gap-2 flex-wrap px-1">
-              <div className="flex items-center gap-1.5">
-                <CardStatusBadge status={card.review_status} />
-                <Badge tone="neutral">
-                  {card.assignment_type === "MANUAL" ? "수동 분류" : "자동 분류"}
-                </Badge>
-              </div>
-              <span className="text-xs text-muted">
-                최종 수정: {formatDate(card.updated_at)}
-              </span>
-            </div>
-
-            {/* card_type 계약 도입 전에는 추측하지 않고 일반 업무 카드로 표시한다. */}
-            {editing ? (
-              <Card className="p-4 space-y-3.5 border-brand-500 bg-surface shadow-xs">
-                <div className="space-y-1">
-                  <label htmlFor="card-title-input" className="text-xs font-bold text-foreground">
-                    카드 제목
-                  </label>
-                  <Input
-                    id="card-title-input"
-                    value={draft.title}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
-                    aria-label="카드 제목"
-                    className="font-bold"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label htmlFor="card-content-input" className="text-xs font-bold text-foreground">
-                    카드 내용
-                  </label>
-                  <Textarea
-                    id="card-content-input"
-                    value={draft.content}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
-                    rows={9}
-                    aria-label="카드 내용"
-                    className="bg-background font-normal"
-                  />
-                </div>
-
-                <p className="text-sm text-muted leading-relaxed">
-                  초안을 저장해도 직원에게 즉시 공개되지 않습니다. 하단 &apos;공개&apos; 버튼을 눌러야 직원의 로드맵과 채팅에 반영됩니다.
-                </p>
-
-                <div className="flex gap-2 pt-1">
-                  <Button
-                    size="md"
-                    variant="primary"
-                    loading={saveDraft.isPending}
-                    loadingLabel="초안 저장 중"
-                    disabled={!draft.title.trim() || !draft.content.trim()}
-                    onClick={() => saveDraft.mutate()}
-                    className="flex-1 min-h-[44px] text-xs font-bold"
-                  >
-                    초안 저장
-                  </Button>
-                  <Button
-                    size="md"
-                    variant="secondary"
-                    disabled={saveDraft.isPending}
-                    onClick={() => setEditing(false)}
-                    className="min-h-[44px] text-xs font-bold"
-                  >
-                    취소
-                  </Button>
-                </div>
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                <TaskCardDetail
-                  title={title}
-                  content={content}
-                  categoryName={card.category?.name}
-                />
-
-                {/* 미공개 초안 안내 */}
-                {hasUnpublishedDraft && card.published && (
-                  <div className="rounded-xl border border-accent-500/40 bg-accent-50/60 p-3 text-xs text-accent-900 leading-relaxed font-medium">
-                    ⚠️ 수정한 초안이 아직 공개되지 않았습니다. 직원은 이전 공개본(#{card.published.version_no})을 보고 있습니다.
-                  </div>
-                )}
-
-                {/* 수정 버튼 */}
-                {card.review_status !== "EXCLUDED" && card.draft && (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    className="w-full min-h-[44px] text-xs font-bold active:scale-98"
-                    onClick={() => {
-                      setDraft({ title, content });
-                      setEditing(true);
-                    }}
-                  >
-                    ✏️ 카드 내용 수정하기
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* 카테고리 변경 섹션 */}
-            <Card className="p-4 space-y-2.5 border-border bg-surface shadow-2xs">
-              <label htmlFor="card-category-select" className="text-xs font-bold text-foreground">
-                업무 카테고리 이동
-              </label>
-              <Select
-                id="card-category-select"
-                value={card.category?.category_id ?? ""}
-                disabled={moveCategory.isPending || card.review_status === "EXCLUDED"}
-                onChange={(e) => moveCategory.mutate(Number(e.target.value))}
-                aria-busy={moveCategory.isPending || undefined}
-                className="w-full bg-background"
-              >
-                <option value="" disabled>
-                  카테고리 선택
-                </option>
-                {categories.data?.items.map((cat) => (
-                  <option key={cat.category_id} value={cat.category_id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-sm text-muted">
-                직접 이동하면 수동 분류로 기록되어 AI 자동 재분류가 덮어쓰지 않습니다.
-              </p>
-            </Card>
-
-            {/* 근거 원본 섹션 */}
-            <section className="space-y-2.5 pt-1" aria-labelledby="evidence-heading">
-              <h2 id="evidence-heading" className="text-xs font-bold text-brand-700 uppercase tracking-wider px-1">
-                연결된 근거 원본 ({card.evidence.length}건)
-              </h2>
-              {card.evidence.length === 0 ? (
-                <Card className="p-4 text-center text-xs text-muted">
-                  연결된 근거 자료가 없습니다.
-                </Card>
-              ) : (
-                card.evidence.map((evidence) => (
-                  <Card key={evidence.evidence_id} className="p-3.5 space-y-2 border-border text-xs bg-surface shadow-2xs">
-                    <strong className="font-semibold text-foreground block truncate">
-                      📎 {evidence.source.title ?? `자료 #${evidence.source.source_id}`}
-                    </strong>
-                    {evidence.source.source_availability === "DELETED" && (
-                      <p className="text-xs font-bold text-muted" data-testid="broken-citation">
-                        인용 끊김 · 원본 자료가 삭제됐어요
-                      </p>
-                    )}
-                    {evidence.excerpt && (
-                      <blockquote className="border-l-2 border-brand-500 bg-brand-50/40 p-2 rounded-r text-sm leading-relaxed text-foreground/85 italic">
-                        &ldquo;{evidence.excerpt}&rdquo;
-                      </blockquote>
-                    )}
-                    {evidence.source.read_url && (
-                      <a
-                        href={evidence.source.read_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-h-[44px] items-center text-xs font-bold text-brand-600 hover:text-brand-700"
-                      >
-                        원본 파일 열기 ↗
-                      </a>
-                    )}
-                  </Card>
-                ))
-              )}
-            </section>
-
-            {/* 변경 이력 섹션 */}
-            <section className="space-y-2 pt-1" aria-labelledby="history-heading">
-              <h2 id="history-heading" className="text-xs font-bold text-muted uppercase tracking-wider px-1">
-                변경 이력 ({card.events.length}건)
-              </h2>
-              {card.events.length === 0 ? (
-                <Card className="p-3 text-center text-xs text-muted">
-                  아직 변경 기록이 없습니다.
-                </Card>
-              ) : (
-                <div className="space-y-1.5">
-                  {card.events.map((event) => (
-                    <Card key={event.event_id} className="p-2.5 text-xs flex items-center justify-between border-border">
-                      <span className="font-semibold text-foreground">{event.action}</span>
-                      <span className="text-xs text-muted">{formatDate(event.created_at)}</span>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
-        {/* 유효하지 않은 cardId */}
-        {!cardId && (
-          <Card className="p-6 text-center space-y-3">
-            <p className="text-xs font-bold text-danger-600">유효하지 않은 카드 링크입니다.</p>
-            <Button size="md" onClick={() => router.replace("/owner/cards")}>
-              카드 목록으로 돌아가기
+    <Screen
+      footer={
+        <>
+          {actionError && status.variables !== "exclude" && (
+            <ErrorInline
+              message={apiErrorMessage(actionError, "이 변경은 저장되지 않았어요.")}
+              onRetry={() => status.variables && status.mutate(status.variables)}
+              retrying={status.isPending}
+            />
+          )}
+          {excluded ? (
+            <Button loading={status.isPending} onClick={() => status.mutate("restore")}>
+              다시 살리기
             </Button>
-          </Card>
-        )}
-      </main>
-
-      {/* 하단 엄지 영역 고정 액션 바 (Bottom Fixed Action Bar) */}
-      {card && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 mx-auto w-full max-w-[480px] border-t border-border bg-surface/95 backdrop-blur-md px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
-          <div className="flex gap-2">
-            {card.review_status !== "EXCLUDED" && (
-              <>
-                {(card.review_status !== "APPROVED" || hasUnpublishedDraft) && (
-                  <Button
-                    size="lg"
-                    variant="primary"
-                    loading={statusMutation.isPending && statusMutation.variables === "approve"}
-                    loadingLabel="공개 처리 중"
-                    disabled={statusMutation.isPending}
-                    onClick={() => statusMutation.mutate("approve")}
-                    className="flex-1 min-h-[50px] text-xs font-bold shadow-xs active:scale-[0.98]"
-                  >
-                    {card.review_status === "APPROVED"
-                      ? "수정본 직원 공개"
-                      : "직원에게 공개하기"}
-                  </Button>
-                )}
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  loading={statusMutation.isPending && statusMutation.variables === "exclude"}
-                  loadingLabel="제외 중"
-                  disabled={statusMutation.isPending}
-                  onClick={() => {
-                    if (window.confirm("이 카드를 직원 화면과 검색에서 제외할까요? 나중에 다시 복원할 수 있습니다.")) {
-                      statusMutation.mutate("exclude");
-                    }
-                  }}
-                  className={`min-h-[50px] text-xs font-bold active:scale-[0.98] ${
-                    card.review_status === "APPROVED" && !hasUnpublishedDraft ? "w-full" : "px-5"
-                  }`}
-                >
-                  제외
+          ) : (
+            <>
+              {canPublish && (
+                <Button loading={status.isPending && status.variables === "approve"} onClick={() => status.mutate("approve")}>
+                  공개하기
                 </Button>
-              </>
-            )}
-
-            {card.review_status === "EXCLUDED" && (
-              <Button
-                size="lg"
-                variant="primary"
-                loading={statusMutation.isPending && statusMutation.variables === "restore"}
-                loadingLabel="복원 중"
-                disabled={statusMutation.isPending}
-                onClick={() => statusMutation.mutate("restore")}
-                className="w-full min-h-[50px] text-xs font-bold shadow-xs active:scale-[0.98]"
-              >
-                카드를 다시 복원하기
+              )}
+              <Button variant={canPublish ? "secondary" : "primary"} onClick={startEdit}>
+                고치기
               </Button>
-            )}
-          </div>
-        </div>
+              <Button variant="secondary" onClick={() => setConfirmExclude(true)}>
+                지우기
+              </Button>
+            </>
+          )}
+        </>
+      }
+    >
+      <BackButton href="/owner/cards" label="카드" />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setMoving(true)}
+          disabled={excluded}
+          aria-label={`카테고리 ${card.category?.name ?? "기타"} · 옮기기`}
+          className={`min-h-8 text-[13px] font-bold text-primary underline-offset-2 hover:underline ${focusRing}`}
+        >
+          {card.category?.name ?? "기타"}
+        </button>
+        <Chip size="sm" tone={statusView.tone}>{statusView.label}</Chip>
+        {unpublishedDraft && <Chip size="sm" tone="warn">고친 내용 공개 전</Chip>}
+      </div>
+      <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{title}</h1>
+      {card.review_status === "NEEDS_REVIEW" && card.needs_review_reason && (
+        <p className="rounded-[14px] bg-warn-50 px-3.5 py-2.5 text-[13px] leading-[1.45] text-warn-700">{card.needs_review_reason}</p>
       )}
-    </div>
+      <Surface className="px-[18px] py-4">
+        <NumberedContent content={content} />
+      </Surface>
+      {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용이 보여요 · {card.published.title}</Caption>}
+      <Caption>
+        출처 · {card.source?.title ?? "알 수 없음"}
+        {card.published ? ` · ${formatDate(card.published.created_at)}` : ""}
+        {sourceDeleted ? " · 인용 끊김" : ""}
+      </Caption>
+      {card.evidence.length > 0 && (
+        <TextButton onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}>
+          {showEvidence ? "근거 접기" : `근거 보기 · ${card.evidence.length}`}
+        </TextButton>
+      )}
+      {showEvidence && (
+        <ul className="flex flex-col gap-2">
+          {card.evidence.map((item) => (
+            <li key={item.evidence_id} className="rounded-[14px] bg-surface px-3.5 py-2.5 text-[13px] leading-[1.45] text-ink shadow-card">
+              <p className="whitespace-pre-wrap">{item.excerpt ?? "원문 위치만 남아 있어요"}</p>
+              <p className="mt-1 text-[12px] text-ink-muted">
+                {item.source.title ?? "자료"}
+                {item.source.source_availability === "DELETED" ? " · 인용 끊김 (원본이 지워졌어요)" : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Sheet
+        open={confirmExclude}
+        onClose={() => setConfirmExclude(false)}
+        title="이 카드를 지울까요?"
+        description="직원에게 더는 보이지 않고 버디도 이 카드로 답하지 않아요. 나중에 다시 살릴 수 있어요."
+      >
+        {status.error !== null && status.variables === "exclude" && <ErrorInline message={apiErrorMessage(status.error, "지우지 못했어요.")} />}
+        <Button variant="danger" loading={status.isPending} onClick={() => status.mutate("exclude")}>
+          지우기
+        </Button>
+        <Button variant="secondary" onClick={() => setConfirmExclude(false)}>
+          그대로 두기
+        </Button>
+      </Sheet>
+      <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
+    </Screen>
+  );
+}
+
+function MoveCategorySheet({
+  open,
+  onClose,
+  card,
+  onMoved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  card: CardDetailDto;
+  onMoved: () => Promise<unknown>;
+}) {
+  const { state } = useApp();
+  const categories = useQuery({ ...productCategoriesQuery(state.token, state.storeId), enabled: open && Boolean(state.token && state.storeId) });
+  const move = useMutation({
+    mutationFn: (categoryId: number) => moveProductCard(card.card_id, categoryId, card.updated_at, state.token!),
+    onSuccess: async () => {
+      await onMoved();
+      onClose();
+    },
+  });
+  return (
+    <Sheet open={open} onClose={onClose} title="어디로 옮길까요?" description="옮겨도 공개 상태와 직원 학습 기록은 그대로예요.">
+      {categories.isLoading && <Skeleton className="h-32" />}
+      {categories.error && <ErrorInline message="카테고리를 불러오지 못했어요." onRetry={() => void categories.refetch()} />}
+      {move.error && (
+        <ErrorInline
+          message={
+            move.error instanceof ApiError && move.error.status === 409
+              ? "그사이 카드가 바뀌었어요. 닫고 다시 시도해 주세요."
+              : apiErrorMessage(move.error, "옮기지 못했어요.")
+          }
+        />
+      )}
+      <ul className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto">
+        {categories.data?.items.map((category) => {
+          const current = category.category_id === card.category?.category_id;
+          return (
+            <li key={category.category_id}>
+              <button
+                type="button"
+                disabled={current || move.isPending}
+                onClick={() => move.mutate(category.category_id)}
+                className={`flex min-h-12 w-full items-center justify-between rounded-[14px] bg-surface px-4 text-left text-[15px] text-ink disabled:opacity-60 ${focusRing}`}
+              >
+                {category.name}
+                {current && <Chip size="sm">지금 여기</Chip>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </Sheet>
   );
 }

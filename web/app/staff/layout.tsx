@@ -14,10 +14,8 @@ export default function StaffLayout({ children }: { children: ReactNode }) {
     return <AuthGateState state={auth.state} onRetry={auth.retry} />;
   }
 
-  const showBottomNav =
-    pathname === "/staff/roadmap" ||
-    pathname === "/staff/chat" || pathname === "/staff/chat/v2" ||
-    pathname === "/staff/faqs";
+  // 리브랜딩 화면(/staff/recipes 등)은 자기 TabBar 를 그린다. 옛 하단 탭은 아직 옮기지 않은 화면에만.
+  const showBottomNav = pathname === "/staff/chat" || pathname === "/staff/faqs";
 
   return (
     <div className="app-page text-foreground">

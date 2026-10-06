@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
+2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 진행: P0~P4 완료(합성 API 브라우저 검사 통과), 다음 P5. 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
 
 **Goal:** Figma `AskBuddy — 리브랜딩 · MVP 화면` 의 `4-1 확정 · 모바일 (390)` 페이지를 `web/` 에 구현한다. Figma에 없는 MVP 계약 상태(검수·인용·CLARIFY/ESCALATE·오류·합류 승인 등)는 같은 시각 언어로 추가 화면을 만들어 채운다. 근무조 체크리스트는 백엔드까지 이 브랜치에서 만든다.
 
@@ -50,11 +50,11 @@
 
 | Figma | node | 대응 MVP 화면 | 현재 라우트 | 새 라우트 |
 |---|---|---|---|---|
-| O1 시작·로그인 | 18:2 | A01 | `/owner/auth`, `/staff/auth`, `/role` | `/login` |
-| O2 매장 이름 | 18:13 | A02 | `/owner/intent`, `/owner/category` | `/owner/setup` |
+| O1 시작·로그인 | 18:2 | A01 | `/owner/auth`, `/staff/auth`, `/role` | `/owner/auth` (가드·서버 목적지 호환으로 주소 유지, 이메일만) |
+| O2 매장 이름 | 18:13 | A02 | `/owner/intent`, `/owner/category` | `/owner/intent` (같은 이유로 주소 유지) |
 | O3 아무거나 넣기 | 18:21 | O01 | `/owner/upload` | `/owner/add` |
 | O4 알아서 정리됐어요 | 18:39 | O04 | `/owner/preview`, `/owner/cards/review` | `/owner/jobs/[jobId]` |
-| O5 알바 초대 | 18:55 | O08 일부 | `/owner/complete` | `/owner/invite` |
+| O5 알바 초대 | 18:55 | O08 일부 | `/owner/complete` | `/owner/invite` (링크·QR 은 U7, 지금은 초대 코드) |
 | O6 오늘 매장·영업 중 / O6-2 마감 후 | 18:66 / 41:2 | O03 + 체크 현황 | `/owner/questions/v2`, `/owner/dashboard` | `/owner` |
 | O7 답하기 | 18:93 | O03 답변 | `/owner/questions/v2` 안 | `/owner/questions/[pendingId]` |
 | O8 카드로 남았어요 | 18:110 | 답변 반영 결과 | 없음 | 같은 라우트의 결과 상태 |
@@ -65,7 +65,7 @@
 | A2 오늘 할 일 | 19:10 | 신규(체크리스트) | 없음 | `/staff` |
 | A3 처음 체크·가입 | 19:40 | A03 가입 | `/staff/auth` | **U3에 따라 재해석**: `/join/[token]` 의 가입 시트 |
 | A4 다 했어요 | 19:50 | 신규(체크리스트) | 없음 | `/staff` 완료 상태 |
-| A5 물어보기 / A6 답 도착 | 19:58 / 19:82 | S03 | `/staff/chat/v2` | `/staff/chat` |
+| A5 물어보기 / A6 답 도착 | 19:58 / 19:82 | S03 | `/staff/chat/v2` | `/staff/ask` (`/staff/chat` 은 옛 v1 이력 화면이라 남김) |
 | A7 레시피 / A8 레시피 보기 | 25:53 / 25:90 | S01 / S02 | `/staff/roadmap`, `/staff/items/[itemId]` | `/staff/recipes`, `/staff/recipes/[itemId]` |
 
 옛 라우트는 지우지 않고 새 라우트로 `redirect` 한다. 이미 저장된 `notification_events.destination` 과 Push 딥링크가 옛 경로를 가리키기 때문이다.
@@ -245,6 +245,11 @@ api/tests/test_checklist_*.py       P5
 - 서버 `VOICE` 허용 형식: `mp3·m4a·wav` (`api/app/ingest/capabilities.py`) → Chrome 녹음은 그대로 못 올린다
 - 선택지: (a) 서버가 webm/ogg 를 받아 ffmpeg 로 변환 (b) 프론트가 Web Audio 로 wav 인코딩(파일이 커짐)
 - 결정 전까지 O3·O6 입력창과 직원 질문창의 말하기 버튼은 숨긴다
+
+### F4. 할 일 목록 추출 — W
+
+- 지금 추출·평가는 레시피 위주다. 체크리스트용 할 일 목록은 한 줄에 한 일·순서 보존·여러 일 합치지 않음이 중요하고, Figma O4 처럼 "레시피 / 오늘 할 일" 분류와 근무조 제안도 W 범위다
+- 상세는 [UI_REBRAND_P5_CHECKLIST.md](UI_REBRAND_P5_CHECKLIST.md) §10
 
 ### F3. 점주 답변 첨부 (O7 말하기·찍기·파일) — 계약·백엔드 없음
 
