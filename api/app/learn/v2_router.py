@@ -28,6 +28,7 @@ from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION
 from app.learn.question_contexts import load_context,accept_selection
+from app.learn.dialogue_history import load_history,retrieval_question
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
@@ -405,6 +406,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             member_id=member_id, user_id=user_id)
                     for requery in range(2):
                         usage=None
+                        history=None
                         async with pool.acquire() as conn:
                             async with conn.transaction():
                                 context=None
@@ -412,6 +414,11 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
+                                if (getattr(settings,'r_general_semantics_enabled',False)
+                                        and req.policy_receipt_id is None and choice is None
+                                        and not policy_action(req.question)):
+                                    history=await load_history(conn,store_id=store_id,member_id=member_id,
+                                        session_id=int(req.session_id))
                                 if choice:
                                     stored=await load_context(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),context_id=choice.context_id)
@@ -424,6 +431,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if context:
                             slots=context.context.confirmed_slots
                             question=context.context.original_question+" "+req.question
+                        user_turns=((context.context.original_question,req.question) if context else
+                                    history.user_turns if history is not None else ())
+                        search_question=retrieval_question(question,history) if history is not None else question
                         if not snapshot.cards or req.policy_receipt_id is not None or policy_action(question):
                             search=SearchResult(snapshot,index_revision,(),question)
                         else:
@@ -434,20 +444,20 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 operation_id=digest(dict(member_id=member_id,request_id=req.request_id)),
                                 logical_call_id="v2:"+digest(dict(member_id=member_id,request_id=req.request_id))[7:]+f":q{requery}")
                             try:
-                                vectors=await asyncio.wait_for(recorded_embeddings([question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
+                                vectors=await asyncio.wait_for(recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
                                     timeout=min(settings.search_deadline_seconds,remaining))
                             except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:
                                 raise ApiError(503,"USAGE_UNAVAILABLE","검색 계측을 시작하지 못했습니다.",retryable=True) from exc
                             except Exception as exc:
                                 raise ApiError(503,"MODEL_UNAVAILABLE","질문 검색을 완료하지 못했습니다.",retryable=True) from exc
-                            search=await hybrid_search(pool,store_id=store_id,question=question,query_vector=vectors[0])
+                            search=await hybrid_search(pool,store_id=store_id,question=search_question,query_vector=vectors[0])
                             if getattr(settings,'r_reranker_enabled',False):
                                 remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,
                                     settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))
                                 rank_context=usage.model_copy(update=dict(stage='RERANK',logical_call_id=usage.logical_call_id+':rank'))
                                 try:
-                                    search=await rerank(search,store_id=store_id,question=question,context=rank_context,
+                                    search=await rerank(search,store_id=store_id,question=search_question,context=rank_context,
                                         sink=request_usage_sink(pool,store_id=store_id),timeout=remaining)
                                 except UsageWriteError as exc:
                                     raise ApiError(503,'USAGE_UNAVAILABLE','재정렬 계측을 시작하지 못했습니다.',retryable=True) from exc
@@ -471,12 +481,12 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         general_audit=None
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
-                                store_id=store_id,question=question,user_turns=(context.context.original_question,req.question) if context else (),
+                                store_id=store_id,question=question,user_turns=user_turns,
                                 baseline=decision,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
                                     settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))),
-                                context_verified=context is not None,context_id=choice.context_id if choice else None,
+                                context_verified=context is not None or history is not None,context_id=choice.context_id if choice else None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
@@ -492,7 +502,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 resolved=decision.resolved,confirmed_slots=decision.confirmed_slots,
                                 semantic_context=decision.semantic_context,choice=choice,
                                 policy_receipt_id=req.policy_receipt_id,
+                                history_head=history.head if history is not None else None,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
+                                    dialogue_receipt_ids=history.receipt_ids if history is not None else (),
                                     semantic_approval_id=semantic_approval,
                                     general_semantics=general_audit,
                                     semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,

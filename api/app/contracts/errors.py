@@ -24,6 +24,7 @@ ErrorCode = Literal[
     "STALE_DRAFT",
     "STALE_PUBLICATION",
     "STALE_KNOWLEDGE",
+    "STALE_DIALOGUE",
     "HASH_MISMATCH",
     "INDEX_PREPARE_FAILED",
     "INDEX_PREPARE_TIMEOUT",
@@ -51,6 +52,7 @@ ERROR_TABLE: dict[str, tuple[int, bool]] = {
     "STALE_DRAFT": (409, True),
     "STALE_PUBLICATION": (409, True),
     "STALE_KNOWLEDGE": (409, True),
+    "STALE_DIALOGUE": (409, True),
     # 내용과 hash 가 다르다. 같은 요청을 되보내도 같은 결과다
     "HASH_MISMATCH": (409, False),
     "INDEX_PREPARE_FAILED": (503, False),
