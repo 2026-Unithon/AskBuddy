@@ -95,8 +95,12 @@ async def process_source(
         if previous and previous['phase'] == 'COMMITTED':
             retry_segments = previous['outcome']['failed_segment_ids']
             expected_segments_total = previous['outcome']['segments_total']
+        # LAYOUT 모드의 구역 ID 는 구역 지도 응답이 재사용될 때만 같은 영역을 가리킨다(계획 편차 4)
+        layout_retry_ok = (src["source_type"] == "SCAN"
+                           and getattr(get_settings(), "scan_extract_mode", "SINGLE") == "LAYOUT"
+                           and bool(getattr(get_settings(), "extract_reuse_enabled", False)))
         if ((previous and previous['layout_hash'] != fingerprint)
-                or (retry_segments is not None and (
+                or (retry_segments is not None and not layout_retry_ok and (
                     not previous or not _same_layout(segments, retry_segments, expected_segments_total)))):
             # 구간 번호가 지난 실행과 같은 내용을 가리킨다고 믿을 수 없다. 다시 뽑으면
             # 이미 만든 카드와 겹치거나 엉뚱한 구간을 채운다. 잃은 구간은 그대로 두고,
@@ -161,12 +165,25 @@ async def process_source(
                 {})
             ledger_ids = previous['ledger_ids']
         else:
-            outcome = await _extract_facts_all(
-                source_id=source_id, source_type=src["source_type"], text=text, media=media,
-                glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
-                raw_sink=raw_sink, checkpoint=_checkpoint,
-                only_segments=set(retry_segments) if retry_segments is not None else None,
-            )
+            # SCAN·LAYOUT 은 구역 기반 다단계 추출로 간다. mock 은 원본이 없어(media 빈 목록)
+            # 오케스트레이터가 빈 쪽으로 돈다. 그 밖의 경로는 이전과 같다
+            layout_mode = (src["source_type"] == "SCAN"
+                           and getattr(get_settings(), "scan_extract_mode", "SINGLE") == "LAYOUT")
+            if layout_mode:
+                from app.ingest.layout import run_layout_extraction
+                outcome = await run_layout_extraction(
+                    source_id=source_id, path=media[0] if media else None,
+                    workdir=storage.workdir(source_id) / "layout", glossary=glossary,
+                    usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink,
+                    checkpoint=_checkpoint,
+                    only_segments=set(retry_segments) if retry_segments is not None else None)
+            else:
+                outcome = await _extract_facts_all(
+                    source_id=source_id, source_type=src["source_type"], text=text, media=media,
+                    glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
+                    raw_sink=raw_sink, checkpoint=_checkpoint,
+                    only_segments=set(retry_segments) if retry_segments is not None else None,
+                )
             if recovery_enabled:
                 pending = dict(version=1, phase='EXTRACTED', layout_hash=fingerprint,
                     outcome=dict(assertions=[a.model_dump(mode='json') for a in outcome.assertions],
@@ -504,6 +521,15 @@ async def _preprocess_scan(
         raise RuntimeError("source_scan 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
     path = await _download(pool, store_id, src)
+
+    from app.config import get_settings as _gs
+    if getattr(_gs(), "scan_extract_mode", "SINGLE") == "LAYOUT":
+        # 구역 경로는 원본 파일만 받는다. 텍스트 레이어·HYBRID 판단은 하지 않는다
+        pages = document.pdf_page_count(path) if path.suffix.lower() == ".pdf" else 1
+        async with pool.acquire() as conn:
+            await repo.update_scan_result(conn, source_id, page_count=pages,
+                                          ocr_text=None, ocr_engine="layout")
+        return "", [path], []
 
     if path.suffix.lower() == ".pdf":
         from app.config import get_settings
@@ -866,6 +892,28 @@ async def _record_segment_failures(
     )
 
 
+def _is_layout_fact(a) -> bool:
+    return bool(getattr(a, "_layout_locator", None))
+
+
+def _layout_extract_version(s) -> str:
+    # source_facts.extract_version 은 varchar(120)
+    return f"layout:{s.layout_transcribe_model}+{s.layout_expand_model}/{s.ingest_mode}"[:120]
+
+
+def _locator_of(source_type: str, a, *, hints: bool) -> tuple[str, dict]:
+    """사실 하나의 근거 위치. 원장(source_facts)과 근거 위치(occurrence)가 같은 값을 쓴다.
+
+    구역 추출 사실은 쪽·구역·좌표(·행)를 PAGE 위치로 남긴다. 그 밖에는 기존 규칙 —
+    영상·음성은 시각, 문서는 쪽, 카톡은 메시지 번호. 쓸 번호가 없으면(서버 검사가 지운
+    것 포함) 자료 전체다.
+    """
+    layout_loc = getattr(a, "_layout_locator", None)
+    if layout_loc:
+        return "PAGE", dict(layout_loc)
+    return occurrences.locator_for(source_type, a.evidence, locator_hints=hints)
+
+
 async def _persist_ledger(
     conn: asyncpg.Connection, store_id: int, source_id: int, source_type: str,
     assertions: list,
@@ -887,13 +935,10 @@ async def _persist_ledger(
 
     s = get_settings()
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
+    hints = bool(getattr(s, "extract_locator_hints", False))
     rows = []
     for a in assertions:
-        # 근거 위치는 사실마다 다르다. 영상·음성은 시각, 문서는 쪽, 카톡은 메시지 번호.
-        # 쓸 번호가 없으면(서버 검사가 지운 것 포함) 자료 전체다
-        locator_type, locator = occurrences.locator_for(
-            source_type, a.evidence,
-            locator_hints=bool(getattr(s, "extract_locator_hints", False)))
+        locator_type, locator = _locator_of(source_type, a, hints=hints)
         rows.append({
             "subject": a.subject,
             "variant": a.as_variant(),
@@ -912,6 +957,8 @@ async def _persist_ledger(
             "locator_type": locator_type,
             "locator": locator,
             "assembly_state": "PENDING",
+            # 구역 사실만 사실 단위 버전을 갖는다. None 이면 자료 단위 기본값(extract_version)
+            "extract_version": _layout_extract_version(s) if _is_layout_fact(a) else None,
         })
 
     fact_ids = await repo.insert_source_facts(

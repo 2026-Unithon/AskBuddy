@@ -9,12 +9,12 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import NamedTuple
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
 from app.ingest import raw_responses
+from app.ingest.providers.types import CallResult  # noqa: F401  (기존 import 경로 호환)
 from app.ingest.schemas import (ExtractionResult, FactExtractionResult,
                                 LocatedFactExtractionResult)
 
@@ -116,22 +116,6 @@ async def _parts(prompt: str, media: list[Path], client=None):
     return parts
 
 
-class CallResult(NamedTuple):
-    """모델 호출 한 번의 결과.
-
-    finish_reason — 공급자가 응답을 멈춘 이유(STOP·MAX_TOKENS 등, 문자열). 못 받으면 None.
-    raw_response_id — 원래 응답 행(extraction_raw_responses). 기록하지 않았으면 None.
-    reused — 모델을 부르지 않고 같은 입력의 지난 성공 응답을 되썼다 (W1-3).
-             그때 raw_response_id 는 그 지난 행이다.
-    """
-
-    text: str
-    usage: dict
-    finish_reason: str | None
-    raw_response_id: int | None = None
-    reused: bool = False
-
-
 def _finish_reason_of(res: object) -> str | None:
     """첫 후보의 종료 사유. SDK enum 이면 이름만 남긴다 (W1-2 가 MAX_TOKENS 를 본다)."""
     candidates = getattr(res, "candidates", None) or []
@@ -150,7 +134,7 @@ def _finish_reason_of(res: object) -> str | None:
     reraise=True,
 )
 async def _call(prompt: str, media: list[Path], schema=None,
-                max_output_tokens: int | None = None) -> CallResult:
+                max_output_tokens: int | None = None, model: str | None = None) -> CallResult:
     """(응답 텍스트, 공급자 usage, 종료 사유). usage 는 못 받으면 빈 dict 다 — 0 으로 채우지 않는다.
 
     잘린 응답(MAX_TOKENS)은 예외가 아니다 — 여기서는 그대로 돌려주고 재시도하지 않는다.
@@ -163,7 +147,7 @@ async def _call(prompt: str, media: list[Path], schema=None,
     s = get_settings()
     client = genai.Client(api_key=s.gemini_api_key)
     res = await client.aio.models.generate_content(
-        model=s.gemini_model,
+        model=model or s.gemini_model,
         contents=await _parts(prompt, media, client),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -320,65 +304,13 @@ async def _measured_call(prompt: str, media: list[Path], sink, context,
                          *, prompt_hash: str | None = None,
                          schema=None, raw_sink=None,
                          max_output_tokens: int | None = None) -> CallResult:
-    """계측을 감싼 호출. context 가 없으면 계측·원래 응답 기록 없이 그대로 부른다.
-
-    원래 응답은 **호출이 끝나고 파싱하기 전에** 남긴다 (W1-1). 저장은 짧은 연결로 하고
-    모델 호출 동안에는 연결을 쥐지 않는다. 저장이 실패하면 멈춘다 — 기록 없는 추출은
-    되짚을 수 없다 (`RawResponseWriteError` 가 그대로 올라간다).
-    """
-    from app.ingest import reuse
-    from app.usage import recorder
+    """계측을 감싼 Gemini 호출. 본문은 공급자 중립 measured_call 로 옮겼다."""
+    from app.ingest.providers import measured
 
     s = get_settings()
     schema = schema or ExtractionResult
-    # 재사용 키 (W1-3) — 기록할 곳이 있으면 언제나 계산해 남긴다. 조회는 플래그가 켜졌을 때만
-    key = None
-    if raw_sink is not None and context is not None:
-        key = await reuse.key_for(context, s, model=s.gemini_model, mode=s.ingest_mode,
-                                  prompt=prompt, media=media, schema=schema,
-                                  max_output_tokens=max_output_tokens)
-        if reuse.lookup_allowed(context, s):
-            hit = await reuse.find(raw_sink, context, key, schema)
-            if hit is not None:
-                await _ledger_reuse(sink, context, s, prompt_hash, hit)
-                return CallResult(hit.response_text, {}, hit.finish_reason,
-                                  hit.raw_response_id, reused=True)
-    if context is None:
-        reply = await _call(prompt, media, schema, max_output_tokens=max_output_tokens)
-    else:
-        async with recorder.attempt(sink, context, model=s.gemini_model,
-                                    mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
-            rec.measure_input(
-                input_bytes=len(prompt.encode("utf-8")) + sum(
-                    m.stat().st_size for m in media if m.exists()),
-                frame_count=len(media) or None,
-            )
-            reply = await _call(prompt, media, schema, max_output_tokens=max_output_tokens)
-            rec.reported_model = s.gemini_model
-            if reply.usage:
-                rec.observe(**reply.usage)
-            else:
-                rec.partial("공급자가 usage 를 보고하지 않았다")
-
-    # 원가 receipt 를 확정한 뒤에 남긴다. 여기서 실패해도 호출 자체는 SUCCEEDED 다
-    raw_id = await raw_responses.record(
-        raw_sink, context, model=s.gemini_model, mode=s.ingest_mode,
-        prompt_hash=prompt_hash, schema=schema, finish_reason=reply.finish_reason,
-        response_text=reply.text, usage=reply.usage, reuse_key=key)
-    return reply._replace(raw_response_id=raw_id)
-
-
-async def _ledger_reuse(sink, context, s, prompt_hash, hit) -> None:
-    """재사용을 원장에 남긴다 — 이번 실행의 논리 호출로, 비용 0(NOT_BILLABLE).
-
-    원래 응답 행은 새로 만들지 않는다. 사유에 되쓴 행 ID 를 적어 어느 응답을 썼는지 잇는다.
-    """
-    from app.ingest.reuse import CACHE_STATE_REUSED
-    from app.usage import recorder
-
-    async with recorder.attempt(sink, context, model=s.gemini_model,
-                                mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
-        rec.not_billable(f"재사용: raw_response_id={hit.raw_response_id}")
-        rec.cache_state = CACHE_STATE_REUSED
-    logger.info("재사용 call=%s raw_response_id=%s — 모델을 부르지 않았다",
-                context.logical_call_id, hit.raw_response_id)
+    return await measured.measured_call(
+        settings=s, model=s.gemini_model,
+        caller=lambda: _call(prompt, media, schema, max_output_tokens=max_output_tokens),
+        prompt=prompt, media=media, schema=schema, sink=sink, context=context,
+        prompt_hash=prompt_hash, raw_sink=raw_sink, max_output_tokens=max_output_tokens)

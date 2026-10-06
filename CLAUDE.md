@@ -64,7 +64,7 @@ W 개발은 `docs/dev/`의 문서만 기준으로 읽는다. `docs/release/`는 
 | DB | PostgreSQL 15 + pgvector (Supabase) |
 | 임베딩 | OpenAI `text-embedding-3-small` (1536차원) — **고정** |
 | STT | OpenAI `whisper-1` |
-| 멀티모달 추출 | Gemini `gemini-3.6-flash` |
+| 멀티모달 추출 | 역할별 모델은 `config.py` 에서 지정(공급자 고정 없음). 기준선 Gemini `gemini-3.6-flash` |
 | 파일 저장 | Supabase Storage 버킷 `sources` (비공개) |
 | 로컬 포트 | api `8000`, web `3000`, DB `54322`, Studio `54323` |
 

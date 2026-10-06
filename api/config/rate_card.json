@@ -1,13 +1,16 @@
 {
-  "version": "unset-2026-09-14",
+  "version": "2026-10-06-anthropic",
   "currency": "USD",
-  "note": "요율 미확정. null 인 항목은 비용을 계산하지 않고 토큰만 쌓는다. 공급자 요금표를 확인한 뒤 채우고 version 을 올린다. 과거 receipt 는 그때의 rate_card_version 으로 재현한다.",
+  "note": "요율 미확정. null 인 항목은 비용을 계산하지 않고 토큰만 쌓는다. 공급자 요금표를 확인한 뒤 채우고 version 을 올린다. 과거 receipt 는 그때의 rate_card_version 으로 재현한다. Anthropic 요율 출처: claude-api 문서 Current Models 표(cached 2026-09-25).",
   "models": {
     "gemini-3.6-flash": {
       "input_per_1m_tokens": null,
       "output_per_1m_tokens": null,
       "cached_input_per_1m_tokens": null
     },
+    "claude-sonnet-5-5": {"input_per_1m_tokens": 2.00, "output_per_1m_tokens": 10.00, "cached_input_per_1m_tokens": 0.20},
+    "claude-opus-5-5": {"input_per_1m_tokens": 4.00, "output_per_1m_tokens": 20.00, "cached_input_per_1m_tokens": 0.20},
+    "claude-haiku-4-5": {"input_per_1m_tokens": 1.00, "output_per_1m_tokens": 5.00, "cached_input_per_1m_tokens": null},
     "whisper-1": {
       "per_minute": null
     },

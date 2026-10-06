@@ -53,6 +53,7 @@ import {
   ApiError,
   getLearnItem,
   getIngestJob,
+  getIngestCapabilities,
   getProductCard,
   getRoadmap,
   getReclassificationJob,
@@ -108,7 +109,17 @@ export const queryKeys = {
   notifications: (storeId: number | null) => [...queryKeys.notificationsRoot(storeId), "latest"] as const,
   notificationPages: (storeId: number | null) => [...queryKeys.notificationsRoot(storeId), "pages"] as const,
   notificationSupport: (storeId: number | null) => ["notification-support", storeId] as const,
+  ingestCapabilities: (storeId: number | null) => ["ingest-capabilities", storeId] as const,
 };
+
+export function ingestCapabilitiesQuery(token: string | null, storeId: number | null) {
+  return queryOptions({
+    queryKey: queryKeys.ingestCapabilities(storeId),
+    queryFn: ({ signal }) => getIngestCapabilities(token!, signal),
+    enabled: Boolean(token && storeId),
+    staleTime: 10 * 60_000,
+  });
+}
 
 export function bootstrapQuery(
   token: string | null,
