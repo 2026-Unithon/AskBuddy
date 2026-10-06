@@ -309,7 +309,7 @@ async def insert_source_facts(
             f["subject"][:200], (f.get("variant") or None),
             f["attribute"][:200], f["value"][:1000],
             f.get("confidence", 0), f.get("locator_type") or locator_type,
-            payload, digest, extract_version,
+            payload, digest, f.get("extract_version") or extract_version,
             f.get("original_assertion"), f.get("unit"),
             f.get("polarity") or "AFFIRM",
             json.dumps(f.get("conditions") or [], ensure_ascii=False),
