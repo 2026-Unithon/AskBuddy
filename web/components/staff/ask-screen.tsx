@@ -27,6 +27,12 @@ const KNOWLEDGE_CHIP: Record<string, string> = {
   LINKED: "매장 카드와 같은 내용이에요",
 };
 
+// 새 답변 경로가 꺼져 있으면(V2_UNAVAILABLE) 서버가 준 안내를 그대로 보여준다
+function loadErrorMessage(error: unknown) {
+  if (error instanceof ApiError && error.code === "V2_UNAVAILABLE" && error.detail) return error.detail;
+  return apiErrorMessage(error, "대화를 불러오지 못했어요.");
+}
+
 /** A5 물어보기 · A6 답 도착. R v2 대화(/learn/v2) 위에 Figma 말풍선을 입힌다. */
 export function AskScreen() {
   const { state } = useApp();
@@ -117,7 +123,7 @@ export function AskScreen() {
       )}
       {loadError && (
         <ErrorInline
-          message={apiErrorMessage(loadError, "대화를 불러오지 못했어요.")}
+          message={loadErrorMessage(loadError)}
           onRetry={() => void (sessions.error ? sessions.refetch() : history.refetch())}
           retrying={sessions.isRefetching || history.isRefetching}
         />
@@ -153,13 +159,13 @@ export function AskScreen() {
             />
           </li>
         ))}
-        {busy && ask.variables && !ask.variables.option && !ask.variables.policy_receipt_id && (
-          <li className="flex flex-col gap-4">
-            <QuestionBubble pending>{ask.variables.question}</QuestionBubble>
-            <Caption>매장 카드를 확인하고 있어요</Caption>
-          </li>
-        )}
       </ol>
+      {busy && ask.variables && !ask.variables.option && !ask.variables.policy_receipt_id && (
+        <div className="flex flex-col gap-4" aria-live="polite">
+          <QuestionBubble pending>{ask.variables.question}</QuestionBubble>
+          <Caption>매장 카드를 확인하고 있어요</Caption>
+        </div>
+      )}
       <RefreshingHint active={history.isRefetching && !busy} />
       <div ref={bottomRef} />
     </Screen>
@@ -225,7 +231,7 @@ function MessageView({
             </OptionButton>
           ))
         ) : policy ? (
-          <OptionButton disabled={busy} onClick={() => onPolicyConfirm(message.original_question!, message.receipt_id!)}>
+          <OptionButton testId="r-policy-confirm" disabled={busy} onClick={() => onPolicyConfirm(message.original_question!, message.receipt_id!)}>
             사장님께 확인 요청
           </OptionButton>
         ) : undefined
@@ -236,10 +242,21 @@ function MessageView({
   );
 }
 
-function OptionButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+function OptionButton({
+  children,
+  onClick,
+  disabled,
+  testId,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  testId?: string;
+}) {
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       disabled={disabled}
       className="min-h-11 rounded-full border-[1.5px] border-primary-weak bg-surface px-4 text-[14px] font-bold text-primary disabled:opacity-50"
@@ -274,7 +291,11 @@ function CitationChip({ receipt, order, broken }: { receipt: string; order: numb
           {citation.data && (
             <>
               <p className="whitespace-pre-wrap">{citation.data.text}</p>
-              {citation.data.owner_answer_id && <p className="mt-1 text-ink-muted">출처 · 사장님 답</p>}
+              {citation.data.owner_answer_id && (
+                <p data-testid="owner-answer-citation" className="mt-1 text-ink-muted">
+                  출처 · 사장님 답
+                </p>
+              )}
               {citation.data.source_availability !== "AVAILABLE" && (
                 <p className="mt-1 text-ink-muted">원본 자료는 지워졌어요. 승인된 내용은 그대로 남아 있어요.</p>
               )}

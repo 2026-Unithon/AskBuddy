@@ -35,6 +35,8 @@ export default function OwnerAnswerPage() {
   const detail = useQuery(rDetailQuery(state.token, state.storeId, state.userId, pendingId));
   const [answer, setAnswer] = useState("");
   const [editing, setEditing] = useState(false);
+  // 같은 답을 다시 보내면 같은 request_id 로 보낸다(멱등). 답을 고치거나 저장에 성공하면 새로 만든다
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   const latest = detail.data?.answers.at(-1);
   useRPublicationRefresh(
@@ -51,6 +53,7 @@ export default function OwnerAnswerPage() {
     onSuccess: async () => {
       setAnswer("");
       setEditing(false);
+      setRequestId(crypto.randomUUID());
       await Promise.all([
         client.invalidateQueries({ queryKey: rKeys.pending(state.storeId, state.userId) }),
         client.invalidateQueries({ queryKey: bootstrapQuery(state.token, state.userId, state.storeId).queryKey }),
@@ -93,8 +96,7 @@ export default function OwnerAnswerPage() {
   const slots = Object.entries(first?.resolved_query.confirmed_slots ?? {});
   const showComposer = !latest || editing;
 
-  const send = () =>
-    submit.mutate({ request_id: crypto.randomUUID(), answer, expected_revision: latest?.revision ?? 0 });
+  const send = () => submit.mutate({ request_id: requestId, answer, expected_revision: latest?.revision ?? 0 });
 
   if (latest && !editing && latest.knowledge_status === "PUBLISHED") {
     return <PublishedResult question={title} answer={latest.answer} onEdit={() => setEditing(true)} />;
@@ -121,6 +123,7 @@ export default function OwnerAnswerPage() {
               value={answer}
               onChange={(value) => {
                 setAnswer(value);
+                setRequestId(crypto.randomUUID());
                 if (submit.isError) submit.reset();
               }}
               onSubmit={send}
@@ -200,9 +203,11 @@ function AnswerStatus({
 function RetryKnowledge({ eventId, pendingId }: { eventId: string; pendingId: string }) {
   const { state } = useApp();
   const client = useQueryClient();
+  // 실패한 재처리 요청을 다시 보낼 때도 같은 request_id 를 쓴다(멱등)
+  const [requestId] = useState(() => crypto.randomUUID());
   const retry = useMutation({
     // API 가 재처리 사유를 요구한다. 점주에게 사유를 쓰게 하지 않고 고정 사유를 남긴다.
-    mutationFn: () => rOwnerRetry(state.token!, eventId, { request_id: crypto.randomUUID(), reason: "점주가 화면에서 다시 시도" }),
+    mutationFn: () => rOwnerRetry(state.token!, eventId, { request_id: requestId, reason: "점주가 화면에서 다시 시도" }),
     onSuccess: () => client.invalidateQueries({ queryKey: rKeys.detail(state.storeId, state.userId, pendingId) }),
   });
   if (retry.error) {

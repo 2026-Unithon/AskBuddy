@@ -5,6 +5,7 @@ export function QuestionBubble({ children, pending = false }: { children: ReactN
   return (
     <div className="flex w-full justify-end">
       <p
+        data-testid="message-content"
         className={`max-w-[85%] whitespace-pre-wrap rounded-[16px] bg-primary px-3.5 py-2.5 text-[15px] font-medium leading-[1.45] tracking-[-0.15px] text-white shadow-primary [word-break:keep-all] ${
           pending ? "opacity-60" : ""
         }`}
@@ -34,7 +35,7 @@ export function AnswerBubble({
           tone === "error" ? "bg-danger-50" : "bg-surface"
         }`}
       >
-        <div className="whitespace-pre-wrap text-[15px] leading-[1.45] tracking-[-0.15px] text-ink [word-break:keep-all]">
+        <div data-testid="message-content" className="whitespace-pre-wrap text-[15px] leading-[1.45] tracking-[-0.15px] text-ink [word-break:keep-all]">
           {children}
         </div>
         {chips && <div className="flex flex-wrap gap-1.5">{chips}</div>}
