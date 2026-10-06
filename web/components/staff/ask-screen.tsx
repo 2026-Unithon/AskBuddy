@@ -40,7 +40,8 @@ export function AskScreen() {
   const client = useQueryClient();
   const params = useSearchParams();
   const sessionParam = params.get("session_id");
-  const [input, setInput] = useState("");
+  // 레시피 보기의 "이 레시피에 대해 물어보기"는 ?q= 로 질문 앞부분을 채워 보낸다
+  const [input, setInput] = useState(() => params.get("q") ?? "");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const sessions = useQuery(rSessionsQuery(state.token, state.storeId, state.userId));
