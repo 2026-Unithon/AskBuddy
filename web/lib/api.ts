@@ -715,6 +715,14 @@ export function isIngestJobActive(status: IngestJobStatus) {
   return status === "QUEUED" || status === "EXTRACTING" || status === "CLASSIFYING";
 }
 
+// 지원 형식·제한의 단일 출처 (MVP §10-1). 병렬 작업이 TEXT 를 추가하면 여기에 그대로 나타난다
+export type IngestCapability = { extensions: string[]; max_bytes?: number; max_duration_sec?: number; max_pages?: number; max_chars?: number };
+export type IngestCapabilities = Partial<Record<IngestSourceType | "TEXT", IngestCapability>>;
+
+export async function getIngestCapabilities(token: string, signal?: AbortSignal) {
+  return fetchJson<IngestCapabilities>("/ingest/capabilities", { headers: authHeader(token), signal });
+}
+
 export async function createIngestJob(
   sourceIds: number[],
   token: string,
