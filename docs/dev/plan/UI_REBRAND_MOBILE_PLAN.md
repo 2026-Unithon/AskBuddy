@@ -246,6 +246,11 @@ api/tests/test_checklist_*.py       P5
 - 선택지: (a) 서버가 webm/ogg 를 받아 ffmpeg 로 변환 (b) 프론트가 Web Audio 로 wav 인코딩(파일이 커짐)
 - 결정 전까지 O3·O6 입력창과 직원 질문창의 말하기 버튼은 숨긴다
 
+### F4. 할 일 목록 추출 — W
+
+- 지금 추출·평가는 레시피 위주다. 체크리스트용 할 일 목록은 한 줄에 한 일·순서 보존·여러 일 합치지 않음이 중요하고, Figma O4 처럼 "레시피 / 오늘 할 일" 분류와 근무조 제안도 W 범위다
+- 상세는 [UI_REBRAND_P5_CHECKLIST.md](UI_REBRAND_P5_CHECKLIST.md) §10
+
 ### F3. 점주 답변 첨부 (O7 말하기·찍기·파일) — 계약·백엔드 없음
 
 - 현재 `POST /learn/v2/pending/{id}/answers` 는 `{request_id, answer, expected_revision}` 텍스트만 받는다
