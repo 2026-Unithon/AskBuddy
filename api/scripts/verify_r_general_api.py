@@ -22,7 +22,7 @@ async def verify(chat,client,headers,pool,admin,seed,settings,title):
     async def generate(**kw):
         assert pool.get_idle_size()==pool.get_size()
         calls.append(kw)
-        request=json.loads(kw['contents'].split('\nJSON schema:\n')[0].split('\n',1)[1])
+        request=json.loads(kw['contents'].split('\nJSON schema:\n')[0].rsplit('\n',1)[1])
         if 'proposal' in request:
             refs=validate_answer_references(current['original'].plan,current['search'].snapshot,store_id=str(seed['store_id']))
             raw=dict(request_hash=request['request_hash'],supported=True,unresolved=[],checked_fact_ids=refs.fact_ids,checked_raw_blocks=refs.raw_blocks)
@@ -57,6 +57,11 @@ async def verify(chat,client,headers,pool,admin,seed,settings,title):
                     assert audit=='STRUCTURE_AND_MODEL_CHECKED'
                     citation=await client.get(f'/learn/v2/receipts/{rid}/citations/1',headers=headers)
                     assert citation.status_code==200
+                    if n:
+                        proposal_input_payload=json.loads(calls[-2]['contents'].split('\nJSON schema:\n')[0].rsplit('\n',1)[1])['input']
+                        assert proposal_input_payload['user_turns'][-1]=='이 매장의 해당 준비 절차를 설명해주세요'
+                        history=await admin.fetchval("select execution_metadata->'dialogue_receipt_ids' from r_answer_receipts where receipt_id=$1",rid)
+                        assert json.loads(history) if isinstance(history,str) else history
                 assert len(calls)==4
                 replay=await chat('general-free-0','이 매장의 해당 준비 절차를 설명해주세요')
                 assert replay.headers.get('x-answer-replayed')=='true' and len(calls)==4

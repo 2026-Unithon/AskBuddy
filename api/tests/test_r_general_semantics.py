@@ -49,6 +49,34 @@ async def test_unregistered_free_question_reaches_server_decision_without_catalo
 
 
 @pytest.mark.asyncio
+async def test_generic_entity_clarification_can_be_resolved_by_accepted_semantics(tmp_path):
+    from app.contracts.answer import AnswerPlan
+    from uuid import uuid4
+    search,raw,kw,_=setup(tmp_path)
+    kw['baseline']=replace(kw['baseline'],plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
+        knowledge_revision=search.snapshot.knowledge_revision,action='CLARIFY',
+        clarification_slot='entity',allowed_options=(search.snapshot.cards[0].title,),context_id=uuid4()))
+    decision,audit=await general_decision(search,provider=provider_for(search,raw),**kw)
+    assert decision.plan.action=='ANSWER' and audit['status']=='STRUCTURE_AND_MODEL_CHECKED'
+
+
+@pytest.mark.asyncio
+async def test_committed_history_quotes_are_bound_and_passed_to_both_model_calls(tmp_path):
+    search,raw,kw,_=setup(tmp_path)
+    prior=kw['question']
+    kw.update(question='그 절차를 다시 알려줘',user_turns=(prior,),context_verified=True)
+    payload=proposal_input(search,store_id=1,question=kw['question'],user_turns=kw['user_turns'])
+    raw['input_hash']=payload['input_hash']
+    kw['baseline']=replace(kw['baseline'],resolved=replace(kw['baseline'].resolved,question=kw['question']))
+    provider=provider_for(search,raw)
+    decision,audit=await general_decision(search,provider=provider,**kw)
+    assert decision.plan.action=='ANSWER' and decision.resolved.question==kw['question']
+    for call in provider.call_args_list:
+        body=json.loads(call.args[0].rsplit('\n',1)[1])
+        assert body['input']['user_turns']==[prior] and body['input']['question']==kw['question']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('change',['off','context','baseline'])
 async def test_ineligible_path_never_calls_provider(tmp_path,change):
     search,raw,kw,_=setup(tmp_path)

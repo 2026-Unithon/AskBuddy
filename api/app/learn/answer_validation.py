@@ -11,6 +11,7 @@ from app.contracts import validate as references
 from app.contracts.answer import AnswerPlan
 from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.hashing import verify_snapshot_hash
+from app.learn.grounded_calculations import Calculation, calculate
 
 
 class AnswerReferenceError(ValueError):
@@ -52,6 +53,23 @@ class ResolvedSelection:
     question: str = ""
     assessment: SuitabilityAssessment | None = None
     grouping_evidence: object | None = None
+    parts: tuple[ResolvedPart, ...] = ()
+    calculations: tuple[Calculation, ...] = ()
+    calculation_user_turns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedPart:
+    """복합 질문의 항목별 승인 참조와 서버 검증 결과."""
+    plan: AnswerPlan
+    resolved: ResolvedSelection
+
+
+def reference_atoms(plan: AnswerPlan) -> set[tuple[str, ...]]:
+    return {(b.card_id, b.card_version_id, b.block_id, kind, identifier)
+            for b in plan.selected_blocks
+            for kind, identifier in ((('raw', b.raw_span_id),) if b.raw_span_id
+                                     else tuple(('fact', fid) for fid in b.fact_revision_ids))}
 
 
 def question_hash(question: str) -> str:
@@ -75,6 +93,25 @@ def validate_answer_for_question(
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    try:
+        calculate(query.calculations, plan=plan, snapshot=snapshot, store_id=store_id,
+                  question=query.question, user_turns=query.calculation_user_turns)
+    except ValueError as exc:
+        raise AnswerReferenceError('INVALID_REFERENCE') from exc
+    if query.parts:
+        if (not 2 <= len(query.parts) <= 8 or not query.question or query.assessment is not None
+                or query.entity_id or query.predicate or query.variants):
+            raise AnswerReferenceError("INVALID_REFERENCE")
+        covered = set()
+        for part in query.parts:
+            if (part.plan.action != 'ANSWER' or part.resolved.parts or part.resolved.calculations
+                    or part.resolved.question != query.question):
+                raise AnswerReferenceError("INVALID_REFERENCE")
+            validate_answer_for_question(part.plan, snapshot, part.resolved, store_id=store_id)
+            covered.update(reference_atoms(part.plan))
+        if covered != reference_atoms(plan):
+            raise AnswerReferenceError("INVALID_REFERENCE")
+        return plan
     if not query.entity_id or not query.predicate:
         raise AnswerReferenceError("UNRESOLVED_CONTEXT")
     facts = {f.fact_revision_id: f for f in snapshot.fact_revisions}
