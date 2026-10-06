@@ -16,7 +16,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
   }
 
   // 리브랜딩 화면(/owner, /owner/cards)은 자기 TabBar 를 그린다. 옛 하단 탭은 아직 옮기지 않은 화면에만.
-  const showBottomNav = pathname === "/owner/upload" || pathname === "/owner/questions";
+  const showBottomNav = pathname === "/owner/questions";
 
   return (
     <div className="app-page text-foreground">

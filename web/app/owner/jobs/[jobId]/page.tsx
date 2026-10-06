@@ -29,7 +29,7 @@ import {
   type CardListItem,
   type IngestJobDetail,
 } from "@/lib/api";
-import { cardsQuery, ingestJobQuery, queryKeys } from "@/lib/query";
+import { bootstrapQuery, cardsQuery, ingestJobQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 // O4 알아서 정리됐어요 — 작업 하나의 처리 상태와 결과 카드 확인.
@@ -211,6 +211,9 @@ function ResultReview({
   const client = useQueryClient();
   const router = useRouter();
   const [approve, setApprove] = useState<ApproveState>({});
+  // 매장의 첫 카드 공개라면 O5 초대로, 아니면 오늘 매장으로 (Figma O4 → O5 → O6)
+  const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
+  const firstGuide = bootstrap.data?.store ? !bootstrap.data.store.guide_completed : false;
 
   const visible = (cards ?? []).filter((card) => card.review_status !== "EXCLUDED");
   const needsReview = visible.filter((card) => card.review_status === "NEEDS_REVIEW");
@@ -240,9 +243,10 @@ function ResultReview({
       Promise.all([
         client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
         client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
+        client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
       ]),
     onSuccess: (failed) => {
-      if (failed === 0 && needsReview.length === 0) router.push("/owner");
+      if (failed === 0 && needsReview.length === 0) router.push(firstGuide ? "/owner/invite" : "/owner");
     },
   });
 
