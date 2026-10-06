@@ -81,6 +81,34 @@ async def verify(pool,admin,seed):
         raise AssertionError("idempotency conflict accepted")
     replies=await asyncio.gather(save("m3-simultaneous"),save("m3-simultaneous"))
     check("concurrent save creates one receipt",sum(r.replayed for r in replies)==1)
+    from app.learn.dialogue_history import load_history
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            history=await load_history(conn,store_id=sid,member_id=mid,session_id=session)
+    check("dialogue reads committed original questions",history.user_turns[-1]=="  합성 위치 질문\n")
+    for foreign in (dict(store_id=sid+1000000,member_id=mid,session_id=session),
+                    dict(store_id=sid,member_id=mid+1000000,session_id=session),
+                    dict(store_id=sid,member_id=mid,session_id=session+1000000)):
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():await load_history(conn,**foreign)
+        except ApiError as exc:check("foreign dialogue scope is hidden",exc.status_code==404)
+        else:raise AssertionError('foreign dialogue accepted')
+    changed=await save('m3-history-newer',history_head=history.head)
+    try:await save('m3-history-stale',history_head=history.head)
+    except ApiError as exc:check('stale dialogue rejected before commit',exc.code=='STALE_DIALOGUE')
+    else:raise AssertionError('stale dialogue committed')
+    check('stale dialogue has no receipt',not await admin.fetchval(
+        "select exists(select 1 from r_answer_receipts where store_id=$1 and request_id='m3-history-stale')",sid))
+    again=await save('m3-history-newer',history_head=history.head)
+    check('committed reply replays even after history changes',again.replayed and again.receipt_id==changed.receipt_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():history=await load_history(conn,store_id=sid,member_id=mid,session_id=session)
+    outcomes=await asyncio.gather(save('m3-dialogue-race-a',history_head=history.head),
+        save('m3-dialogue-race-b',history_head=history.head),return_exceptions=True)
+    check('parallel dialogue commits exactly one new turn',
+        sum(isinstance(x,ApiError) and x.code=='STALE_DIALOGUE' for x in outcomes)==1
+        and sum(not isinstance(x,Exception) for x in outcomes)==1)
     for action in ("REFUSE","SAFE_ROUTE"):
         result=await save("m3-policy-"+action,action=action)
         check(action+" has no pending or citation",not result.response.pending_id and not result.response.citations)
