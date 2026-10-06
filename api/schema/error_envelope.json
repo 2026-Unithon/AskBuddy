@@ -19,6 +19,7 @@
             "STALE_DRAFT",
             "STALE_PUBLICATION",
             "STALE_KNOWLEDGE",
+            "STALE_DIALOGUE",
             "HASH_MISMATCH",
             "INDEX_PREPARE_FAILED",
             "INDEX_PREPARE_TIMEOUT",

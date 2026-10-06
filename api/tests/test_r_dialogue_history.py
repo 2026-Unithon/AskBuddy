@@ -40,6 +40,9 @@ async def test_empty_history_and_concurrent_turn_guard():
     with pytest.raises(ApiError) as error:
         await validate_history_head(conn,store_id=1,member_id=2,session_id=3,expected_head=0)
     assert error.value.code=='STALE_DIALOGUE' and error.value.retryable
+    from app.contracts.errors import error as envelope
+    body=envelope(error.value.code,error.value.message,request_id='dialogue-race')
+    assert body.http_status==409 and body.error.retryable
 
 
 def test_search_history_is_bounded_and_does_not_replace_current_question():
