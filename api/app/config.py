@@ -76,6 +76,37 @@ class Settings(BaseSettings):
     # ingest (준혁) — mock: LLM 미호출(M1 기본값) / real: Gemini 호출
     ingest_mode: Literal["mock", "real"] = "mock"
     gemini_model: str = "gemini-3.6-flash"
+    anthropic_api_key: str = ""
+    # SCAN 추출 경로. SINGLE — 기존 단일 호출(기준선). LAYOUT — 구역 기반 다단계(설계 W_SCAN_LAYOUT_EXTRACTION_DESIGN)
+    scan_extract_mode: Literal["SINGLE", "LAYOUT"] = "SINGLE"
+    # 역할별 모델 '공급자:모델'. 판단은 비싼 모델, 반복은 싼 모델
+    layout_region_model: str = "anthropic:claude-sonnet-5-5"
+    layout_transcribe_model: str = "gemini:gemini-3.6-flash"
+    layout_recheck_model: str = "anthropic:claude-sonnet-5-5"
+    layout_expand_model: str = "gemini:gemini-3.6-flash"
+    # Anthropic effort. None 이면 보내지 않는다(모델 기본값). Haiku 에는 보내지 않는다
+    layout_anthropic_effort: Literal["low", "medium", "high"] | None = "low"
+    layout_max_output_tokens: int = Field(default=16000, ge=1)
+    layout_render_dpi: int = Field(default=200, ge=72)       # 벡터 PDF 렌더 DPI
+    layout_region_image_max_px: int = Field(default=1600, ge=256)  # 구역 지도에 넣는 쪽 이미지 긴 변
+    layout_band_rows: int = Field(default=5, ge=1)           # 띠 하나의 행 수
+    layout_band_overlap_rows: int = Field(default=1, ge=0)   # 띠 사이 겹치는 행 수
+    layout_default_row_px: int = Field(default=40, ge=4)     # 예상 행 수가 없을 때 행 높이(원본 px)
+    layout_zoom: float = Field(default=2.0, ge=1.0, le=4.0)  # 띠 확대 배율
+    layout_ink_threshold: int = Field(default=160, ge=1, le=254)    # 흑백 임계(이하가 글자)
+    layout_uncovered_min_area_px: int = Field(default=400, ge=1)    # 빈 영역 검사 최소 글자 화소 수(원본 px 기준)
+    layout_cover_margin_ratio: float = Field(default=0.015, ge=0, le=0.2)  # 구역 상자 여유(쪽 짧은 변 비율, 최소 4px)
+    layout_coverage_max_overlap: float = Field(default=0.3, ge=0, le=1)    # 후보 상자가 구역과 이만큼 넘게 겹치면 버린다
+    layout_min_row_px: int = Field(default=14, ge=2)         # 예상 행 수로 계산한 행 높이 하한(원본 px)
+    layout_max_row_px: int = Field(default=80, ge=4)         # 예상 행 수로 계산한 행 높이 상한(원본 px)
+    layout_max_bands_per_source: int = Field(default=80, ge=1)
+    layout_recheck_max_turns: int = Field(default=3, ge=1)
+    layout_recheck_max_calls_per_source: int = Field(default=30, ge=0)
+    layout_recheck_max_crops_per_turn: int = Field(default=3, ge=0)  # 재확인 한 턴에 받는 확대 요청 수 상한
+    layout_crop_max_px: int = Field(default=2000, ge=64)     # 확대 이미지 긴 변 상한(배율을 낮춘다)
+    layout_expand_batch_rows: int = Field(default=10, ge=1)
+    layout_fact_confidence: float = Field(default=0.9, ge=0, le=1)
+    layout_concurrency: int = Field(default=4, ge=1)
     stt_model: str = "whisper-1"
 
     # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).
@@ -175,6 +206,18 @@ class Settings(BaseSettings):
         # 업로드 제안은 대상·판 연결 결과를 읽는다. 연결이 꺼져 있으면 비교할 사실이 없다
         if self.w_upload_proposals_enabled and not self.w_entity_revision_enabled:
             raise ValueError("w_upload_proposals_enabled requires w_entity_revision_enabled")
+        return self
+
+    @model_validator(mode="after")
+    def _layout_keys(self) -> "Settings":
+        # LAYOUT 모드가 실제로 쓰는 공급자의 키가 없으면 시작 시점에 막는다
+        if self.scan_extract_mode == "LAYOUT" and self.ingest_mode == "real":
+            specs = [self.layout_region_model, self.layout_transcribe_model,
+                     self.layout_recheck_model, self.layout_expand_model]
+            if any(x.startswith("anthropic:") for x in specs) and not self.anthropic_api_key:
+                raise ValueError("LAYOUT 모드가 Anthropic 모델을 쓰는데 ANTHROPIC_API_KEY 가 없다")
+            if any(x.startswith("gemini:") for x in specs) and not self.gemini_api_key:
+                raise ValueError("LAYOUT 모드가 Gemini 모델을 쓰는데 GEMINI_API_KEY 가 없다")
         return self
 
     @property

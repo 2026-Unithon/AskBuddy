@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from app.team.extraction import (
     ExtractionReport,
@@ -295,6 +299,89 @@ class AggregateTest(unittest.TestCase):
 
     def test_empty_report_does_not_divide_by_zero(self):
         self.assertEqual(aggregate([], card_count=0)["fact_count"], 0)
+
+
+def _load_ree():
+    import importlib
+    import os
+    import sys
+    scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    # 최초 import 때 load_dotenv(override=True) 가 환경을 덮으므로 아래에서 원복한다
+    # 모듈 import 시 load_dotenv(override=True) 가 프로세스 환경을 바꾼다 — 다른 테스트로 새지 않게 되돌린다
+    saved = dict(os.environ)
+    try:
+        return importlib.import_module("run_extract_eval")
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+        from app.config import get_settings
+        get_settings.cache_clear()
+
+
+def test_max_usd_requires_anthropic_rates(monkeypatch):
+    ree = _load_ree()
+    card = SimpleNamespace(model_rate=lambda m: {"input_per_1m": None, "output_per_1m": None})
+    monkeypatch.setattr(ree, "load_rate_card", lambda: card)
+    st = SimpleNamespace(scan_extract_mode="LAYOUT", layout_region_model="anthropic:claude-sonnet-5-5",
+                         layout_transcribe_model="gemini:gemini-3.6-flash",
+                         layout_recheck_model="anthropic:claude-sonnet-5-5",
+                         layout_expand_model="gemini:gemini-3.6-flash")
+    with pytest.raises(SystemExit, match="요율"):
+        ree._check_budget_rates(st)
+
+
+def test_env_override_applies_after_dotenv(monkeypatch):
+    ree = _load_ree()
+    from app.config import get_settings
+    # setenv 로 원래 값(없음)을 기록해 둬야 teardown 이 덮어쓴 값을 되돌린다
+    monkeypatch.setenv("SCAN_EXTRACT_MODE", "SINGLE")
+    monkeypatch.setenv("INGEST_MODE", "mock")
+    ree._apply_env_overrides(["SCAN_EXTRACT_MODE=LAYOUT"])
+    try:
+        assert get_settings().scan_extract_mode == "LAYOUT"
+    finally:
+        monkeypatch.setenv("SCAN_EXTRACT_MODE", "SINGLE")
+        get_settings.cache_clear()
+    with pytest.raises(SystemExit, match="KEY=VALUE"):
+        ree._apply_env_overrides(["broken"])
+
+
+def test_override_record_masks_secrets():
+    ree = _load_ree()
+    rec = ree._override_record(["SCAN_EXTRACT_MODE=LAYOUT", "ANTHROPIC_API_KEY=sk-abc", "X_TOKEN=t"])
+    assert rec[0] == "SCAN_EXTRACT_MODE=LAYOUT"
+    assert "sk-abc" not in " ".join(rec) and "t" != rec[2].split("=", 1)[1]
+    assert rec[1].startswith("ANTHROPIC_API_KEY=") and "***" in rec[1]
+    assert "***" in rec[2]
+
+
+def _campaign_ns(mode, region="anthropic:claude-sonnet-5-5"):
+    from app.config import get_settings
+    s = get_settings()
+    return SimpleNamespace(
+        gemini_model=s.gemini_model, stt_model=s.stt_model, embedding_model=s.embedding_model,
+        ingest_mode=s.ingest_mode, extract_temperature=s.extract_temperature,
+        video_input_mode=s.video_input_mode, video_max_frames_to_model=s.video_max_frames_to_model,
+        frame_interval_sec=s.frame_interval_sec, video_segment_sec=s.video_segment_sec,
+        scan_extract_mode=mode, layout_region_model=region,
+        layout_transcribe_model="gemini:gemini-3.6-flash",
+        layout_recheck_model="anthropic:claude-sonnet-5-5",
+        layout_expand_model="gemini:gemini-3.6-flash", layout_anthropic_effort="medium")
+
+
+def test_campaign_settings_layout_keys_only_in_layout_mode():
+    ree = _load_ree()
+    args = SimpleNamespace(reuse_cards=False, reuse_sources=False)
+    single = ree._campaign_settings(_campaign_ns("SINGLE"), args)
+    assert not any(k.startswith("layout_") or k == "scan_extract_mode" for k in single)
+    a = ree._campaign_settings(_campaign_ns("LAYOUT"), args)
+    for k in ("scan_extract_mode", "layout_region_model", "layout_transcribe_model",
+              "layout_recheck_model", "layout_expand_model", "layout_anthropic_effort"):
+        assert k in a
+    b = ree._campaign_settings(_campaign_ns("LAYOUT", region="anthropic:claude-opus-5-5"), args)
+    assert a != b
 
 
 if __name__ == "__main__":

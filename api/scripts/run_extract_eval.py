@@ -54,6 +54,9 @@ from app.team.extraction import (  # noqa: E402
     match_fact_in_ledger, score_output, variant_axis, applicability, SCORER_VERSION, score_expected_fact,
 )
 from app.team.snapshot import code_version, prompt_digest  # noqa: E402
+from decimal import Decimal  # noqa: E402
+from app.ingest.providers import budget, parse_model_spec  # noqa: E402
+from app.usage.rates import load_rate_card  # noqa: E402
 from app.team.eval_campaign import (  # noqa: E402
     CampaignError, append_campaign_event, claim_campaign_run, enforce_observed_budget,
     sha256_bytes, sha256_file, validate_campaign,
@@ -63,6 +66,49 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "eval" / "data"
 # manifest 의 authority 를 SCAN 문서 분류로 옮긴다
 _DOC_CATEGORY = {"RECIPE_BOOK": "RECIPE", "NOTICE": "MANUAL", "OWNER_ANSWER": "ETC", "OTHER": "ETC"}
 REPORT_DIR = Path(__file__).resolve().parents[1] / "eval" / "reports"
+
+
+# ── 실행 한 번에만 적용하는 설정과 금액 상한 ─────────────────────────────────
+
+_SECRET_HINTS = ("KEY", "SECRET", "TOKEN")
+
+
+def _layout_specs(s: Any) -> list[str]:
+    return [s.layout_region_model, s.layout_transcribe_model,
+            s.layout_recheck_model, s.layout_expand_model]
+
+
+def _check_budget_rates(s: Any) -> None:
+    """금액 상한을 걸려면 Anthropic 모델 요율이 있어야 한다. Gemini 요율이 없으면 비용 UNKNOWN 으로 둔다."""
+    if getattr(s, "scan_extract_mode", "SINGLE") != "LAYOUT":
+        return
+    card = load_rate_card()
+    missing = [x for x in _layout_specs(s) if x.startswith("anthropic:")
+               and card.model_rate(parse_model_spec(x).model)["input_per_1m"] is None]
+    if missing:
+        raise SystemExit(f"--max-usd: Anthropic 모델 요율이 없다 {missing} — api/config/rate_card.json")
+
+
+def _apply_env_overrides(pairs: list[str]) -> None:
+    """이번 실행에만 설정을 덮는다. .env 를 읽은 뒤에 적용하고 설정 캐시를 비운다."""
+    import os
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--env-override 는 KEY=VALUE 형식이다: {pair!r}")
+        os.environ[key.strip()] = value
+    get_settings.cache_clear()
+
+
+def _override_record(pairs: list[str]) -> list[str]:
+    """리포트에 남길 덮어쓰기 기록. 키·비밀·토큰 이름의 값은 가린다."""
+    out = []
+    for pair in pairs:
+        key, _, value = pair.partition("=")
+        if any(h in key.upper() for h in _SECRET_HINTS):
+            value = "***"
+        out.append(f"{key.strip()}={value}")
+    return out
 
 
 # ── 자료 적재 ──────────────────────────────────────────────────────────────
@@ -279,6 +325,25 @@ def write_report(run_id: int, slug: str, label: str, metrics: dict, rows: list[d
         f"- 사실 {metrics['fact_count']}건 · 생성 카드 {metrics['card_count']}장",
         "",
     ]
+    spend = snapshot.get("spend")
+    if spend is not None:
+        L += [
+            "## 사용액 (Anthropic 요율 기준)",
+            "",
+            f"- 알려진 사용액 {spend['usd_known']} USD"
+            f" · 요율 없는 모델 {', '.join(spend['unpriced_models']) or '없음'}",
+            "",
+        ]
+    lstats = snapshot.get("layout_stats") or {}
+    if lstats:
+        keys = sorted({k for st in lstats.values() for k in st
+                       if not isinstance(st[k], (dict, list))})
+        L += ["## 레이아웃 단계 통계", "",
+              "| 자료 | " + " | ".join(keys) + " |",
+              "|---|" + "---:|" * len(keys)]
+        for sk, st in lstats.items():
+            L.append(f"| {sk} | " + " | ".join(str(st.get(k, "")) for k in keys) + " |")
+        L.append("")
     if truth_confidence == "TEST":
         L += [
             "> **정답지는 팀 자체 판정(`TEST`)이다. 점주 확인이 아니다.**",
@@ -413,7 +478,7 @@ def _drifted_sources(store_dir: pathlib.Path, manifest: dict) -> list[str]:
 
 def _campaign_settings(s: Any, args: argparse.Namespace) -> dict[str, Any]:
     """후보가 바뀌면 결과도 바뀌는 값만 비밀 없이 고정한다."""
-    return {
+    settings = {
         "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
         "code_version": code_version(),
         "extract_prompt_version": prompt_digest("extract_facts.ko.txt"),
@@ -434,6 +499,15 @@ def _campaign_settings(s: Any, args: argparse.Namespace) -> dict[str, Any]:
         "reuse_cards": bool(args.reuse_cards),
         "reuse_sources": bool(args.reuse_sources),
     }
+    # LAYOUT 일 때만 덧붙인다 — SINGLE 은 기존 등록 캠페인 해시가 그대로여야 한다
+    if getattr(s, "scan_extract_mode", "SINGLE") == "LAYOUT":
+        settings["scan_extract_mode"] = s.scan_extract_mode
+        settings["layout_region_model"] = s.layout_region_model
+        settings["layout_transcribe_model"] = s.layout_transcribe_model
+        settings["layout_recheck_model"] = s.layout_recheck_model
+        settings["layout_expand_model"] = s.layout_expand_model
+        settings["layout_anthropic_effort"] = s.layout_anthropic_effort
+    return settings
 
 
 async def main() -> int:
@@ -462,8 +536,20 @@ async def main() -> int:
                     help="후보의 사전등록 반복 번호")
     ap.add_argument("--print-campaign-settings", action="store_true",
                     help="현재 후보 settings JSON을 출력하고 종료한다")
+    ap.add_argument("--max-usd", type=float, default=None,
+                    help="이번 실행의 Anthropic 사용액 상한(USD). 닿으면 남은 구역은 실패로 남긴다")
+    ap.add_argument("--env-override", action="append", default=[],
+                    help="이번 실행에만 적용할 설정 KEY=VALUE (여러 번 가능)")
     args = ap.parse_args()
     _PARTIAL.clear()
+
+    # 다른 설정을 읽기 전에 덮어쓴다 (campaign 설정 해시·출력 포함)
+    _apply_env_overrides(args.env_override)
+    if args.max_usd is not None:
+        _check_budget_rates(get_settings())
+        budget.set_limit(Decimal(str(args.max_usd)))
+    else:
+        budget.set_limit(None)
 
     if args.print_campaign_settings:
         print(json.dumps(_campaign_settings(get_settings(), args), ensure_ascii=False,
@@ -609,6 +695,9 @@ async def main() -> int:
         "frame_interval_sec": s.frame_interval_sec,
         "video_segment_sec": s.video_segment_sec,
         "pipeline_version": "facts_then_cards/v1",
+        "layout": {"mode": s.scan_extract_mode, "models": _layout_specs(s)},
+        "env_overrides": _override_record(args.env_override),
+        "max_usd": args.max_usd,
         # 무엇을 검증하려고 돌렸는가. holdout 개봉은 이 기록 없이는 근거가 없다
         "campaign": ({"campaign_id": campaign_run.campaign_id,
                       "campaign_hash": campaign_run.campaign_hash,
@@ -688,6 +777,12 @@ async def main() -> int:
     finally:
         await close_pool()
 
+    from app.ingest import layout as _layout
+    source_keys = _PARTIAL.get("source_keys") or {}
+    snapshot["layout_stats"] = {source_keys.get(sid, str(sid)): st
+                                for sid, st in _layout.STATS.items()}
+    snapshot["spend"] = {"usd_known": str(budget.spent()),
+                         "unpriced_models": sorted(budget.unpriced())}
     path = write_report(run_id, slug, args.label, metrics, report_rows,
                         truth_confidence, snapshot)
     if campaign_run is not None:
@@ -740,6 +835,7 @@ async def _execute(conn, run_id, store_id, store_dir, manifest, truth,
                 if getattr(args, 'only_source', None) else None)
         mapping = await ingest_sources(conn, store_id, store_dir, manifest,
                                        owner, only_types=only, only_keys=keys)
+        _PARTIAL["source_keys"] = {int(k): v for k, v in mapping.items()}
         print("  추출 파이프라인")
         await run_pipeline(store_id, list(mapping), run_id)
 

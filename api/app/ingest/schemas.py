@@ -81,6 +81,8 @@ class ExtractedAssertion(BaseModel):
     # 서버가 채운다 (W1-4 최종 수정). 서버 검사 판정 목록 — 근거 위치 행의 check_flags 로 남는다.
     # 필드가 아니라 schema 에 실리지 않는다(요청 스키마 불변)
     _check_flags: list[dict] = PrivateAttr(default_factory=list)
+    # 서버가 채운다(LAYOUT 경로). 쪽·구역·좌표·행 — 원장 PAGE 위치로 그대로 남는다. schema 에 실리지 않는다
+    _layout_locator: dict | None = PrivateAttr(default=None)
 
     @property
     def raw_response_id(self) -> int | None:
