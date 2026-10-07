@@ -262,5 +262,7 @@ R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W
 5. **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). 옮기면 W 가 옛 함수 3개를 지운다.
 6. **`card_embeddings` 를 읽는 옛 경로(`/reg/retrieve`, 평가 러너) 정리 후 테이블 삭제 migration** 을 함께 정한다 (§6).
 7. **공개판이 없는 매장의 점주 답변 후보 검색은 빈 후보를 돌려준다** (§6). 새 매장의 첫 점주 답변이 막히지 않게 한다.
-8. **`FactProvenance.source_id`(`contracts/snapshot.py`)가 필수라 점주 답변만 출처인 revision 은 snapshot 에 아직 실을 수 없다** (W2 결과). W 는 그 출처를 `fact_revision_meta`·`fact_owner_answer_links` 에 두고 `fact_occurrences` 에 파일 출처를 만들지 않는다. **W3 전에 계약 검토가 필요하다.** 또 `fact_owner_answer_links.owner_answer_id`(와 `fact_revision_meta` 의 점주 답변 참조) FK 는 R 소유 `owner_answers` 에 대해 **`on delete restrict`** 다 — W 판이 가리키는 점주 답변 행은 지울 수 없다. R 의 점주 답변 삭제·정리 경로가 이 제약과 맞는지 확인한다.
+8. ~~`FactProvenance.source_id` 필수 · `owner_answer_id` FK `on delete restrict` 점검~~ — **닫힘, R 이 할 일 없음.**
+   (a) R 이 `4bb145c`(2026-10-05)에서 `FactProvenance` 를 `source_id XOR owner_answer_id`(파일 출처면 `occurrence_id` 필수)로 바꿨다(`api/app/contracts/snapshot.py:35-55`).
+   (b) W3-0 §3-4 확인(2026-10-07, 코드 변경 없음): R 트리거 `askbuddy_owner_original_immutable`(`supabase/migrations/20260917130000_m3_owner_answer_delivery.sql:43-56`)가 R revision 이 있는 점주 답변의 삭제·원문 수정을 막고, 앱 코드(`api/app`)에는 `owner_answers`·`pending_questions`(답변으로 cascade)를 지우는 경로가 없다. 따라서 W 링크(`fact_revision_meta.owner_answer_id`·`fact_owner_answer_links`)의 `on delete restrict` 가 새로 막는 앱 삭제 경로는 없다. 매장 삭제는 기존처럼 불변 원장 때문에 막히고, 데모 매장은 보관 방식으로 처리한다(현행 유지).
 9. **새 `fact_revisions` 삽입은 W 서비스(`api/app/ingest/fact_ledger.py`·`fact_revisions.py`)를 거치기를 권한다.** W 는 revision 마다 `knowledge_facts`·`fact_revision_meta` 를 짝지어 두고 `fact_revisions.entity_id`·`fact_id` 에는 FK 가 없다. 권고일 뿐이며 임의 id 를 넣는 R 의 기존 verify 스크립트는 그대로 동작한다.

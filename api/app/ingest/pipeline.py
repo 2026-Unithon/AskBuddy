@@ -21,6 +21,7 @@ from app.ingest import occurrences
 from app.ingest import repository as repo
 from app.ingest import recovery
 from app.ingest.preprocess import audio, document, kakao, storage, video
+from app.ingest.variant_split import split_hot_ice, split_refs
 from app.ingest.schemas import ExtractionResult, ExtractedAssertion
 
 logger = logging.getLogger(__name__)
@@ -942,6 +943,10 @@ async def _persist_ledger(
         return {}
 
     s = get_settings()
+    if getattr(s, "w_entity_revision_enabled", False):
+        # W3-0 §3-1 — HOT/ICE 가 함께 적힌 사실을 규격별 두 사실로 나눈다(D19).
+        # 끄면 이 줄을 건너뛰어 원장 쓰기가 이전과 같다(D16). 반환 열쇠도 갈라진 이름표다
+        assertions = split_hot_ice(assertions)
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
     hints = bool(getattr(s, "extract_locator_hints", False))
     rows = []
@@ -1058,6 +1063,17 @@ async def assemble_assertions(
         return ExtractionResult(cards=[], unresolved=[f"조립 실패: {exc}"])
 
 
+def _ledger_keys(ledger: dict[str, int], ref: str) -> list[str]:
+    """조립이 고른 ref 의 원장 열쇠. HOT/ICE 나누기(W3-0 §3-1)로 갈라진 사실이면 두 열쇠다.
+
+    조립 모델은 나누기 전 사실 목록을 보므로 원래 ref 를 쓴다. 플래그가 꺼져 있으면
+    갈라진 열쇠가 원장에 없으므로 이전과 같다(ref 가 있으면 그것 하나, 없으면 빈 목록).
+    """
+    if ref in ledger:
+        return [ref]
+    return [key for key in split_refs(ref) if key in ledger]
+
+
 async def _persist(
     conn: asyncpg.Connection,
     store_id: int,
@@ -1108,7 +1124,8 @@ async def _persist(
         # 카드 ↔ 원장 잇기 — 조립이 고른 사실의 ref 로 찾는다 (W1).
         # 카드 저장 전에 계산한다 — W2 에서 카드의 대상을 정하는 데도 쓴다 (순수 dict 연산)
         refs = [f.ref for f in card.facts if getattr(f, "ref", "")]
-        fact_ids = [ledger[r] for r in refs if r in ledger]
+        keys = [key for r in refs for key in _ledger_keys(ledger, r)]
+        fact_ids = [ledger[key] for key in keys]
         entity_id = None
         if entity_revision:
             from app.ingest import fact_ledger
@@ -1138,8 +1155,8 @@ async def _persist(
             locator_type = "WHOLE_SOURCE"
             locator = {}
 
-        linked_refs.update(r for r in refs if r in ledger)
-        unmatched.extend(r for r in refs if r and r not in ledger)
+        linked_refs.update(keys)
+        unmatched.extend(r for r in refs if r and not _ledger_keys(ledger, r))
         if refs and not fact_ids:
             # ref 를 하나도 못 이었다. 카드는 남기되 조용히 넘기지 않는다
             logger.warning("카드 '%s' 의 사실 참조를 원장에서 찾지 못했다: %s",

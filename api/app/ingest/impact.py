@@ -19,7 +19,7 @@ from typing import Iterable
 
 import asyncpg
 
-from app.ingest.entities import lock_store_knowledge
+from app.ingest.entities import _follow_merged, lock_store_knowledge
 
 log = logging.getLogger(__name__)
 
@@ -183,15 +183,80 @@ async def affected_cards(conn: asyncpg.Connection, store_id: int, fact_revision_
 _RANK = "array['NEW','IDENTICAL','SUPPLEMENT','CONFLICT']::varchar[]"
 
 
+async def _adopt_merged_proposals(conn: asyncpg.Connection, store_id: int,
+                                  source_id: int) -> int:
+    """병합된 대상 아래 이 자료의 PENDING_REVIEW 제안을 살아 있는 대상으로 옮긴다 (W3-0 §3-3-2).
+
+    살아 있는 대상(병합 사슬 끝)에 이 자료의 제안이 아직 없으면 그 제안의 entity_id 를 바꾼다
+    (proposal_id·항목 그대로). 이미 있고 그것도 PENDING_REVIEW 면 unique(store, source, entity)
+    때문에 옮길 수 없으므로 옛 제안을 SUPERSEDED 로 닫는다. 살아 있는 대상의 제안이 이미 결정됐으면
+    옛 제안을 옮기지도 닫지도 않는다(KEPT_PENDING, 결정 K — 검수 안 된 내용을 숨기지 않는다).
+    결정된 제안은 건드리지 않는다(결정 J). 가드 UPDATE 가 실제로 한 행을 바꿨거나 KEPT_PENDING
+    일 때만 대상 이력 PROPOSAL_MOVED 를 남긴다. 살펴본 제안 수를 돌려준다.
+    호출 전 조건: 같은 트랜잭션에서 매장 잠금을 잡았다.
+    """
+    rows = await conn.fetch(
+        "select p.proposal_id, p.entity_id from upload_change_proposals p "
+        "join knowledge_entities e on e.store_id = p.store_id and e.entity_id = p.entity_id "
+        "where p.store_id = $1 and p.source_id = $2 and p.status = 'PENDING_REVIEW' "
+        "and e.status = 'MERGED' "
+        "order by p.proposal_id",
+        store_id, source_id)
+    for row in rows:
+        live = await _follow_merged(conn, store_id, row["entity_id"])
+        taken = await conn.fetchrow(
+            "select proposal_id, status from upload_change_proposals "
+            "where store_id = $1 and source_id = $2 and entity_id = $3",
+            store_id, source_id, live)
+        if taken is None:
+            status = await conn.execute(
+                "update upload_change_proposals set entity_id = $3, updated_at = now() "
+                "where store_id = $1 and proposal_id = $2 and status = 'PENDING_REVIEW'",
+                store_id, row["proposal_id"], live)
+            outcome = "MOVED"
+        elif taken["status"] == "PENDING_REVIEW":
+            status = await conn.execute(
+                "update upload_change_proposals set status = 'SUPERSEDED', decided_at = now(), "
+                "updated_at = now() "
+                "where store_id = $1 and proposal_id = $2 and status = 'PENDING_REVIEW'",
+                store_id, row["proposal_id"])
+            outcome = "SUPERSEDED"
+        else:
+            # 결정 K — 살아 있는 대상의 제안이 이미 결정됐으면 그 머리는 다시 열리지 않는다.
+            # 닫으면 검수 안 된 내용이 사라지므로 옛 PENDING 제안을 그대로 둔다
+            status = None
+            outcome = "KEPT_PENDING"
+        if status is not None and status != "UPDATE 1":
+            # 가드에 걸려 바뀐 행이 없다(경합) — 이력을 남기지 않는다
+            log.info("W3-0 제안 정리 건너뜀 store=%s source=%s proposal=%s (%s)",
+                     store_id, source_id, row["proposal_id"], status)
+            continue
+        into = taken["proposal_id"] if taken is not None else None
+        await conn.execute(
+            "insert into knowledge_entity_events "
+            "(store_id, action, entity_id, other_entity_id, payload) "
+            "values ($1, 'PROPOSAL_MOVED', $2, $3, $4::jsonb)",
+            store_id, live, row["entity_id"],
+            json.dumps({"proposal_id": row["proposal_id"], "source_id": source_id,
+                        "outcome": outcome, "into_proposal_id": into}, ensure_ascii=False))
+        log.info("W3-0 제안 정리 store=%s source=%s proposal=%s 대상 %s → %s (%s)",
+                 store_id, source_id, row["proposal_id"], row["entity_id"], live, outcome)
+    return len(rows)
+
+
 async def record_upload_proposals(conn: asyncpg.Connection, store_id: int, source_id: int, *,
                                   job_id: int | None) -> int:
     """이 자료가 이은 모든 판을 대상별로 묶어 검수 제안을 남긴다. 남긴(또는 이미 있던) 제안 수.
 
     호출자의 트랜잭션 안에서 돈다(_persist). 다시 불러도 행이 늘지 않는다 — 머리는
-    PENDING_REVIEW 이고 더 강한 관계일 때만 관계·영향 카드를 올린다. 항목은 머리가
+    PENDING_REVIEW 이고 더 강한 관계일 때 관계·영향 카드를 올리며, 같은 관계면 영향 카드(matched_cards)가
+    달라졌을 때만 새 계산으로 바꾼다(W3-0 §3-3-3). 병합된 대상 아래 PENDING 제안은 먼저 살아 있는
+    대상으로 옮기고, 대상은 병합 사슬 끝으로 묶는다(W3-0 §3-3-2). 항목은 머리가
     PENDING_REVIEW 일 때만 지금 계산으로 넣거나 고치고, 결정된 제안은 건드리지 않는다(결정 J).
     """
     await lock_store_knowledge(conn, store_id)
+    # W3-0 §3-3-2 — 병합된 대상 아래 PENDING 제안을 먼저 살아 있는 대상으로 옮긴다
+    await _adopt_merged_proposals(conn, store_id, source_id)
     links = await conn.fetch(
         "select l.fact_id, l.fact_revision_id, l.link_kind, k.entity_id "
         "from source_fact_revision_links l "
@@ -203,12 +268,16 @@ async def record_upload_proposals(conn: asyncpg.Connection, store_id: int, sourc
     if not links:
         return 0
 
+    # W3-0 §3-3-2 — 대상은 병합 사슬 끝(살아 있는 대상)으로 묶는다
+    live_of: dict[int, int] = {}
+    for entity_id in sorted({link["entity_id"] for link in links}):
+        live_of[entity_id] = await _follow_merged(conn, store_id, entity_id)
     fact_of: dict[int, int] = {}
     entity_of: dict[int, int] = {}
     kinds: dict[int, set[str]] = defaultdict(set)
     for link in links:
         fact_of[link["fact_revision_id"]] = link["fact_id"]
-        entity_of[link["fact_revision_id"]] = link["entity_id"]
+        entity_of[link["fact_revision_id"]] = live_of[link["entity_id"]]
         kinds[link["fact_id"]].add(link["link_kind"])
     # 이 자료의 어느 원장 행도 이 사실을 새로 만들지 않았다 = 이 자료 전에 있던 사실
     preexisting = {fid for fid, k in kinds.items() if k == {"MATCHED"}}
@@ -267,9 +336,12 @@ async def record_upload_proposals(conn: asyncpg.Connection, store_id: int, sourc
             "on conflict (store_id, source_id, entity_id) do update "
             "set relation_type = excluded.relation_type, "
             "matched_cards = excluded.matched_cards, updated_at = now() "
-            "where p.status = 'PENDING_REVIEW' "
-            f"and array_position({_RANK}, excluded.relation_type) "
-            f"> array_position({_RANK}, p.relation_type)",
+            "where p.status = 'PENDING_REVIEW' and ("
+            f"array_position({_RANK}, excluded.relation_type) "
+            f"> array_position({_RANK}, p.relation_type) "
+            f"or (array_position({_RANK}, excluded.relation_type) "
+            f"= array_position({_RANK}, p.relation_type) "
+            "and p.matched_cards is distinct from excluded.matched_cards))",
             store_id, source_id, job_id, entity_id, relation,
             json.dumps(matched_cards, ensure_ascii=False))
         head = await conn.fetchrow(
