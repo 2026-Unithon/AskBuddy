@@ -47,7 +47,7 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
     });
     const page = await ctx.newPage(), errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    await page.goto('http://127.0.0.1:3011/staff/chat/v2?session_id=1');
+    await page.goto('http://127.0.0.1:3011/staff/ask?session_id=1');
     await page.getByText(`합성 기록 ${count}`, { exact: true }).waitFor();
     return { ctx, page, state, errors };
   }
@@ -55,30 +55,30 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
     for (const count of [99, 100, 101, 200]) {
       const { ctx, page, state, errors } = await setup(count);
       check(`${count} newest page bounded`, await page.locator('ol li').count() === Math.min(count, 100));
-      check(`${count} older cursor exact`, await page.getByRole('button', { name: '이전 대화 기록 보기' }).count() === Number(count > 100));
+      check(`${count} older cursor exact`, await page.getByRole('button', { name: '이전 대화 보기' }).count() === Number(count > 100));
       check(`${count} latest clarification immediately usable`, await page.getByRole('button', { name: 'HOT', exact: true }).isVisible());
       await page.getByRole('button', { name: 'HOT', exact: true }).click();
       await page.getByText('저장 완료 ANSWER', { exact: true }).waitFor();
       check(`${count} submitted answer appears without paging`, true);
-      await page.getByLabel('업무 질문').fill('합성 안전 질문');
-      await page.getByRole('button', { name: '질문하기', exact: true }).click();
+      await page.getByLabel('모르는 거 물어보기').fill('합성 안전 질문');
+      await page.getByRole('button', { name: '보내기', exact: true }).click();
       await page.getByTestId('r-policy-confirm').waitFor();
       await page.reload();
       await page.getByTestId('r-policy-confirm').click();
       await page.getByText('저장 완료 ESCALATE', { exact: true }).waitFor();
       check(`${count} latest safety confirmation survives reload`, true);
-      while (await page.getByRole('button', { name: '이전 대화 기록 보기' }).count()) {
+      while (await page.getByRole('button', { name: '이전 대화 보기' }).count()) {
         const previous = await page.locator('ol li').count();
-        await page.getByRole('button', { name: '이전 대화 기록 보기' }).click();
+        await page.getByRole('button', { name: '이전 대화 보기' }).click();
         await page.waitForFunction(n => document.querySelectorAll('ol li').length > n, previous);
       }
       check(`${count} all older records restored without duplication`, await page.locator('ol li').count() === state.messages.length);
-      const texts = await page.locator('ol li > p.whitespace-pre-wrap').allTextContents();
+      const texts = await page.locator('ol li [data-testid="message-content"]').allTextContents();
       assert.deepEqual(texts, state.messages.map(m => m.content));
       check(`${count} oldest to newest order preserved`, true);
-      await page.getByLabel('업무 질문').fill('기록을 펼친 뒤 새 질문');
+      await page.getByLabel('모르는 거 물어보기').fill('기록을 펼친 뒤 새 질문');
       const expectedCount = state.messages.length + 2;
-      await page.getByRole('button', { name: '질문하기', exact: true }).click();
+      await page.getByRole('button', { name: '보내기', exact: true }).click();
       await page.waitForFunction(n => document.querySelectorAll('ol li').length === n, expectedCount);
       check(`${count} refetch of multiple pages preserves every row`, await page.locator('ol li').count() === state.messages.length);
       assert.deepEqual(errors, []);
@@ -91,7 +91,7 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
     await page.getByText('기다리던 점주 답변', { exact: true }).waitFor({ timeout: 12000 });
     check('earlier pending reply arrives automatically after later answers', true);
     state.messages.at(-1).knowledge_status = 'PUBLISHED'; state.pending = false;
-    await page.getByText('답변 1 · 지식 반영: 공개 완료', { exact: true }).waitFor({ timeout: 12000 });
+    await page.getByText('새 카드 · 방금 추가했어요', { exact: true }).waitFor({ timeout: 12000 });
     const calls = state.calls;
     await page.waitForTimeout(6200);
     check('resolved session stops polling', state.calls === calls);

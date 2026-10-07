@@ -47,6 +47,17 @@
   --radius-lg: 1.5rem;
   --radius-md: 1rem;
   --radius-sm: 0.65rem;
+
+  /* 리브랜딩 Figma 변수(페이지 4-1) — 새 화면(components/kit)은 이 토큰만 쓴다 */
+  --primary: #2e6b3c;
+  --primary-weak: #a8d4b4;
+  --ink: #1e2a22;
+  --ink-muted: #66756b;
+  --empty: #e0eee3;
+  --kakao: #fee500;
+  --shadow-card: 0 1px 3px 0 rgba(31, 43, 33, 0.05), 0 8px 24px 0 rgba(31, 43, 33, 0.07);
+  --shadow-primary: 0 10px 22px -4px rgba(46, 107, 61, 0.3);
+  --shadow-hero: 0 14px 30px -6px rgba(46, 107, 61, 0.32);
 }
 
 @theme inline {
@@ -90,6 +101,17 @@
   --color-danger-800: var(--danger-800);
   --color-danger-900: var(--danger-900);
   --color-danger-950: var(--danger-950);
+
+  --color-primary: var(--primary);
+  --color-primary-weak: var(--primary-weak);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-empty: var(--empty);
+  --color-kakao: var(--kakao);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-primary: var(--shadow-primary);
+  --shadow-hero: var(--shadow-hero);
 
   --font-sans: var(--font-pretendard);
 }
@@ -152,7 +174,7 @@ button, a, input, textarea, select {
 }
 
 :is(a, button, input, textarea, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--brand-500);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 

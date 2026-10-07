@@ -130,7 +130,8 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                       question:str,snapshot:PublishedKnowledgeSnapshot,plan:AnswerPlan,
                       resolved:ResolvedSelection,confirmed_slots:dict[str,str],
                       semantic_context:dict|None=None,choice:ContextChoice|None=None,
-                      execution_metadata:dict|None=None,policy_receipt_id:str|None=None) -> StoredReply:
+                      execution_metadata:dict|None=None,policy_receipt_id:str|None=None,
+                      history_head:int|None=None) -> StoredReply:
     if (not 8<=len(request_id)<=80 or not question.strip() or len(question)>1000
             or (choice is None and resolved.question!=question)):
         raise ApiError(422,"INVALID_CONTRACT","질문과 요청 정보를 확인해 주세요.")
@@ -151,6 +152,10 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             replay=await _receipt(conn,store_id=store_id,member_id=member_id,request_id=request_id,body_hash=body_hash)
             if replay is not None:
                 return replay
+            if history_head is not None:
+                from app.learn.dialogue_history import validate_history_head
+                await validate_history_head(conn,store_id=store_id,member_id=member_id,
+                    session_id=session_id,expected_head=history_head)
             if policy_receipt_id is not None:
                 if choice is not None or plan.action!='ESCALATE':
                     raise ApiError(422,'INVALID_CONTRACT','안전 확인 요청은 별도 이관이어야 합니다.')
@@ -224,7 +229,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",
                                   store_id,source_ids)
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
-                pending_id=str(pending_id) if pending_id else None,
+                pending_id=str(pending_id) if pending_id else None,resolved=resolved,
                 availability={str(r["source_id"]):r["source_availability"] for r in rows})
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",
@@ -237,7 +242,11 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb) returning receipt_id""",
                 store_id,member_id,session_id,request_id,body_hash,question,
                 json.dumps(dict(question=resolved.question,entity=resolved.entity_id,predicate=resolved.predicate,variants=resolved.variants,
-                                confirmed_slots=confirmed_slots,semantic_context=semantic_context)),
+                                confirmed_slots=confirmed_slots,semantic_context=semantic_context,
+                                calculations=[c.model_dump(mode='json') for c in resolved.calculations],
+                                parts=[dict(plan=p.plan.model_dump(mode='json'),entity=p.resolved.entity_id,
+                                    predicate=p.resolved.predicate,variants=p.resolved.variants)
+                                    for p in resolved.parts])),
                 json.dumps(dict(state_revision=context.state_revision,context=context.context.model_dump(mode="json"))) if context else None,
                 int(snapshot.snapshot_id),int(snapshot.knowledge_revision),
                 user_message,buddy_message,pending_id,response.model_dump_json(),json.dumps(execution_metadata or {}))

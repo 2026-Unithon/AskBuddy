@@ -8,7 +8,7 @@ RENDERER_VERSION = "r-approved/v1"
 
 
 def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: int,
-           request_id: str, pending_id: str | None = None, availability=None) -> ChatResponse:
+           request_id: str, pending_id: str | None = None, availability=None, resolved=None) -> ChatResponse:
     if snapshot.renderer_version != RENDERER_VERSION:
         raise ValueError("unsupported approved renderer version")
     validate_answer_references(plan,snapshot,store_id=str(store_id))
@@ -47,4 +47,10 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
                                              else availability.get(origin.source_id,"UNAVAILABLE")))
                     if citation not in citations:
                         citations.append(citation)
+    if resolved is not None:
+        from app.learn.answer_validation import validate_answer_for_question
+        from app.learn.grounded_calculations import calculate
+        validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
+        lines.extend(calculate(resolved.calculations,plan=plan,snapshot=snapshot,store_id=store_id,
+            question=resolved.question,user_turns=resolved.calculation_user_turns))
     return ChatResponse(**fields,message="\n".join(lines),citations=tuple(citations))

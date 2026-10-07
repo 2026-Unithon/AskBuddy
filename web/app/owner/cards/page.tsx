@@ -1,398 +1,197 @@
 "use client";
 
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Input, Select } from "@/components/ui";
+import { Suspense, useMemo, useState } from "react";
 import {
-  ApiError,
-  mutateProductCard,
-  resolveKnowledgeProposal,
-  type CardFilters,
-} from "@/lib/api";
-import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
+  Button,
+  Chip,
+  Empty,
+  ErrorInline,
+  Icon,
+  ListGroup,
+  ListRow,
+  OWNER_TABS,
+  PageHeader,
+  RefreshingHint,
+  Screen,
+  Skeleton,
+  TabBar,
+  focusRing,
+} from "@/components/kit";
+import { apiErrorMessage, type CardFilters, type CardListItem } from "@/lib/api";
+import { cardsInfiniteQuery, proposalsQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
-import { KnowledgeCardListItem } from "@/components/owner/knowledge-card-list-item";
-import { EmptyState } from "@/components/owner/empty-state";
-import { InlineError } from "@/components/owner/inline-error";
-import { SkeletonList } from "@/components/owner/skeleton-list";
-import { OwnerPageHeader } from "@/components/owner/owner-page-header";
-
-const STATUS_FILTERS = [
-  { value: "needs_review", label: "검토 필요" },
-  { value: "pending", label: "미확인" },
-  { value: "approved", label: "공개됨" },
-  { value: "excluded", label: "제외됨" },
+const FILTERS: { value: NonNullable<CardFilters["status"]>; label: string }[] = [
   { value: "all", label: "전체" },
-] as const;
+  { value: "needs_review", label: "확인 필요" },
+  { value: "pending", label: "공개 전" },
+  { value: "excluded", label: "지운 카드" },
+];
 
-export default function CardsPage() {
+const ROW_BADGE: Partial<Record<CardListItem["review_status"], { label: string; tone: "warn" | "neutral" | "danger" }>> = {
+  NEEDS_REVIEW: { label: "확인 필요", tone: "warn" },
+  PENDING: { label: "공개 전", tone: "neutral" },
+  EXCLUDED: { label: "지움", tone: "danger" },
+};
+
+/** 본문 첫 두 줄을 " · "로 이어 한 줄 요약으로 쓴다 (Figma O9 부제). */
+function summary(content: string) {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" · ");
+}
+
+// O9 카드: 카테고리별 묶음 + 검색 + 상태 필터. 알림 딥링크의 status/job_id/category_id/query 를 그대로 받는다.
+function CardsScreen() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const params = useSearchParams();
   const { state } = useApp();
-  const queryClient = useQueryClient();
 
-  const rawStatus = searchParams.get("status");
-  const status = STATUS_FILTERS.some((f) => f.value === rawStatus)
-    ? (rawStatus as CardFilters["status"])
-    : "needs_review";
-
-  const rawJobId = searchParams.get("job_id");
+  const rawStatus = params.get("status");
+  const status = FILTERS.some((f) => f.value === rawStatus) ? (rawStatus as CardFilters["status"]) : "all";
+  const rawJobId = params.get("job_id");
   const jobId = rawJobId && /^\d+$/.test(rawJobId) ? Number(rawJobId) : undefined;
-  const rawCategoryId = searchParams.get("category_id");
+  const rawCategoryId = params.get("category_id");
   const categoryId = rawCategoryId && /^\d+$/.test(rawCategoryId) ? Number(rawCategoryId) : undefined;
-  const queryText = searchParams.get("query")?.trim() ?? "";
-
-  const [searchInput, setSearchInput] = useState(queryText);
+  const queryText = params.get("query")?.trim() ?? "";
+  const [search, setSearch] = useState(queryText);
 
   const filters = useMemo<CardFilters>(
-    () => ({
-      status,
-      jobId,
-      categoryId,
-      query: queryText || undefined,
-    }),
+    () => ({ status, jobId, categoryId, query: queryText || undefined }),
     [status, jobId, categoryId, queryText]
   );
-
   const cards = useInfiniteQuery(cardsInfiniteQuery(state.token, state.storeId, filters));
-  const categories = useQuery(productCategoriesQuery(state.token, state.storeId));
   const proposals = useQuery(proposalsQuery(state.token, state.storeId));
 
+  const setParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(params.toString());
+    if (value) next.set(key, value);
+    else next.delete(key);
+    router.replace(`/owner/cards${next.size ? `?${next}` : ""}`);
+  };
+
   const items = cards.data?.pages.flatMap((page) => page.items) ?? [];
-  const total = cards.data?.pages[0]?.total ?? 0;
-
-  const pendingProposals = useMemo(
-    () => proposals.data?.items.filter((p) => p.status === "PENDING_REVIEW") ?? [],
-    [proposals.data?.items]
-  );
-
-  const cardAction = useMutation({
-    mutationFn: ({ cardId, action }: { cardId: number; action: "approve" | "exclude" | "restore" }) =>
-      mutateProductCard(cardId, action, state.token!),
-    onSuccess: (_, variables) => {
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.card(state.storeId, variables.cardId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) }),
-      ]);
-    },
-    onError: (actionError) => {
-      if (actionError instanceof ApiError && actionError.status === 409) {
-        void cards.refetch();
-      }
-    },
-  });
-
-  const proposalAction = useMutation({
-    mutationFn: ({ proposalId, action }: { proposalId: number; action: "approve" | "dismiss" }) =>
-      resolveKnowledgeProposal(proposalId, action, state.token!),
-    onSuccess: () => {
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.staff(state.storeId) }),
-      ]);
-    },
-  });
-
-  function setFilterStatus(nextStatus: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("status", nextStatus);
-    router.replace(`/owner/cards?${params.toString()}`);
+  // "전체"에서는 지운 카드를 빼고 보여준다 — 지운 카드는 따로 모아 본다
+  const visible = status === "all" ? items.filter((card) => card.review_status !== "EXCLUDED") : items;
+  const groups = new Map<string, CardListItem[]>();
+  for (const card of visible) {
+    const name = card.category?.name ?? "기타";
+    groups.set(name, [...(groups.get(name) ?? []), card]);
   }
-
-  function setFilterCategory(nextCategoryId: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (nextCategoryId) {
-      params.set("category_id", nextCategoryId);
-    } else {
-      params.delete("category_id");
-    }
-    router.replace(`/owner/cards?${params.toString()}`);
-  }
-
-  function handleSearchSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const params = new URLSearchParams(searchParams.toString());
-    const trimmed = searchInput.trim();
-    if (trimmed) {
-      params.set("query", trimmed);
-    } else {
-      params.delete("query");
-    }
-    router.replace(`/owner/cards?${params.toString()}`);
-  }
-
-  const error =
-    cards.error ??
-    categories.error ??
-    proposals.error ??
-    cardAction.error ??
-    proposalAction.error;
-  const errorMessage =
-    error instanceof ApiError
-      ? error.detail || "카드 목록을 불러오지 못했어요."
-      : error
-      ? "서버에 연결할 수 없습니다."
-      : null;
+  const proposalCount = proposals.data?.items.length ?? 0;
+  const filtered = Boolean(jobId || categoryId || queryText) || status !== "all";
 
   return (
-    <div className="flex-1 flex flex-col w-full bg-background min-h-dvh">
-      <OwnerPageHeader
-        title="카드 목록"
-        subtitle={`총 ${total}개의 매장 업무 지식 카드`}
-        isFetching={cards.isFetching}
-        isLoading={cards.isLoading}
-      />
+    <Screen tabBar={<TabBar tabs={OWNER_TABS} />}>
+      <PageHeader title="카드" />
+      <form
+        role="search"
+        className="flex w-full items-center gap-2 rounded-full bg-surface px-4 py-3 shadow-card"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setParam("query", search.trim() || null);
+        }}
+      >
+        <Icon name="search" size={16} className="text-ink-muted" />
+        <input
+          type="search"
+          aria-label="카드 찾기"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="메뉴·위치·할 일로 찾기"
+          enterKeyHint="search"
+          className="min-w-0 flex-1 bg-transparent text-[15px] leading-[1.45] tracking-[-0.15px] text-ink outline-none placeholder:text-ink-muted"
+        />
+      </form>
 
-      {/* 메인 콘텐츠 (하단 탭 바 높이 고려 pb-24) */}
-      <main className="flex-1 space-y-3 px-4 py-3.5 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] overflow-y-auto">
-        {/* 검색 폼 */}
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Input
-              data-testid="card-search-input"
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="카드 제목 또는 내용 검색…"
-              aria-label="카드 검색어"
-              className="pr-12 shadow-2xs"
-            />
-            {searchInput && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchInput("");
-                  const params = new URLSearchParams(searchParams.toString());
-                  params.delete("query");
-                  router.replace(`/owner/cards?${params.toString()}`);
-                }}
-                className="absolute right-0 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-xl text-sm text-muted hover:bg-surface-muted hover:text-foreground active:scale-95"
-                aria-label="검색어 지우기"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-          <Button
-            type="submit"
-            className="shrink-0 shadow-2xs"
-          >
-            검색
-          </Button>
-        </form>
-
-        {/* 카테고리 필터 셀렉트 */}
-        {categories.data && categories.data.items.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label htmlFor="category-select" className="text-xs font-bold text-muted shrink-0">
-              분류:
-            </label>
-            <Select
-              id="category-select"
-              value={categoryId ? String(categoryId) : ""}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="min-w-0 flex-1"
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="카드 상태">
+        {FILTERS.map((filter) => {
+          const active = filter.value === status;
+          return (
+            <button
+              key={filter.value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setParam("status", filter.value === "all" ? null : filter.value)}
+              className={`min-h-9 shrink-0 rounded-full px-3.5 text-[13px] font-bold ${
+                active ? "bg-primary text-white" : "bg-surface text-ink-muted shadow-card"
+              } ${focusRing}`}
             >
-              <option value="">전체 카테고리</option>
-              {categories.data.items.map((cat) => (
-                <option key={cat.category_id} value={cat.category_id}>
-                  {cat.name}
-                </option>
-              ))}
-            </Select>
-            <Link
-              href="/owner/categories"
-              className="inline-flex min-h-[44px] shrink-0 items-center px-2 text-xs font-bold text-brand-700 active:scale-[0.95]"
-            >
-              관리
-            </Link>
-          </div>
-        )}
+              {filter.label}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* 상태 필터 수평 스크롤 탭 */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-          {STATUS_FILTERS.map((f) => {
-            const active = status === f.value;
+      {proposalCount > 0 && (
+        <Link
+          href="/owner/cards/proposals"
+          className={`flex items-center gap-2 rounded-[20px] bg-warn-50 px-[18px] py-3.5 text-[14px] font-bold text-warn-700 ${focusRing}`}
+        >
+          <span className="flex-1">기존 카드와 다른 답이 있어요 · {proposalCount}</span>
+          <Icon name="right" size={18} />
+        </Link>
+      )}
+      {(jobId || categoryId) && (
+        <button type="button" onClick={() => router.replace("/owner/cards")} className={`self-start ${focusRing}`}>
+          <Chip tone="neutral">{jobId ? "이번에 넣은 자료의 카드만" : "한 카테고리만"} · 모두 보기</Chip>
+        </button>
+      )}
+
+      {cards.isLoading && (
+        <>
+          <Skeleton className="h-36" />
+          <Skeleton className="h-28" />
+        </>
+      )}
+      {cards.error && (
+        <ErrorInline message={apiErrorMessage(cards.error, "카드를 불러오지 못했어요.")} onRetry={() => void cards.refetch()} retrying={cards.isRefetching} />
+      )}
+      {cards.data && visible.length === 0 && (
+        filtered ? (
+          <Empty buddy={false} title="찾는 카드가 없어요" description="다른 말로 찾거나 필터를 바꿔 보세요." />
+        ) : (
+          <Empty title="아직 확인할 카드가 없어요" description="자료를 올리면 카드가 만들어져요." />
+        )
+      )}
+
+      {[...groups.entries()].map(([name, list]) => (
+        <ListGroup key={name} label={name}>
+          {list.map((card) => {
+            const badge = ROW_BADGE[card.review_status];
             return (
-              <button
-                key={f.value}
-                type="button"
-                onClick={() => setFilterStatus(f.value)}
-                aria-pressed={active}
-                className={`min-h-[44px] shrink-0 rounded-full px-4 text-xs font-bold transition-all active:scale-[0.95] ${
-                  active
-                    ? "bg-brand-700 text-white shadow-sm"
-                    : "bg-surface-muted text-muted hover:text-foreground"
-                }`}
-              >
-                {f.label}
-              </button>
+              <ListRow
+                key={card.card_id}
+                title={card.title}
+                subtitle={summary(card.content)}
+                href={`/owner/cards/${card.card_id}`}
+                badge={badge ? <Chip size="sm" tone={badge.tone}>{badge.label}</Chip> : undefined}
+              />
             );
           })}
-        </div>
+        </ListGroup>
+      ))}
+      {cards.hasNextPage && (
+        <Button variant="secondary" loading={cards.isFetchingNextPage} onClick={() => void cards.fetchNextPage()}>
+          카드 더 보기
+        </Button>
+      )}
+      <RefreshingHint active={cards.isRefetching && !cards.isFetchingNextPage} />
+    </Screen>
+  );
+}
 
-        {/* 오류 알림 */}
-        {errorMessage && (
-          <InlineError
-            message={errorMessage}
-            isRetrying={cards.isFetching || categories.isFetching || proposals.isFetching}
-            onRetry={() => {
-              void Promise.all([cards.refetch(), categories.refetch(), proposals.refetch()]);
-            }}
-          />
-        )}
-
-        {jobId && (
-          <div className="flex min-h-[44px] items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 px-3 text-xs text-brand-800">
-            <span>작업 #{jobId}에서 만든 카드만 표시 중이에요.</span>
-            <button
-              type="button"
-              className="min-h-[44px] shrink-0 px-2 font-bold text-brand-700 active:scale-[0.95]"
-              onClick={() => {
-                const params = new URLSearchParams(searchParams.toString());
-                params.delete("job_id");
-                router.replace(`/owner/cards?${params.toString()}`);
-              }}
-            >
-              필터 해제
-            </button>
-          </div>
-        )}
-
-        {/* 지식 보완/충돌 제안 배너 */}
-        {pendingProposals.length > 0 && (
-          <div className="rounded-2xl border border-accent-500/40 bg-accent-50/50 p-3.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <strong className="text-xs font-bold text-accent-700">
-                💡 점주 답변에서 도출된 새 제안 {pendingProposals.length}건
-              </strong>
-              <Link
-                href="/owner/cards/review"
-                className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-bold text-brand-700 underline hover:bg-brand-50 hover:text-brand-800"
-              >
-                일괄 검토 →
-              </Link>
-            </div>
-            <div className="space-y-2 pt-1">
-              {pendingProposals.slice(0, 2).map((proposal) => (
-                <div
-                  key={proposal.proposal_id}
-                  className="rounded-xl bg-surface p-3 border border-border text-xs space-y-1.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <Badge tone={proposal.relation_type === "CONFLICT" ? "danger" : "brand"}>
-                      {proposal.relation_type === "CONFLICT" ? "충돌 검토" : "보완 제안"}
-                    </Badge>
-                  </div>
-                  <p className="font-semibold text-foreground line-clamp-2">
-                    {proposal.proposed_content}
-                  </p>
-                  <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      size="md"
-                      loading={
-                        proposalAction.isPending &&
-                        proposalAction.variables?.proposalId === proposal.proposal_id &&
-                        proposalAction.variables.action === "approve"
-                      }
-                      disabled={
-                        proposalAction.isPending &&
-                        proposalAction.variables?.proposalId === proposal.proposal_id
-                      }
-                      loadingLabel="반영 중"
-                      onClick={() => proposalAction.mutate({ proposalId: proposal.proposal_id, action: "approve" })}
-                      className="px-3 text-sm"
-                    >
-                      승인·반영
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      loading={
-                        proposalAction.isPending &&
-                        proposalAction.variables?.proposalId === proposal.proposal_id &&
-                        proposalAction.variables.action === "dismiss"
-                      }
-                      disabled={
-                        proposalAction.isPending &&
-                        proposalAction.variables?.proposalId === proposal.proposal_id
-                      }
-                      loadingLabel="기각 중"
-                      onClick={() => proposalAction.mutate({ proposalId: proposal.proposal_id, action: "dismiss" })}
-                      className="px-3 text-sm"
-                    >
-                      기각
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 로딩 스켈레톤 */}
-        {cards.isLoading && (
-          <div className="space-y-2.5 pt-1">
-            <SkeletonList count={5} heightClass="h-24" label="카드 목록 불러오는 중" />
-          </div>
-        )}
-
-        {/* 빈 상태 */}
-        {!cards.isLoading && !errorMessage && items.length === 0 && (
-          <EmptyState
-            icon="🗂"
-            title="조건에 맞는 카드가 없어요"
-            description="다른 필터를 선택하거나 새로운 업무 자료를 올려 카드를 생성해보세요."
-            actionHref="/owner/upload"
-            actionLabel="새 자료 올리기 →"
-          />
-        )}
-
-        {/* 카드 목록 */}
-        <div className="space-y-2">
-          {items.map((card) => (
-            <KnowledgeCardListItem
-              key={card.card_id}
-              card={card}
-              onApprove={(id) => cardAction.mutate({ cardId: id, action: "approve" })}
-              onExclude={(id) => cardAction.mutate({ cardId: id, action: "exclude" })}
-              isActing={
-                cardAction.isPending && cardAction.variables?.cardId === card.card_id
-              }
-              actingAction={
-                cardAction.isPending && cardAction.variables?.cardId === card.card_id
-                  ? cardAction.variables.action
-                  : null
-              }
-            />
-          ))}
-        </div>
-
-        {/* 무한 스크롤 / 더보기 버튼 */}
-        {cards.hasNextPage && (
-          <div className="pt-2 text-center">
-            <Button
-              variant="secondary"
-              size="md"
-              loading={cards.isFetchingNextPage}
-              loadingLabel="추가 카드 불러오는 중"
-              onClick={() => void cards.fetchNextPage()}
-              className="w-full"
-            >
-              다음 카드 더보기 ↓
-            </Button>
-          </div>
-        )}
-      </main>
-    </div>
+export default function OwnerCardsPage() {
+  return (
+    <Suspense>
+      <CardsScreen />
+    </Suspense>
   );
 }
