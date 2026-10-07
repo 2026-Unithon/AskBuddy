@@ -1,0 +1,111 @@
+{
+  "workload": "SELECT pg_sleep; synthetic hold",
+  "hold_ms": 250.0,
+  "pool_min": 1,
+  "pool_max": 10,
+  "timeout_seconds": 10.0,
+  "results": [
+    {
+      "users": 10,
+      "calls_per_user": 4,
+      "concurrent_requests": 40,
+      "success": 40,
+      "errors": {},
+      "elapsed_ms": 1101.31,
+      "latency_p50_ms": 590.53,
+      "latency_p95_ms": 1099.09,
+      "acquire_p95_ms": 843.19,
+      "throughput_rps": 36.32
+    },
+    {
+      "users": 10,
+      "calls_per_user": 8,
+      "concurrent_requests": 80,
+      "success": 80,
+      "errors": {},
+      "elapsed_ms": 2207.0,
+      "latency_p50_ms": 1075.04,
+      "latency_p95_ms": 2086.69,
+      "acquire_p95_ms": 1834.09,
+      "throughput_rps": 36.25
+    },
+    {
+      "users": 20,
+      "calls_per_user": 4,
+      "concurrent_requests": 80,
+      "success": 80,
+      "errors": {},
+      "elapsed_ms": 2050.92,
+      "latency_p50_ms": 1022.01,
+      "latency_p95_ms": 2044.39,
+      "acquire_p95_ms": 1783.85,
+      "throughput_rps": 39.01
+    },
+    {
+      "users": 20,
+      "calls_per_user": 8,
+      "concurrent_requests": 160,
+      "success": 160,
+      "errors": {},
+      "elapsed_ms": 4103.2,
+      "latency_p50_ms": 2072.05,
+      "latency_p95_ms": 4100.92,
+      "acquire_p95_ms": 3846.94,
+      "throughput_rps": 38.99
+    },
+    {
+      "users": 50,
+      "calls_per_user": 4,
+      "concurrent_requests": 200,
+      "success": 200,
+      "errors": {},
+      "elapsed_ms": 5098.16,
+      "latency_p50_ms": 2545.23,
+      "latency_p95_ms": 4841.32,
+      "acquire_p95_ms": 4585.28,
+      "throughput_rps": 39.23
+    },
+    {
+      "users": 50,
+      "calls_per_user": 8,
+      "concurrent_requests": 400,
+      "success": 390,
+      "errors": {
+        "TimeoutError": 10
+      },
+      "elapsed_ms": 10027.13,
+      "latency_p50_ms": 5086.48,
+      "latency_p95_ms": 9668.89,
+      "acquire_p95_ms": 9416.88,
+      "throughput_rps": 38.89
+    },
+    {
+      "users": 100,
+      "calls_per_user": 4,
+      "concurrent_requests": 400,
+      "success": 390,
+      "errors": {
+        "TimeoutError": 10
+      },
+      "elapsed_ms": 10014.92,
+      "latency_p50_ms": 5080.1,
+      "latency_p95_ms": 9628.72,
+      "acquire_p95_ms": 9375.69,
+      "throughput_rps": 38.94
+    },
+    {
+      "users": 100,
+      "calls_per_user": 8,
+      "concurrent_requests": 800,
+      "success": 390,
+      "errors": {
+        "TimeoutError": 410
+      },
+      "elapsed_ms": 10028.73,
+      "latency_p50_ms": 5052.98,
+      "latency_p95_ms": 9649.64,
+      "acquire_p95_ms": 9395.6,
+      "throughput_rps": 38.89
+    }
+  ]
+}
