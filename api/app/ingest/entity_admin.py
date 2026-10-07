@@ -20,8 +20,8 @@ from typing import Literal
 
 import asyncpg
 
-from app.ingest.entities import (AliasTaken, EntityUnresolvable, find_entity_by_alias,
-                                 lock_store_knowledge)
+from app.ingest.entities import (AliasTaken, EntityUnresolvable, _follow_merged,
+                                 find_entity_by_alias, lock_store_knowledge)
 from app.ingest.entity_names import normalize_subject
 from app.ingest.fact_revisions import FactChange, _append_revision, _apply_change, _head_of, \
     _lock_fact
@@ -215,6 +215,66 @@ async def split_entity(conn: asyncpg.Connection, store_id: int, *, entity_id: in
     return new_entity
 
 
+def _as_object(value) -> dict:
+    """jsonb 객체(문자열로 올 수 있다)를 dict 로."""
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        return json.loads(value) if value.strip() else {}
+    return dict(value)
+
+
+async def _rehome_candidates(conn: asyncpg.Connection, store_id: int, *, keep_entity_id: int,
+                             merged_entity_id: int, actor_id: int) -> None:
+    """병합된 대상이 낀 (병합된 대상, 제3 대상) PENDING 후보를 정리한다 (W3-0 §3-3-1).
+
+    keep 과 제3 대상 사이에 후보가 없으면 같은 이유·근거로 keep 쪽 PENDING 후보를 새로 만들고,
+    이미 있으면(상태 무관 — 결정된 쌍은 다시 열지 않는다) 만들지 않는다. 어느 쪽이든 옛 후보는
+    MERGED 로 닫고 이력 CANDIDATE_MOVED 를 남긴다. 제3 대상은 병합 사슬 끝으로 따라가고, 그것이
+    keep 이면 새 후보 없이 닫기만 한다(이력 other_entity_id 는 원래 제3 대상).
+    호출 전 조건: 같은 트랜잭션에서 매장 잠금을 잡았고 merged 는 이미 MERGED 다.
+    """
+    rows = await conn.fetch(
+        "select candidate_id, entity_id_low, entity_id_high, reason, evidence "
+        "from knowledge_entity_candidates "
+        "where store_id = $1 and status = 'PENDING' and $2 in (entity_id_low, entity_id_high) "
+        "and $3 not in (entity_id_low, entity_id_high) "
+        "order by candidate_id for update",
+        store_id, merged_entity_id, keep_entity_id)
+    for row in rows:
+        raw_third = (row["entity_id_high"] if row["entity_id_low"] == merged_entity_id
+                     else row["entity_id_low"])
+        # 제3 대상도 이미 병합됐을 수 있다 — 살아 있는 대상으로 따라간다
+        third = await _follow_merged(conn, store_id, raw_third)
+        new_id = None
+        if third != keep_entity_id:
+            low, high = sorted((keep_entity_id, third))
+            evidence = _as_object(row["evidence"]) | {
+                "moved_from_candidate_id": row["candidate_id"],
+                "merged_entity_id": merged_entity_id}
+            new_id = await conn.fetchval(
+                "insert into knowledge_entity_candidates "
+                "(store_id, entity_id_low, entity_id_high, reason, evidence) "
+                "values ($1, $2, $3, $4, $5::jsonb) "
+                "on conflict (store_id, entity_id_low, entity_id_high) do nothing "
+                "returning candidate_id",
+                store_id, low, high, row["reason"], _json(evidence))
+        else:
+            # 제3 대상이 이미 keep 으로 합쳐졌다 — (keep, keep) 쌍은 만들지 않고 닫기만 한다
+            third = raw_third
+        await conn.execute(
+            "update knowledge_entity_candidates set status = 'MERGED', decided_by = $3, "
+            "decided_at = now(), evidence = evidence || $4::jsonb "
+            "where store_id = $1 and candidate_id = $2 and status = 'PENDING'",
+            store_id, row["candidate_id"], actor_id,
+            _json({"merged_into_entity_id": keep_entity_id, "replaced_by_candidate_id": new_id}))
+        await _event(conn, store_id, "CANDIDATE_MOVED", entity_id=keep_entity_id,
+                     other_entity_id=third, actor_id=actor_id,
+                     payload={"from_candidate_id": row["candidate_id"], "to_candidate_id": new_id,
+                              "merged_entity_id": merged_entity_id,
+                              "outcome": "MOVED" if new_id is not None else "CLOSED"})
+
+
 async def merge_entities(conn: asyncpg.Connection, store_id: int, *, keep_entity_id: int,
                          merged_entity_id: int, actor_id: int, candidate_id: int | None) -> int:
     """merged 대상을 keep 에 합친다(점주 확정). 옮긴 사실 수.
@@ -223,6 +283,7 @@ async def merge_entities(conn: asyncpg.Connection, store_id: int, *, keep_entity
     다시 만든다. merged 는 MERGED·merged_into_entity_id=keep 이 된다. 같은 값이 된 두 사실은 둘 다
     남고 충돌이 아니다(A-4). 두 대상 쌍의 PENDING 후보는 CONFIRMED_SAME 으로 닫는다.
     candidate_id 를 주면 그 후보가 이 쌍의 PENDING 후보여야 한다(아니면 ValueError, 쓰기 없음).
+    병합된 대상이 낀 다른 PENDING 후보는 keep 쪽으로 옮기거나(같은 쌍이 이미 있으면) MERGED 로 닫는다(W3-0).
     """
     if keep_entity_id == merged_entity_id:
         raise ValueError("자기 자신과는 병합하지 않는다")
@@ -282,6 +343,9 @@ async def merge_entities(conn: asyncpg.Connection, store_id: int, *, keep_entity
                      other_entity_id=merged_entity_id, actor_id=actor_id,
                      payload={"fact_ids": facts, "moved_aliases": [a["alias_norm"] for a in aliases],
                               "candidate_id": candidate_id})
+        # W3-0 §3-3-1 — 병합된 대상이 낀 다른 PENDING 후보를 keep 쪽으로 옮기거나 닫는다
+        await _rehome_candidates(conn, store_id, keep_entity_id=keep_entity_id,
+                                 merged_entity_id=merged_entity_id, actor_id=actor_id)
     log.info("W2 대상 병합 store=%s %s → %s 사실 %d 별칭 %d", store_id, merged_entity_id,
              keep_entity_id, len(facts), len(aliases))
     return len(facts)

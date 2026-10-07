@@ -3,6 +3,7 @@
 설정은 필드가 몇 개뿐인 NS 로 patch 한다(F18). 모델·DB 는 부르지 않는다.
 실제 DB 동작은 verify_w_entity_revision 의 P1~P5 가 확인한다.
 """
+import json
 import inspect
 import re
 from types import SimpleNamespace as NS
@@ -171,11 +172,14 @@ async def test_persist_flag_on_records_after_assembly_state_with_same_conn():
 class _ProposalConn:
     """record_upload_proposals 가 부르는 조회를 문장 조각으로 흉내 낸다."""
 
-    def __init__(self, status):
+    def __init__(self, status, merged_into=None):
         self.status = status
+        self.merged_into = merged_into or {}   # 병합된 대상 → 살아남은 대상
         self.writes: list[tuple[str, tuple]] = []
 
     async def fetch(self, query, *args):
+        if "e.status = 'MERGED'" in query:
+            return []   # 병합된 대상 아래 PENDING 제안 없음
         if "from source_fact_revision_links l" in query and "sf.source_id" in query:
             return [{"fact_id": 70, "fact_revision_id": 700, "link_kind": "CREATED",
                      "entity_id": 5}]
@@ -188,6 +192,12 @@ class _ProposalConn:
         raise AssertionError(query)
 
     async def fetchrow(self, query, *args):
+        if "from knowledge_entities" in query:
+            # _follow_merged — (store_id, entity_id)
+            target = self.merged_into.get(args[1])
+            if target is not None:
+                return {"status": "MERGED", "merged_into_entity_id": target}
+            return {"status": "ACTIVE", "merged_into_entity_id": None}
         assert "from upload_change_proposals" in query and "store_id = $1" in query
         return {"proposal_id": 40, "status": self.status}
 
@@ -246,3 +256,114 @@ async def test_variant_check_uses_only_facts_of_the_same_entity():
     # 결정 J Minor — 다른 대상의 ICE 사실 때문에 HOT 사실이 영향에서 빠지면 안 된다
     result = await impact.affected_cards(_AffectedConn(), 3, [700], exclude_source_id=None)
     assert result.by_fact_revision == {700: (9,)}
+
+
+# ── W3-0 §3-3 — 병합 뒤 제안 정리·같은 순위 갱신 ─────────────────────────────
+
+async def _record_with(conn):
+    affected = impact.AffectedCards(card_ids=(9,), by_fact_revision={700: (9,)})
+    with patch.object(impact, "lock_store_knowledge", AsyncMock()), \
+         patch.object(impact, "affected_cards", AsyncMock(return_value=affected)):
+        await impact.record_upload_proposals(conn, 3, 8, job_id=None)
+
+
+@pytest.mark.asyncio
+async def test_proposals_group_by_the_live_entity_after_merge():
+    conn = _ProposalConn("PENDING_REVIEW", merged_into={5: 12})
+    await _record_with(conn)
+    heads = [a for q, a in conn.writes if "insert into upload_change_proposals as p" in q]
+    assert len(heads) == 1 and heads[0][3] == 12
+
+
+@pytest.mark.asyncio
+async def test_upsert_refreshes_matched_cards_on_same_rank_only_when_changed():
+    conn = _ProposalConn("PENDING_REVIEW")
+    await _record_with(conn)
+    sql = next(q for q, _ in conn.writes if "insert into upload_change_proposals as p" in q)
+    assert "where p.status = 'PENDING_REVIEW'" in sql
+    assert (f"array_position({impact._RANK}, excluded.relation_type) "
+            f"> array_position({impact._RANK}, p.relation_type)") in sql
+    assert (f"array_position({impact._RANK}, excluded.relation_type) "
+            f"= array_position({impact._RANK}, p.relation_type)") in sql
+    assert "p.matched_cards is distinct from excluded.matched_cards" in sql
+
+
+class _AdoptConn:
+    """병합된 대상(9 → 12) 아래 PENDING 제안 41 하나. taken 은 살아 있는 대상의 같은 자료 제안
+    (None 또는 (proposal_id, status)). update_status 는 가드 UPDATE 의 결과 문자열."""
+
+    def __init__(self, taken, update_status="UPDATE 1"):
+        self.taken = taken
+        self.update_status = update_status
+        self.writes: list[tuple[str, tuple]] = []
+
+    async def fetch(self, query, *args):
+        assert ("p.status = 'PENDING_REVIEW'" in query and "e.status = 'MERGED'" in query
+                and "p.store_id = $1" in query and args == (3, 8))
+        return [{"proposal_id": 41, "entity_id": 9}]
+
+    async def fetchrow(self, query, *args):
+        if "from upload_change_proposals" in query:
+            assert "store_id = $1" in query and args == (3, 8, 12)
+            if self.taken is None:
+                return None
+            return {"proposal_id": self.taken[0], "status": self.taken[1]}
+        assert "from knowledge_entities" in query and args[0] == 3
+        if args[1] == 9:
+            return {"status": "MERGED", "merged_into_entity_id": 12}
+        return {"status": "ACTIVE", "merged_into_entity_id": None}
+
+    async def execute(self, query, *args):
+        self.writes.append((query, args))
+        if query.startswith("update"):
+            return self.update_status
+        return "INSERT 0 1"
+
+
+@pytest.mark.asyncio
+async def test_pending_proposal_of_merged_entity_moves_to_live_entity():
+    conn = _AdoptConn(taken=None)
+    assert await impact._adopt_merged_proposals(conn, 3, 8) == 1
+    updates = [(q, a) for q, a in conn.writes if q.startswith("update upload_change_proposals")]
+    assert len(updates) == 1 and "set entity_id = $3" in updates[0][0]
+    assert "status = 'PENDING_REVIEW'" in updates[0][0] and updates[0][1] == (3, 41, 12)
+    events = [a for q, a in conn.writes if "insert into knowledge_entity_events" in q]
+    assert len(events) == 1 and events[0][:3] == (3, 12, 9)
+    assert json.loads(events[0][3]) == {"proposal_id": 41, "source_id": 8, "outcome": "MOVED",
+                                        "into_proposal_id": None}
+
+
+@pytest.mark.asyncio
+async def test_pending_proposal_of_merged_entity_is_superseded_when_live_one_exists():
+    conn = _AdoptConn(taken=(40, "PENDING_REVIEW"))
+    await impact._adopt_merged_proposals(conn, 3, 8)
+    updates = [(q, a) for q, a in conn.writes if q.startswith("update upload_change_proposals")]
+    assert len(updates) == 1 and "status = 'SUPERSEDED'" in updates[0][0]
+    assert "status = 'PENDING_REVIEW'" in updates[0][0] and updates[0][1] == (3, 41)
+    assert not any("set entity_id" in q for q, _ in conn.writes)
+    events = [a for q, a in conn.writes if "insert into knowledge_entity_events" in q]
+    assert json.loads(events[0][3]) == {"proposal_id": 41, "source_id": 8,
+                                        "outcome": "SUPERSEDED", "into_proposal_id": 40}
+
+
+@pytest.mark.parametrize("decided", ["ACCEPTED", "DISMISSED", "SUPERSEDED"])
+@pytest.mark.asyncio
+async def test_pending_proposal_of_merged_entity_is_kept_when_live_one_is_decided(decided):
+    # 결정 K — 살아 있는 대상의 제안이 결정됐으면 옛 PENDING 제안을 옮기지도 닫지도 않는다
+    conn = _AdoptConn(taken=(40, decided))
+    assert await impact._adopt_merged_proposals(conn, 3, 8) == 1
+    assert not any(q.startswith("update") for q, _ in conn.writes)
+    events = [a for q, a in conn.writes if "insert into knowledge_entity_events" in q]
+    assert len(events) == 1 and events[0][:3] == (3, 12, 9)
+    assert json.loads(events[0][3]) == {"proposal_id": 41, "source_id": 8,
+                                        "outcome": "KEPT_PENDING", "into_proposal_id": 40}
+
+
+@pytest.mark.parametrize("taken", [None, (40, "PENDING_REVIEW")])
+@pytest.mark.asyncio
+async def test_no_proposal_event_when_guarded_update_changed_nothing(taken):
+    # 가드(status = 'PENDING_REVIEW')에 걸려 바뀐 행이 없으면 이력을 남기지 않는다
+    conn = _AdoptConn(taken=taken, update_status="UPDATE 0")
+    await impact._adopt_merged_proposals(conn, 3, 8)
+    assert len([q for q, _ in conn.writes if q.startswith("update")]) == 1
+    assert not any("insert into knowledge_entity_events" in q for q, _ in conn.writes)

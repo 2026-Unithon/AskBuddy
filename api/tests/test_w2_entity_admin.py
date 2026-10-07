@@ -337,6 +337,9 @@ def _merge_conn(*, statuses=(("ACTIVE", KEEP), ("ACTIVE", GONE)), facts=(70, 71)
             dict(alias_id=200 + i, alias_norm=a, alias_raw=a) for i, a in enumerate(aliases)],
         "from knowledge_facts where store_id = $1 and fact_id = $2 for update":
             lambda args: dict(fact_id=args[1], entity_id=GONE, head_revision_id=HEAD),
+        # _follow_merged — 기본은 모두 ACTIVE
+        "select status, merged_into_entity_id from knowledge_entities":
+            dict(status="ACTIVE", merged_into_entity_id=None),
     }
     responses.update(extra)
     return FakeConn(responses)
@@ -399,6 +402,78 @@ async def test_merge_relinks_moves_aliases_marks_merged_and_confirms_candidate()
     assert merge[2:4] == (KEEP, GONE)
     assert json.loads(merge[-1]) == {"fact_ids": [70, 71], "moved_aliases": ["카페라테"],
                                      "candidate_id": 8}
+
+
+@pytest.mark.asyncio
+async def test_merge_moves_or_closes_pending_candidates_of_the_merged_entity():
+    # W3-0 §3-3-1 — (병합된 대상, 제3 대상) PENDING 후보를 남기지 않는다
+    third_new, third_dup = 30, 31
+    pending = [
+        dict(candidate_id=81, entity_id_low=GONE, entity_id_high=third_new, reason="EDIT1",
+             evidence='{"reason": "EDIT1"}'),
+        dict(candidate_id=82, entity_id_low=GONE, entity_id_high=third_dup, reason="CONTAINS",
+             evidence={"reason": "CONTAINS"}),
+    ]
+    conn = _merge_conn(**{
+        "and status = 'PENDING' and $2 in (entity_id_low, entity_id_high)": pending,
+        # keep 과 third_dup 사이에는 이미 후보가 있다 → 새로 만들지 못한다(None)
+        "insert into knowledge_entity_candidates":
+            lambda args: 90 if args[2] == third_new else None,
+    })
+    await _merge(conn)
+    query = conn.sql("$2 in (entity_id_low, entity_id_high)")[0]
+    assert query[2] == (STORE, GONE, KEEP) and "for update" in query[1]
+    inserts = [c[2] for c in conn.sql("insert into knowledge_entity_candidates")]
+    assert [a[:4] for a in inserts] == [(STORE, KEEP, third_new, "EDIT1"),
+                                        (STORE, KEEP, third_dup, "CONTAINS")]
+    assert json.loads(inserts[0][4]) == {"reason": "EDIT1", "moved_from_candidate_id": 81,
+                                         "merged_entity_id": GONE}
+    closes = conn.sql("update knowledge_entity_candidates set status = 'MERGED'")
+    assert [c[2][:3] for c in closes] == [(STORE, 81, ACTOR), (STORE, 82, ACTOR)]
+    assert all("status = 'PENDING'" in c[1] for c in closes)
+    assert [json.loads(c[2][3]) for c in closes] == [
+        {"merged_into_entity_id": KEEP, "replaced_by_candidate_id": 90},
+        {"merged_into_entity_id": KEEP, "replaced_by_candidate_id": None}]
+    actions = [e[1] for e in _events(conn)]
+    assert actions[-3:] == ["MERGE", "CANDIDATE_MOVED", "CANDIDATE_MOVED"]
+    moved = [e for e in _events(conn) if e[1] == "CANDIDATE_MOVED"]
+    assert [e[2:4] for e in moved] == [(KEEP, third_new), (KEEP, third_dup)]
+    assert [json.loads(e[-1]) for e in moved] == [
+        {"from_candidate_id": 81, "to_candidate_id": 90, "merged_entity_id": GONE,
+         "outcome": "MOVED"},
+        {"from_candidate_id": 82, "to_candidate_id": None, "merged_entity_id": GONE,
+         "outcome": "CLOSED"}]
+
+
+@pytest.mark.asyncio
+async def test_merge_follows_third_entity_and_closes_when_it_resolves_to_keep():
+    # 제3 대상이 이미 keep 으로 합쳐졌으면 (keep, keep) 후보를 만들지 않고 닫기만 한다.
+    # 다른 대상으로 합쳐졌으면 살아 있는 대상과 짝을 만든다
+    into_keep, into_other, live_other = 30, 31, 40
+    pending = [
+        dict(candidate_id=81, entity_id_low=GONE, entity_id_high=into_keep, reason="EDIT1",
+             evidence={}),
+        dict(candidate_id=82, entity_id_low=GONE, entity_id_high=into_other, reason="CONTAINS",
+             evidence={}),
+    ]
+    chain = {into_keep: KEEP, into_other: live_other}
+    conn = _merge_conn(**{
+        "and status = 'PENDING' and $2 in (entity_id_low, entity_id_high)": pending,
+        "select status, merged_into_entity_id from knowledge_entities":
+            lambda args: (dict(status="MERGED", merged_into_entity_id=chain[args[1]])
+                          if args[1] in chain
+                          else dict(status="ACTIVE", merged_into_entity_id=None)),
+        "insert into knowledge_entity_candidates": 91,
+    })
+    await _merge(conn)
+    inserts = [c[2] for c in conn.sql("insert into knowledge_entity_candidates")]
+    assert [a[:4] for a in inserts] == [(STORE, KEEP, live_other, "CONTAINS")]
+    closes = conn.sql("update knowledge_entity_candidates set status = 'MERGED'")
+    assert [c[2][:2] for c in closes] == [(STORE, 81), (STORE, 82)]
+    assert [json.loads(c[2][3])["replaced_by_candidate_id"] for c in closes] == [None, 91]
+    moved = [e for e in _events(conn) if e[1] == "CANDIDATE_MOVED"]
+    assert [e[2:4] for e in moved] == [(KEEP, into_keep), (KEEP, live_other)]
+    assert [json.loads(e[-1])["outcome"] for e in moved] == ["CLOSED", "MOVED"]
 
 
 # ── decide_candidate ────────────────────────────────────────────────────────

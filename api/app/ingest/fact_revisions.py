@@ -303,6 +303,8 @@ async def import_legacy_correction(conn: asyncpg.Connection, store_id: int, *,
 
     corrected_value 가 없거나 비었으면 None. 원장 사실이 아직 판에 이어지지 않았으면 None
     (판이 없는 사실은 옮기지 않는다). 이미 옮겼으면 그 판 id(멱등). 원장은 읽기만 한다.
+    W3-0 §3-2 — 지금 head 가 추출 판(EXTRACTION)이 아니면(점주 정정·점주 답변·재연결·이관,
+    또는 메타가 없어 모름) 더 오래된 corrected_value 를 그 위에 얹지 않고 None. 사유를 로그에 남긴다.
     """
     async with conn.transaction():
         await lock_store_knowledge(conn, store_id)
@@ -326,6 +328,15 @@ async def import_legacy_correction(conn: asyncpg.Connection, store_id: int, *,
             return done
         # CAS 기대값은 지금의 head 다(잠근 행에서 읽는다)
         row = await _lock_fact(conn, store_id, fact_id, None)
+        head_kind = await conn.fetchval(
+            "select change_kind from fact_revision_meta "
+            "where store_id = $1 and fact_revision_id = $2",
+            store_id, row["head_revision_id"])
+        if head_kind != "EXTRACTION":
+            log.info("legacy 정정 건너뜀 store=%s source_fact=%s fact=%s head=%s(%s) — "
+                     "추출 판이 아닌 head 위에 옛 corrected_value 를 얹지 않는다",
+                     store_id, source_fact_id, fact_id, row["head_revision_id"], head_kind)
+            return None
         head, variant_other = await _head_of(conn, store_id, row["head_revision_id"])
         corrected = ledger["corrected_value"]
         shape = _apply_change(head, variant_other,

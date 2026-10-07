@@ -322,7 +322,8 @@ async def test_legacy_import_appends_revision_with_legacy_fields():
         "from source_facts": dict(fact_id=5, corrected_value="25", corrected_at=at,
                                   corrected_by=ACTOR),
         "from source_fact_revision_links": FACT,
-        "legacy_source_fact_id = $2": None})
+        "legacy_source_fact_id = $2": None,
+        "select change_kind from fact_revision_meta": "EXTRACTION"})
     assert await fr.import_legacy_correction(conn, STORE, source_fact_id=5) == NEW
     insert = conn.sql("insert into fact_revisions")[0][2]
     assert insert[3:5] == ("25", "25") and insert[9:11] == (Decimal("25"), "ml")
@@ -331,6 +332,29 @@ async def test_legacy_import_appends_revision_with_legacy_fields():
     assert (meta[3], meta[7], meta[8], meta[10]) == (
         "LEGACY_CORRECTION", at, "source_facts.corrected_value 이관", 5)
     assert not conn.sql("source_facts set")
+
+
+@pytest.mark.parametrize("head_kind", ["OWNER_CORRECTION", "OWNER_ANSWER", "RELINK",
+                                       "LEGACY_CORRECTION", None])
+@pytest.mark.asyncio
+async def test_legacy_import_skips_when_head_is_not_extraction(head_kind, caplog):
+    # W3-0 §3-2 — 점주 정정(등) 위에 더 오래된 corrected_value 를 새 head 로 얹지 않는다.
+    # 메타가 없어 종류를 모르는 head(None)도 덮지 않는다
+    conn = FakeConn(extra={
+        "from source_facts": dict(fact_id=5, corrected_value="25", corrected_at=None,
+                                  corrected_by=ACTOR),
+        "from source_fact_revision_links": FACT,
+        "legacy_source_fact_id = $2": None,
+        "select change_kind from fact_revision_meta": head_kind})
+    with caplog.at_level("INFO", logger="app.ingest.fact_revisions"):
+        assert await fr.import_legacy_correction(conn, STORE, source_fact_id=5) is None
+    assert not conn.sql("insert into")
+    assert not conn.sql("update knowledge_facts")
+    kind_query = conn.sql("select change_kind from fact_revision_meta")
+    assert len(kind_query) == 1 and kind_query[0][2] == (STORE, HEAD)
+    # head 확인은 사실 행을 잠근 뒤에 한다
+    assert order_of(conn, "for update") < order_of(conn, "select change_kind")
+    assert "legacy 정정 건너뜀" in caplog.text
 
 
 # ── 충돌 기각 ────────────────────────────────────────────────────────────────

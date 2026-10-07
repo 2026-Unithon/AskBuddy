@@ -59,6 +59,9 @@ Task 5 (W2-4 ③ 대상 병합·분리·재연결, 한 합성 매장 + 실제 �
   S3 공개본 보존 — S1·S2 전후 카드 행·card_versions·card_facts·snapshot 수·current hash·업로드 제안 동일
   S4 다른 매장 entity_id 로 relink → LookupError·행 수 불변, 직접 쓰기는 복합 FK 실패,
      다른 매장 id 로 split·merge·후보 결정 → LookupError
+
+W3-0 (설계 W3_0_FLAG_READINESS_DESIGN §3-6): verify() 끝에서 scripts/verify_w3_flag_readiness.py 를
+부른다 — 두 플래그를 켠 합성 종단 검증 T1~T8.
 """
 import importlib
 import json
@@ -1706,4 +1709,7 @@ async def verify(db, dsn):
         await _scenario_revisions(db, dsn)
         await _scenario_proposals(db, dsn)
         await _scenario_entity_admin(db, dsn)
+        # W3-0 §3-6 — 두 플래그를 켠 합성 종단 검증. 순환 import 를 피해 여기서 부른다
+        from verify_w3_flag_readiness import verify as verify_w3_0
+        await verify_w3_0(db, dsn)
     print("PASS W entity revision all scenarios")
