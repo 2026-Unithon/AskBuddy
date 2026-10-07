@@ -8,7 +8,7 @@ from app.ingest.layout.schemas import (ExpandResult, LayoutFact, PlacedRegion, P
                                        TableInfo, TableResult, TranscribedRow)
 from app.ingest.schemas import Evidence, ExtractedAssertion, FactExtractionResult
 
-ST = NS(layout_expand_model="gemini:gemini-3.6-flash", layout_expand_batch_rows=10,
+ST = NS(layout_expand_model="gemini:gemini-3.6-flash", layout_expand_batch_rows=10, layout_concurrency=4,
         layout_fact_confidence=0.9)
 
 

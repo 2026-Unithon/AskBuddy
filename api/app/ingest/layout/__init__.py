@@ -3,8 +3,11 @@
 구역 하나 = 구간(segment) 하나. 구역을 끝내는 즉시 checkpoint 로 원장에 적는다.
 금액 상한에 닿으면 남은 구역·쪽은 부르지 않고 실패로 남긴다(작업은 PARTIAL).
 판독 불가·전개 미반영은 구역 실패가 아니라 미해결로만 남긴다(계획 편차 7).
+쪽 지도는 모두 동시에, 구역은 layout_region_concurrency 개까지 동시에 돈다. 결과는 쪽→구역 순서로 합친다.
 """
+import asyncio
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import get_settings
@@ -18,6 +21,47 @@ logger = logging.getLogger(__name__)
 
 # 평가 하네스가 읽는 단계별 손실 기록. 프로세스 안에서만 산다(제품 응답에 싣지 않는다)
 STATS: dict[int, dict] = {}
+
+
+@dataclass
+class _Halt:
+    """금액 상한 공용 멈춤 표시. 이벤트 루프 하나 안에서만 읽고 쓴다."""
+    on: bool = False
+
+
+@dataclass
+class _RegionResult:
+    region_id: str
+    failed: bool = False
+    facts: list = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _PageResult:
+    map_failed: bool = False
+    total: int = 0
+    notes: list[str] = field(default_factory=list)
+    regions: list[_RegionResult] = field(default_factory=list)
+
+
+def _start(coro) -> asyncio.Task:
+    """작업을 즉시(eager) 시작한다. 첫 await 까지는 지금 자리에서 돈다.
+
+    상한 표시를 본 시점과 실제 시작이 어긋나지 않게 하고, 앞 쪽·앞 구역부터 순서대로 출발시킨다.
+    """
+    return asyncio.eager_task_factory(asyncio.get_running_loop(), coro)
+
+
+async def _gather_all(tasks: list) -> list:
+    """형제가 모두 끝난 뒤에만 실패를 올린다. 하나가 예상 못 한 예외를 내도 나머지를 방치하지 않는다.
+
+    이 함수를 await 하던 쪽이 취소되면 gather 가 자식을 취소하고 CancelledError 를 그대로 올린다.
+    자식의 취소·중단(Exception 아닌 BaseException)은 다른 예외보다 먼저 올린다.
+    """
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    transcribe.raise_first_failure(results)
+    return results
 
 
 def _new_stats() -> dict:
@@ -114,41 +158,17 @@ async def run_layout_extraction(*, source_id: int, path: Path | None, workdir: P
         return (only_segments is None or rid in only_segments
                 or _map_segment(page_number) in only_segments)
 
-    merged, unresolved, failed, total = [], [], [], 0
-    stop = False
-    for page in pages:
-        if stop:
-            # 상한 뒤 쪽은 구역 지도도 부르지 않는다. 잃은 쪽으로 세어 PARTIAL 로 드러낸다
-            total += 1
-            failed.append(_map_segment(page.number))
-            continue
-        try:
-            placed, notes = await map_page(page, workdir, ctx=ctx, usage_sink=usage_sink,
-                                           raw_sink=raw_sink)
-        except budget.BudgetExceeded as exc:
-            logger.warning("금액 상한 — %d쪽 구역 지도부터 부르지 않는다: %s", page.number, exc)
-            total += 1
-            failed.append(_map_segment(page.number))
-            stop = True
-            continue
-        except Exception as exc:
-            # map_page 는 모델 실패를 스스로 흡수한다. 여기 오는 것은 이미지 처리 등 코드 오류다
-            logger.warning("구역 지도 실패 source=%s %d쪽: %s", source_id, page.number, exc)
-            total += 1
-            failed.append(_map_segment(page.number))
-            continue
-        unresolved += notes
-        for region in placed:
-            total += 1
-            stats["regions"] += 1
-            stats["coverage_regions"] += region.added_by == "COVERAGE"
-            stats["fallback_regions"] += region.added_by == "FALLBACK"
-            rid = region.region_id
-            if not wanted(rid, page.number):
-                continue
-            if stop:
-                failed.append(rid)
-                continue
+    # 금액 상한 공용 멈춤 표시. 어느 쪽/구역에서든 켜지면 아직 시작하지 않은 일은 부르지 않는다
+    halt = _Halt()
+    # 자료 하나 안에서 동시에 처리하는 구역 수(쪽을 가로질러 공용). 모델 호출 수는 공급자 상한이 따로 묶는다
+    region_gate = asyncio.Semaphore(s.layout_region_concurrency)
+
+    async def run_region(region, page) -> _RegionResult:
+        rid = region.region_id
+        async with region_gate:
+            if halt.on:
+                # 상한 뒤에 차례가 온 구역은 부르지 않는다. 잃은 구역으로 센다
+                return _RegionResult(rid, failed=True)
             try:
                 facts, notes, text = await _process_region(region, page, workdir, ctx, caps, glossary,
                                                            source_id, usage_sink, raw_sink, stats)
@@ -159,17 +179,68 @@ async def run_layout_extraction(*, source_id: int, path: Path | None, workdir: P
                     locator_hints=False,
                     clear_ungrounded=bool(getattr(s, "extract_clear_ungrounded_values", False)))
                 if checkpoint is not None:
-                    # 끝낸 즉시 적는다. 적지 못하면 그 구역은 잃은 것으로 센다
+                    # 끝낸 즉시 적는다(구역별 트랜잭션, 순서 무관). 적지 못하면 그 구역은 잃은 것으로 센다
                     await checkpoint(facts, rid)
-                merged += facts
-                unresolved += notes
+                return _RegionResult(rid, facts=facts, notes=notes)
             except budget.BudgetExceeded as exc:
+                # 표시는 구역 자리를 내놓기 전에 켠다 — 기다리던 구역이 상한을 못 보고 시작하지 않게
                 logger.warning("금액 상한 — %s 부터 남은 구역을 부르지 않는다: %s", rid, exc)
-                failed.append(rid)
-                stop = True
+                halt.on = True
+                return _RegionResult(rid, failed=True)
             except Exception as exc:
                 logger.warning("구역 실패 source=%s %s: %s", source_id, rid, exc)
-                failed.append(rid)
+                return _RegionResult(rid, failed=True)
+
+    async def run_page(page) -> _PageResult:
+        mapped = _PageResult()
+        if halt.on:
+            # 모든 쪽이 거의 동시에 출발하므로 여기서 걸리는 일은 드물다(앞 쪽이 첫 await 전에 상한을
+            # 켠 경우뿐). 보통 뒷쪽은 map_page 안의 check_before_call 이 낸 BudgetExceeded 로
+            # 아래에서 `p{n}-map` 실패가 된다. 어느 쪽이든 잃은 쪽으로 세어 PARTIAL 로 드러낸다
+            mapped.map_failed = True
+            return mapped
+        try:
+            placed, notes = await map_page(page, workdir, ctx=ctx, usage_sink=usage_sink,
+                                           raw_sink=raw_sink)
+        except budget.BudgetExceeded as exc:
+            logger.warning("금액 상한 — %d쪽 구역 지도부터 부르지 않는다: %s", page.number, exc)
+            halt.on = True
+            mapped.map_failed = True
+            return mapped
+        except Exception as exc:
+            # map_page 는 모델 실패를 스스로 흡수한다. 여기 오는 것은 이미지 처리 등 코드 오류다
+            logger.warning("구역 지도 실패 source=%s %d쪽: %s", source_id, page.number, exc)
+            mapped.map_failed = True
+            return mapped
+        mapped.notes = list(notes)
+        mapped.total = len(placed)
+        jobs = []
+        for region in placed:
+            stats["regions"] += 1
+            stats["coverage_regions"] += region.added_by == "COVERAGE"
+            stats["fallback_regions"] += region.added_by == "FALLBACK"
+            if wanted(region.region_id, page.number):
+                jobs.append(_start(run_region(region, page)))
+        # 지도가 나온 쪽부터 구역을 시작한다. 결과는 구역 순서대로 모은다
+        mapped.regions = list(await _gather_all(jobs))
+        return mapped
+
+    # 모든 쪽의 구역 지도를 동시에 시작하고, 모든 일이 끝나기를 기다린 뒤 쪽 순서대로 합친다
+    page_results = await _gather_all([_start(run_page(page)) for page in pages])
+    merged, unresolved, failed, total = [], [], [], 0
+    for page, result in zip(pages, page_results):
+        if result.map_failed:
+            total += 1
+            failed.append(_map_segment(page.number))
+            continue
+        total += result.total
+        unresolved += result.notes
+        for r in result.regions:
+            if r.failed:
+                failed.append(r.region_id)
+            else:
+                merged += r.facts
+                unresolved += r.notes
     stats["failed_regions"] = len(failed)
     if total and len(failed) == total and only_segments is None:
         raise RuntimeError(f"모든 구역({total}개) 추출이 실패했다")

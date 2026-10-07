@@ -1,9 +1,11 @@
 """⑤ 사실 전개. 몇 행씩 싼 모델에 텍스트로 주고, 빠진 숫자·x 칸은 코드가 짚어 다시 묻는다."""
+import asyncio
 import logging
 import re
 
 from app.config import get_settings
 from app.ingest.layout import groups, prompts
+from app.ingest.layout.transcribe import raise_first_failure
 from app.ingest.layout.schemas import ExpandResult, LayoutFact, ProseResult, TableResult
 from app.ingest.providers import measured_generate, parse_model_spec
 from app.ingest.schemas import Evidence, ExtractedAssertion
@@ -124,7 +126,51 @@ async def _call(table, rows_text, missing, label, ctx, usage_sink, raw_sink) -> 
         what="사실 전개", mock_build=lambda: ExpandResult(facts=[]))
 
 
+async def _expand_batch(table: TableResult, idx: list[int], tag: str, ctx, usage_sink,
+                        raw_sink) -> tuple[list[ExtractedAssertion], list[str]]:
+    """행 묶음 하나 → (사실, 미해결). 묶음끼리 상태를 나누지 않아 동시에 불러도 된다."""
+    region = table.region
+    assertions: list[ExtractedAssertion] = []
+    unresolved: list[str] = []
+    keys = {f"R{j + 1}": i for j, i in enumerate(idx)}      # 배치 안에서 유일한 행 키
+    key_of = {i: k for k, i in keys.items()}
+    got = await _call(table, "\n".join(row_text(table, i, key_of[i]) for i in idx), "",
+                      tag, ctx, usage_sink, raw_sink)
+    per_row: dict[int, list[LayoutFact]] = {i: [] for i in idx}
+
+    def _place(facts):
+        for f in facts:
+            target = keys.get(_norm_ref(f.row_ref))
+            if target is None:
+                unresolved.append(f"[행 연결 실패] {region.page}쪽 {region.region_id}: "
+                                  f"row_ref={f.row_ref} — {f.original_assertion}")
+            else:
+                per_row[target].append(f)
+    _place(got.facts)
+    gaps = {i: missing_tokens(row_tokens(table, i), per_row[i]) for i in idx}
+    gap_rows = [i for i in idx if gaps[i]]
+    if gap_rows:
+        hint = "\n이전 응답에서 빠진 값: " + " ; ".join(
+            f"[{key_of[i]}] " + ", ".join(t for _, t in gaps[i]) for i in gap_rows)
+        retry = await _call(table, "\n".join(row_text(table, i, key_of[i]) for i in gap_rows),
+                            hint, tag + "r", ctx, usage_sink, raw_sink)
+        # 재시도 응답에서는 틈이 있던 행의 사실만 받는다
+        _place([f for f in retry.facts if keys.get(_norm_ref(f.row_ref)) in gap_rows])
+    for i in idx:
+        label = _label(table, i)
+        mine = _dedup([_normalize_variant(f, table, i) for f in per_row[i]])
+        for k, f in enumerate(mine):
+            assertions.append(_to_assertion(f, table, k, label, i))
+        for kind, tok in missing_tokens(row_tokens(table, i), mine):
+            shown = f"{tok}(x)" if kind == "NEG" else tok
+            unresolved.append(f"[전개 미반영] {region.page}쪽 {region.region_id} 행 {label}: {shown}")
+    return assertions, unresolved
+
+
 async def expand_table(table: TableResult, *, ctx, usage_sink, raw_sink) -> tuple[list[ExtractedAssertion], list[str]]:
+    """행 묶음을 동시에 부르고, 결과는 묶음 순서대로 합친다(직렬과 같은 순서).
+
+    표 안의 묶음 동시 수는 layout_concurrency, 모델 호출 전체는 ingest_model_concurrency 가 묶는다."""
     s = get_settings()
     region = table.region
     assertions: list[ExtractedAssertion] = []
@@ -132,41 +178,20 @@ async def expand_table(table: TableResult, *, ctx, usage_sink, raw_sink) -> tupl
                   f"'{table.header[c] if c < len(table.header) else c}' 칸: {why}"
                   for (r, c), why in sorted(table.unreadable.items())]
     n = s.layout_expand_batch_rows
-    for start in range(0, len(table.rows), n):
-        idx = list(range(start, min(start + n, len(table.rows))))
-        keys = {f"R{j + 1}": i for j, i in enumerate(idx)}      # 배치 안에서 유일한 행 키
-        key_of = {i: k for k, i in keys.items()}
-        tag = f"{region.region_id}.x{start // n}"
-        got = await _call(table, "\n".join(row_text(table, i, key_of[i]) for i in idx), "",
-                          tag, ctx, usage_sink, raw_sink)
-        per_row: dict[int, list[LayoutFact]] = {i: [] for i in idx}
+    batches = [(list(range(start, min(start + n, len(table.rows)))), f"{region.region_id}.x{start // n}")
+               for start in range(0, len(table.rows), n)]
+    # 큰 표 하나가 공급자 공용 대기열을 채우지 않게 표마다 묶음 동시 수를 묶는다
+    gate = asyncio.Semaphore(s.layout_concurrency)
 
-        def _place(facts):
-            for f in facts:
-                target = keys.get(_norm_ref(f.row_ref))
-                if target is None:
-                    unresolved.append(f"[행 연결 실패] {region.page}쪽 {region.region_id}: "
-                                      f"row_ref={f.row_ref} — {f.original_assertion}")
-                else:
-                    per_row[target].append(f)
-        _place(got.facts)
-        gaps = {i: missing_tokens(row_tokens(table, i), per_row[i]) for i in idx}
-        gap_rows = [i for i in idx if gaps[i]]
-        if gap_rows:
-            hint = "\n이전 응답에서 빠진 값: " + " ; ".join(
-                f"[{key_of[i]}] " + ", ".join(t for _, t in gaps[i]) for i in gap_rows)
-            retry = await _call(table, "\n".join(row_text(table, i, key_of[i]) for i in gap_rows),
-                                hint, tag + "r", ctx, usage_sink, raw_sink)
-            # 재시도 응답에서는 틈이 있던 행의 사실만 받는다
-            _place([f for f in retry.facts if keys.get(_norm_ref(f.row_ref)) in gap_rows])
-        for i in idx:
-            label = _label(table, i)
-            mine = _dedup([_normalize_variant(f, table, i) for f in per_row[i]])
-            for k, f in enumerate(mine):
-                assertions.append(_to_assertion(f, table, k, label, i))
-            for kind, tok in missing_tokens(row_tokens(table, i), mine):
-                shown = f"{tok}(x)" if kind == "NEG" else tok
-                unresolved.append(f"[전개 미반영] {region.page}쪽 {region.region_id} 행 {label}: {shown}")
+    async def one(idx, tag):
+        async with gate:
+            return await _expand_batch(table, idx, tag, ctx, usage_sink, raw_sink)
+    # 하나가 실패해도 형제 호출의 기록/종료를 기다린 뒤 구역 실패로 넘긴다(금액 상한 우선)
+    results = await asyncio.gather(*(one(idx, tag) for idx, tag in batches), return_exceptions=True)
+    raise_first_failure(results)
+    for facts, notes in results:
+        assertions += facts
+        unresolved += notes
     return assertions, unresolved
 
 

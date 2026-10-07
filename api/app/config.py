@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     layout_expand_batch_rows: int = Field(default=10, ge=1)
     layout_fact_confidence: float = Field(default=0.9, ge=0, le=1)
     layout_concurrency: int = Field(default=4, ge=1)
+    # 자료 하나 안에서 동시에 처리하는 구역 수. 모델 호출 수는 ingest_model_concurrency 가 따로 묶는다
+    layout_region_concurrency: int = Field(default=3, ge=1)
     # 최초 시도 + 추가 3회. 영구 오류/잘린 출력은 같은 입력으로 반복하지 않는다.
     ingest_stage_retries: int = Field(default=3, ge=0, le=5)
     ingest_retry_base_seconds: float = Field(default=1.0, ge=0, le=10)
