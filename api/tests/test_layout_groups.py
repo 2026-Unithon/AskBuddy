@@ -12,7 +12,7 @@ from app.ingest.layout.schemas import (ExpandResult, GroupSpan, GroupSpans, Layo
 from app.ingest.providers import budget
 
 ST = NS(layout_group_model="anthropic:claude-sonnet-5-5", layout_crop_max_px=2000)
-EST = NS(layout_expand_model="gemini:gemini-3.6-flash", layout_expand_batch_rows=10,
+EST = NS(layout_expand_model="gemini:gemini-3.6-flash", layout_expand_batch_rows=10, layout_concurrency=4,
          layout_fact_confidence=0.9)
 
 

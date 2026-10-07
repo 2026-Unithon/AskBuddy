@@ -14,6 +14,7 @@ from app.ingest.layout.schemas import (BandRow, BandRows, Box, Caps, CellFlag, P
                                        PlacedRegion, ProseLines, ProseResult, TableResult,
                                        TranscribedRow)
 from app.ingest.providers import measured_generate, parse_model_spec
+from app.ingest.providers.budget import BudgetExceeded
 
 logger = logging.getLogger(__name__)
 _FILL = "↑"
@@ -177,11 +178,38 @@ def needs_reroute(rows: list[TranscribedRow], header: list[str]) -> bool:
     return bad * 2 > len(rows)
 
 
+def raise_first_failure(results: list) -> None:
+    """gather(return_exceptions=True) 결과에 실패가 있으면 하나를 올린다.
+
+    우선순위: 취소·중단(Exception 아닌 BaseException) → 금액 상한 → 그 밖의 예외.
+    금액 상한을 다른 오류보다 먼저 올려야 구역이 멈춤 표시를 켠다.
+    """
+    errors = [r for r in results if isinstance(r, BaseException)]
+    for pick in (lambda e: not isinstance(e, Exception),
+                 lambda e: isinstance(e, BudgetExceeded),
+                 lambda e: True):
+        for e in errors:
+            if pick(e):
+                raise e
+
+
+def _reserve_bands(caps: Caps, need: int) -> None:
+    """띠 상한을 검사와 동시에 미리 차감(예약)한다.
+
+    구역이 병렬로 돌므로, 세기만 하고 호출마다 차감하면 두 구역이 같은 순간 검사를 통과해
+    한쪽이 중간에 상한에 걸려 쓴 돈만 잃는다. 검사와 차감 사이에 await 가 없어 원자적이다.
+    구역이 예외로 끝나도 예약을 되돌리지 않는다 — 상한은 비용 폭주를 막는 장치라
+    조금 일찍 닫히는 쪽이 안전하다.
+    """
+    if need > caps.bands_left:
+        # 일부 띠만 부르고 상한에 걸려 쓴 돈만 잃는 구역을 만들지 않는다
+        raise RuntimeError(f"띠 호출 상한 부족: 필요 {need}, 남음 {caps.bands_left}")
+    caps.bands_left -= need
+
+
 async def _band_call(spec_text, region, page, workdir, bi, box, header, caps, ctx, usage_sink, raw_sink):
+    """띠 상한은 호출부(transcribe_table)가 이미 예약했다. 여기서는 차감하지 않는다."""
     s = get_settings()
-    if caps.bands_left <= 0:
-        raise RuntimeError("띠 호출 상한 도달")
-    caps.bands_left -= 1
     img = crop_zoom(page.path, box, s.layout_zoom, workdir / f"{region.region_id}-b{bi}.png")
     result = await measured_generate(
         parse_model_spec(spec_text), prompts.render("table_band", header=" | ".join(header)),
@@ -206,9 +234,7 @@ async def transcribe_table(region: PlacedRegion, page: PageImage, workdir: Path,
                        default_row_px=s.layout_default_row_px, min_row_px=s.layout_min_row_px,
                        max_row_px=s.layout_max_row_px)
     targets = band_indexes if band_indexes is not None else list(range(len(boxes)))
-    if len(targets) > caps.bands_left:
-        # 미리 센다 — 일부 띠만 부르고 상한에 걸려 쓴 돈만 잃는 구역을 만들지 않는다
-        raise RuntimeError(f"띠 호출 상한 부족: 필요 {len(targets)}, 남음 {caps.bands_left}")
+    _reserve_bands(caps, len(targets))
     gate = asyncio.Semaphore(s.layout_concurrency)
 
     async def one(bi):
@@ -217,9 +243,7 @@ async def transcribe_table(region: PlacedRegion, page: PageImage, workdir: Path,
                                     bi, boxes[bi], header, caps, ctx, usage_sink, raw_sink)
     # 하나가 실패해도 형제 호출의 기록/종료를 기다린 뒤 구역 실패로 넘긴다.
     results = await asyncio.gather(*(one(bi) for bi in targets), return_exceptions=True)
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
+    raise_first_failure(results)
     if band_indexes is not None:
         # 재전사: 대상 띠의 원본 행만 돌려준다. 병합·검사는 호출부(재확인)가 기존 행과 함께 한다
         raw = [TranscribedRow((br.row_label or "").strip() or None, list(br.cells), bi,
@@ -247,12 +271,10 @@ async def transcribe_text(region: PlacedRegion, page: PageImage, workdir: Path, 
     boxes = plan_bands(region.box, None, rows_per_band=s.layout_band_rows * 3,
                        overlap_rows=s.layout_band_overlap_rows, default_row_px=s.layout_default_row_px,
                        min_row_px=s.layout_min_row_px, max_row_px=s.layout_max_row_px)
+    _reserve_bands(caps, len(boxes))
     lines: list[str] = []
     prev: list[str] = []
     for bi, box in enumerate(boxes):
-        if caps.bands_left <= 0:
-            raise RuntimeError("띠 호출 상한 도달")
-        caps.bands_left -= 1
         img = crop_zoom(page.path, box, s.layout_zoom, workdir / f"{region.region_id}-t{bi}.png")
         got = await measured_generate(
             parse_model_spec(s.layout_transcribe_model), prompts.render(kind_prompt), [img], ProseLines,

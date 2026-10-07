@@ -47,7 +47,9 @@ async def recheck_rows(table: TableResult, page: PageImage, workdir: Path, *, ca
         return table
     bands = bands[:caps.recheck_calls_left]
     caps.recheck_calls_left -= len(bands)
-    caps.bands_left += len(bands)            # 재전사는 띠 상한이 아니라 재확인 상한으로 센다
+    # 재전사는 띠 상한이 아니라 재확인 상한으로 센다. 바로 아래 transcribe_table 이 같은 수를
+    # 예약(차감)하므로 순효과는 0 이다. 사이에 await 가 없어 다른 구역이 끼어들지 못한다
+    caps.bands_left += len(bands)
     redo = await transcribe_table(table.region, page, workdir, caps=caps,
                                   ctx=lambda l: ctx(f"{l}.re"), usage_sink=usage_sink,
                                   raw_sink=raw_sink, spec_text=s.layout_recheck_model,

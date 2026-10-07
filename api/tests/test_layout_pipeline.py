@@ -20,6 +20,7 @@ def _settings(**over):
                 layout_expand_model="gemini:gemini-3.6-flash", layout_render_dpi=72,
                 ingest_scan_max_pages=None, layout_max_bands_per_source=80,
                 layout_recheck_max_calls_per_source=30, layout_concurrency=2,
+                layout_region_concurrency=3,
                 extract_locator_hints=False, extract_clear_ungrounded_values=False)
     base.update(over)
     return NS(**base)
