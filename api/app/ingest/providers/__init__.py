@@ -61,8 +61,6 @@ async def measured_generate(spec: ModelSpec, prompt: str, images: list[Path], sc
         settings=s, model=spec.model, caller=caller, prompt=prompt, media=images, schema=schema,
         sink=usage_sink, context=usage_context, prompt_hash=_hash(prompt), raw_sink=raw_sink,
         max_output_tokens=max_output_tokens, thinking_level=thinking)
-    if not reply.reused:
-        budget.add_usage(spec.model, reply.usage)
     sink = None if reply.reused else raw_sink
     return await raw_responses.parse_checked(
         sink, usage_context, reply.raw_response_id, reply.finish_reason,

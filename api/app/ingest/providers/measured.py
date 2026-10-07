@@ -9,10 +9,12 @@ from typing import Awaitable, Callable
 
 from app.ingest import raw_responses
 from app.ingest.providers.types import CallResult
+from app.ingest.resilience import limited, transient, backoff, setting
 
 logger = logging.getLogger(__name__)
 
 
+@limited("ingest_model_concurrency")
 async def measured_call(*, settings, model: str, caller: Callable[[], Awaitable[CallResult]],
                         prompt: str, media: list[Path], schema, sink, context,
                         prompt_hash: str | None, raw_sink, max_output_tokens: int | None,
@@ -40,22 +42,46 @@ async def measured_call(*, settings, model: str, caller: Callable[[], Awaitable[
                 await _ledger_reuse(sink, context, s, model, prompt_hash, hit)
                 return CallResult(hit.response_text, {}, hit.finish_reason,
                                   hit.raw_response_id, reused=True)
-    if context is None:
-        reply = await caller()
-    else:
-        async with recorder.attempt(sink, context, model=model,
-                                    mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
-            rec.measure_input(
-                input_bytes=len(prompt.encode("utf-8")) + sum(
-                    m.stat().st_size for m in media if m.exists()),
-                frame_count=len(media) or None,
-            )
-            reply = await caller()
-            rec.reported_model = model
-            if reply.usage:
-                rec.observe(**reply.usage)
+    from app.ingest.providers import budget
+    retries = setting("ingest_stage_retries")
+    for retry in range(retries + 1):
+        budget.check_before_call()
+        call_context = (context.model_copy(update={"attempt_no": context.attempt_no + retry})
+                        if context is not None else None)
+        # 저장 자체만 재시도한다. 공급자 오류만 다음 유료 시도로 간다.
+        provider_error = None
+        try:
+            if call_context is None:
+                try:
+                    reply = await caller()
+                except Exception as exc:
+                    provider_error = exc
+                    raise
             else:
-                rec.partial("공급자가 usage 를 보고하지 않았다")
+                async with recorder.attempt(sink, call_context, model=model,
+                                            mode=s.ingest_mode, prompt_hash=prompt_hash) as rec:
+                    rec.measure_input(
+                        input_bytes=len(prompt.encode("utf-8")) + sum(
+                            m.stat().st_size for m in media if m.exists()),
+                        frame_count=len(media) or None,
+                    )
+                    try:
+                        reply = await caller()
+                    except Exception as exc:
+                        provider_error = exc
+                        raise
+                    rec.reported_model = model
+                    if reply.usage:
+                        rec.observe(**reply.usage)
+                    else:
+                        rec.partial("공급자가 usage 를 보고하지 않았다")
+        except Exception as exc:
+            if provider_error is None or not transient(exc) or retry == retries:
+                raise
+            await backoff(retry, stage="provider", exc=exc)
+            continue
+        budget.add_usage(model, reply.usage)
+        break
 
     # 원가 receipt 를 확정한 뒤에 남긴다. 여기서 실패해도 호출 자체는 SUCCEEDED 다
     raw_id = await raw_responses.record(

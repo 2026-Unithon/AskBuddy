@@ -19,7 +19,8 @@ _FINISH = {"end_turn": "STOP", "max_tokens": "MAX_TOKENS"}
 
 
 def _client(api_key: str):
-    return anthropic.AsyncAnthropic(api_key=api_key)
+    return anthropic.AsyncAnthropic(api_key=api_key, max_retries=0,
+                                    timeout=get_settings().gemini_request_timeout_sec)
 
 
 def _image_block(path: Path) -> dict:

@@ -55,7 +55,8 @@ class DbUsageSink:
 
     async def start(self, attempt: UsageAttempt) -> int:
         from app.usage.repository import start_attempt
-        return await start_attempt(self._pool, attempt)
+        from app.ingest.resilience import retry_io
+        return await retry_io(lambda: start_attempt(self._pool, attempt), stage="receipt.start")
 
     async def finalize(self, attempt_id: int, attempt: UsageAttempt,
                        known_cost, cost, price_status) -> None:

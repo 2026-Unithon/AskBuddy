@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     layout_expand_batch_rows: int = Field(default=10, ge=1)
     layout_fact_confidence: float = Field(default=0.9, ge=0, le=1)
     layout_concurrency: int = Field(default=4, ge=1)
+    # 최초 시도 + 추가 3회. 영구 오류/잘린 출력은 같은 입력으로 반복하지 않는다.
+    ingest_stage_retries: int = Field(default=3, ge=0, le=5)
+    ingest_retry_base_seconds: float = Field(default=1.0, ge=0, le=10)
+    ingest_source_concurrency: int = Field(default=2, ge=1)
+    ingest_model_concurrency: int = Field(default=4, ge=1)
+    ingest_db_timeout_seconds: float = Field(default=10.0, gt=0)
     stt_model: str = "whisper-1"
 
     # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).
@@ -136,6 +142,7 @@ class Settings(BaseSettings):
     # 측정 전이라 값을 가정하지 않는다. 상한에 닿아 잘린 응답(MAX_TOKENS)은
     # 상한 설정과 무관하게 언제나 성공으로 처리하지 않는다
     extract_max_output_tokens: int | None = Field(default=None, ge=1)
+    assemble_batch_facts: int = Field(default=200, ge=1)
     assemble_max_output_tokens: int | None = Field(default=None, ge=1)
     # 잘린 추출을 반으로 나눠 다시 뽑는 깊이 상한 (W1-2). 0 이면 나누지 않는다(기본, 꺼 둠).
     # 깊이 d 까지 나누면 한 구간이 최대 2^(d+1)-1 번 호출된다 — 비용 상한을 함께 본다
