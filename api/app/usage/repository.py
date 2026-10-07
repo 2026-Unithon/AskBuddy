@@ -29,7 +29,13 @@ class UsageWriteError(RuntimeError):
     """계측 저장 실패. 유료 호출 전이면 호출을 멈춘다."""
 
 
-async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
+# 답변 경로의 완료 receipt 저장 한도(종전 값). 지연 예산(D21 p95 5초)을 지키려고 짧게 포기한다
+_FAST_FINALIZE_TIMEOUT_SEC = 0.2
+_FAST_FINALIZE_TRIES = 2
+
+
+async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt, *,
+                        timeout: float | None = None) -> int:
     """호출 전에 STARTED 로 먼저 남긴다.
 
     먼저 남겨야 프로세스가 죽어도 "돈은 나갔는데 기록이 없는" 구멍이 안 생긴다.
@@ -38,8 +44,8 @@ async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
     started = time.monotonic()
     phase = "acquire"
     try:
-        from app.config import get_settings
-        async with asyncio.timeout(get_settings().ingest_db_timeout_seconds), pool.acquire() as conn:
+        # timeout 은 추출 경로(resilient sink)만 준다. 답변 경로는 종전처럼 제한을 걸지 않는다
+        async with asyncio.timeout(timeout), pool.acquire() as conn:
             phase = "insert"
             return int(await conn.fetchval(
                 """
@@ -79,6 +85,7 @@ async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
 async def finalize_attempt(
     pool: asyncpg.Pool, usage_attempt_id: int, attempt: UsageAttempt,
     *, known_cost: Decimal | None, cost: Decimal | None, price_status: str,
+    resilient: bool = False,
 ) -> None:
     """응답이나 실패를 확정한다.
 
@@ -89,8 +96,8 @@ async def finalize_attempt(
     from app.config import get_settings
     from app.ingest.resilience import retry_io
 
-    async def write():
-        async with asyncio.timeout(get_settings().ingest_db_timeout_seconds), pool.acquire() as conn:
+    async def write(limit: float):
+        async with asyncio.timeout(limit), pool.acquire() as conn:
             await conn.execute(
                 """
                 update ai_usage_attempts set
@@ -121,7 +128,19 @@ async def finalize_attempt(
             )
 
     try:
-        await retry_io(write, stage="receipt.finalize")
+        if resilient:
+            # 추출(백그라운드): 일시 장애를 버틴다
+            await retry_io(lambda: write(get_settings().ingest_db_timeout_seconds),
+                           stage="receipt.finalize")
+            return
+        # 답변 경로(D21 p95 5초): 짧게 두 번만 시도하고 STARTED/UNKNOWN 으로 남긴다
+        for retry in range(_FAST_FINALIZE_TRIES):
+            try:
+                await write(_FAST_FINALIZE_TIMEOUT_SEC)
+                return
+            except Exception:
+                if retry == _FAST_FINALIZE_TRIES - 1:
+                    raise
     except Exception as exc:
         logger.error("원가 기록 확정 실패 id=%s type=%s", usage_attempt_id, type(exc).__name__)
 

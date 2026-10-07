@@ -50,20 +50,30 @@ class NullSink:
 class DbUsageSink:
     """원장에 쓴다. pool 을 잠깐씩만 빌린다."""
 
-    def __init__(self, pool) -> None:
+    def __init__(self, pool, *, resilient: bool = False) -> None:
+        """resilient=True 는 추출 파이프라인 전용 — 긴 시간 제한과 재시도로 일시 장애를 버틴다.
+
+        답변 경로(R)는 기본값(False)이다. 지연 예산(D21) 때문에 종전처럼 짧게 포기한다.
+        """
         self._pool = pool
+        self._resilient = resilient
 
     async def start(self, attempt: UsageAttempt) -> int:
-        from app.usage.repository import start_attempt
+        from app.usage import repository
+        if not self._resilient:
+            return await repository.start_attempt(self._pool, attempt)
+        from app.config import get_settings
         from app.ingest.resilience import retry_io
-        return await retry_io(lambda: start_attempt(self._pool, attempt), stage="receipt.start")
+        limit = get_settings().ingest_db_timeout_seconds
+        return await retry_io(lambda: repository.start_attempt(self._pool, attempt, timeout=limit),
+                              stage="receipt.start")
 
     async def finalize(self, attempt_id: int, attempt: UsageAttempt,
                        known_cost, cost, price_status) -> None:
         from app.usage.repository import finalize_attempt
         await finalize_attempt(self._pool, attempt_id, attempt,
                                known_cost=known_cost, cost=cost,
-                               price_status=price_status)
+                               price_status=price_status, resilient=self._resilient)
 
 
 class _Recording:

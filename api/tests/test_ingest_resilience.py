@@ -119,7 +119,8 @@ async def test_db_start_retries_without_spending_and_stops_on_duplicate():
     for errors, expected in (([TimeoutError()] * 3 + [7], 4),
                              ([TimeoutError(), UsageWriteError('duplicate')], 2)):
         start = AsyncMock(side_effect=errors)
-        sink = DbUsageSink(object())
+        # 추출 파이프라인이 쓰는 resilient sink 만 시작 receipt 를 재시도한다
+        sink = DbUsageSink(object(), resilient=True)
         caller = AsyncMock(return_value=CallResult('{}', {}, 'STOP'))
         with patch('app.usage.repository.start_attempt', start), \
              patch('app.usage.repository.finalize_attempt', AsyncMock()):

@@ -63,7 +63,8 @@ async def process_source(
     from app.usage import DbUsageSink
 
     pool = get_pool()
-    usage_sink = DbUsageSink(pool)
+    # 추출은 백그라운드 작업이라 영수증 저장의 일시 장애를 재시도로 버틴다
+    usage_sink = DbUsageSink(pool, resilient=True)
     # 모델 원래 응답 기록 (W1-1). mock 도 같은 기록을 남긴다. 저장 실패는 추출을 멈춘다
     raw_sink = DbRawResponseSink(pool, run_tag=run_tag)
     started = time.perf_counter()
