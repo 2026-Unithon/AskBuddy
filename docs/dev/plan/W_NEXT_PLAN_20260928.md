@@ -252,18 +252,19 @@ TODO 근거: W3 절 + W4 의 "fact_revision 블록 고정" 남은 것. **이 Pha
 - [ ] web 변경 후 `pnpm check` 와 저장소 스킬 `web-async-state-check`·`ui-state-walkthrough` 를 쓴다. 브라우저를 못 띄웠으면 그렇게 보고한다.
 
 ### W2 에서 넘어온 것
-- [ ] 병합 뒤 재처리하면 병합된 대상 아래의 옛 PENDING 업로드 제안과 남은 대상 아래의 새 PENDING 제안이 중복된다.
-- [ ] 병합된 대상이 낀 다른 PENDING 같은 대상 후보(병합된 것, 제3 대상)가 그대로 PENDING 으로 남는다.
-- [ ] `import_legacy_correction` 이 점주 정정 판 위에 더 오래된 `corrected_value` 를 새 head 로 얹을 수 있다(적용 시각과 head 순서 불일치).
-- [ ] 같은 순위로 다시 처리하면 제안의 `matched_cards` 가 갱신되지 않는다.
-- [ ] 기존 카드·사실은 소급 채우지 않았다(`knowledge_cards.entity_id` 비어 있음, 옛 `source_facts` 의 대상·판 없음). 소급 이관을 정한다.
+- [x] 병합 뒤 재처리하면 병합된 대상 아래의 옛 PENDING 업로드 제안과 남은 대상 아래의 새 PENDING 제안이 중복된다. — W3-0 §3-3-2: 병합된 대상의 PENDING 제안을 그 자료에 살아 있는 대상 제안이 없으면 **옮기고(MOVED)**, 살아 있는 제안이 PENDING_REVIEW 이면 옛 제안을 **SUPERSEDED** 로 닫고, 그 밖의 경우(살아 있는 제안이 이미 결정됨)는 옛 제안을 PENDING 으로 **남겨 둔다(KEPT_PENDING)**. 모두 `PROPOSAL_MOVED` 이력이 남고 결정된 제안은 건드리지 않는다.
+- [x] 병합된 대상이 낀 다른 PENDING 같은 대상 후보(병합된 것, 제3 대상)가 그대로 PENDING 으로 남는다. — W3-0 §3-3-1: 남은 대상 쪽으로 옮기거나 `MERGED` 로 닫고 이력 `CANDIDATE_MOVED`(migration `20261007090000_w_merge_cleanup_states.sql`).
+- [x] `import_legacy_correction` 이 점주 정정 판 위에 더 오래된 `corrected_value` 를 새 head 로 얹을 수 있다(적용 시각과 head 순서 불일치). — W3-0 §3-2: head 가 EXTRACTION 이 아니면 건너뜀(None, 로그).
+- [x] 같은 순위로 다시 처리하면 제안의 `matched_cards` 가 갱신되지 않는다. — W3-0 §3-3-3: 같은 순위여도 `matched_cards` 가 달라졌으면 새 계산으로 갱신.
+- [x] 기존 카드·사실은 소급 채우지 않았다(`knowledge_cards.entity_id` 비어 있음, 옛 `source_facts` 의 대상·판 없음). — 2026-10-07 사용자 결정: 소급 이관하지 않는다. 플래그를 켠 뒤 올라온 자료만 새 구조로 간다(W3-0 설계 §2).
 
 **플래그 켜기 전 점검** (`w_entity_revision_enabled`·`w_upload_proposals_enabled`)
-- [ ] 한 자료에 HOT/ICE 가 함께 나오면 규격 없음 slot 으로 들어간다. 표시는 `VARIANT_MULTI` 사유뿐이다 — 켜기 전에 처리 방식을 정한다.
-- [ ] 연결·같은 대상 후보 처리량이 매장 advisory lock 하나에 묶인다. 켜기 전에 먼저 잰다.
-- [ ] `owner_answer_id` FK 는 R 소유 `owner_answers` 에 대해 `on delete restrict` 다. 점주 답변 삭제 경로와 맞춘다(인계 문서 R 이 할 일).
-- [ ] 호출 경로를 붙이기 전에 `import_legacy_correction` 적용 순서(위 항목)를 먼저 고친다.
-- [ ] 두 플래그를 모두 켜고 구간을 동시에 처리하는 합성 종단 검증을 한 번 돌린다.
+- [x] 한 자료에 HOT/ICE 가 함께 나오면 규격 없음 slot 으로 들어간다. — W3-0 §3-1: 원장 단계에서 규격별 두 사실로 나눈다(`api/app/ingest/variant_split.py`, 플래그 켜짐일 때만).
+- [x] 연결·같은 대상 후보 처리량이 매장 advisory lock 하나에 묶인다. — W3-0 §3-5 측정(합성 모델 지연, 조건당 1회, 로컬 Docker): `docs/dev/review/W3_0_THROUGHPUT_20261007.md`. 실제 모델 지연은 재지 않았다.
+- [x] `owner_answer_id` FK 는 R 소유 `owner_answers` 에 대해 `on delete restrict` 다. — W3-0 §3-4 확인: R 트리거가 R revision 있는 답변의 삭제를 막고 앱에 답변 삭제 경로가 없어 새로 막히는 경로 없음. 코드 변경 없음(인계 문서 R 이 할 일 8, 닫힘).
+- [x] 호출 경로를 붙이기 전에 `import_legacy_correction` 적용 순서(위 항목)를 먼저 고친다. — W3-0 §3-2.
+- [x] 두 플래그를 모두 켜고 구간을 동시에 처리하는 합성 종단 검증을 한 번 돌린다. — `api/scripts/verify_w3_flag_readiness.py`(40개 검사, 재구축 검증이 부른다). 구간 동시성 2 에서 구간이 겹쳤음은 처리량 측정의 lock 대기 시간(lock_wait)으로 추정했다(구간별 시각 기록은 없음).
+- [ ] 배포판에서 두 플래그 켜기 — **사용자 실행**: `docs/dev/plan/W3_0_FLAG_ROLLOUT.md`. 아직 켜지 않았다.
 
 **W3 검증:** 다른 매장/존재하지 않는 참조, HOT/ICE 수치 교환, 부정·조건·예외 삭제, 순서 변경을 차단한다.
 승인 미리보기와 저장 콘텐츠가 같다. occurrence 가 처리 결과 없이 사라지지 않는다. 실제 DB 로 사실 블록 카드 승인 → R 검색·답변 인용까지(`verify_w_publication_flow.py`).

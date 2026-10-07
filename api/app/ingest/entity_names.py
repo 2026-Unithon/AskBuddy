@@ -104,6 +104,19 @@ def parse_variant(raw: str | None) -> VariantParts:
                         multi_temperature=len(temperatures) > 1)
 
 
+def strip_temperature(raw: str | None) -> str:
+    """규격 문자열에서 온도 낱말(HOT/ICE 와 규격 칸 서술어)만 뺀 나머지. 원래 표기, 공백 1칸.
+
+    W3-0 HOT/ICE 나누기가 쓴다 — 'HOT/ICE L' 을 'HOT L'·'ICE L' 로 나눌 때 사이즈 등
+    나머지 규격 낱말을 그대로 남긴다.
+    """
+    tokens = _tokens(unicodedata.normalize("NFKC", raw or ""))
+    kept = [t for t in tokens
+            if t.casefold() not in TEMPERATURE_TOKENS
+            and t.casefold() not in _VARIANT_ONLY_TEMPERATURE]
+    return " ".join(kept)
+
+
 def _edit_distance_is_one(a: str, b: str) -> bool:
     """코드포인트 Levenshtein 거리가 정확히 1 인가."""
     if a == b or abs(len(a) - len(b)) > 1:
