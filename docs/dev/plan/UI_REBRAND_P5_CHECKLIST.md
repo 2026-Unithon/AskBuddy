@@ -1,6 +1,6 @@
 # P5 근무조 체크리스트 — 설계
 
-2026-10-06 · 상태: **설계 확정(3차).** 상위 계획 [UI_REBRAND_MOBILE_PLAN.md](UI_REBRAND_MOBILE_PLAN.md) P5 · 브랜치 `ui/rebrand-mobile`
+2026-10-06 · 상태: **설계 확정(3차) · 백엔드 구현 완료(2026-10-07, 미커밋).** 상위 계획 [UI_REBRAND_MOBILE_PLAN.md](UI_REBRAND_MOBILE_PLAN.md) P5 · 브랜치 `ui/rebrand-mobile`
 구현은 이 문서 확정 뒤 별도 구현 계획(`UI_REBRAND_P5_CHECKLIST_PLAN.md`)으로 쪼개 subagent-driven 으로 진행한다(U8).
 
 ## 1. 목적
@@ -130,9 +130,9 @@ create table if not exists checklist_check_events (
   store_id        bigint not null references stores(store_id) on delete cascade,
   business_date   date not null,
   card_version_id bigint not null,
-  line_no         int not null,
+  line_no         int not null check (line_no >= 1),
   checked         boolean not null,
-  user_id         bigint references users(user_id) on delete set null,
+  user_id         bigint not null references users(user_id) on delete cascade,   -- 이벤트는 사람 기록이라 사람이 지워지면 함께 지운다
   late            boolean not null default false,   -- C6 어제 창에서 저장
   created_at      timestamptz not null default now()
 );
@@ -155,7 +155,7 @@ create table if not exists checklist_submissions (
 );
 ```
 
-- 앞선 초안의 `shift_completions` 는 없앴다. 점주 화면의 근무조 ✓ 는 "그 근무조를 범위에 가진 사람의 제출이 있음"으로 계산한다
+- 앞선 초안의 `shift_completions` 는 없앴다. 점주 화면의 근무조 ✓ 는 제출 범위(`scope_shift_ids`)에 그 근무조가 명시된 제출이 있을 때만이다(§5)
 - 알바생이 "내 기록 남기기"를 끄면: 이벤트를 만들지 않고 `checklist_checks.updated_by` 도 비운다. 제출은 `personal=false` 로 남긴다. 다시 켜도 꺼진 기간은 비어 있다 (C7-1)
 - 점주가 "알바생 기록"을 끄면: 저장은 그대로, 점주의 알바생 기록 **조회만** 막는다. 다시 켜면 전부 보인다 (C7-2). 알바생 본인 조회는 영향 없음
 
@@ -164,7 +164,9 @@ create table if not exists checklist_submissions (
 - `now_local = now() at time zone stores.timezone`, `business_date = (now_local - business_day_starts_at)::date`
 - **범위(scope)**: 점주 → 전체. 직원 → `member_shifts` 가 비었거나 활성 근무조가 0개면 전체, 아니면 공통 카드 + 담당 근무조 카드. 전체 = 체크리스트 카드 전부(공통 + 모든 근무조). 한 카드가 범위 안 여러 근무조에 있어도 줄은 한 번만 센다
 - **지금 근무조**: 범위 안 근무조 중 시간이 맞는 것(자정 넘김 처리), 여러 개면 `sort_order` 앞, 없으면 오늘 남은 가장 빠른 것(`upcoming`), 그것도 없으면 첫 근무조. 칩은 범위 안 근무조만 보여주고, 근무조 묶음 위에 공통 묶음을 항상 같이 보여준다
-- **완료 %(달력)**: 제출이 있으면 `done_lines / total_lines`(제출 때 고정), 없으면 그날 마지막 상태로 범위 계산. 범위 줄 수가 0이면 % 없이 "할 일 없음"
+- **근무조 ✓(점주 화면)**: 제출 범위(scope_shift_ids)에 그 근무조가 명시된 제출이 있을 때만. 전체 범위 제출은 근무조를 체크하지 않고 마지막 제출로만 보인다
+- **자동 제출(C4)**: 범위를 다 체크하면 서버가 제출을 자동 기록한다(PUT /checks)
+- **완료 %(달력)**: 제출이 있으면 done_lines / total_lines(제출 때 고정). 제출이 없는 날은 % 없이 "체크 N개"만 보여준다
 - **"한 일"**: 그날 그 사람의 이벤트 중 줄별 마지막 이벤트가 `checked=true` 인 줄
 - 클라이언트는 영업일을 계산하지 않는다. 체크·제출 요청에 서버가 준 `business_date` 를 그대로 보낸다
   - 오늘 날짜: 정상 처리
@@ -190,6 +192,13 @@ create table if not exists checklist_submissions (
 | `PATCH /checklist/settings` | 점주 | `{business_day_starts_at?, staff_records_visible?}` |
 | `PATCH /checklist/me` | 점주·직원 | `{personal_records_enabled}` 내 기록 남기기 |
 
+- **실제 응답 형태(구현 기준)**
+  - `GET /checklist/today`: 위 필드 외에 `previous_business_date`, `previous_submitted`, `view`(지금 화면 줄 수 total/done), `scope_counts`(범위 전체 total/done), `upcoming`(bool)을 준다
+  - `GET /checklist/records/{date}`: 그 사람이 체크한 줄만(`lines`)과 제출(`submission`)을 준다. 범위 전체 줄 목록은 주지 않는다
+  - `GET /checklist/status`: `last_submission` 에 `user_id` 가 없다(누가 냈는지 식별하지 않음). `shift_names` 는 있다
+  - `GET /checklist/shifts`: 항목마다 `card_ids`(승인 여부와 무관하게 그 근무조에 연결된 카드, card_id 순)를 준다
+  - `PUT /checklist/checks`: `submitted`(오늘 제출이 있는지)를 돌려준다
+  - `checklist_check_events.user_id` 는 `not null on delete cascade` 다
 - 점주 전용 경로는 `claims.role != 'OWNER'` 면 403. 직원이 남의 `user_id` 기록을 요청하면 403
 - 다른 매장 근무조·카드·직원 id 는 404 (MVP §18-2). 오류는 공통 오류 계약
 
