@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 
 from app.config import get_settings
-from app.ingest.layout import expand, recheck, transcribe
+from app.ingest.layout import expand, groups, recheck, transcribe
 from app.ingest.layout.pages import blank_page, page_images
 from app.ingest.layout.regions import map_page
 from app.ingest.layout.schemas import Caps
@@ -23,7 +23,7 @@ STATS: dict[int, dict] = {}
 def _new_stats() -> dict:
     return dict(pages=0, regions=0, coverage_regions=0, fallback_regions=0, rows=0, expected_rows=0,
                 rechecked_cells=0, unreadable_cells=0, unexpanded_tokens=0, failed_regions=0, rerouted=0,
-                row_flags_left=0)
+                row_flags_left=0, group_rows=0)
 
 
 def _map_segment(page_number: int) -> str:
@@ -60,6 +60,10 @@ async def _process_region(region, page, workdir, ctx, caps, glossary, source_id,
             before = sum(1 for f in table.flags if f.col is not None)
             await recheck.resolve_cells(table, page, workdir, caps=caps, ctx=ctx,
                                         usage_sink=usage_sink, raw_sink=raw_sink)
+            # 세로 병합 칸을 채운 뒤에 사실을 편다(규격이 사실에 들어가야 한다)
+            group_notes = await groups.resolve_groups(table, page, workdir, ctx=ctx,
+                                                      usage_sink=usage_sink, raw_sink=raw_sink)
+            stats["group_rows"] += table.group_rows
             stats["rechecked_cells"] += before
             stats["unreadable_cells"] += len(table.unreadable)
             stats["rows"] += len(table.rows)
@@ -68,7 +72,7 @@ async def _process_region(region, page, workdir, ctx, caps, glossary, source_id,
             stats["row_flags_left"] += len(row_notes)
             facts, unresolved = await expand.expand_table(table, ctx=ctx, usage_sink=usage_sink,
                                                           raw_sink=raw_sink)
-            unresolved = row_notes + list(unresolved)
+            unresolved = row_notes + group_notes + list(unresolved)
             stats["unexpanded_tokens"] += sum(1 for u in unresolved if u.startswith("[전개 미반영]"))
             text = "\n".join(expand.row_text(table, i) for i in range(len(table.rows)))
             return facts, unresolved, text

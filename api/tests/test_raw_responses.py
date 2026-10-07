@@ -52,7 +52,7 @@ class FakeRawSink:
 
 def _real_settings():
     return NS(gemini_api_key="synthetic", gemini_model="gemini-synthetic",
-              ingest_mode="real", extract_temperature=0.0)
+              ingest_mode="real", extract_temperature=0.0, gemini_request_timeout_sec=300)
 
 
 # ── _call: 응답 텍스트·usage·finish_reason ─────────────────────────────
@@ -74,6 +74,19 @@ async def test_call_returns_text_usage_and_finish_reason_name():
     assert reply.usage == {}
     assert reply.finish_reason == "MAX_TOKENS"
     assert reply.raw_response_id is None
+
+
+@pytest.mark.asyncio
+async def test_call_sets_request_timeout_from_settings():
+    """응답이 오지 않는 Gemini 요청이 영원히 기다리지 않게 요청 시간 제한을 건다(실측에서 45분 멈춤)."""
+    res = NS(text="{}", usage_metadata=None, candidates=[])
+    client = NS(aio=NS(models=NS(generate_content=AsyncMock(return_value=res))))
+    st = _real_settings()
+    st.gemini_request_timeout_sec = 42
+    with patch.object(gemini, "get_settings", return_value=st), \
+         patch("google.genai.Client", return_value=client) as made:
+        await gemini._call("프롬프트", [], FactExtractionResult)
+    assert made.call_args.kwargs["http_options"].timeout == 42_000
 
 
 def test_finish_reason_handles_missing_and_plain_values():

@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import time
+
 import asyncpg
 
 from app.contracts.usage import UsageAttempt
@@ -27,14 +29,24 @@ class UsageWriteError(RuntimeError):
     """계측 저장 실패. 유료 호출 전이면 호출을 멈춘다."""
 
 
-async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
+# 답변 경로의 완료 receipt 저장 한도(종전 값). 지연 예산(D21 p95 5초)을 지키려고 짧게 포기한다
+_FAST_FINALIZE_TIMEOUT_SEC = 0.2
+_FAST_FINALIZE_TRIES = 2
+
+
+async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt, *,
+                        timeout: float | None = None) -> int:
     """호출 전에 STARTED 로 먼저 남긴다.
 
     먼저 남겨야 프로세스가 죽어도 "돈은 나갔는데 기록이 없는" 구멍이 안 생긴다.
     """
     c = attempt.context
+    started = time.monotonic()
+    phase = "acquire"
     try:
-        async with pool.acquire() as conn:
+        # timeout 은 추출 경로(resilient sink)만 준다. 답변 경로는 종전처럼 제한을 걸지 않는다
+        async with asyncio.timeout(timeout), pool.acquire() as conn:
+            phase = "insert"
             return int(await conn.fetchval(
                 """
                 insert into ai_usage_attempts (
@@ -64,12 +76,16 @@ async def start_attempt(pool: asyncpg.Pool, attempt: UsageAttempt) -> int:
         raise UsageWriteError(
             f"이미 기록된 시도다 (call={c.logical_call_id} attempt={c.attempt_no})")
     except Exception as exc:
-        raise UsageWriteError(f"시작 receipt 저장 실패: {exc}") from exc
+        # 메시지가 빈 예외(TimeoutError 등)도 원인을 가를 수 있게 종류와 걸린 시간을 남긴다
+        raise UsageWriteError(
+            f"시작 receipt 저장 실패: phase={phase} type={type(exc).__name__} "
+            f"({time.monotonic() - started:.1f}s)") from exc
 
 
 async def finalize_attempt(
     pool: asyncpg.Pool, usage_attempt_id: int, attempt: UsageAttempt,
     *, known_cost: Decimal | None, cost: Decimal | None, price_status: str,
+    resilient: bool = False,
 ) -> None:
     """응답이나 실패를 확정한다.
 
@@ -77,42 +93,56 @@ async def finalize_attempt(
     저장만 재시도하고 끝내 안 되면 STARTED 로 남아 UNKNOWN 으로 집계된다.
     """
     u, s = attempt.usage, attempt.scale
-    for retry in range(2):
-        try:
-            async with asyncio.timeout(0.2), pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    update ai_usage_attempts set
-                      status=$2, reported_model=$3, provider_request_id=$4,
-                      finished_at=$5, latency_ms=$6, error_code=$7, cache_state=$8,
-                      prompt_tokens=$9, completion_tokens=$10, cached_tokens=$11,
-                      thought_tokens=$12, billable_units=$13, billable_unit_name=$14,
-                      raw_usage=$15::jsonb,
-                      input_bytes=$16, media_duration_sec=$17, page_count=$18, frame_count=$19,
-                      usage_status=$20, missing_reason=$21,
-                      known_cost_usd=$22, cost_usd=$23, price_status=$24
-                    where usage_attempt_id=$1 and store_id=$25
-                      and logical_call_id=$26 and attempt_no=$27
-                      and status='STARTED'
-                    """,
-                    usage_attempt_id, attempt.status, attempt.reported_model,
-                    attempt.provider_request_id,
-                    attempt.finished_at or datetime.now(timezone.utc),
-                    attempt.latency_ms, attempt.error_code, attempt.cache_state,
-                    u.prompt_tokens, u.completion_tokens, u.cached_tokens,
-                    u.thought_tokens, u.billable_units, u.billable_unit_name,
-                    json.dumps(u.raw, ensure_ascii=False) if u.raw else None,
-                    s.input_bytes, s.media_duration_sec, s.page_count, s.frame_count,
-                    attempt.usage_status, attempt.missing_reason,
-                    known_cost, cost, price_status,
-                    int(attempt.context.store_id), attempt.context.logical_call_id,
-                    attempt.context.attempt_no,
-                )
+    from app.config import get_settings
+    from app.ingest.resilience import retry_io
+
+    async def write(limit: float):
+        async with asyncio.timeout(limit), pool.acquire() as conn:
+            await conn.execute(
+                """
+                update ai_usage_attempts set
+                  status=$2, reported_model=$3, provider_request_id=$4,
+                  finished_at=$5, latency_ms=$6, error_code=$7, cache_state=$8,
+                  prompt_tokens=$9, completion_tokens=$10, cached_tokens=$11,
+                  thought_tokens=$12, billable_units=$13, billable_unit_name=$14,
+                  raw_usage=$15::jsonb,
+                  input_bytes=$16, media_duration_sec=$17, page_count=$18, frame_count=$19,
+                  usage_status=$20, missing_reason=$21,
+                  known_cost_usd=$22, cost_usd=$23, price_status=$24
+                where usage_attempt_id=$1 and store_id=$25
+                  and logical_call_id=$26 and attempt_no=$27
+                  and status='STARTED'
+                """,
+                usage_attempt_id, attempt.status, attempt.reported_model,
+                attempt.provider_request_id,
+                attempt.finished_at or datetime.now(timezone.utc),
+                attempt.latency_ms, attempt.error_code, attempt.cache_state,
+                u.prompt_tokens, u.completion_tokens, u.cached_tokens,
+                u.thought_tokens, u.billable_units, u.billable_unit_name,
+                json.dumps(u.raw, ensure_ascii=False) if u.raw else None,
+                s.input_bytes, s.media_duration_sec, s.page_count, s.frame_count,
+                attempt.usage_status, attempt.missing_reason,
+                known_cost, cost, price_status,
+                int(attempt.context.store_id), attempt.context.logical_call_id,
+                attempt.context.attempt_no,
+            )
+
+    try:
+        if resilient:
+            # 추출(백그라운드): 일시 장애를 버틴다
+            await retry_io(lambda: write(get_settings().ingest_db_timeout_seconds),
+                           stage="receipt.finalize")
             return
-        except Exception as exc:
-            if retry == 1:
-                # DB 저장만 최대 2회. 원문/SQL/자격 증명을 로그에 넣지 않는다.
-                logger.error("원가 기록 확정 실패 id=%s type=%s", usage_attempt_id, type(exc).__name__)
+        # 답변 경로(D21 p95 5초): 짧게 두 번만 시도하고 STARTED/UNKNOWN 으로 남긴다
+        for retry in range(_FAST_FINALIZE_TRIES):
+            try:
+                await write(_FAST_FINALIZE_TIMEOUT_SEC)
+                return
+            except Exception:
+                if retry == _FAST_FINALIZE_TRIES - 1:
+                    raise
+    except Exception as exc:
+        logger.error("원가 기록 확정 실패 id=%s type=%s", usage_attempt_id, type(exc).__name__)
 
 
 async def rollup_extraction_run(

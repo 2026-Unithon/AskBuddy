@@ -44,12 +44,15 @@ async def measured_generate(spec: ModelSpec, prompt: str, images: list[Path], sc
                                        usage_context=usage_context, prompt=prompt, media=images)
 
     budget.check_before_call()
+    # 레이아웃 Gemini 호출의 사고 수준(None 이면 모델 기본). 재사용 키도 이 값으로 갈린다
+    thinking = getattr(s, "layout_gemini_thinking_level", None) if spec.provider == "gemini" else None
     if spec.provider == "gemini":
         from app.ingest.extract import gemini
 
         async def caller():
             return await gemini._call(prompt, images, schema,
-                                      max_output_tokens=max_output_tokens, model=spec.model)
+                                      max_output_tokens=max_output_tokens, model=spec.model,
+                                      thinking_level=thinking)
     else:
         async def caller():
             return await anthropic_call.call(spec.model, prompt, images, schema, max_output_tokens)
@@ -57,9 +60,7 @@ async def measured_generate(spec: ModelSpec, prompt: str, images: list[Path], sc
     reply = await measured.measured_call(
         settings=s, model=spec.model, caller=caller, prompt=prompt, media=images, schema=schema,
         sink=usage_sink, context=usage_context, prompt_hash=_hash(prompt), raw_sink=raw_sink,
-        max_output_tokens=max_output_tokens)
-    if not reply.reused:
-        budget.add_usage(spec.model, reply.usage)
+        max_output_tokens=max_output_tokens, thinking_level=thinking)
     sink = None if reply.reused else raw_sink
     return await raw_responses.parse_checked(
         sink, usage_context, reply.raw_response_id, reply.finish_reason,

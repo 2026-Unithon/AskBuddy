@@ -32,6 +32,11 @@ MOCK_PLACEHOLDER = "(목 모드 — 전처리를 건너뛰었다)"
 PARTIAL_RETRY_UNAVAILABLE = "PARTIAL_RETRY_UNAVAILABLE"
 
 
+from app.config import get_settings
+from app.ingest.resilience import limited, retry_io
+
+
+@limited("ingest_source_concurrency")
 async def process_source(
     store_id: int, source_id: int, *, job_id: int | None = None,
     cost_phase: str = "REGISTRATION", cost_purpose: str = "PRODUCT",
@@ -58,7 +63,8 @@ async def process_source(
     from app.usage import DbUsageSink
 
     pool = get_pool()
-    usage_sink = DbUsageSink(pool)
+    # 추출은 백그라운드 작업이라 영수증 저장의 일시 장애를 재시도로 버틴다
+    usage_sink = DbUsageSink(pool, resilient=True)
     # 모델 원래 응답 기록 (W1-1). mock 도 같은 기록을 남긴다. 저장 실패는 추출을 멈춘다
     raw_sink = DbRawResponseSink(pool, run_tag=run_tag)
     started = time.perf_counter()
@@ -150,10 +156,12 @@ async def process_source(
         ledger_ids: dict[str, int] = {}
 
         async def _checkpoint(seg_assertions, segment_id):
-            async with pool.acquire() as c, c.transaction():
-                ledger_ids.update(await _persist_ledger(
-                    c, store_id, source_id, src["source_type"],
-                    seg_assertions))
+            async def write():
+                async with pool.acquire() as c, c.transaction():
+                    saved = await _persist_ledger(
+                        c, store_id, source_id, src["source_type"], seg_assertions)
+                return saved
+            ledger_ids.update(await retry_io(write, stage="ledger.checkpoint"))
 
         if previous and previous['phase'] == 'EXTRACTED':
             cached = previous['outcome']
@@ -1014,14 +1022,34 @@ async def assemble_assertions(
         }
         for a in assertions
     ]
+    # 같은 대상의 규격은 한 카드에 남겨야 하므로 대상 묶음을 쪼개지 않는다.
+    grouped: dict[str, list[dict]] = {}
+    for fact in flat:
+        grouped.setdefault(fact["대상"], []).append(fact)
+    batches, batch = [], []
+    limit = get_settings().assemble_batch_facts
+    for group in grouped.values():
+        if batch and len(batch) + len(group) > limit:
+            batches.append(batch)
+            batch = []
+        batch.extend(group)
+    if batch:
+        batches.append(batch)
     try:
-        return await assemble_cards(
-            source_id=source_id, facts=flat,
-            category_names=categories, glossary=glossary,
-            usage_sink=usage_sink,
-            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE"),
-            raw_sink=raw_sink,
-        )
+        results = []
+        for index, facts in enumerate(batches):
+            results.append(await assemble_cards(
+                source_id=source_id, facts=facts,
+                category_names=categories, glossary=glossary,
+                usage_sink=usage_sink,
+                usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE",
+                                       segment_id=f"batch{index}" if len(batches) > 1 else None),
+                raw_sink=raw_sink,
+            ))
+        if len(results) == 1:
+            return results[0]  # 단일 호출은 원래 응답 ID도 보존한다
+        return ExtractionResult(cards=[card for r in results for card in r.cards],
+                                unresolved=[note for r in results for note in r.unresolved])
     except Exception as exc:
         if strict:
             raise RuntimeError('카드 조립 실패 — 저장한 추출 결과로 재시도해야 합니다.') from exc

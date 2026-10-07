@@ -215,7 +215,11 @@ async def transcribe_table(region: PlacedRegion, page: PageImage, workdir: Path,
         async with gate:
             return await _band_call(spec_text or s.layout_transcribe_model, region, page, workdir,
                                     bi, boxes[bi], header, caps, ctx, usage_sink, raw_sink)
-    results = await asyncio.gather(*(one(bi) for bi in targets))
+    # 하나가 실패해도 형제 호출의 기록/종료를 기다린 뒤 구역 실패로 넘긴다.
+    results = await asyncio.gather(*(one(bi) for bi in targets), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
     if band_indexes is not None:
         # 재전사: 대상 띠의 원본 행만 돌려준다. 병합·검사는 호출부(재확인)가 기존 행과 함께 한다
         raw = [TranscribedRow((br.row_label or "").strip() or None, list(br.cells), bi,

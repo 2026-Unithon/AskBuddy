@@ -3,7 +3,7 @@ import logging
 import re
 
 from app.config import get_settings
-from app.ingest.layout import prompts
+from app.ingest.layout import groups, prompts
 from app.ingest.layout.schemas import ExpandResult, LayoutFact, ProseResult, TableResult
 from app.ingest.providers import measured_generate, parse_model_spec
 from app.ingest.schemas import Evidence, ExtractedAssertion
@@ -103,6 +103,18 @@ def _to_assertion(f: LayoutFact, table_or_prose, index: int, row: str | None, ro
     return a
 
 
+def _normalize_variant(f: LayoutFact, table: TableResult, i: int) -> LayoutFact:
+    """규격을 HOT/ICE 로 정규화한다. 모델 값 → 표 병합 칸 → 원래 값 순. 서로 다르면 표를 따른다."""
+    original = " ".join(f.variant.split())
+    model = groups.variant_of(original)
+    row = groups.row_variant(table, i)
+    if model and row and model != row:
+        return f.model_copy(update={"variant": row, "conditions": [
+            *f.conditions, f"규격 불일치: 모델 {original} / 표 {row}"]})
+    chosen = model or row or original
+    return f.model_copy(update={"variant": chosen}) if chosen != f.variant else f
+
+
 async def _call(table, rows_text, missing, label, ctx, usage_sink, raw_sink) -> ExpandResult:
     s = get_settings()
     return await measured_generate(
@@ -149,7 +161,7 @@ async def expand_table(table: TableResult, *, ctx, usage_sink, raw_sink) -> tupl
             _place([f for f in retry.facts if keys.get(_norm_ref(f.row_ref)) in gap_rows])
         for i in idx:
             label = _label(table, i)
-            mine = _dedup(per_row[i])
+            mine = _dedup([_normalize_variant(f, table, i) for f in per_row[i]])
             for k, f in enumerate(mine):
                 assertions.append(_to_assertion(f, table, k, label, i))
             for kind, tok in missing_tokens(row_tokens(table, i), mine):

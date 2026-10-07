@@ -84,9 +84,13 @@ class Settings(BaseSettings):
     layout_transcribe_model: str = "gemini:gemini-3.6-flash"
     layout_recheck_model: str = "anthropic:claude-sonnet-5-5"
     layout_expand_model: str = "gemini:gemini-3.6-flash"
+    # 표의 세로 병합 칸(구분 열) 묶음을 판단하는 모델
+    layout_group_model: str = "anthropic:claude-sonnet-5-5"
     # Anthropic effort. None 이면 보내지 않는다(모델 기본값). Haiku 에는 보내지 않는다
     layout_anthropic_effort: Literal["low", "medium", "high"] | None = "low"
     layout_max_output_tokens: int = Field(default=16000, ge=1)
+    # 레이아웃 Gemini 호출(띠 전사·표 전개)의 사고 수준. None 이면 모델 기본(기준선). 띠 전사는 판단이 필요 없는 일이다
+    layout_gemini_thinking_level: Literal["MINIMAL", "LOW", "MEDIUM", "HIGH"] | None = None
     layout_render_dpi: int = Field(default=200, ge=72)       # 벡터 PDF 렌더 DPI
     layout_region_image_max_px: int = Field(default=1600, ge=256)  # 구역 지도에 넣는 쪽 이미지 긴 변
     layout_band_rows: int = Field(default=5, ge=1)           # 띠 하나의 행 수
@@ -107,6 +111,12 @@ class Settings(BaseSettings):
     layout_expand_batch_rows: int = Field(default=10, ge=1)
     layout_fact_confidence: float = Field(default=0.9, ge=0, le=1)
     layout_concurrency: int = Field(default=4, ge=1)
+    # 최초 시도 + 추가 3회. 영구 오류/잘린 출력은 같은 입력으로 반복하지 않는다.
+    ingest_stage_retries: int = Field(default=3, ge=0, le=5)
+    ingest_retry_base_seconds: float = Field(default=1.0, ge=0, le=10)
+    ingest_source_concurrency: int = Field(default=2, ge=1)
+    ingest_model_concurrency: int = Field(default=4, ge=1)
+    ingest_db_timeout_seconds: float = Field(default=10.0, gt=0)
     stt_model: str = "whisper-1"
 
     # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).
@@ -132,6 +142,7 @@ class Settings(BaseSettings):
     # 측정 전이라 값을 가정하지 않는다. 상한에 닿아 잘린 응답(MAX_TOKENS)은
     # 상한 설정과 무관하게 언제나 성공으로 처리하지 않는다
     extract_max_output_tokens: int | None = Field(default=None, ge=1)
+    assemble_batch_facts: int = Field(default=200, ge=1)
     assemble_max_output_tokens: int | None = Field(default=None, ge=1)
     # 잘린 추출을 반으로 나눠 다시 뽑는 깊이 상한 (W1-2). 0 이면 나누지 않는다(기본, 꺼 둠).
     # 깊이 d 까지 나누면 한 구간이 최대 2^(d+1)-1 번 호출된다 — 비용 상한을 함께 본다
@@ -157,6 +168,8 @@ class Settings(BaseSettings):
     # Files API 업로드가 ACTIVE 가 될 때까지 기다리는 한도·폴링 간격 (gemini.py 에서 옮김)
     gemini_file_active_timeout_sec: int = Field(default=600, ge=0)
     gemini_file_poll_sec: int = Field(default=5, ge=0)
+    # 추출·조립 Gemini 요청 하나의 시간 제한(초). 사실 1,500건 규모 조립이 약 3분 걸린다
+    gemini_request_timeout_sec: int = Field(default=300, ge=10)
 
     # 추출 온도. 답변 생성은 D12 로 0.0 이 못 박혀 있는데 추출만 0.2 였다.
     # 근거가 문서 어디에도 없었고, 같은 자료를 두 번 돌리면 손실률이 8%p 가까이 흔들렸다.
@@ -213,7 +226,7 @@ class Settings(BaseSettings):
         # LAYOUT 모드가 실제로 쓰는 공급자의 키가 없으면 시작 시점에 막는다
         if self.scan_extract_mode == "LAYOUT" and self.ingest_mode == "real":
             specs = [self.layout_region_model, self.layout_transcribe_model,
-                     self.layout_recheck_model, self.layout_expand_model]
+                     self.layout_recheck_model, self.layout_expand_model, self.layout_group_model]
             if any(x.startswith("anthropic:") for x in specs) and not self.anthropic_api_key:
                 raise ValueError("LAYOUT 모드가 Anthropic 모델을 쓰는데 ANTHROPIC_API_KEY 가 없다")
             if any(x.startswith("gemini:") for x in specs) and not self.gemini_api_key:

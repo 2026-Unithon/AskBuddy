@@ -118,3 +118,40 @@ def test_layout_requires_anthropic_key():
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         Settings(_env_file=None, ingest_mode="real", scan_extract_mode="LAYOUT", anthropic_api_key="")
     Settings(_env_file=None, ingest_mode="real", scan_extract_mode="SINGLE", anthropic_api_key="")
+
+
+def test_layout_schemas_have_no_additional_properties_for_gemini():
+    """Gemini response_schema 는 additionalProperties 를 거절한다(실호출 400) — 스키마 자체엔 없어야 한다."""
+    from app.ingest.layout import schemas as ls
+
+    def walk(node):
+        if isinstance(node, dict):
+            assert "additionalProperties" not in node
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    for model in (ls.RegionMap, ls.BandRows, ls.ProseLines, ls.RecheckTurn, ls.ExpandResult):
+        walk(model.model_json_schema())
+
+
+def test_anthropic_schema_is_strict_everywhere():
+    """Anthropic 으로 보낼 때만 모든 object 에 additionalProperties:false 를 붙인다."""
+    from app.ingest.layout import schemas as ls
+    out = anthropic_call.strict_schema(ls.RegionMap)
+    objects = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                objects.append(node)
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(out)
+    assert objects and all(o.get("additionalProperties") is False for o in objects)
+    # 원본 모델의 스키마는 바뀌지 않는다
+    assert "additionalProperties" not in ls.RegionMap.model_json_schema()

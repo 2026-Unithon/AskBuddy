@@ -10,8 +10,6 @@ import logging
 import time
 from pathlib import Path
 
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
 from app.config import get_settings
 from app.ingest import raw_responses
 from app.ingest.providers.types import CallResult  # noqa: F401  (기존 import 경로 호환)
@@ -127,25 +125,25 @@ def _finish_reason_of(res: object) -> str | None:
     return getattr(reason, "name", None) or str(reason)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(Exception),
-    reraise=True,
-)
 async def _call(prompt: str, media: list[Path], schema=None,
-                max_output_tokens: int | None = None, model: str | None = None) -> CallResult:
+                max_output_tokens: int | None = None, model: str | None = None,
+                thinking_level: str | None = None) -> CallResult:
     """(응답 텍스트, 공급자 usage, 종료 사유). usage 는 못 받으면 빈 dict 다 — 0 으로 채우지 않는다.
 
     잘린 응답(MAX_TOKENS)은 예외가 아니다 — 여기서는 그대로 돌려주고 재시도하지 않는다.
     같은 입력으로 다시 부르면 같은 자리에서 또 잘린다. 판정은 파싱 전에 호출부가 한다.
     `max_output_tokens` 가 None 이면 공급자 기본값을 쓴다.
+    `thinking_level` 이 None 이면 사고 설정을 보내지 않는다(모델 기본 — 기존 동작).
     """
     from google import genai
     from google.genai import types
 
     s = get_settings()
-    client = genai.Client(api_key=s.gemini_api_key)
+    # 요청 시간 제한. 없으면 응답 없는 연결 하나에 작업이 영원히 묶인다(실측에서 45분 멈춤).
+    # 넘으면 예외 → measured_call에서 시도별 receipt와 함께 재시도한다
+    client = genai.Client(api_key=s.gemini_api_key,
+                          http_options=types.HttpOptions(timeout=s.gemini_request_timeout_sec * 1000,
+                              retry_options=types.HttpRetryOptions(attempts=1)))
     res = await client.aio.models.generate_content(
         model=model or s.gemini_model,
         contents=await _parts(prompt, media, client),
@@ -154,6 +152,8 @@ async def _call(prompt: str, media: list[Path], schema=None,
             response_schema=schema or ExtractionResult,
             temperature=s.extract_temperature,
             max_output_tokens=max_output_tokens,
+            thinking_config=(types.ThinkingConfig(thinking_level=thinking_level)
+                             if thinking_level else None),
         ),
     )
     return CallResult(res.text or "", _usage_of(res), _finish_reason_of(res))

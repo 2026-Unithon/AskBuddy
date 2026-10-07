@@ -697,6 +697,9 @@ async def main() -> int:
         "pipeline_version": "facts_then_cards/v1",
         "layout": {"mode": s.scan_extract_mode, "models": _layout_specs(s)},
         "env_overrides": _override_record(args.env_override),
+        "resilience": {name: getattr(s, name) for name in (
+            "ingest_stage_retries", "ingest_source_concurrency", "ingest_model_concurrency",
+            "ingest_db_timeout_seconds", "assemble_batch_facts")},
         "max_usd": args.max_usd,
         # 무엇을 검증하려고 돌렸는가. holdout 개봉은 이 기록 없이는 근거가 없다
         "campaign": ({"campaign_id": campaign_run.campaign_id,
@@ -713,66 +716,68 @@ async def main() -> int:
     await init_pool()
     pool = get_pool()
     try:
-        async with pool.acquire() as conn:
-            store_id = await conn.fetchval(
-                "select store_id from stores where store_slug = $1", slug)
-            if store_id is None:
-                print(f"매장이 없다: {slug}. seed_eval_stores.py 를 먼저 돌린다", file=sys.stderr)
-                return 1
-            owner = await conn.fetchval(
-                "select user_id from users order by user_id limit 1")
+        from app.db_session import ShortSession
+        # 모델 호출 동안 평가용 연결을 점유하지 않는다
+        conn = ShortSession(pool)
+        store_id = await conn.fetchval(
+            "select store_id from stores where store_slug = $1", slug)
+        if store_id is None:
+            print(f"매장이 없다: {slug}. seed_eval_stores.py 를 먼저 돌린다", file=sys.stderr)
+            return 1
+        owner = await conn.fetchval(
+            "select user_id from users order by user_id limit 1")
 
-            run_id = int(await conn.fetchval(
-                """
-                insert into extraction_runs (
-                  store_id, label, code_version, prompt_version, extract_model,
-                  stt_model, ingest_mode, settings, truth_confidence,
-                  source_count, fact_count, notes, created_by
-                )
-                values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13)
-                returning run_id
-                """,
-                store_id, args.label, snapshot["code_version"], snapshot["prompt_version"],
-                snapshot["extract_model"], snapshot["stt_model"], snapshot["ingest_mode"],
-                json.dumps(snapshot, ensure_ascii=False), truth_confidence,
-                len(manifest["sources"]), len(truth["facts"]), args.notes, owner,
-            ))
-            print(f"run_id={run_id} {slug} · {args.label} · 정답지 {truth_confidence}")
-            print(f"  코드 {snapshot['code_version']} · 프롬프트 {snapshot['prompt_version']}"
-                  f" · ingest_mode={snapshot['ingest_mode']}")
+        run_id = int(await conn.fetchval(
+            """
+            insert into extraction_runs (
+              store_id, label, code_version, prompt_version, extract_model,
+              stt_model, ingest_mode, settings, truth_confidence,
+              source_count, fact_count, notes, created_by
+            )
+            values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13)
+            returning run_id
+            """,
+            store_id, args.label, snapshot["code_version"], snapshot["prompt_version"],
+            snapshot["extract_model"], snapshot["stt_model"], snapshot["ingest_mode"],
+            json.dumps(snapshot, ensure_ascii=False), truth_confidence,
+            len(manifest["sources"]), len(truth["facts"]), args.notes, owner,
+        ))
+        print(f"run_id={run_id} {slug} · {args.label} · 정답지 {truth_confidence}")
+        print(f"  코드 {snapshot['code_version']} · 프롬프트 {snapshot['prompt_version']}"
+              f" · ingest_mode={snapshot['ingest_mode']}")
+        if campaign_run is not None:
+            append_campaign_event(campaign_path, campaign_run, "STARTED", run_id=run_id)
+
+        source_types: dict[str, str] = {
+            e["source_key"]: e["type"] for e in manifest["sources"]}
+
+        # 도중에 죽어도 실행을 RUNNING 으로 방치하지 않는다.
+        # RUNNING 인 실행은 동결 트리거가 풀려 있어 나중에 덮어써질 수 있다
+        try:
+            await _execute(conn, run_id, store_id, store_dir, manifest,
+                           truth, source_types, owner, args)
+        except Exception:
+            await conn.execute(
+                "update extraction_runs set status='FAILED', finished_at=now() "
+                "where run_id=$1 and status='RUNNING'",
+                run_id,
+            )
             if campaign_run is not None:
-                append_campaign_event(campaign_path, campaign_run, "STARTED", run_id=run_id)
+                usage = _PARTIAL.get("campaign_usage") or {}
+                append_campaign_event(campaign_path, campaign_run, "FAILED", run_id=run_id,
+                                      detail="evaluation failed",
+                                      ai_attempt_count=usage.get("ai_attempt_count"),
+                                      cost_usd=usage.get("cost_usd"))
+            raise
 
-            source_types: dict[str, str] = {
-                e["source_key"]: e["type"] for e in manifest["sources"]}
-
-            # 도중에 죽어도 실행을 RUNNING 으로 방치하지 않는다.
-            # RUNNING 인 실행은 동결 트리거가 풀려 있어 나중에 덮어써질 수 있다
-            try:
-                await _execute(conn, run_id, store_id, store_dir, manifest,
-                               truth, source_types, owner, args)
-            except Exception:
-                await conn.execute(
-                    "update extraction_runs set status='FAILED', finished_at=now() "
-                    "where run_id=$1 and status='RUNNING'",
-                    run_id,
-                )
-                if campaign_run is not None:
-                    usage = _PARTIAL.get("campaign_usage") or {}
-                    append_campaign_event(campaign_path, campaign_run, "FAILED", run_id=run_id,
-                                          detail="evaluation failed",
-                                          ai_attempt_count=usage.get("ai_attempt_count"),
-                                          cost_usd=usage.get("cost_usd"))
-                raise
-
-            row = await conn.fetchrow(
-                "select metrics, card_count from extraction_runs where run_id=$1", run_id)
-            metrics = row["metrics"] if isinstance(row["metrics"], dict) else json.loads(row["metrics"])
-            cards_n = int(row["card_count"])
-            report_rows = [dict(r) for r in await conn.fetch(
-                """select fact_id, subject, variant, attribute, value, must_have,
-                          source_key, source_type, verdict, card_id, score, reason
-                   from extraction_results where run_id=$1 order by fact_id""", run_id)]
+        row = await conn.fetchrow(
+            "select metrics, card_count from extraction_runs where run_id=$1", run_id)
+        metrics = row["metrics"] if isinstance(row["metrics"], dict) else json.loads(row["metrics"])
+        cards_n = int(row["card_count"])
+        report_rows = [dict(r) for r in await conn.fetch(
+            """select fact_id, subject, variant, attribute, value, must_have,
+                      source_key, source_type, verdict, card_id, score, reason
+               from extraction_results where run_id=$1 order by fact_id""", run_id)]
 
     finally:
         await close_pool()

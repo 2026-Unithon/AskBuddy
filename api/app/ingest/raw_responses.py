@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -87,8 +88,9 @@ async def insert_raw_response(
     logical_call_id: str | None, response: RawResponse,
 ) -> int:
     """응답 원문을 남기고 raw_response_id 를 돌려준다. 연결은 이 한 문장만큼만 빌린다."""
+    from app.ingest.resilience import setting
     try:
-        async with pool.acquire() as conn:
+        async with asyncio.timeout(setting("ingest_db_timeout_seconds")), pool.acquire() as conn:
             return int(await conn.fetchval(
                 """
                 insert into extraction_raw_responses (
@@ -208,11 +210,13 @@ async def record(sink: RawResponseSink | None, context, *, model: str, mode: str
         return None
     if context is None:
         raise RawResponseWriteError("원래 응답을 귀속할 매장 문맥(usage_context)이 없다")
-    return await sink.save(context, RawResponse(
+    response = RawResponse(
         stage=context.stage, model=model, mode=mode, prompt_hash=prompt_hash,
         schema_version=schema_version(schema), finish_reason=finish_reason,
         response_text=response_text, usage=dict(usage or {}), reuse_key=reuse_key,
-    ))
+    )
+    from app.ingest.resilience import retry_io
+    return await retry_io(lambda: sink.save(context, response), stage="raw.save")
 
 
 async def parse_recorded(sink: RawResponseSink | None, context,

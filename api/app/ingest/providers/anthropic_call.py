@@ -19,7 +19,8 @@ _FINISH = {"end_turn": "STOP", "max_tokens": "MAX_TOKENS"}
 
 
 def _client(api_key: str):
-    return anthropic.AsyncAnthropic(api_key=api_key)
+    return anthropic.AsyncAnthropic(api_key=api_key, max_retries=0,
+                                    timeout=get_settings().gemini_request_timeout_sec)
 
 
 def _image_block(path: Path) -> dict:
@@ -30,12 +31,29 @@ def _image_block(path: Path) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
 
 
+def strict_schema(schema) -> dict:
+    """Anthropic json_schema 용. 모든 object 에 additionalProperties:false 를 붙인 사본.
+
+    스키마 모델 자체에는 넣지 않는다 — Gemini 가 그 키를 거절하기 때문이다.
+    """
+    def walk(node):
+        if isinstance(node, dict):
+            out = {k: walk(v) for k, v in node.items()}
+            if out.get("type") == "object":
+                out["additionalProperties"] = False
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    return walk(schema.model_json_schema())
+
+
 async def call(model: str, prompt: str, images: list[Path], schema,
                max_output_tokens: int | None) -> CallResult:
     s = get_settings()
     if not s.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY 가 없다")
-    output_config: dict = {"format": {"type": "json_schema", "schema": schema.model_json_schema()}}
+    output_config: dict = {"format": {"type": "json_schema", "schema": strict_schema(schema)}}
     # Haiku 4.5 는 effort 를 받지 않는다
     if s.layout_anthropic_effort and not model.startswith("claude-haiku"):
         output_config["effort"] = s.layout_anthropic_effort
