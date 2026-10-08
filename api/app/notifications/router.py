@@ -79,7 +79,7 @@ async def save_subscription(
         belongs = await db.fetchval(
             """
             select exists(
-              select 1 from store_members where store_id = $1 and user_id = $2
+              select 1 from store_members where store_id = $1 and user_id = $2 and removed_at is null
             )
             """,
             store_id,
@@ -117,6 +117,7 @@ async def save_subscription(
     return {"subscription_id": int(subscription_id), "enabled": True}
 
 
+# store-isolation-ok: 구독은 사용자 단위이며 JWT 사용자 소유의 구독만 비활성화한다.
 @router.delete("/subscriptions/{subscription_id}", status_code=204)
 async def delete_subscription(
     subscription_id: int,
@@ -234,3 +235,47 @@ async def mark_notification_read(
     if read_at is None:
         raise ApiError(404, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다.")
     return {"notification_id": notification_id, "read_at": read_at.isoformat()}
+
+# store-isolation-ok: 구독은 사용자 단위다. 매장 없는 알바도 승인 알림을 받아야 한다
+@router.get("/push-key")
+async def push_key(user_id: CurrentUserId) -> dict:
+    settings = get_settings()
+    return {
+        "push_configured": push_is_configured(),
+        "vapid_public_key": settings.vapid_public_key or None,
+    }
+
+
+# store-isolation-ok: 구독은 사용자 단위다(user_id 는 JWT)
+@router.post("/my-subscriptions", status_code=201)
+async def save_my_subscription(
+    req: SubscriptionRequest,
+    db: Db,
+    user_id: CurrentUserId,
+    user_agent: str | None = Header(default=None, alias="User-Agent"),
+) -> dict:
+    _validate_subscription(req)
+    subscription_id = await db.fetchval(
+        """
+        insert into push_subscriptions (user_id, endpoint, p256dh, auth, user_agent, enabled)
+        values ($1,$2,$3,$4,$5,true)
+        on conflict (user_id, endpoint) do update
+        set p256dh = excluded.p256dh, auth = excluded.auth,
+            user_agent = excluded.user_agent, enabled = true, updated_at = now()
+        returning subscription_id
+        """,
+        user_id, req.endpoint, req.keys.p256dh, req.keys.auth, (user_agent or "")[:500] or None)
+    return {"subscription_id": int(subscription_id), "enabled": True}
+
+
+# store-isolation-ok: 본인 구독만 끈다
+@router.delete("/my-subscriptions/{subscription_id}", status_code=204)
+async def delete_my_subscription(subscription_id: int, db: Db, user_id: CurrentUserId) -> None:
+    updated = await db.fetchval(
+        """
+        update push_subscriptions set enabled = false, updated_at = now()
+        where subscription_id = $1 and user_id = $2 returning subscription_id
+        """,
+        subscription_id, user_id)
+    if updated is None:
+        raise ApiError(404, "NOT_FOUND", "구독을 찾을 수 없어요.")

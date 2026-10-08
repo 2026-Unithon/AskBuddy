@@ -49,6 +49,11 @@ jobs:
         with:
           version: 2.115.0
 
+      - name: migration 적용 대상 확인
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+        run: supabase db push --db-url "$PROD_DB_URL" --include-all --dry-run
+
       - name: migration 적용
         env:
           PROD_DB_URL: ${{ secrets.PROD_DB_URL }}

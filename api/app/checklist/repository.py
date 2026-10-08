@@ -19,7 +19,7 @@ async def get_member(db, store_id: int, user_id: int):
         """select m.member_id, m.member_role, m.personal_records_enabled,
                   s.timezone, s.business_day_starts_at, s.staff_records_visible
            from store_members m join stores s on s.store_id = m.store_id
-           where m.store_id = $1 and m.user_id = $2""",
+           where m.store_id = $1 and m.user_id = $2 and m.removed_at is null""",
         store_id, user_id,
     )
 
@@ -213,7 +213,7 @@ async def list_members(db, store_id: int) -> list[dict[str, Any]]:
            join users u on u.user_id = m.user_id
            left join member_shifts ms on ms.store_id = m.store_id and ms.member_id = m.member_id
            left join store_shifts s on s.store_id = ms.store_id and s.shift_id = ms.shift_id and s.archived_at is null
-           where m.store_id = $1
+           where m.store_id = $1 and m.removed_at is null
            group by m.member_id, m.user_id, u.name, m.member_role
            order by m.member_role desc, m.member_id""",
         store_id,
@@ -225,7 +225,7 @@ async def list_members(db, store_id: int) -> list[dict[str, Any]]:
 async def set_member_shifts(db, store_id: int, member_id: int, shift_ids: list[int]) -> bool:
     async with db.transaction():
         exists = await db.fetchval(
-            "select exists(select 1 from store_members where store_id = $1 and member_id = $2)", store_id, member_id)
+            "select exists(select 1 from store_members where store_id = $1 and member_id = $2 and removed_at is null)", store_id, member_id)
         if not exists:
             return False
         await db.execute("delete from member_shifts where store_id = $1 and member_id = $2", store_id, member_id)

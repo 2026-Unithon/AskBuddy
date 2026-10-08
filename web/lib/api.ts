@@ -72,8 +72,9 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return error.detail || fallback;
 }
 
-export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
-  const { timeoutMs = TIMEOUT_MS, sessionExpiry = true, ...fetchInit } = init ?? {};
+async function fetchJsonOnce<T>(path: string, init?: FetchJsonInit): Promise<T> {
+  const { timeoutMs = TIMEOUT_MS, sessionExpiry: _sessionExpiry, ...fetchInit } = init ?? {};
+  void _sessionExpiry;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const clientRequestId = requestId();
@@ -82,6 +83,7 @@ export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<
     : controller.signal;
   try {
     const res = await fetch(`${BASE}${path}`, {
+      credentials: "include",
       ...fetchInit,
       headers: {
         "Content-Type": "application/json",
@@ -120,9 +122,6 @@ export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<
         else detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? "");
       } catch {
         // 본문이 JSON 이 아니면 상태 코드만으로 판단한다
-      }
-      if (sessionExpiry && res.status === 401 && new Headers(fetchInit.headers).has("Authorization")) {
-        emitSessionExpired(path);
       }
       throw new ApiError(res.status, detail, path, {
         code,
@@ -206,8 +205,8 @@ export async function opsLogin(email: string, password: string) {
 export type AuthUser = {
   user_id: number;
   name: string;
-  email: string;
-  role: "OWNER" | "STAFF";
+  email?: string;
+  role: "OWNER" | "STAFF" | null;
   // 매장을 만들기 전 점주에게는 이 필드가 아예 없다. null 이 아니라 누락이다.
   store_id?: number | null;
 };
@@ -217,7 +216,7 @@ export type AuthResponse = { token: string; user: AuthUser };
 export type BootstrapResponse = {
   user: {
     user_id: number;
-    role: "OWNER" | "STAFF";
+    role: "OWNER" | "STAFF" | null;
     name: string;
   };
   store: {
@@ -241,7 +240,7 @@ export async function getBootstrap(token: string, signal?: AbortSignal) {
   });
 }
 
-export async function login(email: string, password: string, role: "OWNER" | "STAFF") {
+export async function login(email: string, password: string, role?: "OWNER" | "STAFF") {
   return fetchJson<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password, role }),
@@ -252,30 +251,12 @@ export async function signup(params: {
   name: string;
   email: string;
   password: string;
-  role: "OWNER" | "STAFF";
+  role?: "OWNER" | "STAFF";
   phone?: string;
 }) {
   return fetchJson<AuthResponse>("/auth/signup", {
     method: "POST",
     body: JSON.stringify(params),
-  });
-}
-
-// 신입은 이 하나로 가입과 매장 합류가 동시에 끝난다.
-export async function joinByInvite(params: {
-  name: string;
-  email: string;
-  password: string;
-  inviteCode: string;
-}) {
-  return fetchJson<AuthResponse>("/auth/join", {
-    method: "POST",
-    body: JSON.stringify({
-      name: params.name,
-      email: params.email,
-      password: params.password,
-      invite_code: params.inviteCode,
-    }),
   });
 }
 
@@ -295,14 +276,6 @@ export async function createStore(
     method: "POST",
     headers: authHeader(token),
     body: JSON.stringify({ store_name: params.storeName, business_type: params.businessType }),
-  });
-}
-
-export async function createInvite(token: string) {
-  return fetchJson<{ code: string; expires_at?: string }>("/auth/invites", {
-    method: "POST",
-    headers: authHeader(token),
-    body: JSON.stringify({}),
   });
 }
 
@@ -1031,7 +1004,7 @@ export type NotificationSupport = {
 
 export type NotificationItem = {
   notification_id: number;
-  event_type: "INGEST_COMPLETED" | "PENDING_QUESTION";
+  event_type: "INGEST_COMPLETED" | "PENDING_QUESTION" | "OWNER_ANSWER" | "JOIN_REQUESTED" | "JOIN_APPROVED";
   aggregate_type: "INGEST_JOB" | "PENDING_QUESTION";
   aggregate_id: number;
   title: string;
@@ -1095,4 +1068,145 @@ export async function markNotificationRead(notificationId: number, token: string
     `/notifications/${notificationId}/read`,
     { method: "POST", headers: authHeader(token) }
   );
+}
+
+export type SessionResponse = AuthResponse;
+let renewing: Promise<SessionResponse> | null = null;
+const renewListeners = new Set<(s: SessionResponse) => void>();
+
+export function onSessionRenewed(listener: (s: SessionResponse) => void): () => void {
+  renewListeners.add(listener);
+  return () => { renewListeners.delete(listener); };
+}
+
+async function postRefresh(): Promise<SessionResponse> {
+  return fetchJsonOnce<SessionResponse>("/auth/refresh", { method: "POST", sessionExpiry: false });
+}
+
+// 여러 요청이 동시에 401 을 받아도 갱신은 한 번만 한다.
+// 다른 탭이 방금 회전했다면 첫 시도가 401 이다 — 쿠키는 탭끼리 공유하므로 잠시 뒤 한 번 더 시도한다.
+export function refreshSession(): Promise<SessionResponse> {
+  if (!renewing) {
+    renewing = (async () => {
+      try {
+        return await postRefresh();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await new Promise((r) => setTimeout(r, 300));
+          return await postRefresh();
+        }
+        throw error;
+      }
+    })()
+      .then((session) => {
+        renewListeners.forEach((l) => l(session));
+        return session;
+      })
+      .finally(() => { renewing = null; });
+  }
+  return renewing;
+}
+
+export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
+  try {
+    return await fetchJsonOnce<T>(path, init);
+  } catch (error) {
+    const headers = new Headers(init?.headers);
+    const canRenew = (init?.sessionExpiry ?? true) && headers.has("Authorization");
+    if (!(error instanceof ApiError) || error.status !== 401 || !canRenew) throw error;
+    let session: SessionResponse;
+    try {
+      session = await refreshSession();
+    } catch (refreshError) {
+      if (refreshError instanceof ApiError && refreshError.status === 401) emitSessionExpired(path);
+      throw refreshError;
+    }
+    headers.set("Authorization", `Bearer ${session.token}`);
+    return fetchJsonOnce<T>(path, { ...init, headers: Object.fromEntries(headers.entries()) });
+  }
+}
+
+export async function logoutSession(): Promise<void> {
+  await fetchJsonOnce<void>("/auth/logout", { method: "POST", sessionExpiry: false });
+}
+
+// api.ts
+export type JoinStatus = {
+  status: "PENDING" | "REJECTED" | "APPROVED" | "REMOVED" | "NONE";
+  store_name: string | null;
+};
+
+export async function getJoinStatus(token: string, signal?: AbortSignal) {
+  return fetchJson<JoinStatus>("/auth/join-status", { headers: authHeader(token), signal, cache: "no-store" });
+}
+
+export async function getPushKey(token: string, signal?: AbortSignal) {
+  return fetchJson<{ push_configured: boolean; vapid_public_key: string | null }>(
+    "/notifications/push-key", { headers: authHeader(token), signal });
+}
+
+export async function saveMyPushSubscription(subscription: PushSubscriptionJSON, token: string) {
+  return fetchJson<{ subscription_id: number; enabled: boolean }>("/notifications/my-subscriptions", {
+    method: "POST", headers: authHeader(token), body: JSON.stringify(subscription),
+  });
+}
+
+export function kakaoStartUrl(p: { intent: "LOGIN" | "STAFF_JOIN"; invite?: string; next?: string | null }) {
+  const q = new URLSearchParams({ intent: p.intent });
+  if (p.invite) q.set("invite", p.invite);
+  if (p.next) q.set("next", p.next);
+  return `${BASE}/auth/kakao/start?${q.toString()}`;
+}
+
+export async function getProviders(signal?: AbortSignal) {
+  return fetchJson<{ kakao: boolean }>("/auth/providers", { signal });
+}
+
+export async function getInvitePreview(token: string, signal?: AbortSignal) {
+  return fetchJson<{ store_name: string }>(`/auth/invites/${encodeURIComponent(token)}`, { signal });
+}
+
+export async function requestJoin(inviteToken: string, token: string) {
+  return fetchJson<{ status: "PENDING" | "ALREADY_MEMBER"; store_name: string }>("/auth/join-requests", {
+    method: "POST", headers: authHeader(token), body: JSON.stringify({ invite_token: inviteToken }),
+  });
+}
+
+// MVP §28 문구 사전과 같은 문구
+export const AUTH_ERROR_COPY: Record<string, string> = {
+  KAKAO_CANCELLED: "카카오 로그인을 취소했어요.",
+  KAKAO_FAILED: "카카오 로그인에 실패했어요. 잠시 후 다시 시도해 주세요.",
+  OAUTH_STATE_INVALID: "로그인 시간이 지났어요. 처음부터 다시 시도해 주세요.",
+  ROLE_CONFLICT: "이 계정은 다른 역할로 가입되어 있어요.",
+  INVITE_INVALID: "더 이상 쓸 수 없는 초대 링크예요. 사장님께 새 링크를 받아 주세요.",
+  ALREADY_IN_OTHER_STORE: "이미 다른 매장에 합류한 계정이에요.",
+  KAKAO_NOT_CONFIGURED: "지금은 카카오 로그인을 쓸 수 없어요. 이메일로 계속해 주세요.",
+};
+
+export type MembersResponse = {
+  pending: { request_id: number; name: string; requested_at: string }[];
+  active: { user_id: number; name: string; role: "OWNER" | "STAFF"; joined_at: string }[];
+};
+
+export async function getInviteLink(token: string, signal?: AbortSignal) {
+  return fetchJson<{ url: string }>("/members/invite-link", { headers: authHeader(token), signal });
+}
+export async function rotateInviteLink(token: string) {
+  return fetchJson<{ url: string }>("/members/invite-link/rotate", { method: "POST", headers: authHeader(token) });
+}
+export async function listMembers(token: string, signal?: AbortSignal) {
+  return fetchJson<MembersResponse>("/members", { headers: authHeader(token), signal });
+}
+export async function approveJoin(requestId: number, token: string) {
+  return fetchJson<void>(`/members/requests/${requestId}/approve`, { method: "POST", headers: authHeader(token) });
+}
+export async function rejectJoin(requestId: number, token: string) {
+  return fetchJson<void>(`/members/requests/${requestId}/reject`, { method: "POST", headers: authHeader(token) });
+}
+export async function removeMember(userId: number, token: string) {
+  return fetchJson<void>(`/members/${userId}/remove`, { method: "POST", headers: authHeader(token) });
+}
+
+export function chooseRole(role: "OWNER" | "STAFF", token: string) {
+  return fetchJson<SessionResponse>("/auth/role", { method: "POST", headers: authHeader(token), body: JSON.stringify({ role }) });
 }

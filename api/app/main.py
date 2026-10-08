@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.kakao_router import router as kakao_router
+from app.members.router import router as members_router
 from app.auth.router import router as auth_router
 from app.bootstrap.router import router as bootstrap_router
 from app.cards.owner_answer_worker import run_owner_answer_worker
@@ -84,6 +86,8 @@ app.add_middleware(
 
 app.include_router(preflight_router)
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(kakao_router, prefix="/auth", tags=["auth"])
+app.include_router(members_router, prefix="/members", tags=["members"])
 app.include_router(ops_router, prefix="/ops", tags=["ops"])
 app.include_router(bootstrap_router, prefix="/app", tags=["app"])
 app.include_router(cards_router, prefix="/cards", tags=["cards"])

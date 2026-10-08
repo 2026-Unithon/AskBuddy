@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class BootstrapUser(BaseModel):
     user_id: int
-    role: Literal["OWNER", "STAFF"]
+    role: Literal["OWNER", "STAFF"] | None
     name: str
 
 

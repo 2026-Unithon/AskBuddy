@@ -213,7 +213,7 @@ export default function NotificationsPage() {
             <button key={item.notification_id} type="button" onClick={() => void openNotification(item)} disabled={openingId === item.notification_id} aria-busy={openingId === item.notification_id || undefined} className="block min-h-11 w-full rounded-2xl text-left disabled:opacity-60">
               <Card className={`p-4 ${item.read_at ? "opacity-65" : "border-brand-500/40"}`}>
                 <div className="flex items-start gap-3">
-                  <span className="text-xl" aria-hidden>{item.event_type === "PENDING_QUESTION" ? "❓" : "✨"}</span>
+                  <span className="text-xl" aria-hidden>{item.event_type === "PENDING_QUESTION" ? "❓" : item.event_type === "JOIN_REQUESTED" ? "👋" : "✨"}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-bold">{item.title}</p>

@@ -321,3 +321,47 @@ async def deliver_notification(store_id: int, notification_id: int) -> None:
             store_id,
             notification_id,
         )
+
+async def create_join_request_notification(
+    db: asyncpg.Connection, *, store_id: int, request_id: int, staff_name: str,
+) -> int | None:
+    """알바 합류 요청을 점주에게 알린다. 점주 행이 없으면 알리지 않는다."""
+    owner_id = await db.fetchval(
+        """
+        select user_id from store_members
+        where store_id = $1 and member_role = 'OWNER' and removed_at is null
+        order by member_id limit 1
+        """,
+        store_id)
+    if owner_id is None:
+        return None
+    return await create_notification_event(
+        db,
+        store_id=store_id,
+        recipient_user_id=int(owner_id),
+        event_type="JOIN_REQUESTED",
+        aggregate_type="JOIN_REQUEST",
+        aggregate_id=request_id,
+        dedupe_key=f"join_request:{request_id}",
+        title="새 직원이 합류를 요청했어요",
+        body=f"{staff_name}님이 매장 합류 승인을 기다리고 있어요.",
+        destination="/owner/members",
+    )
+
+async def create_join_approved_notification(
+    db: asyncpg.Connection, *, store_id: int, request_id: int, staff_user_id: int,
+) -> int | None:
+    """승인된 알바에게 알린다. 승인 트랜잭션 안에서 멤버 행을 만든 뒤에 부른다."""
+    store_name = await db.fetchval("select store_name from stores where store_id = $1", store_id)
+    return await create_notification_event(
+        db,
+        store_id=store_id,
+        recipient_user_id=staff_user_id,
+        event_type="JOIN_APPROVED",
+        aggregate_type="JOIN_REQUEST",
+        aggregate_id=request_id,
+        dedupe_key=f"join_approved:{request_id}",
+        title="합류가 승인됐어요",
+        body=f"{store_name}에서 바로 시작할 수 있어요.",
+        destination="/staff/roadmap",
+    )

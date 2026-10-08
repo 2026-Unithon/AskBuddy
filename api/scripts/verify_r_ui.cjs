@@ -19,13 +19,11 @@ const path = require('node:path');
     citations: action === 'ANSWER' ? [{ card_id: '1', card_version_id: '2', block_id: 'b1', source_availability: 'AVAILABLE' }] : [] });
   async function context(role) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await ctx.addInitScript((role) => localStorage.setItem('askbuddy_state', JSON.stringify({ v: 8,
-      data: { token: 'synthetic-ui-only', role, storeId: 1, userId: role === 'OWNER' ? 1 : 2, storeName: '합성 UI 매장' } })), role);
     await ctx.route('http://localhost:8000/**', async (route) => {
       const req = route.request(), url = new URL(req.url()), p = url.pathname;
       const body = req.method() === 'POST' ? req.postDataJSON() : null;
       let payload;
-      if (p === '/app/bootstrap') {
+      if (p === '/auth/refresh') { payload = { token: 'synthetic-ui-only', user: { user_id: role === 'OWNER' ? 1 : 2, role, store_id: 1 } }; } else if (p === '/app/bootstrap') {
         payload = { user: { user_id: role === 'OWNER' ? 1 : 2, role, name: '합성 사용자' },
           store: { store_id: 1, store_name: '합성 UI 매장', guide_completed: true, category_version: 1 },
           badges: { waiting_questions: 0, pending_cards: 0 },

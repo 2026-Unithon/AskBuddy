@@ -1,73 +1,20 @@
+"use client";
+import { Suspense } from "react";
 import Link from "next/link";
-import Image from "next/image";
-
-export default function WelcomePage() {
-  return (
-    <div className="app-page">
-      <div className="app-mobile-frame">
-        <Image
-          src="/images/roadmap-bg.png"
-          alt=""
-          fill
-          className="object-cover opacity-25 pointer-events-none"
-          style={{ objectPosition: "top" }}
-          sizes="480px"
-          priority
-        />
-
-        <div
-          className="relative flex-1 flex flex-col items-center justify-center px-6 text-center"
-          aria-labelledby="welcome-title"
-        >
-          <div className="w-[190px] h-[190px] relative drop-shadow-[0_12px_24px_rgba(0,0,0,0.18)]">
-            <Image
-              src="/images/buddy-hero.png"
-              alt="AskBuddy 마스코트"
-              fill
-              unoptimized
-              className="object-contain"
-              sizes="190px"
-              priority
-            />
-          </div>
-          <div className="w-full max-w-[260px] mt-4">
-            <h1
-              id="welcome-title"
-              className="text-4xl font-bold text-brand-700 tracking-[-0.9px] leading-10"
-              style={{ textShadow: "0 1px 12px rgba(255,255,255,0.7)" }}
-            >
-              AskBuddy
-            </h1>
-            <p
-              className="mt-2 text-xl font-semibold leading-[27.5px]"
-              style={{ textShadow: "0 1px 12px rgba(255,255,255,0.7)" }}
-            >
-              <span className="text-foreground">
-                간편한 인수인계,
-                <br />
-              </span>
-              <span className="text-brand-500">AskBuddy</span>
-              <span className="text-foreground">입니다 👋</span>
-            </p>
-            <p
-              className="mt-2 text-sm font-medium text-foreground/70"
-              style={{ textShadow: "0 1px 12px rgba(255,255,255,0.7)" }}
-            >
-              처음에는 Buddy와 함께, 익숙해지면 혼자.
-            </p>
-          </div>
-        </div>
-
-        <div className="relative px-6 pb-10">
-          <Link
-            href="/role"
-            aria-label="AskBuddy 시작하기"
-            className="flex w-full items-center justify-center py-4 rounded-2xl bg-brand-500 shadow-[0px_6px_20px_#5bbf6a61] font-bold text-lg text-white transition-transform active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700"
-          >
-            시작하기 →
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
+import { useSearchParams } from "next/navigation";
+import { Buddy, Shell } from "@/components/ui";
+import { KakaoLoginButton } from "@/components/kakao-login-button";
+import { LoginLoading, LoginRetry, useLoginDestination } from "@/components/login-session";
+function Login() {
+  const next = useSearchParams().get("next");
+  const session = useLoginDestination(next);
+  if (session.error) return <LoginRetry retry={session.retry} />;
+  if (!session.state.hydrated || session.state.token) return <LoginLoading />;
+  return <div className="flex flex-1 flex-col justify-center gap-6 px-6 py-10">
+    <div className="flex flex-col items-center gap-4 text-center"><Buddy size={150} /><h1 className="text-4xl font-bold text-brand-700">AskBuddy</h1><p className="text-xl font-semibold">간편한 인수인계,<br />버디와 함께 시작해요.</p></div>
+    <div className="mt-8 space-y-3"><KakaoLoginButton intent="LOGIN" next={next} />
+    <Link href={next ? `/auth/email?next=${encodeURIComponent(next)}` : "/auth/email"} className="flex min-h-12 items-center justify-center rounded-xl border border-border bg-surface font-semibold">이메일로 시작하기</Link></div>
+    <p className="text-center text-base text-muted">알바생은 사장님이 보낸 링크로 바로 들어와요.</p>
+  </div>;
 }
+export default function Page() { return <Shell><Suspense fallback={<LoginLoading />}><Login /></Suspense></Shell>; }
