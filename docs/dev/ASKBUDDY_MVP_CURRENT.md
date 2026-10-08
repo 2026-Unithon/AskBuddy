@@ -445,7 +445,7 @@ flowchart TD
 
 ## 12-1. 근무조 체크리스트
 
-상세 계약은 [docs/dev/plan/UI_REBRAND_P5_CHECKLIST.md](plan/UI_REBRAND_P5_CHECKLIST.md)를 따른다. 체크 항목은 승인·공개된 카드의 줄에서만 나온다.
+상세 계약은 [docs/dev/plan/UI_REBRAND_P5_CHECKLIST.md](plan/UI_REBRAND_P5_CHECKLIST.md)를 따른다. 체크 항목은 승인·공개된 카드의 줄에서만 나온다. 2026-10-08 프론트 구현·공유 로컬 DB P5 적용·일회용 DB 실제 API 검증 완료. [P7 검증 기록](review/UI_REBRAND_P7_VALIDATION_20261008.md)과 [모바일 화면 확인 자료](review/p7_20261008/README.md)를 참고한다. 운영 배포·디자이너 승인은 별도다.
 
 - C1·C2: 근무조는 점주가 정하고(오픈·미들·마감 프리셋 가능), 카드와 직접 연결한다. 연결이 없으면 공통이다
 - C3: 직원 범위는 공통 카드 + 담당 근무조 카드. 담당이 없거나 근무조가 없으면 전체다. 날짜별 근무표는 없다

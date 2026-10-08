@@ -52,7 +52,8 @@ jobs:
       - name: migration 적용
         env:
           PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
-        run: supabase db push --db-url "$PROD_DB_URL" --yes
+        # 병렬 브랜치에서 뒤늦게 합쳐진 과거 timestamp migration도 미적용 이력만 적용한다.
+        run: supabase db push --db-url "$PROD_DB_URL" --include-all --yes
 
       - name: 서버 배포
         env:

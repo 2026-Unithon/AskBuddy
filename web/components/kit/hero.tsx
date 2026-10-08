@@ -14,7 +14,7 @@ export function HeroCard({
 }) {
   return (
     <section
-      className={`relative flex w-full flex-col overflow-hidden rounded-[24px] bg-primary px-[22px] py-5 text-white shadow-hero ${className}`}
+      className={`relative flex w-full shrink-0 flex-col overflow-hidden rounded-[24px] bg-primary px-[22px] py-5 text-white shadow-hero ${className}`}
     >
       <BuddyImage size={buddySize} className="absolute right-3 top-2" />
       {children}
