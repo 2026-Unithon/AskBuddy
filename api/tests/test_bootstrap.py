@@ -19,10 +19,10 @@ class FakeDb:
 class BootstrapTest(unittest.IsolatedAsyncioTestCase):
     def test_destinations(self):
         self.assertEqual(_default_destination("OWNER", False, False), "/owner/intent")
-        self.assertEqual(_default_destination("OWNER", True, False), "/owner/upload")
-        self.assertEqual(_default_destination("OWNER", True, True), "/owner/questions/v2")
-        self.assertEqual(_default_destination("STAFF", False, False), "/staff/auth")
-        self.assertEqual(_default_destination("STAFF", True, False), "/staff/roadmap")
+        self.assertEqual(_default_destination("OWNER", True, False), "/owner/add")
+        self.assertEqual(_default_destination("OWNER", True, True), "/owner")
+        self.assertEqual(_default_destination("STAFF", False, False), "/staff/pending")
+        self.assertEqual(_default_destination("STAFF", True, False), "/staff")
 
     async def test_owner_without_store_goes_to_intent(self):
         db = FakeDb(
@@ -52,7 +52,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             db, {"user_id": 1, "role": "OWNER", "store_id": 10}
         )
 
-        self.assertEqual(result.default_destination, "/owner/questions/v2")
+        self.assertEqual(result.default_destination, "/owner")
         self.assertTrue(result.store.guide_completed)
         self.assertEqual(result.store.category_version, 4)
         self.assertEqual(result.badges.pending_cards, 7)
@@ -76,7 +76,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             db, {"user_id": 2, "role": "STAFF", "store_id": 10}
         )
 
-        self.assertEqual(result.default_destination, "/staff/roadmap")
+        self.assertEqual(result.default_destination, "/staff")
 
     async def test_claimed_other_store_is_hidden(self):
         db = FakeDb(

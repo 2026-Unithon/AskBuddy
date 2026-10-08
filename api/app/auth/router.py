@@ -5,20 +5,27 @@ main.py 는 이 파일의 router 만 import 한다. 엔드포인트는 여기 �
 from __future__ import annotations
 
 import re
-import secrets
-from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import asyncpg
 import bcrypt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response, BackgroundTasks
 from pydantic import BaseModel, EmailStr, Field
 
-from app.config import get_settings
-from app.deps import Claims, CurrentStoreId, CurrentUserId, Db, create_token
+from app.deps import Claims, CurrentUserId, Db
+
+from app.auth.session import (
+    REFRESH_COOKIE, RefreshRejected, active_store_id, clear_refresh_cookie,
+    create_access_token, issue_refresh, require_allowed_origin, revoke_family_of,
+    rotate_refresh, session_payload, set_refresh_cookie,
+)
+from app.errors import ApiError
+
+from app.members import invites, join_requests
+from app.notifications.service import deliver_notification
 
 router = APIRouter()
 
-_INVITE_TTL_DAYS = 365
 
 
 def _hash_password(password: str) -> str:
@@ -36,24 +43,15 @@ class SignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=50)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
-    role: str = Field(pattern="^(OWNER|STAFF)$")
+    role: Literal["OWNER", "STAFF"] | None = None
     phone: str | None = None
 
 
 class LoginRequest(BaseModel):
-    """역할 선택 후 재진입. role 은 UI에서 고른 값이며 DB users.role 과 일치해야 한다."""
+    """역할은 DB에서 결정한다. 요청 role은 구버전 클라이언트 호환용이다."""
     email: EmailStr
     password: str
-    role: str = Field(pattern="^(OWNER|STAFF)$")
-
-
-class JoinRequest(BaseModel):
-    """알바 최초 합류. role 은 항상 STAFF 로 저장한다 (요청에 role 없음)."""
-    email: EmailStr
-    password: str
-    name: str = Field(min_length=1, max_length=50)
-    invite_code: str = Field(min_length=1, max_length=50)
-    phone: str | None = None
+    role: Literal["OWNER", "STAFF"] | None = None
 
 
 class CreateStoreRequest(BaseModel):
@@ -73,28 +71,20 @@ def _slugify(store_name: str, user_id: int) -> str:
     return raw[:50]
 
 
-def _make_invite_code(business_type: str) -> str:
-    """예: CAFE-A3F2. invite_codes.code unique (varchar 30)."""
-    return f"{business_type}-{secrets.token_hex(2).upper()}"
+def _token_for(user_id: int, store_id: int | None, role: str | None) -> str:
+    return create_access_token(user_id=user_id, role=role, store_id=store_id)
 
 
-def _token_for(user_id: int, store_id: int | None, role: str) -> str:
-    s = get_settings()
-    payload: dict = {
-        "user_id": user_id,
-        "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=s.jwt_expire_minutes),
-    }
-    if store_id is not None:
-        payload["store_id"] = store_id
-    return create_token(payload)
+async def start_session(db, response: Response, *, user_id: int) -> None:
+    """로그인·가입이 끝나면 refresh 쿠키를 심는다. 카카오 콜백도 이 함수를 쓴다."""
+    raw, _ = await issue_refresh(db, user_id=user_id)
+    set_refresh_cookie(response, raw)
 
 
+# store-isolation-ok: 가입 전에는 매장이 없고 신규 사용자만 생성한다.
 @router.post("/signup")
-async def signup(req: SignupRequest, db: Db):
-    """점주 가입. STAFF 는 /auth/join(초대코드)을 쓴다."""
-    if req.role != "OWNER":
-        raise HTTPException(400, "STAFF 는 /auth/join 으로 가입한다")
+async def signup(req: SignupRequest, response: Response, db: Db):
+    """역할 없이도 가입할 수 있다. 직원은 승인 전까지 매장 소속이 없다."""
 
     existing = await db.fetchrow(
         "select user_id from users where email = $1", str(req.email).lower()
@@ -105,15 +95,17 @@ async def signup(req: SignupRequest, db: Db):
     row = await db.fetchrow(
         """
         insert into users (name, phone, email, password_hash, role)
-        values ($1, $2, $3, $4, 'OWNER')
+        values ($1, $2, $3, $4, $5)
         returning user_id, name, email, role
         """,
         req.name,
         req.phone,
         str(req.email).lower(),
         _hash_password(req.password),
+        req.role,
     )
     token = _token_for(int(row["user_id"]), None, row["role"])
+    await start_session(db, response, user_id=int(row["user_id"]))
     return {
         "token": token,
         "user": {
@@ -125,15 +117,16 @@ async def signup(req: SignupRequest, db: Db):
     }
 
 
+# store-isolation-ok: 로그인 시점에 사용자 자격과 활성 소속을 검증한다.
 @router.post("/login")
-async def login(req: LoginRequest, db: Db):
-    """역할 선택 후 재진입. 요청 role 과 users.role 이 다르면 401 (계정 탐색 방지로 메시지 통일)."""
+async def login(req: LoginRequest, response: Response, db: Db):
+    """이메일 계정으로 로그인하고 제품 세션 쿠키를 발급한다."""
     row = await db.fetchrow(
         """
         select u.user_id, u.name, u.email, u.role, u.password_hash,
                sm.store_id
         from users u
-        left join store_members sm on sm.user_id = u.user_id
+        left join store_members sm on sm.user_id = u.user_id and sm.removed_at is null
         where u.email = $1
         order by sm.member_id
         limit 1
@@ -144,13 +137,13 @@ async def login(req: LoginRequest, db: Db):
         raise HTTPException(401, "invalid credentials")
     if not _verify_password(req.password, row["password_hash"]):
         raise HTTPException(401, "invalid credentials")
-    # PM UX: 사업자/알바 화면을 갈랐으므로, 고른 role 과 DB role 이 맞을 때만 통과
-    if row["role"] != req.role:
+    if row["role"] not in (None, "OWNER", "STAFF"):
         raise HTTPException(401, "invalid credentials")
 
     store_id = int(row["store_id"]) if row["store_id"] is not None else None
-    # JWT role 은 요청값이 아니라 DB 값 (요청 role 은 게이트용)
+    # JWT 역할은 요청값이 아닌 DB 값으로 정한다.
     token = _token_for(int(row["user_id"]), store_id, row["role"])
+    await start_session(db, response, user_id=int(row["user_id"]))
     return {
         "token": token,
         "user": {
@@ -163,68 +156,6 @@ async def login(req: LoginRequest, db: Db):
     }
 
 
-@router.post("/join")
-async def join(req: JoinRequest, db: Db):
-    """알바 최초 합류: 초대코드 → users(STAFF) + store_members. 재진입은 /login."""
-    invite = await db.fetchrow(
-        """
-        select invite_id, store_id, expires_at, is_used
-        from invite_codes
-        where code = $1
-        """,
-        req.invite_code.strip().upper(),
-    )
-    if not invite:
-        raise HTTPException(404, "invalid invite code")
-    if invite["is_used"]:
-        raise HTTPException(410, "invite code already used")
-    if invite["expires_at"] and invite["expires_at"] < datetime.now(timezone.utc):
-        raise HTTPException(410, "invite code expired")
-
-    existing = await db.fetchrow(
-        "select user_id from users where email = $1", str(req.email).lower()
-    )
-    if existing:
-        raise HTTPException(409, "email already registered")
-
-    async with db.transaction():
-        user = await db.fetchrow(
-            """
-            insert into users (name, phone, email, password_hash, role)
-            values ($1, $2, $3, $4, 'STAFF')
-            returning user_id, name, email, role
-            """,
-            req.name,
-            req.phone,
-            str(req.email).lower(),
-            _hash_password(req.password),
-        )
-        store_id = int(invite["store_id"])
-        await db.execute(
-            """
-            insert into store_members (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
-            values ($1, $2, 'STAFF', 0, 0, false)
-            """,
-            store_id,
-            int(user["user_id"]),
-        )
-        # 코드 재사용 허용 여부가 미결(N1). 일단 is_used 는 건드리지 않는다.
-
-    token = _token_for(int(user["user_id"]), store_id, user["role"])
-    return {
-        "token": token,
-        "user": {
-            "user_id": int(user["user_id"]),
-            "name": user["name"],
-            "email": user["email"],
-            "role": user["role"],
-            "store_id": store_id,
-        },
-    }
-
-
-# 업종별 기본 업무 카테고리. db/002_seed_demo.sql 의 demo-cafe 와 같은 값이다.
-# 이번 릴리스는 카페만 구현한다 — 나머지 업종은 매장 생성 후 점주가 직접 켠다.
 DEFAULT_CATEGORIES: dict[str, list[tuple[str, bool, int]]] = {
     "CAFE": [
         ("오픈업무", True, 1),
@@ -317,81 +248,105 @@ async def create_store(req: CreateStoreRequest, db: Db, claims: Claims):
     }
 
 
-@router.post("/invites")
-async def create_invite(
-    db: Db,
-    user_id: CurrentUserId,
-    store_id: CurrentStoreId,
-    claims: Claims,
-):
-    """점주가 알바용 초대코드 발급. store_id 는 JWT 만 신뢰 (body 없음)."""
-    if claims.get("role") != "OWNER":
-        raise HTTPException(403, "OWNER only")
 
-    # JWT store_id 가 이 OWNER 의 매장인지 확인
-    member = await db.fetchrow(
-        """
-        select member_id from store_members
-        where store_id = $1 and user_id = $2 and member_role = 'OWNER'
-        """,
-        store_id,
-        user_id,
-    )
-    if not member:
-        raise HTTPException(403, "not owner of this store")
+# store-isolation-ok: 쿠키 세션 갱신. 매장은 서버가 활성 멤버십에서 정한다
+@router.post("/refresh")
+async def refresh(request: Request, response: Response, db: Db):
+    require_allowed_origin(request)
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if not raw:
+        raise ApiError(401, "SESSION_EXPIRED", "다시 로그인해 주세요.")
+    try:
+        user_id, new_raw = await rotate_refresh(db, raw=raw)
+        payload = await session_payload(db, user_id=user_id)
+    except RefreshRejected as exc:
+        raise ApiError(401, "SESSION_EXPIRED", "다시 로그인해 주세요.") from exc
+    set_refresh_cookie(response, new_raw)
+    return payload
 
-    biz = await db.fetchrow(
-        "select business_type from stores where store_id = $1",
-        store_id,
-    )
-    if not biz:
-        raise HTTPException(404, "store not found")
 
-    # 이미 쓸 수 있는 코드가 있으면 그걸 돌려준다.
-    # 화면에 들어올 때마다 새로 발급하면 사장님이 알바에게 알려준 코드가 계속 바뀐다.
-    existing = await db.fetchrow(
-        """
-        select invite_id, code, expires_at, store_id
-        from invite_codes
-        where store_id = $1 and is_used = false and expires_at > now()
-        order by invite_id
-        limit 1
-        """,
-        store_id,
-    )
-    if existing:
-        return {
-            "invite_id": int(existing["invite_id"]),
-            "code": existing["code"],
-            "store_id": int(existing["store_id"]),
-            "expires_at": existing["expires_at"].isoformat(),
-            "reused": True,
-        }
+# store-isolation-ok: 로그아웃은 사용자 단위 세션 폐기다
+@router.post("/logout", status_code=204)
+async def logout(request: Request, db: Db):
+    require_allowed_origin(request)
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:
+        await revoke_family_of(db, raw=raw)
+    out = Response(status_code=204)
+    clear_refresh_cookie(out)
+    return out
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_TTL_DAYS)
 
-    # unique 충돌 시 몇 번 재시도
-    for _ in range(5):
-        code = _make_invite_code(biz["business_type"])
-        try:
-            row = await db.fetchrow(
-                """
-                insert into invite_codes (store_id, code, expires_at)
-                values ($1, $2, $3)
-                returning invite_id, code, expires_at, store_id
-                """,
-                store_id,
-                code,
-                expires_at,
-            )
-            return {
-                "invite_id": int(row["invite_id"]),
-                "code": row["code"],
-                "store_id": int(row["store_id"]),
-                "expires_at": row["expires_at"].isoformat(),
-                "reused": False,
-            }
-        except asyncpg.UniqueViolationError:
-            continue
 
-    raise HTTPException(500, "failed to allocate invite code")
+# store-isolation-ok: 공개 초대 링크 미리보기. 매장명만 돌려준다
+@router.get("/invites/{token}")
+async def preview_invite(token: str, db: Db):
+    found = await invites.resolve(db, token=token)
+    if found is None:
+        raise ApiError(404, "INVITE_INVALID", "더 이상 쓸 수 없는 초대 링크예요.")
+    return {"store_name": found["store_name"]}
+
+class JoinByInviteRequest(BaseModel):
+    invite_token: str = Field(min_length=16, max_length=64)
+
+
+_JOIN_MESSAGES = {
+    "ROLE_CONFLICT": "사장님 계정으로는 직원으로 합류할 수 없어요.",
+    "ALREADY_IN_OTHER_STORE": "이미 다른 매장에 합류한 계정이에요.",
+}
+
+
+# store-isolation-ok: 매장 소속 전 알바의 합류 요청. 매장은 초대 토큰으로 서버가 찾는다
+@router.post("/join-requests")
+async def create_join_request(req: JoinByInviteRequest, db: Db, claims: Claims,
+                              user_id: CurrentUserId, background: BackgroundTasks):
+    invite = await invites.resolve(db, token=req.invite_token)
+    if invite is None:
+        raise ApiError(404, "INVITE_INVALID", "더 이상 쓸 수 없는 초대 링크예요.")
+    store_id = int(invite["store_id"])
+    role = claims.get("role")
+    if role is None:
+        await set_role_if_unset(db, user_id=user_id, role="STAFF")
+        role = await db.fetchval("select role from users where user_id = $1", user_id)
+    try:
+        action = join_requests.decide_join(
+            user_role=role,
+            active_store_id=await active_store_id(db, user_id=user_id),
+            invite_store_id=store_id)
+    except join_requests.JoinRefused as exc:
+        raise ApiError(exc.status, exc.code, _JOIN_MESSAGES[exc.code]) from exc
+    if action == "ALREADY_MEMBER":
+        return {"status": "ALREADY_MEMBER", "store_name": invite["store_name"]}
+    name = await db.fetchval("select name from users where user_id = $1", user_id)
+    _, notification_id = await join_requests.request_join(
+        db, store_id=store_id, user_id=user_id,
+        invite_id=int(invite["invite_id"]), staff_name=name)
+    if notification_id is not None:
+        # 커밋 뒤에 보내야 알림 행이 보인다
+        background.add_task(deliver_notification, store_id, notification_id)
+    return {"status": "PENDING", "store_name": invite["store_name"]}
+
+
+# store-isolation-ok: 매장 소속 전 알바가 자기 요청 상태만 본다
+@router.get("/join-status")
+async def join_status(db: Db, user_id: CurrentUserId):
+    return await join_requests.latest_status(db, user_id=user_id)
+
+class RoleRequest(BaseModel):
+    role: Literal["OWNER", "STAFF"]
+
+
+# store-isolation-ok: 역할은 사용자 단위다. 아직 매장이 없다
+async def set_role_if_unset(db, *, user_id: int, role: str) -> bool:
+    changed = await db.fetchval(
+        "update users set role = $2 where user_id = $1 and role is null returning user_id",
+        user_id, role)
+    return changed is not None
+
+
+# store-isolation-ok: 가입 직후 한 번 역할을 고른다. 매장은 아직 없다
+@router.post("/role")
+async def choose_role(req: RoleRequest, db: Db, user_id: CurrentUserId):
+    if not await set_role_if_unset(db, user_id=user_id, role=req.role):
+        raise ApiError(409, "ROLE_ALREADY_SET", "이미 역할을 골랐어요.")
+    return await session_payload(db, user_id=user_id)

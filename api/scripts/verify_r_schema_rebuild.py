@@ -4,6 +4,8 @@
 supabase/config.toml과 같은 major의 pgvector 이미지가 필요하다.
 """
 import asyncio
+import os
+import sys
 import tomllib
 from pathlib import Path
 from uuid import uuid4
@@ -55,6 +57,14 @@ async def main():
             await verify_retention(pool,fresh,seed)
         finally:
             await pool.close()
+        # 같은 새 스키마에서 카카오·세션·합류·퇴사자 격리를 검증한다. 테스트 데이터는 롤백한다.
+        auth_test = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pytest", "tests/test_kakao_local_integration.py", "-q",
+            cwd=Path(__file__).resolve().parents[1],
+            env={**os.environ, "KAKAO_TEST_DB_URL": DSN.rsplit("/", 1)[0] + "/" + name},
+        )
+        if await auth_test.wait() != 0:
+            raise RuntimeError("카카오 인증 DB 통합 검증 실패")
         from verify_w_ingest_recovery import verify as verify_w_recovery
         await verify_w_recovery(fresh, DSN.rsplit("/", 1)[0]+"/"+name)
         from verify_w_raw_responses import verify as verify_w_raw

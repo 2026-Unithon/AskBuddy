@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r api/requirements.txt
+      - run: pip install -r api/requirements.txt pytest
       - shell: pwsh
         run: ./api/scripts/verify_r_handoff.ps1 -Python python -IncludeSchemaRebuild
   browser:

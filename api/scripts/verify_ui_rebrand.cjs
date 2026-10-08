@@ -34,26 +34,31 @@ const BASE = 'http://127.0.0.1:3011';
   const fail = (route, status, message) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ detail: message, error: { message } }) });
 
   async function context(role, { signedIn = true } = {}) {
+    let sessionActive = signedIn, sessionRole = role;
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    if (signedIn) await ctx.addInitScript((role) => localStorage.setItem('askbuddy_state', JSON.stringify({ v: 9,
-      data: { token: 'synthetic-ui-only', role, storeId: 1, userId: role === 'OWNER' ? 1 : 2 } })), role);
     await ctx.route('http://localhost:8000/**', async (route) => {
       const req = route.request(), url = new URL(req.url()), p = url.pathname, m = req.method();
       const body = ['POST', 'PATCH', 'PUT'].includes(m) && req.postData() ? req.postDataJSON() : null;
       let payload;
-      if (p === '/app/bootstrap') payload = { user: { user_id: role === 'OWNER' ? 1 : 2, role, name: '합성 사용자' },
+      if (p === '/auth/refresh') {
+        if (!sessionActive) return fail(route, 401, '세션 없음');
+        payload = { token: 'synthetic-ui-only', user: { user_id: role === 'OWNER' ? 1 : 2, role: sessionRole, store_id: state.hasStore ? 1 : null } };
+      } else if (p === '/auth/logout') { sessionActive = false; payload = {}; }
+      else if (p === '/auth/providers') payload = { kakao: true };
+      else if (p === '/auth/role') { sessionRole = body.role; payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: sessionRole, store_id: null } }; }
+      else if (p === '/app/bootstrap') payload = { user: { user_id: role === 'OWNER' ? 1 : 2, role: sessionRole, name: '합성 사용자' },
         store: state.hasStore ? { store_id: 1, store_name: '합성 매장', guide_completed: state.guideCompleted, category_version: 1 } : null,
         badges: { waiting_questions: 0, pending_cards: 1 },
-        default_destination: role === 'OWNER' ? (state.hasStore ? '/owner/questions/v2' : '/owner/intent') : '/staff/roadmap' };
+        default_destination: !sessionRole ? '/auth/role' : sessionRole === 'OWNER' ? (state.hasStore ? '/owner' : '/owner/intent') : '/staff' };
       else if (p === '/auth/login') {
         if (body.password !== 'right-pass') return fail(route, 401, '이메일 또는 비밀번호가 맞지 않습니다');
-        payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: 'OWNER', store_id: state.hasStore ? 1 : null } };
-      } else if (p === '/auth/signup') { state.hasStore = false; state.signupBodies.push(body); payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: 'OWNER', store_id: null } }; }
+        sessionActive = true; payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: 'OWNER', store_id: state.hasStore ? 1 : null } };
+      } else if (p === '/auth/signup') { state.hasStore = false; sessionActive = true; sessionRole = null; state.signupBodies.push(body); payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: null, store_id: null } }; }
       else if (p === '/auth/stores') {
         if (state.failStore) { state.failStore = false; return fail(route, 503, '합성 매장 생성 실패'); }
         state.hasStore = true; state.storeBodies.push(body);
         payload = { token: 'synthetic-ui-only', store: { store_id: 1, store_name: body.store_name } };
-      } else if (p === '/auth/invites') payload = { code: 'CAFE-TEST' };
+      } else if (p === '/members/invite-link') payload = { url: 'http://localhost:3011/join/synthetic-invite-token' };
       else if (p === '/ingest/capabilities') payload = { SCAN: { extensions: ['pdf', 'jpg', 'jpeg', 'png'], max_bytes: 20000000 } };
       else if (p === '/ingest/jobs') payload = { items: [], next_cursor: null, total: 0 };
       else if (p === '/ingest/jobs/7') payload = { job_id: 7, title: null, status: state.job.status, category_version: 1,
@@ -220,21 +225,24 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/settings`);
     await page.getByText('합성 매장', { exact: true }).waitFor();
     await page.getByRole('button', { name: '로그아웃' }).click();
-    // init script 가 문서마다 합성 토큰을 다시 넣으므로 저장소 대신 도착 화면으로 확인한다
+    // 세션 폐기 뒤 새로고침해도 로그인 화면에 머문다
     await page.waitForURL(`${BASE}/`);
-    check('logout lands on start, not back on settings', !page.url().includes('next='));
+    await page.getByRole('link', { name: '이메일로 시작하기' }).waitFor();
+    await page.reload();
+    await page.getByRole('link', { name: '이메일로 시작하기' }).waitFor();
+    check('logout stays signed out after reload', !page.url().includes('next='));
 
     // P2 시작: 로그인 실패·성공, 가입 → 매장 이름(실패 후 재시도) → 아무거나 넣기, 초대 코드, 첫 공개 → 초대
     const fresh = await context('OWNER', { signedIn: false }), fp = await fresh.newPage();
     fp.on('pageerror', (e) => errors.push(e.message));
     await fp.goto(`${BASE}/owner/auth`);
-    await fp.getByRole('button', { name: '이메일로 시작하기' }).click();
-    const sheet = fp.getByRole('dialog');
+    await fp.getByRole('link', { name: '이메일로 시작하기' }).click();
+    const sheet = fp;
     await sheet.getByLabel('이메일').fill('owner@synthetic.test');
     await sheet.getByLabel('비밀번호').fill('wrong-pass');
     await sheet.getByRole('button', { name: '로그인', exact: true }).click();
-    await sheet.getByText('이메일 또는 비밀번호가 달라요', { exact: true }).waitFor();
-    check('wrong password stays on login with message', fp.url().includes('/owner/auth'));
+    await sheet.getByText('이메일 또는 비밀번호를 확인해 주세요.', { exact: true }).waitFor();
+    check('wrong password stays on login with message', fp.url().includes('/auth/email'));
     await sheet.getByLabel('비밀번호').fill('right-pass');
     await sheet.getByRole('button', { name: '로그인', exact: true }).click();
     await fp.waitForURL(`${BASE}/owner`);
@@ -244,14 +252,16 @@ const BASE = 'http://127.0.0.1:3011';
     const joiner = await context('OWNER', { signedIn: false }), jp = await joiner.newPage();
     jp.on('pageerror', (e) => errors.push(e.message));
     await jp.goto(`${BASE}/owner/auth`);
-    await jp.getByRole('button', { name: '이메일로 시작하기' }).click();
-    await jp.getByRole('dialog').getByRole('button', { name: /가입하기/ }).click();
-    await jp.getByRole('dialog').getByLabel('이름').fill('합성 사장');
-    await jp.getByRole('dialog').getByLabel('이메일').fill('new@synthetic.test');
-    await jp.getByRole('dialog').getByLabel('비밀번호').fill('right-pass');
-    await jp.getByRole('dialog').getByRole('button', { name: '가입하고 시작하기' }).click();
+    await jp.getByRole('link', { name: '이메일로 시작하기' }).click();
+    await jp.getByRole('button', { name: /가입하기/ }).click();
+    await jp.getByLabel('이름').fill('합성 사장');
+    await jp.getByLabel('이메일').fill('new@synthetic.test');
+    await jp.getByLabel('비밀번호').fill('right-pass');
+    await jp.getByRole('button', { name: '가입하기', exact: true }).click();
+    await jp.waitForURL('**/auth/role');
+    check('signup defers role choice', state.signupBodies[0]?.role == null);
+    await jp.getByRole('button', { name: '사장님이에요' }).click();
     await jp.waitForURL('**/owner/intent');
-    check('signup asks store name next', state.signupBodies[0]?.role === 'OWNER');
     await jp.getByLabel('매장 이름').fill('합성 새 매장');
     await jp.getByRole('button', { name: '다음', exact: true }).click();
     await jp.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
@@ -263,14 +273,18 @@ const BASE = 'http://127.0.0.1:3011';
     check('voice tool hidden until recording format decided', await jp.getByRole('button', { name: '말하기' }).count() === 0);
     await joiner.close();
 
+    await page.goto(`${BASE}/auth/email`);
+    await page.getByLabel('이메일').fill('owner@synthetic.test');
+    await page.getByLabel('비밀번호').fill('right-pass');
+    await page.getByRole('button', { name: '로그인', exact: true }).click();
+    await page.waitForURL(`${BASE}/owner`);
     await page.goto(`${BASE}/owner/upload`);
     await page.waitForURL('**/owner/add');
     check('old upload address opens add screen', true);
     await page.goto(`${BASE}/owner/complete`);
     await page.waitForURL('**/owner/invite');
-    await page.getByRole('button', { name: '초대 코드 만들기' }).click();
-    await page.getByText('CAFE-TEST', { exact: true }).waitFor();
-    check('invite code shown in place of QR', true);
+    await page.getByRole('button', { name: '링크 복사', exact: true }).waitFor();
+    check('invite link actions available', await page.getByRole('link', { name: '직원 관리 · 합류 승인' }).isVisible());
     state.guideCompleted = false; state.job.status = 'SUCCEEDED';
     state.cards[0].review_status = 'PENDING'; state.cards[2].review_status = 'PENDING'; state.cards[2].needs_review_reason = null;
     await page.goto(`${BASE}/owner/jobs/7`);

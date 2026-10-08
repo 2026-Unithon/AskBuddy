@@ -39,7 +39,7 @@ where s.store_slug = 'demo-cafe';
 
 -- 4. 초대코드 ---------------------------------------------------------
 insert into invite_codes (store_id, code, expires_at)
-select store_id, 'CAFE-DEMO', now() + interval '365 days'
+select store_id, 'demoInviteToken0000001', now() + interval '365 days'
 from stores where store_slug = 'demo-cafe';
 
 -- 5. 업무 카테고리 ----------------------------------------------------
@@ -138,7 +138,7 @@ where s.store_slug = 'demo-cafe';
 -- 검증 쿼리
 --   select count(*) from roadmap_items;      -- 16
 --   select count(*) from knowledge_cards;    -- 3
---   select code from invite_codes;           -- CAFE-DEMO
+--   select code from invite_codes;           -- demoInviteToken0000001
 --   select store_id from stores where store_slug='demo-cafe';
 -- 주의: card_embeddings 는 시드에 없다. 워커가 임베딩을 채워야 검색이 동작한다.
 -- =====================================================================

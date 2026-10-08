@@ -202,6 +202,19 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me-32bytes-minimum"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
+    # 제품 세션 (이슈 #37). access 는 짧게 두고 refresh 로 90일 동안 이어 쓴다.
+    # jwt_expire_minutes 는 scripts/dev_token.py 전용으로 남긴다
+    access_token_expire_minutes: int = Field(default=60, ge=5, le=1440)
+    refresh_token_expire_days: int = Field(default=90, ge=1, le=365)
+    # 로컬 http 에서는 false. 운영은 반드시 true
+    auth_cookie_secure: bool = True
+    # 카카오 콜백이 끝나면 돌려보낼 웹 주소, 초대 링크의 앞부분
+    web_base_url: str = "http://localhost:3000"
+    # 셋 다 있어야 카카오 로그인을 연다. 없으면 /auth/kakao/start 가 설정 안내 화면으로 이동한다
+    kakao_rest_api_key: str = ""
+    kakao_client_secret: str = ""
+    kakao_redirect_uri: str = "http://localhost:8000/auth/kakao/callback"
+
     # 운영자 토큰(/ops/login). 진단 화면 전용이라 제품 토큰보다 짧게 둔다
     ops_token_expire_minutes: int = 60
     # 같은 IP+이메일 실패가 이 횟수에 닿으면 lock 시간 동안 로그인을 막는다

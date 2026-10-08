@@ -11,21 +11,21 @@ export function SessionExpiryHandler() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const handled = useRef(false);
-  const previousToken = useRef<string | null>(null);
+  const previousUser = useRef<number | null>(null);
 
   useEffect(() => {
-    if (previousToken.current && state.token !== previousToken.current) {
+    if (previousUser.current && state.userId !== previousUser.current) {
       queryClient.clear();
     }
-    previousToken.current = state.token;
+    previousUser.current = state.userId;
     if (state.token) handled.current = false;
-  }, [state.token, queryClient]);
+  }, [state.userId, state.token, queryClient]);
 
   useEffect(() => {
     function handleExpiredSession() {
-      if (!state.token || !state.role || handled.current) return;
+      if (!state.token || handled.current) return;
       handled.current = true;
-      const authPath = state.role === "OWNER" ? "/owner/auth" : "/staff/auth";
+      const authPath = "/";
       const destination = `${window.location.pathname}${window.location.search}`;
       queryClient.clear();
       dispatch({ type: "LOGOUT" });

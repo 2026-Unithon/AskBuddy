@@ -7,13 +7,13 @@ self.addEventListener("push", (event) => {
     data = { title: "AskBuddy", body: event.data.text(), destination: "/owner/notifications" };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || "AskBuddy", {
+    Promise.all([clients.matchAll({type: "window", includeUncontrolled: true}).then((windows) => windows.forEach((client) => client.postMessage({type: "askbuddy:push"}))), self.registration.showNotification(data.title || "AskBuddy", {
       body: data.body || "새 알림이 있어요.",
       icon: data.icon || "/images/buddy-hero.png",
       badge: "/images/buddy-hero.png",
       tag: data.notification_id ? `askbuddy-${data.notification_id}` : undefined,
       data: { destination: data.destination || "/owner/notifications" },
-    })
+    })])
   );
 });
 

@@ -1,4 +1,5 @@
 import { checklistApi } from "./checklist-api";
+import { refreshSession, getProviders, getInvitePreview, getJoinStatus, getInviteLink, listMembers } from "./api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { withOpsSession } from "@/lib/ops-session";
 import { rSessions, rHistory, rPendingList, rPendingDetail, rCitation, rNotifications } from "./r-v2-api";
@@ -85,6 +86,9 @@ export function preflightQuery(token: string) {
 }
 
 export const queryKeys = {
+  joinStatus: (userId: number | null) => ["join-status", userId] as const,
+  inviteLink: (storeId: number | null) => ["invite-link", storeId] as const,
+  members: (storeId: number | null) => ["members", storeId] as const,
   bootstrap: (userId: number | null, storeId: number | null) =>
     ["bootstrap", userId, storeId] as const,
   categories: (storeId: number | null) => ["categories", storeId] as const,
@@ -367,4 +371,33 @@ export function checklistRecordsQuery(token: string | null, store: number | null
 }
 export function checklistDayQuery(token: string | null, store: number | null, viewer: number | null, user: number | null, day: string | null) {
   return queryOptions({ queryKey: checklistKeys.day(store, viewer, user, day), queryFn: ({ signal }) => checklistApi.recordDay(token!, day!, user, signal), enabled: Boolean(token && store && viewer && day) });
+}
+
+// query.ts — queryKeys 에 joinStatus: (userId: number | null) => ["join-status", userId] as const 추가
+export function joinStatusQuery(token: string | null, userId: number | null) {
+  return queryOptions({
+    queryKey: queryKeys.joinStatus(userId),
+    queryFn: ({ signal }) => getJoinStatus(token!, signal),
+    enabled: Boolean(token && userId),
+    // 폴링하지 않는다. Push 메시지와 화면 복귀 때만 다시 조회한다
+    refetchOnWindowFocus: "always",
+    staleTime: 0,
+  });
+}
+
+export function providersQuery() {
+  return queryOptions({ queryKey: ["auth-providers"], queryFn: ({signal}) => getProviders(signal), staleTime: 60_000 });
+}
+export function invitePreviewQuery(token: string) {
+  return queryOptions({ queryKey: ["invite-preview", token], queryFn: ({signal}) => getInvitePreview(token, signal), retry: false });
+}
+export function inviteLinkQuery(token: string | null, storeId: number | null) {
+  return queryOptions({ queryKey: queryKeys.inviteLink(storeId), queryFn: ({signal}) => getInviteLink(token!, signal), enabled: Boolean(token && storeId) });
+}
+export function membersQuery(token: string | null, storeId: number | null) {
+  return queryOptions({ queryKey: queryKeys.members(storeId), queryFn: ({signal}) => listMembers(token!, signal), enabled: Boolean(token && storeId) });
+}
+
+export function approvedSessionQuery(userId: number | null, enabled: boolean) {
+ return queryOptions({queryKey: ["approved-session", userId], queryFn: refreshSession, enabled, retry: false, staleTime: Infinity, gcTime: 0});
 }

@@ -83,7 +83,7 @@ async def get_store_id(claims: Claims, db: Db) -> int:
     store_id = _claim_id(claims, "store_id")
     user_id = _claim_id(claims, "user_id")
     member = await db.fetchrow(
-        "select member_role from store_members where store_id = $1 and user_id = $2",
+        "select member_role from store_members where store_id = $1 and user_id = $2 and removed_at is null",
         store_id, user_id,
     )
     if not member or member["member_role"] not in ("OWNER", "STAFF") or member["member_role"] != claims.get("role"):

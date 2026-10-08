@@ -77,6 +77,8 @@ def install_error_handlers(app: FastAPI) -> None:
             request.url.path == "/app/bootstrap"
             or request.url.path.startswith(
                 (
+                    "/auth",
+                    "/members",
                     "/categories",
                     "/reclassification-jobs",
                     "/ingest",

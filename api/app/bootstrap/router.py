@@ -17,12 +17,14 @@ from app.errors import ApiClaims, ApiError
 router = APIRouter()
 
 
-def _default_destination(role: str, has_store: bool, guide_completed: bool) -> str:
+def _default_destination(role: str | None, has_store: bool, guide_completed: bool) -> str:
+    if role is None:
+        return "/auth/role"
     if role == "OWNER":
         if not has_store:
             return "/owner/intent"
-        return "/owner/questions/v2" if guide_completed else "/owner/upload"
-    return "/staff/roadmap" if has_store else "/staff/auth"
+        return "/owner" if guide_completed else "/owner/add"
+    return "/staff" if has_store else "/staff/pending"
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
@@ -52,7 +54,7 @@ async def get_bootstrap(
                    s.guide_completed_at, s.category_version
             from store_members sm
             join stores s on s.store_id = sm.store_id
-            where sm.user_id = $1 and sm.store_id = $2
+            where sm.user_id = $1 and sm.store_id = $2 and sm.removed_at is null
             limit 1
             """,
             int(user_id),

@@ -405,7 +405,7 @@ async def list_staff(
         from store_members m
         join users u on u.user_id = m.user_id
         where m.store_id = $1
-          and m.member_role = 'STAFF'
+          and m.member_role = 'STAFF' and m.removed_at is null
         order by m.joined_at asc, m.member_id asc
         """,
         store_id,

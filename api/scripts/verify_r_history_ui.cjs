@@ -18,13 +18,12 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
     const state = { calls: 0, pending, messages: Array.from({ length: count }, (_, i) =>
       message(i+1, pending ? (i === 0 ? 'ESCALATE' : 'ANSWER') : (i === count-1 ? 'CLARIFY' : 'ANSWER'), `합성 기록 ${i+1}`)) };
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await ctx.addInitScript(() => localStorage.setItem('askbuddy_state', JSON.stringify({ v: 8,
-      data: { token: 'synthetic-ui-only', role: 'STAFF', storeId: 1, userId: 2, storeName: '합성 UI 매장' } })));
     await ctx.route('**/*', async route => {
       const req = route.request(), url = new URL(req.url()), path = url.pathname;
       if (url.origin === 'http://127.0.0.1:3011') return route.continue();
       let payload;
-      if (path === '/app/bootstrap') payload = { user: { user_id: 2, role: 'STAFF', name: '합성 직원' },
+      if (path === '/auth/refresh') payload = { token: 'synthetic-ui-only', user: { user_id: 2, role: 'STAFF', store_id: 1 } };
+      else if (path === '/app/bootstrap') payload = { user: { user_id: 2, role: 'STAFF', name: '합성 직원' },
         store: { store_id: 1, store_name: '합성 UI 매장', guide_completed: true, category_version: 1 },
         badges: { waiting_questions: 0, pending_cards: 0 }, default_destination: '/staff/roadmap' };
       else if (path === '/learn/v2/sessions') payload = { sessions: [{ session_id: '1' }] };
