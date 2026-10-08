@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 진행: P0~P4 완료(합성 API 브라우저 검사 통과), P5 프론트 구현(2026-10-08), 최종 검증 결과는 P5 프론트 계획 참고. 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
+2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 진행: P0~P4 완료(합성 API 브라우저 검사 통과), P5 프론트·P7 개발 검증 완료(2026-10-08). 실제 API/DB 58개·합성 회귀 33개/48개 통과, 스크린샷 37장. 디자이너 확인·운영 배포는 별도. 결과는 P7 검증 기록 참고. 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
 
 **Goal:** Figma `AskBuddy — 리브랜딩 · MVP 화면` 의 `4-1 확정 · 모바일 (390)` 페이지를 `web/` 에 구현한다. Figma에 없는 MVP 계약 상태(검수·인용·CLARIFY/ESCALATE·오류·합류 승인 등)는 같은 시각 언어로 추가 화면을 만들어 채운다. 근무조 체크리스트는 백엔드까지 이 브랜치에서 만든다.
 
@@ -175,13 +175,15 @@ P1~P4는 기존 API만 쓰므로 서로 독립이다. P5는 백엔드가 있어 
 - 매장 체크 상태는 공유한다. 개인 제출·기록은 구성원 설정을 따르며 점주 현황에 제출자의 이름을 표시하지 않는다
 - 영업일은 서버가 계산한다. 프론트는 응답 날짜를 보내고 날짜 변경 시 어제 창에서 저장 하나로 반영·제출한다
 - 직원 오늘 할 일·완료·질문창, 점주 진행 현황, 개인 기록 달력, 근무조·직원 담당·카드 연결·기록 설정을 구현한다
-- 검증은 `pnpm check`, 매장 격리 검사, 체크리스트 API 단위 테스트, 합성 API 브라우저 검사·기존 리브랜딩 회귀로 구분한다. 공유 개발 DB migration 적용은 별도 항목으로 유지한다
+- 검증은 `pnpm check`, 매장 격리 검사, 체크리스트 API 단위 테스트, 합성 API 브라우저 검사·기존 리브랜딩 회귀로 구분한다. 공유 로컬 DB에 P5 migration 적용 완료. 실제 API/DB 후속 검증은 P7 결과 참고
 
 ### P6 합류 — 범위 밖 (U7)
 
 다른 작업에서 진행한다. 이 브랜치는 `/login` 에 카카오 버튼 자리를 만들지 않고, 그 작업이 P0의 `Button`(kakao 변형 포함)·`Sheet`·`Screen` 을 가져다 쓸 수 있게만 둔다.
 
 ### P7 통합 검증·문서
+
+2026-10-08 개발 검증 완료. [실제 API/DB·회귀 결과](../review/UI_REBRAND_P7_VALIDATION_20261008.md), [디자이너 확인용 스크린샷 37장](../review/p7_20261008/README.md). 디자이너의 확인은 별도로 받는다.
 
 - `pnpm check`, 모든 새 라우트 `ui-state-walkthrough`, 360×800 확인
 - 옛 라우트 redirect와 알림 딥링크 확인

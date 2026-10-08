@@ -1,6 +1,6 @@
 # P5 프론트 구현·검증
 
-2026-10-08 · 상태: **구현·정적 검사·합성 API 브라우저 검증 완료.** 브랜치 `ui/rebrand-mobile`.
+2026-10-08 · 상태: **구현·정적 검사·합성 API 브라우저 검증 완료. 실제 API·DB 종단 검증은 P7 검증 기록 참고.** 브랜치 `ui/rebrand-mobile`.
 
 기준: [P5 확정 설계](UI_REBRAND_P5_CHECKLIST.md), [MVP 정본](../ASKBUDDY_MVP_CURRENT.md), `web/AGENTS.md`. U8에 따라 프론트는 직접 구현한다. 사용자 확인: 신규 달력·설정·직원 담당 화면도 기존 초록색 모바일 UI와 공통 컴포넌트를 사용한다.
 
@@ -37,6 +37,6 @@
 - 두 브라우저 검사 모두 런타임 예외 없음. 390px·360px 가로 넘침 검사 통과. 달력·완료 화면 스크린샷을 확인하고 월 이동 버튼 폭을 수정했다
 - `web-async-state-check` 금지 패턴 검사: 신규 체크리스트 코드에 직접 폴링·effect fetch·응답 localStorage 복사·오류 숨김·lint 억제 없음
 
-브라우저 검증은 실제 브라우저와 **합성 API**를 사용한다. 실제 공유 개발 DB 연결·migration 적용·실제 매장 자료 종단 검증 결과로 해석하지 않는다. 공유 DB migration 적용 항목은 `DEV_TODO_CURRENT.md`에 남아 있다.
+위 최초 브라우저 검증은 실제 브라우저와 **합성 API**를 사용했다. 후속 P7에서는 공유 로컬 DB에 P5 migration을 적용하고, 별도 일회용 PostgreSQL에서 합성 매장 자료로 실제 FastAPI·DB 종단 검증을 실행했다. [P7 결과](../review/UI_REBRAND_P7_VALIDATION_20261008.md) 참고.
 
 재현: `cd web && pnpm start --port 3011` 실행 후 Playwright가 설치된 환경에서 두 브라우저 스크립트를 실행한다. `NODE_PATH`는 필요한 경우 해당 환경의 설치 경로를 지정한다. P5 스크린샷은 기본 `/tmp/askbuddy-p5-ui/`에 저장하며 `P5_UI_ARTIFACT_DIR`로 바꿀 수 있다.
