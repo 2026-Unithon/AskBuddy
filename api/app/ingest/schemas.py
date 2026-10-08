@@ -132,6 +132,33 @@ class LocatedFactExtractionResult(FactExtractionResult):
     assertions: list[LocatedAssertion] = []
 
 
+# ── 사실 조립 계획 (W3a, 플래그 w_fact_assembly_enabled) ──────────────────
+# 모델은 이름표(E…·F…)·카테고리·블록 종류만 낸다. 제목·문장·값 필드를 두지 않는다 —
+# 카드 제목과 본문은 서버가 사실 판에서 렌더링한다(card_plan).
+
+class PlannedBlock(BaseModel):
+    kind: Literal["QUANTITIES", "STEPS", "NOTES"]
+    facts: list[str] = []          # 입력 사실 이름표(F1…). 순서가 표시 순서다
+
+
+class PlannedCard(BaseModel):
+    entity: str                    # 입력 대상 이름표(E1…)
+    category_name: str
+    blocks: list[PlannedBlock] = []
+
+
+class CardPlanBatch(BaseModel):
+    cards: list[PlannedCard] = []
+    unresolved: list[str] = []
+    # 서버가 채운다. 필드가 아니라 response_schema 에 실리지 않는다
+    _raw_response_id: int | None = PrivateAttr(default=None)
+
+    @property
+    def raw_response_id(self) -> int | None:
+        """이 결과를 만든 원래 응답 행. 기록하지 않은 호출이면 None."""
+        return self._raw_response_id
+
+
 # ── 요청 ───────────────────────────────────────────────────────────────────
 
 class VoiceMeta(BaseModel):

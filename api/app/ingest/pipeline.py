@@ -11,6 +11,7 @@ import asyncio
 import logging
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -210,17 +211,26 @@ async def process_source(
         async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
 
-        # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다.
-        # 모델 호출이므로 연결 밖에서 한다
-        result = await assemble_assertions(
-            source_id=source_id, assertions=assertions,
-            categories=list(categories), glossary=glossary,
-            usage_sink=usage_sink, usage_base=usage_base,
-            raw_sink=raw_sink, strict=True,
-        )
-        if assertions and not result.cards:
-            raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
-        result.unresolved.extend(unresolved)
+        # W3a — 켜면 대상 단위 사실 조립으로 간다. 옛 조립·_persist 를 부르지 않는다
+        fact_assembly_on = bool(getattr(get_settings(), "w_fact_assembly_enabled", False))
+        if fact_assembly_on:
+            # 입력은 짧은 연결로 읽고 놓은 뒤 모델을 부른다. 배치 실패는 strict 라 예외(FAILED)
+            prepared = await _prepare_fact_assembly(
+                pool, store_id, source_id, categories=list(categories), glossary=glossary,
+                usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True)
+            unresolved_total = len(prepared.planning.unresolved) + len(unresolved)
+        else:
+            # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다.
+            # 모델 호출이므로 연결 밖에서 한다
+            result = await assemble_assertions(
+                source_id=source_id, assertions=assertions,
+                categories=list(categories), glossary=glossary,
+                usage_sink=usage_sink, usage_base=usage_base,
+                raw_sink=raw_sink, strict=True,
+            )
+            if assertions and not result.cards:
+                raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
+            result.unresolved.extend(unresolved)
 
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -253,16 +263,22 @@ async def process_source(
                         f"legacy-source-{source_id}",
                     )
 
-                saved = await _persist(
-                    conn,
-                    store_id,
-                    source_id,
-                    categories,
-                    result,
-                    job_id=int(origin_job_id) if origin_job_id is not None else None,
-                    category_version=category_version,
-                    ledger_ids=ledger_ids,
-                )
+                if fact_assembly_on:
+                    saved = await _persist_fact_cards(
+                        conn, store_id, source_id, categories, prepared,
+                        job_id=int(origin_job_id) if origin_job_id is not None else None,
+                        category_version=category_version)
+                else:
+                    saved = await _persist(
+                        conn,
+                        store_id,
+                        source_id,
+                        categories,
+                        result,
+                        job_id=int(origin_job_id) if origin_job_id is not None else None,
+                        category_version=category_version,
+                        ledger_ids=ledger_ids,
+                    )
 
                 # 카드·구간 결과·완료를 함께 확정한다. 중간 오류는 모두 rollback한다.
                 await _record_segment_failures(
@@ -271,7 +287,8 @@ async def process_source(
                 await repo.set_status(conn, store_id, source_id, "DONE")
         logger.info("ingest DONE source=%s cards=%d unresolved=%d "
                     "구간 %d/%d 실패 %.1fs",
-                    source_id, saved, len(result.unresolved),
+                    source_id, saved,
+                    unresolved_total if fact_assembly_on else len(result.unresolved),
                     outcome.segments_failed, outcome.segments_total,
                     time.perf_counter() - started)
         return None
@@ -1040,17 +1057,32 @@ async def assemble_assertions(
         batch.extend(group)
     if batch:
         batches.append(batch)
+    concurrency = int(getattr(get_settings(), "assemble_concurrency", 1) or 1)
+
+    def _call(index, facts):
+        return assemble_cards(
+            source_id=source_id, facts=facts,
+            category_names=categories, glossary=glossary,
+            usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE",
+                                   segment_id=f"batch{index}" if len(batches) > 1 else None),
+            raw_sink=raw_sink,
+        )
+
     try:
-        results = []
-        for index, facts in enumerate(batches):
-            results.append(await assemble_cards(
-                source_id=source_id, facts=facts,
-                category_names=categories, glossary=glossary,
-                usage_sink=usage_sink,
-                usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE",
-                                       segment_id=f"batch{index}" if len(batches) > 1 else None),
-                raw_sink=raw_sink,
-            ))
+        if concurrency <= 1 or len(batches) <= 1:
+            results = []
+            for index, facts in enumerate(batches):  # 기존 동작 — 첫 실패에서 멈춘다
+                results.append(await _call(index, facts))
+        else:
+            from app.ingest.batching import gather_in_order
+            gathered = await gather_in_order(
+                [lambda i=i, f=f: _call(i, f) for i, f in enumerate(batches)],
+                concurrency=concurrency)
+            failure = next((r for r in gathered if isinstance(r, Exception)), None)
+            if failure is not None:
+                raise failure  # index 순 첫 실패 — 아래 except 가 기존처럼 처리한다
+            results = gathered
         if len(results) == 1:
             return results[0]  # 단일 호출은 원래 응답 ID도 보존한다
         return ExtractionResult(cards=[card for r in results for card in r.cards],
@@ -1198,6 +1230,134 @@ async def _persist(
         logger.info("unresolved source=%s: %s", source_id, item)
 
     return saved
+
+
+# ── W3a 대상 단위 사실 조립 (플래그 w_fact_assembly_enabled) ─────────────────
+
+@dataclass(frozen=True)
+class PreparedAssembly:
+    entity_ids: tuple[int, ...]  # 이 자료가 건드린 살아 있는 대상(오름차순)
+    states: dict[int, "EntityCardState"]  # 준비 때 상태
+    groups: dict[int, "EntityGroup"]  # DEFER 가 아닌 대상의 입력(사실 1개 이상)
+    held: tuple["HeldFact", ...]
+    data_errors: dict[int, str]  # check_group 코드
+    planning: "PlanningOutcome"
+
+
+async def _prepare_fact_assembly(pool, store_id: int, source_id: int, *, categories: list[str],
+                                 glossary: list[dict], usage_sink, usage_base, raw_sink,
+                                 strict: bool) -> PreparedAssembly:
+    """조립 입력을 짧은 연결로 읽고 놓은 뒤, 연결 없이 사실 조립 모델을 부른다.
+
+    DEFER 대상(공개·수동·점주 초안·레거시 카드)은 입력을 읽지 않는다. 데이터 오류 묶음은
+    모델에 보내지 않는다. 사용량 문맥은 배치마다 `plan{n}` 이다(배치가 하나여도 plan0).
+    """
+    from app.ingest import card_plan, fact_assembly, fact_cards
+
+    async with pool.acquire() as conn:
+        entity_ids = tuple(await fact_assembly.entities_for_source(conn, store_id, source_id))
+        states = {e: await fact_cards.entity_card_state(conn, store_id, e) for e in entity_ids}
+        loaded = await fact_assembly.load_entity_groups(
+            conn, store_id, [e for e in entity_ids if states[e].mode != "DEFER"])
+    # 여기부터 연결 없음 — 모델 호출 중 DB 연결을 쥐지 않는다
+    groups = {g.entity_id: g for g in loaded.groups}
+    data_errors = {e: code for e, g in groups.items() if (code := card_plan.check_group(g))}
+    planning = await fact_assembly.plan_entities(
+        source_id=source_id,
+        groups=[groups[e] for e in sorted(groups) if e not in data_errors],
+        categories=categories, glossary=glossary, usage_sink=usage_sink,
+        context_for=lambda i: _ctx_for(usage_base, source_id, "ASSEMBLE", segment_id=f"plan{i}"),
+        raw_sink=raw_sink, strict=strict)
+    return PreparedAssembly(entity_ids=entity_ids, states=states, groups=groups,
+                            held=tuple(loaded.held), data_errors=data_errors, planning=planning)
+
+
+async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id: int,
+                              categories: dict[str, int], prepared: PreparedAssembly, *,
+                              job_id: int | None, category_version: int) -> int:
+    """사실 카드를 쓰고 이 자료의 occurrence 를 모두 처분한다. 호출자 트랜잭션 안에서 돈다.
+
+    매장 지식 잠금을 잡은 뒤 대상마다 상태·입력을 다시 보고, 준비 뒤 달라졌으면 쓰지 않고
+    구체적 사유로 검수 대기로 둔다. 처분 누락이 있으면 예외로 트랜잭션을 되돌린다.
+    이번에 만든 카드 판 수를 돌려준다.
+    """
+    from app.config import get_settings
+    from app.ingest import card_plan, entities, fact_assembly, fact_cards
+
+    await entities.lock_store_knowledge(conn, store_id)
+    await fact_cards.record_unresolvable_occurrences(conn, store_id, source_id)
+
+    planning = prepared.planning
+    failed = set(planning.failed_entity_ids)
+    created = 0
+    for e in prepared.entity_ids:
+        now = await fact_cards.entity_card_state(conn, store_id, e)
+        before = prepared.states[e]
+        fact_ids = await fact_cards.entity_fact_ids(conn, store_id, e)
+
+        async def pending(reason: str) -> None:
+            await fact_cards.mark_pending(conn, store_id, source_id=source_id,
+                                          fact_ids=fact_ids, reason=reason)
+
+        if now.mode == "DEFER":
+            await pending(fact_cards.REASON_EXISTING_CARD if before.mode == "DEFER"
+                          else fact_cards.REASON_CONCURRENT)
+            continue
+        if before.mode == "DEFER":
+            # 지금은 풀렸지만 준비 때 입력을 읽지 않았다
+            await pending(fact_cards.REASON_CONCURRENT)
+            continue
+        if e in prepared.data_errors:
+            await pending(prepared.data_errors[e])
+            continue
+        if e in failed:
+            await pending(fact_cards.REASON_ASSEMBLY_FAILED)
+            continue
+        group = prepared.groups.get(e)
+        if group is None:
+            continue  # 모든 사실이 보류 — 아래 보류 처리가 사유를 단다
+        reloaded = await fact_assembly.load_entity_groups(conn, store_id, [e])
+        current = {f.fact_revision_id for g in reloaded.groups if g.entity_id == e
+                   for f in g.facts}
+        if current != {f.fact_revision_id for f in group.facts}:
+            await pending(fact_cards.REASON_STALE_INPUT)
+            continue
+        result = card_plan.plan_entity(group, planning.proposals.get(e, ()))
+        if result.pending_reason:
+            await pending(result.pending_reason)
+            continue
+        if result.model_error:
+            logger.warning("W3a 모델 계획 버림 source=%s 대상 %s %s — 대체 계획",
+                           source_id, e, result.model_error)
+        # 지금 상태를 넘긴다 — 준비 때 NEW 였어도 지금 REASSEMBLE 이면 재조립한다
+        written = await fact_cards.write_entity_cards(
+            conn, store_id, source_id=source_id, job_id=job_id,
+            category_version=category_version, categories=categories, state=now,
+            group=group, result=result)
+        if written.deferred_reason:
+            # 잠금 아래 다시 본 상태가 달라 쓰지 않았다(occurrence 사유는 쓰기 쪽이 달았다)
+            logger.info("W3a 카드 쓰기 보류 source=%s 대상 %s %s",
+                        source_id, e, written.deferred_reason)
+            continue
+        created += len(written.new_version_ids)
+
+    # 대상 단위 사유 뒤에 단다 — 더 구체적인 보류 사유가 덮이지 않게
+    for h in prepared.held:
+        await fact_cards.mark_pending(conn, store_id, source_id=source_id,
+                                      fact_ids=[h.fact_id], reason=h.reason)
+
+    if getattr(get_settings(), "w_upload_proposals_enabled", False):
+        from app.ingest import impact
+        await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)
+
+    counts = await fact_cards.disposition_counts(conn, store_id, source_id)
+    if counts.missing > 0:
+        raise RuntimeError(f"occurrence 처분 누락 {counts.missing}건 — 저장하지 않는다")
+    logger.info("W3a 처분 source=%s 합계 %d · LINKED %d · 검수 대기 %s · 제외 %s",
+                source_id, counts.total, counts.linked, counts.review_pending, counts.excluded)
+    for item in planning.unresolved:
+        logger.info("unresolved source=%s: %s", source_id, item)
+    return created
 
 
 def _to_percent(confidence: float) -> float:

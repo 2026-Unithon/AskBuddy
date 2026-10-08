@@ -206,6 +206,15 @@ class CurrentManifestTest(unittest.IsolatedAsyncioTestCase):
         conn.fetchval.assert_not_awaited()
 
 
+def _blocks_then_no_facts(block_rows):
+    """card_version_blocks 조회엔 블록 행, card_block_facts 조회엔 빈 목록(레거시 판)."""
+    async def fetch(query, *args):
+        if "from card_block_facts" in query:
+            return []
+        return block_rows
+    return fetch
+
+
 class BuildKnowledgeContentTest(unittest.IsolatedAsyncioTestCase):
     async def test_builds_valid_knowledge_content_with_renderer_version(self):
         conn = AsyncMock()
@@ -219,10 +228,10 @@ class BuildKnowledgeContentTest(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"unexpected query: {query}")
 
         conn.fetchrow.side_effect = fetchrow
-        conn.fetch.return_value = [
+        conn.fetch.side_effect = _blocks_then_no_facts([
             {"block_id": "raw1", "kind": "RAW", "block_order": 1,
              "raw_span_id": 500},
-        ]
+        ])
 
         content = await build_knowledge_content(
             conn, store_id=7, manifest={1: 10}, glossary_version="glossary/v1")
@@ -258,10 +267,10 @@ class BuildKnowledgeContentTest(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"unexpected query: {query}")
 
         conn.fetchrow.side_effect = fetchrow
-        conn.fetch.return_value = [
+        conn.fetch.side_effect = _blocks_then_no_facts([
             {"block_id": "raw1", "kind": "RAW", "block_order": 1,
              "raw_span_id": 500},
-        ]
+        ])
         content = await build_knowledge_content(
             conn, store_id=7, manifest={1: 10}, glossary_version="glossary/v1")
         self.assertEqual(content.cards[0].title, "제목 없음")

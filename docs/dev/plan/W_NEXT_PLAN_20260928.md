@@ -77,6 +77,7 @@ W 공개 경로의 실제 DB 검증은 `api/scripts/verify_w_publication_flow.py
 | W2 | 두 대상 이름이 같은 대상인지 서버가 정하는 규칙 | 매장별 정규화 이름 + 별칭 표. 단어 유사도만으로 합치지 않고 애매하면 검수로 |
 | W2 | 자료끼리 값이 충돌할 때 검수 화면에서 무엇을 기본으로 보여줄지 | 양쪽 값·출처·날짜를 나란히, 기본 선택 없음(권위·최신성은 정렬 참고만) |
 | W3 | 카드 편집으로 업무 의미가 바뀌면 새 점주 작성 사실로 기록하고 재승인 — 편집 화면 설계 | 값·조건 편집은 사실 편집 UI, 문구만 바꾸는 편집은 표시 문구로 분리 |
+| W3a | `w_fact_assembly_enabled` 배포판 켜기 시점 | W3b 이후 (사실 단위 검수 화면 전에는 켜지 않는다) |
 | W3 | `contracts/*` 계약 변경이 필요해지면 R 합의 | 가능한 한 현재 계약(`CardPlan`·`CardBlock`·`FactRevision`) 안에서 해결 |
 | J2 | 동시 처리 수·재시도 횟수·lease 길이 | 동시 1~2, 재시도 3, lease 5분 + heartbeat |
 | W5 | 요율표(`config/rate_card.json` 모델 단가), 예산 상한, 실행 수 | W1 기준선 3회 + 대조 3회 × 2매장 = 12회, W3 후 같은 12회 |
@@ -223,25 +224,39 @@ TODO 근거: W2 절 전체. 스키마는 M1 의 `fact_revisions`·`fact_occurren
 
 TODO 근거: W3 절 + W4 의 "fact_revision 블록 고정" 남은 것. **이 Phase 는 새 플래그(예: `W_FACT_ASSEMBLY`, 기본 false) 뒤에 넣는다.**
 
+> 2026-10-08: W3a 구현·단위 테스트(1910 passed, 4 xfailed)·실제 DB 검증(`api/scripts/verify_w3a_fact_assembly.py`, 재구축 검증 통과)을 마쳤다. 수집 경로 동작은 플래그 `w_fact_assembly_enabled` 뒤(기본 꺼짐, `w_entity_revision_enabled` 필요)이다. 실제 모델로는 재지 않았다(유료 호출 0). R 필수 검토(W3-4)는 요청만 했다(`W_TO_R_PUBLICATION_HANDOFF_20260927.md` §11). 점주 검수 화면(W3-5)은 W3b 이며 아직 시작하지 않았다.
+
 ### Task W3-1. 조립 출력 = CardPlan
-- [ ] `api/prompts/assemble_cards.ko.txt` 를 사실 참조 방식으로 바꾼 새 프롬프트 파일을 만든다(옛 것은 플래그 OFF 경로용으로 둔다).
-      출력은 `app.contracts.card.CardPlan`(대상·규격·제목·블록: `QUANTITIES|STEPS|NOTES|RAW`, 블록마다 `fact_revision_ids`).
-- [ ] 조립 입력은 **대상 단위**로 모은 사실 revision 이다(W2). 자료 단위가 아니다.
+- [x] `api/prompts/assemble_card_plan.ko.txt` 새 프롬프트(옛 `assemble_cards.ko.txt` 는 플래그 꺼짐 경로용으로 그대로). 모델은 대상 이름표·카테고리·블록 종류·사실 이름표만 낸다(`CardPlanBatch`, `api/app/ingest/schemas.py`). 제목·문장·수량·단위·조건·부정·예외는 모델이 쓰지 않고 서버가 렌더링한다. 남은 것: 실제 모델로 재지 않았다(합성 대역 검증). 카드 제목은 서버가 대상 이름(+분할 시 ` i/n`)으로 만든다. 규격은 제목이 아니라 블록 머리 줄과 `PublishedCard.variant` 가 싣는다.
+- [x] 조립 입력은 **대상 단위**로 모은 사실 revision 이다(`api/app/ingest/fact_assembly.py`). 자료 단위가 아니다.
+
+### Task W3-1b. 조립 호출 병렬화
+현황(2026-10-08 확인): `assemble_assertions`(`api/app/ingest/pipeline.py`)는 대상 묶음을 `assemble_batch_facts`(200) 단위 배치로 나눈 뒤
+**배치를 for 루프로 하나씩** 부른다. 한 배치가 실패하면 앞서 성공한 배치 결과까지 버리고 `조립 실패` 하나로 끝난다.
+구간 추출은 `extract_segment_concurrency` + `asyncio.Semaphore`/`gather` 로 이미 동시 호출하지만 조립에는 그런 설정이 없다.
+W3a 는 조립 입력을 대상 단위로 바꾸므로 큰 자료에서 배치 수가 늘고, 직렬 호출 지연이 그대로 쌓인다.
+- [x] `config.py` 에 `assemble_concurrency`(기본 1 = 지금과 같은 직렬). 배치 호출을 `Semaphore` + `gather` 로 감쌌다(`api/app/ingest/batching.py` `gather_in_order`). 전역 모델 게이트 `ingest_model_concurrency` 는 그대로 상한이다.
+- [x] 결과는 **배치 index 순서**로 합친다. 동시 수 1·2·4 에서 카드·사실 연결·`usage_context.segment_id` 가 같다(합성 대역 확인). 사실 조립 경로의 segment_id 는 `plan{n}`, 옛 경로는 `batch{n}` 그대로.
+- [x] 배치 실패 처리: **제품 경로(`process_source`)는 `strict` 라 배치 하나가 실패하면 자료 전체가 FAILED 다(이전과 같음).** 재시도 때 성공한 배치는 재사용 키로 다시 부르지 않는다. 배치 단위 격리(실패 배치 사실만 `ASSEMBLY_FAILED` 검수 대기, 성공 배치 카드 저장)는 non-strict 경로(미리보기·검증 스크립트)에만 있다.
+- [x] 모델 호출 중 DB 연결을 쥐지 않는다. 카드 저장·매장 lock 은 모든 배치가 끝난 뒤 한 트랜잭션이다.
+- [x] 비용은 호출 수가 같으므로 변하지 않는다. 합성 확인에서 배치별 사용량 문맥(`plan0…`)이 빠짐없이 남았다.
+- 검증(합성 지연 1500ms, 유료 호출 0): 동시 수 1/2/4 중앙값 12.0/6.0/3.0초(각 3회), 결과 동일, 한 배치 실패 시 나머지 보존, strict 예외 확인. 기록: `docs/dev/review/W3A_ASSEMBLE_CONCURRENCY_20261008.md`. 기본값을 1 보다 올리는 것은 실제 모델 지연·공급자 rate limit 확인 뒤 사용자가 정한다.
 
 ### Task W3-2. 서버 검증·렌더링
-- [ ] 참조 허용 목록(같은 매장·같은 대상 묶음의 revision 만), 규격 일치(HOT 블록에 ICE 사실 금지), 필수 조건·예외 포함,
-      STEPS 의 순서·선행(`requires`, 순환 금지)을 검사한다. 어기면 그 카드를 검수 대기로 보낸다 — 문장을 지워 완성 카드로 위장하지 않는다.
-- [ ] 줄 문법: 제목 → 수치 → 순서 → 목록 → 근거. 없는 블록은 생략. 고정 필드·분량 때문에 사실을 버리지 않는다. 큰 대상은 의미 단위로 관련 카드로 나눈다.
-- [ ] `card_version_blocks`·`card_block_facts` 에 블록을 고정하고, 카드 `content` 는 렌더링 결과로 채운다(기존 화면 호환).
+- [x] 참조 허용 목록(같은 대상 묶음의 revision 만), 규격 일치(HOT 블록에 ICE 사실 금지), 필수 선행(`requires`, 같은 카드 안), STEPS 순서 검사(`api/app/ingest/card_plan.py`, 계획 오류 코드 `PLAN_*`·데이터 오류 코드 `DATA_*`). 어기면 모델 계획을 버리고 서버 대체 계획으로 가며 카드는 `FALLBACK:<코드>` 검수 대기다. 문장을 지워 완성 카드로 위장하지 않는다.
+- [~] 줄 문법: 제목 → 수치(`QUANTITIES`) → 순서(`STEPS`) → 목록(`NOTES`) → 근거. 없는 블록은 생략. 고정 필드·분량 때문에 사실을 버리지 않는다. 큰 대상 분할은 상한(블록당 사실 50·카드당 블록 20) 기계 분할만 한다. 남은 것: 모델이 제안하는 의미 단위 분할은 허용만 하고 품질은 재지 않았다.
+- [x] `card_version_blocks`·`card_block_facts`·`card_version_fact_provenance` 에 블록과 근거를 고정하고, 카드 `content` 는 서버 렌더링 결과로 채운다(기존 화면 호환). migration `20261008090000_w_fact_assembly.sql`.
 
 ### Task W3-3. occurrence 처분 기록
-- [ ] 추출 occurrence 마다 `LINKED`(카드·블록) / `REVIEW_PENDING`(사유) / `EXCLUDED`(사유) 를 `fact_occurrences` 에 남긴다.
-      처리 결과 없이 사라지는 occurrence 가 없어야 한다. 과도한 제외·대기를 품질 향상으로 세지 않도록 건수를 함께 보고한다.
+- [x] 자료 처리가 끝나면 그 자료의 `source_fact_occurrences` 행마다 `fact_occurrences` 행이 정확히 하나 있다(누락이 있으면 저장 트랜잭션을 되돌린다). 처분 건수를 처리 로그에 남긴다(`api/app/ingest/fact_cards.py` `disposition_counts`).
+      `REVIEW_PENDING` 사유: `ENTITY_UNRESOLVABLE`, `VARIANT_UNRESOLVED`, `ENTITY_MISMATCH`, `EXISTING_CARD`, `CONCURRENT_ASSEMBLY`, `STALE_INPUT`, `ASSEMBLY_FAILED`, 데이터 오류 `DATA_REQUIRES_OUTSIDE_ENTITY`·`DATA_REQUIRES_CYCLE`·`DATA_TOO_LARGE`·`DATA_NO_NAME`.
+      **W3a 는 `EXCLUDED` 를 쓰지 않는다**(점주 결정, W3b). 점주가 이미 둔 `EXCLUDED` 는 바꾸지 않고, `LINKED` 를 `REVIEW_PENDING` 으로 내리지 않는다. 공개 카드·수동 배정·점주 초안·레거시 카드는 자동 조립이 쓰지 않고 보류한다(`EXISTING_CARD`).
+      작업 `card_count` 는 새 카드 수가 아니라 이 자료 occurrence 가 `LINKED` 로 이어진 서로 다른 카드 수다.
 
 ### Task W3-4. 공개판에 사실 싣기
-- [ ] `api/app/publish/content.py` 가 사실 블록 카드에 대해 `fact_revisions` 와 실제 `entity_id` 를 싣는다. RAW 블록 레거시 카드는 그대로.
-      이미 발행된 snapshot 의 hash 는 바뀌지 않아야 한다(새 필드는 값이 있을 때만).
-- [ ] **R 필수 검토**: R 렌더러·색인·인용 검증이 사실 블록 공개판을 받는지 R 과 확인한다. 인계 문서에 요청을 적는다.
+- [x] `api/app/publish/content.py` 가 사실 블록 카드에 대해 `fact_revisions` 와 실제 `entity_id`·`variant` 를 싣는다. 사실 블록 여부는 플래그가 아니라 데이터(`card_block_facts` 행)로 가른다. 레거시 RAW 카드는 그대로이고 이미 발행된 snapshot hash 는 바뀌지 않는다(새 필드는 사실 카드가 있을 때만). 근거는 카드 판에 고정(`card_version_fact_provenance`)해 같은 판은 같은 content 로 다시 실린다.
+- [x] entity_id 충돌 방어(최종 검토 I1): 같은 공개판에서 레거시 카드 `entity_id`(=`card_id`)와 사실 카드·사실 판 `entity_id` 가 같은 숫자면 `InvalidContent` 로 공개를 거절한다(fail closed). 사실 카드가 없는 공개판은 결과가 이전과 같다. 단위 `test_w3a_publish_content.py` `EntityNamespaceGuardTest`. 근본 해결은 R 계약 변경(인계 10-f).
+- [ ] **R 필수 검토**: R 렌더러·색인·인용 검증이 사실 블록 공개판을 받는지 R 과 확인한다. 요청: `W_TO_R_PUBLICATION_HANDOFF_20260927.md` §11·R 이 할 일 10. **R 확인 전에는 완료로 표시하지 않는다.**
 
 ### Task W3-5. 검수 화면
 - 2026-10-05 사용자 확정: [W/R 공유 기준](../review/WR_CARD_EDIT_FACT_REVIEW_20261005.md)의 **사실·문장 단위 추가·수정·삭제·순서 변경**을 따른다. 기존 fact 값만 편집하도록 제한하지 않는다. 새 사실은 텍스트로 입력·확인하며 표현만의 편집은 이번 범위에 포함하지 않는다. 아래 §3의 편집 화면 질문은 이 방향으로 확정됐다.
@@ -269,6 +284,19 @@ TODO 근거: W3 절 + W4 의 "fact_revision 블록 고정" 남은 것. **이 Pha
 **W3 검증:** 다른 매장/존재하지 않는 참조, HOT/ICE 수치 교환, 부정·조건·예외 삭제, 순서 변경을 차단한다.
 승인 미리보기와 저장 콘텐츠가 같다. occurrence 가 처리 결과 없이 사라지지 않는다. 실제 DB 로 사실 블록 카드 승인 → R 검색·답변 인용까지(`verify_w_publication_flow.py`).
 
+W3a 에서 확인한 것(합성 데이터·합성 모델 대역, 실제 DB `api/scripts/verify_w3a_fact_assembly.py`): 다른 매장·없는 참조, HOT/ICE 교환, 부정·조건·예외 삭제, 순서 변경 차단(단위 `test_w3a_card_plan.py` 와 DB 시나리오 P), 승인 미리보기 = 저장 본문, 자료마다 occurrence 처분 누락 0(E), 사실 카드 승인 → R 검색(`hybrid_search`)·`decide` → ANSWER 가 공개 사실을 인용(B3, 인용 fact_revision·source·block 대조). 시나리오 id: L1~L4(조립 입력·호출·재사용), P1~P12(카드 판·블록·근거·처분), E1~E12(파이프라인·작업 종단), B1~B7(공개판·R 답변·재공개 결정성·점주 편집 판). 결과: 단위 1910 passed, 4 xfailed, 131 subtests; 재구축 검증 종료 코드 0, PASS 928줄; 격리 검사 위반 15건(모두 기존 `ingest/repository.py`), 새 위반 0. 실제 모델·유료 호출은 없다(지출 0).
+
+### W3a 플래그 켜기 전 점검 (`w_fact_assembly_enabled`)
+- [ ] 배포판에서 켜는가 — **사용자 결정 대기.** 권장: W3b(사실 단위 검수 화면) 전에는 켜지 않는다(공개 카드 대상의 새 자료 DEFER·대체 카드·검수 대기 사실을 볼 화면이 없다).
+- [ ] migration `20261008090000_w_fact_assembly.sql` 적용 확인(배포 워크플로가 서버보다 먼저 적용).
+- [ ] `W_ENTITY_REVISION_ENABLED=true` 가 먼저다(설정 검증이 막는다).
+- [ ] `ASSEMBLE_CONCURRENCY` 기본 1. 올리는 것은 실제 모델 지연·rate limit 확인 뒤 사용자.
+- [ ] 평가 하네스(`api/scripts/run_extract_eval.py`)가 플래그 상태와 `assemble_card_plan.ko.txt` digest 를 기록하게 한다(W5 선행).
+- [ ] **entity_id 이름공간(R 과 합의).** 레거시 카드 `entity_id`(=`card_id`)와 사실 대상 `entity_id` 가 같은 숫자 공간이다. 지금은 W 가 충돌 시 공개를 거절한다(`build_knowledge_content` `InvalidContent`). R 계약·검증기에서 이름공간을 나누기 전에는 켜지 않는다(인계 §11·R 할 일 10-f).
+- [ ] **대상 분리 뒤 영구 DEFER.** 대상 E 에서 F 를 떼어내도 옛 occurrence 는 E 카드에 `LINKED` 로 남고 `card_facts` 는 더하기만 하므로, F 의 관련 카드로 E 카드가 계속 잡혀 F 가 영구 DEFER(EXISTING_CARD) 된다. 켜기 전에 처리 방식을 정하고 구현한다(W3b 설계 입력).
+- [ ] **작업 `card_count` 의미.** 켜진 매장의 `card_count` 는 "새 카드" 가 아니라 이 자료 occurrence 가 `LINKED` 로 이어진 서로 다른 카드 수다(같은 카드가 여러 자료에 겹쳐 세지고 재처리도 1 이상이라 SUCCEEDED). 켜기 전에 의미 또는 완료 알림 문구("새 카드 N장")를 고친다.
+- 알아둘 것: 꺼짐은 오늘과 같고, 이미 승인된 사실 카드는 플래그를 꺼도 계속 공개된다(데이터 롤백 아님). 사실 카드를 점주가 자유 편집하면 블록 없는 판 → RAW 공개로 돌아간다(W3b 전 알려진 한계).
+
 ---
 
 ## Phase J2 — 업로드 처리 영속 worker
@@ -294,6 +322,7 @@ TODO 근거: J2 절의 worker 항목. 본보기는 `api/app/cards/owner_answer_w
 
 - [ ] 선행: 사용자가 요율표 `config/rate_card.json`(모델 단가)을 채우고 예산 상한을 승인한다. 없으면 원가 미관측으로 캠페인이 실패한다.
 - [ ] W3 머지 직전 main 에 태그 `w-baseline-pre-w3`(사용자에게 요청).
+- [ ] W3a 플래그 켬/끔·조립 프롬프트(`assemble_card_plan.ko.txt`) digest 를 캠페인 조건에 고정한다(평가 하네스가 기록해야 한다).
 - [ ] 사전등록 캠페인 파일(`docs/dev/plan/W_EVAL_CAMPAIGN_V1.md` 형식, Git 제외 경로): 채점기 `w_fact_score/v4`·`COMMON+CAFE`,
       정답지 hash(278건), 평가 정책 `w_user_confirmed_20260927.json`, 후보 CONTROL(기준선)·CONTROL_REPEAT(대조)·CANDIDATE(W3), 후보마다 3회, seed, 예산.
 - [ ] 실행: 기준선 3 + 대조 3 × 2매장(12회)은 태그 버전으로, W3 3 + 대조 3 × 2매장(12회)은 W3 버전으로. `run_extract_eval.py --campaign ...`.

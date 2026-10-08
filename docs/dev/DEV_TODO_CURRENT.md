@@ -313,15 +313,17 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 ## W3. 사실 참조로 카드 조립·검수 — 구 13.3-1b~1c·13.4~13.5
 
 - [x] W3-0 플래그 켜기 준비(설계 `docs/dev/plan/W3_0_FLAG_READINESS_DESIGN.md`, 계획 `docs/dev/plan/W3_0_FLAG_READINESS_PLAN.md`): HOT/ICE 동시 사실 원장 나누기, legacy 정정 순서, 병합 뒤 후보·제안 정리·같은 순위 `matched_cards` 갱신, 두 플래그 합성 종단 검증, 처리량 기록, 점주 답변 삭제 경로 확인. **남은 것: 배포판 플래그 켜기는 사용자가 `docs/dev/plan/W3_0_FLAG_ROLLOUT.md` 로 한다(아직 켜지 않음). 다음은 W3a(대상 단위 사실 조립).**
-- [ ] 조립 모델은 fact revision/블록 참조·배치·표시 힌트만 제안한다. 수량·단위·조건·부정·예외를 새 값으로 발급하지 않는다.
-- [ ] 서버가 참조 허용 목록, 대상·규격, 필수 조건·예외·선행 단계와 순서를 검증하고 콘텐츠를 렌더링한다.
-- [ ] 제목 → 수치 → 순서 → 목록 → 근거의 줄 문법을 유지한다. 없는 블록은 생략하며 고정 필드·분량 제한 때문에 사실을 버리지 않는다.
-- [ ] 대상이 크면 의미 단위와 dependencies를 유지해 관련 카드로 분리한다. 숫자만 떼거나 필수 조건을 다른 화면에서 찾게 하지 않는다.
-- [ ] 조립 실패는 원장을 보존한 검수 대기나 검증된 RAW 블록으로 처리한다. 실패 문장을 삭제해 완성 카드로 위장하지 않는다.
-- [ ] 추출 occurrence마다 `LINKED / REVIEW_PENDING / EXCLUDED(reason)` 처분을 기록한다. 미처리·잘못된 연결·필수 문맥 누락을 별도 측정하고 과도한 제외/대기를 품질 향상으로 세지 않는다.
-- [ ] 검수 화면에 값·규격·조건·근거·원문을 제시하고 수정·추가·제외를 허용한다. 숫자가 없는 금지·예외도 숨기지 않는다.
-- [ ] 자유 편집으로 업무 의미가 바뀌면 새 점주 작성 사실/블록으로 기록하고 재승인한다. 문구 수정이 미검증 사실 변경의 우회로가 되지 않게 한다.
-- [ ] `RECIPE | TASK`는 렌더링 힌트로 사용한다. 체크리스트·근거 이미지·승인 정보를 연결하며 예상 질문은 검색 파생물로 구분한다.
+- [x] W3a(대상 단위 사실 조립, 플래그 `w_fact_assembly_enabled` 기본 꺼짐, `w_entity_revision_enabled` 필요, 2026-10-08): 근거 `docs/dev/plan/W_NEXT_PLAN_20260928.md` Phase W3. 단위 1910 passed·실제 DB 재구축 검증 통과·실제 모델 미실측. **남은 것: 배포판 켜기는 사용자 결정(W3b 이후 권장), W3b 검수 화면.** 켜기 전 점검: 같은 계획 문서 "W3a 플래그 켜기 전 점검"(entity_id 이름공간 R 합의, 대상 분리 뒤 영구 DEFER, `card_count` 의미 포함).
+- [x] 조립 모델은 fact revision/블록 참조·배치만 제안한다. 수량·단위·조건·부정·예외·제목·문장은 서버가 사실 판에서 렌더링한다(`api/app/ingest/card_plan.py`, `fact_assembly.py`, 프롬프트 `assemble_card_plan.ko.txt`). 표시 힌트 제안은 받지 않는다.
+- [x] 조립 배치 호출을 병렬화한다(`assemble_concurrency`, 기본 1). 결과는 배치 순서로 합친다. 제품 경로는 strict 라 배치 하나가 실패하면 자료 전체가 FAILED 다(이전과 같고, 재시도 때 성공 배치는 재사용 키로 다시 부르지 않는다). 배치 단위 격리(실패 배치 사실만 검수 대기, 성공 배치 카드 보존)는 non-strict 경로(미리보기·검증)에만 있다. 측정(합성 지연): `docs/dev/review/W3A_ASSEMBLE_CONCURRENCY_20261008.md`. 기본값을 올리는 것은 실제 모델 확인 뒤 사용자.
+- [x] 서버가 참조 허용 목록, 대상·규격, 필수 선행 단계와 순서를 검증하고 콘텐츠를 렌더링한다. 조건·예외는 사실 줄에 서버가 붙인다.
+- [x] 제목 → 수치 → 순서 → 목록 → 근거의 줄 문법을 유지한다. 없는 블록은 생략하며 고정 필드·분량 제한 때문에 사실을 버리지 않는다.
+- [~] 대상이 크면 관련 카드로 분리한다. 구현: 상한(블록 50 사실·카드 20 블록) 기계 분할과 모델의 의미 분할 허용. **남은 것: 의미 분할 품질 미측정, 카드 제목 = 대상 이름, 분할 카드만 뒤에 ` i/n`(예: `대상A 2/3`), 규격 접미사 없음. 분할 카드는 R 이 제목 전체 언급으로 못 찾음(R 요청 10-a).**
+- [x] 조립 실패는 원장을 보존한 검수 대기(`FALLBACK:<코드>`·`NO_PROVENANCE`)로 처리한다. 실패 문장을 삭제해 완성 카드로 위장하지 않는다. (검증된 RAW 블록 대체는 쓰지 않는다.)
+- [x] 추출 occurrence마다 `LINKED / REVIEW_PENDING` 처분을 기록한다(누락 0을 저장 트랜잭션이 강제). `EXCLUDED` 는 점주 결정이라 W3a 가 쓰지 않는다(W3b). 건수는 처리 로그에 남기고 별도 평가 분모는 W5.
+- [ ] 검수 화면에 값·규격·조건·근거·원문을 제시하고 수정·추가·제외를 허용한다. 숫자가 없는 금지·예외도 숨기지 않는다. (W3b)
+- [ ] 자유 편집으로 업무 의미가 바뀌면 새 점주 작성 사실/블록으로 기록하고 재승인한다. 문구 수정이 미검증 사실 변경의 우회로가 되지 않게 한다. (W3b — 지금은 편집 판이 RAW 로 공개되고 사실이 빠진다.)
+- [ ] `RECIPE | TASK`는 렌더링 힌트로 사용한다. 체크리스트·근거 이미지·승인 정보를 연결하며 예상 질문은 검색 파생물로 구분한다. (후속)
 
 검증: 타 매장/존재하지 않는 참조, HOT/ICE 수치 교환, 부정·조건·예외 삭제, 순서 변경을 차단한다. 승인 미리보기와 저장 콘텐츠가 같고 occurrence가 처리 결과 없이 사라지지 않는다.
 
@@ -330,12 +332,12 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 2026-09-27 갱신. 근거는 PR #24(공개 연결, `api/app/publish/approval.py`·`content.py`·`service.py`), `w/publish-cleanup`(뒷정리), `w/legacy-embed-cleanup`(옛 색인 쓰기 제거·초기 색인 준비)이다. `[~]` 는 부분 구현이며 남은 것을 한 줄로 적는다.
 
 - [~] `card_version → fact_revision`과 렌더링 블록을 고정해 `PublishedKnowledgeSnapshot`을 만든다. 원장 전체를 R에 넘기지 않는다.
-  - 구현: 카드 버전 원문을 불변 RAW 블록으로 고정해 manifest 단위 snapshot 으로 공개한다(`api/app/publish/content.py` `ensure_raw_blocks`·`build_knowledge_content`). 남은 것: fact_revision 블록 고정은 미구현.
+  - 구현: 카드 버전 원문을 불변 RAW 블록으로 고정해 manifest 단위 snapshot 으로 공개한다(`api/app/publish/content.py` `ensure_raw_blocks`·`build_knowledge_content`). 사실 블록 카드는 `card_version_blocks`·`card_block_facts`·`card_version_fact_provenance` 로 고정하고 공개판에 `fact_revisions`·실제 `entity_id` 를 싣는다(`api/app/publish/content.py`). 남은 것: R 필수 검토(`W_TO_R_PUBLICATION_HANDOFF_20260927.md` §11), 레거시 RAW 카드 사실 전환, 점주 편집 판의 사실 연결(W3b).
 - [ ] 점주에게 숫자·조건·예외·순서와 답변에 사용할 내용을 모두 보여준다. 요약만 검수하고 숨은 facts를 승인 처리하지 않는다.
 - [~] W가 발행 조정을 소유하고 R의 인덱스 준비 어댑터를 호출한다. 임베딩은 단일 진입점 `app.reg.embeddings.embed_texts`를 유지한다.
   - 구현: `api/app/publish/approval.py` `publish_cards` → `prepare_index_request`·`activate_prepared_index`(R 어댑터). 승인·제외·복원·점주 제안 승인·점주 답변 worker 가 이 조정자를 거친다. 레거시 `/ingest/cards/*` 직접 공개 경로는 제거했다(`api/app/ingest/router.py`, `api/tests/test_w_legacy_ingest_cards_removed.py`). 옛 색인(`card_embeddings`) 호환 쓰기와 `POST /ingest/embed` 를 제거했다(PR #26 이후). 옛 색인 매장은 `api/scripts/bootstrap_store_index.py --apply` 로 초기 색인을 만든다(`api/app/publish/bootstrap.py`, worker 는 색인 없는 매장을 미룬다). 남은 것: 레거시 점주 답변 경로(`api/app/learn/router.py` → `publish_new_proposal`, R 소유 파일)가 아직 `publish_cards` 밖에서 포인터를 옮긴다.
 - [~] 임베딩/payload를 먼저 준비한 뒤 짧은 DB 트랜잭션에서 CAS로 승인 대상 revision을 확인하고 공개 포인터·index·fact refs·`knowledge_revision`을 원자적으로 바꾼다. 모델 호출 동안 DB lock/연결을 점유하지 않는다.
-  - 구현: 준비는 연결 없이, 공개는 한 트랜잭션에서 카드 CAS·`publish_knowledge`·공개 포인터·`activate_prepared_index` 를 함께 커밋한다(`approval.py`). 점주 답변 worker 의 관계 분석은 `ShortSession` 으로 모델 호출 중 연결을 쥐지 않고, 색인 준비 뒤 `after_prepare` 로 점유를 연장한다(`api/app/cards/owner_answer_worker.py`). 풀 크기는 `DB_POOL_MIN_SIZE`·`DB_POOL_MAX_SIZE` 설정(`api/app/config.py`). 남은 것: fact refs 원자 전환은 fact_revision 블록과 함께 미구현.
+  - 구현: 준비는 연결 없이, 공개는 한 트랜잭션에서 카드 CAS·`publish_knowledge`·공개 포인터·`activate_prepared_index` 를 함께 커밋한다(`approval.py`). 점주 답변 worker 의 관계 분석은 `ShortSession` 으로 모델 호출 중 연결을 쥐지 않고, 색인 준비 뒤 `after_prepare` 로 점유를 연장한다(`api/app/cards/owner_answer_worker.py`). 풀 크기는 `DB_POOL_MIN_SIZE`·`DB_POOL_MAX_SIZE` 설정(`api/app/config.py`). 사실 참조(`fact_revisions`)는 공개 content 에 실려 snapshot 과 함께 공개된다(실제 DB 시나리오 B2: 공개판 모양, B4: 같은 판 재공개 시 같은 content/hash). 원자 전환 자체는 W3a 에서 새로 검증하지 않았다. 남은 것: R 쪽 색인·인용 종단 검토(R 필수 검토 요청 중).
 - [x] 동시 수정·승인·제외의 stale 발행을 거절한다. 실패하면 기존 공개본을 유지하고 중복 요청이 중복 발행하지 않게 한다.
   - 근거: `approval.py` `_cas_holds`·멱등 키(`operations`), `api/tests/test_w_publish_approval.py`, 실제 DB `api/scripts/verify_w_publication_flow.py` 시나리오 3~5·경합.
 - [~] 공개·제외 이벤트를 R에 전달하며 색인/cache 지연은 최종 공개 재검사로 차단한다.
@@ -349,6 +351,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 
 ## W5. 쓰기 품질 실험·완료
 
+- [ ] 선행: 평가 하네스(`run_extract_eval.py`)가 `w_fact_assembly_enabled` 상태와 `assemble_card_plan.ko.txt` digest 를 기록하고, 캠페인 조건에 고정한다.
 - [ ] 원본→사실 재현율/정밀도, 사실→카드 보존·값/조건 변경, 충돌 정확성, 미배치/제외/대기, 점주 수정량·검수 시간을 분리 보고한다.
 - [ ] 입력 분할·추출 schema·renderer를 한 축씩 비교하고 통합 후보를 기준선과 다시 비교한다.
 - [ ] 네이티브 영상·프레임 수는 해당 실패가 드러나는 자료에서 후속 실험한다. 과거 프레임 실험만으로 원인을 확정하지 않는다.
