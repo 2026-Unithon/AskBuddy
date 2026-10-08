@@ -74,6 +74,8 @@ async def main():
             await verify_w3_consumer(pool, fresh)
             from verify_r_legacy_publication import verify as verify_legacy_publication
             await verify_legacy_publication(pool, fresh)
+            from verify_checklist import verify as verify_checklist
+            await verify_checklist(pool, fresh)
         finally:
             await pool.close()
     finally:

@@ -21,6 +21,8 @@ import {
 } from "@/components/kit";
 import { ApiError, apiErrorMessage, moveProductCard, mutateProductCard, updateProductCardDraft, type CardDetailDto } from "@/lib/api";
 import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
+import { CardAssignment } from "@/components/checklist/card-assignment";
+import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 const STATUS: Record<CardDetailDto["review_status"], { label: string; tone: "brand" | "warn" | "neutral" | "danger" }> = {
@@ -50,6 +52,7 @@ export default function OwnerCardPage() {
 
   const refresh = () =>
     Promise.all([
+      client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) }),
       client.invalidateQueries({ queryKey: queryKeys.card(state.storeId, cardId) }),
       client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
       client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
@@ -229,6 +232,7 @@ export default function OwnerCardPage() {
       <Surface className="px-[18px] py-4">
         <NumberedContent content={content} />
       </Surface>
+      {!excluded && card.review_status === "APPROVED" && card.published && <CardAssignment cardId={cardId} />}
       {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용이 보여요 · {card.published.title}</Caption>}
       <Caption>
         출처 · {card.source?.title ?? "알 수 없음"}

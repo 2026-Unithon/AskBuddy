@@ -16,13 +16,13 @@ import {
   Skeleton,
   TabBar,
 } from "@/components/kit";
+import { OwnerChecklistStatus } from "@/components/checklist/owner-status";
 import { OwnerAddComposer } from "@/components/owner/owner-add-composer";
 import { apiErrorMessage } from "@/lib/api";
 import { bootstrapQuery, rPendingQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 // O6 오늘 매장: 확인해 주세요(대기 질문) + 새로 알려줄 것 넣기.
-// 영업 현황 카드(근무조 체크)는 P5 체크리스트에서 붙인다.
 export default function OwnerTodayPage() {
   const { state } = useApp();
   const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
@@ -38,6 +38,7 @@ export default function OwnerTodayPage() {
         action={<SettingsButton href="/owner/settings" initial={storeName} />}
       />
 
+      <OwnerChecklistStatus />
       <SectionTitle>확인해 주세요{waiting.length > 0 ? ` · ${waiting.length}${pending.hasNextPage ? "+" : ""}` : ""}</SectionTitle>
       {pending.isLoading && (
         <>

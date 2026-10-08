@@ -29,6 +29,7 @@ from app.ops.router import router as ops_router
 from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
 from app.team.router import router as team_router
+from app.checklist.router import router as checklist_router
 
 settings = get_settings()
 
@@ -98,6 +99,7 @@ app.include_router(learn_router, prefix="/learn", tags=["learn"])
 app.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 # 내부 전용 평가 하네스. JWT scope="team" 없이는 전부 403 이다
 app.include_router(team_router, prefix="/team", tags=["team"])
+app.include_router(checklist_router, prefix="/checklist", tags=["checklist"])
 
 
 @app.get("/health")

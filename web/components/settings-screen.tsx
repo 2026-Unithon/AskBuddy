@@ -19,12 +19,16 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
     role === "OWNER"
       ? [
           { title: "내 계정", subtitle: user?.name },
+          { title: "내 기록", subtitle: "내가 한 일 · 기록 남기기", href: `/${role.toLowerCase()}/me` },
           { title: "매장", subtitle: store?.store_name },
+          { title: "근무조 · 알바생 기록", subtitle: "할 일 담기 · 영업일 시각 · 기록 조회", href: "/owner/shifts" },
+          { title: "직원 담당", subtitle: "직원마다 근무조 정하기", href: "/owner/members" },
           { title: "카테고리", subtitle: "카드를 나누는 묶음", href: "/owner/categories" },
           { title: "알림", subtitle: "질문이 오면 바로 알려드려요", href: "/owner/notifications" },
         ]
       : [
           { title: "내 계정", subtitle: user?.name },
+          { title: "내 기록", subtitle: "내가 한 일 · 기록 남기기", href: `/${role.toLowerCase()}/me` },
           { title: "매장", subtitle: store?.store_name },
           { title: "답변 알림", subtitle: "사장님 답이 오면 알려드려요", href: "/staff/notifications/v2" },
         ];

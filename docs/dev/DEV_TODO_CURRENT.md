@@ -513,6 +513,16 @@ R 완료: C0/R0~R4 계약·보안·회귀와 제품 루프가 fixture에서 동�
 - [ ] Task 14: 점주 직원 관리 화면
 - [ ] Task 15: 화면 검증과 카카오 실연결
 
+# P5. 근무조 체크리스트 (ui/rebrand-mobile)
+
+설계: [plan/UI_REBRAND_P5_CHECKLIST.md](plan/UI_REBRAND_P5_CHECKLIST.md) · 구현 계획: [plan/UI_REBRAND_P5_CHECKLIST_PLAN.md](plan/UI_REBRAND_P5_CHECKLIST_PLAN.md)
+
+- [x] 설계 확정
+- [x] 백엔드(migration·API·단위 테스트·일회용 DB 검증)
+- [ ] 로컬 개발 DB 적용(공유 DB — 사용자 동의 후)
+- [x] 프론트 P5 화면(2026-10-08): 오늘 할 일·제출·어제 창, 점주 현황, 기록 달력, 근무조·직원 담당·카드 연결·기록 설정. 정적 검사 통과, 합성 API 브라우저 P5 33개·기존 회귀 48개 통과. [구현·검증](plan/UI_REBRAND_P5_FRONTEND_PLAN.md)
+- [ ] F4 할 일 목록 추출(W)
+
 # 실행 순서와 두 사람의 인계
 
 | 병렬 구간 | W 담당자 | R 담당자 | 합류 조건 |

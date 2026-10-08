@@ -1,3 +1,4 @@
+import { checklistApi } from "./checklist-api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { withOpsSession } from "@/lib/ops-session";
 import { rSessions, rHistory, rPendingList, rPendingDetail, rCitation, rNotifications } from "./r-v2-api";
@@ -322,4 +323,48 @@ export function roadmapQuery(token: string | null, storeId: number | null, userI
     enabled: Boolean(token && storeId && userId),
     staleTime: 15_000,
   });
+}
+
+// 개인 기록과 오늘 범위는 사용자별, 점주 설정은 매장별로 분리한다.
+export const checklistKeys = {
+  root: (store: number | null) => ["checklist", store] as const,
+  todayRoot: (store: number | null, user: number | null) => ["checklist", store, "today", user] as const,
+  today: (store: number | null, user: number | null, shift: number | null, date: string | null) => ["checklist", store, "today", user, shift, date] as const,
+  status: (store: number | null) => ["checklist", store, "status"] as const,
+  shifts: (store: number | null) => ["checklist", store, "shifts"] as const,
+  members: (store: number | null) => ["checklist", store, "members"] as const,
+  settings: (store: number | null) => ["checklist", store, "settings"] as const,
+  me: (store: number | null, user: number | null) => ["checklist", store, "me", user] as const,
+  card: (store: number | null, card: number) => ["checklist", store, "card", card] as const,
+  records: (store: number | null, viewer: number | null, user: number | null, month: string) => ["checklist", store, "records", viewer, user, month] as const,
+  day: (store: number | null, viewer: number | null, user: number | null, day: string | null) => ["checklist", store, "day", viewer, user, day] as const,
+};
+export function checklistTodayQuery(token: string | null, store: number | null, user: number | null, shift: number | null = null, date: string | null = null, poll: number | false = 15_000) {
+  return queryOptions({ queryKey: checklistKeys.today(store, user, shift, date), queryFn: ({ signal }) => checklistApi.today(token!, shift, date, signal),
+    enabled: Boolean(token && store && user), refetchInterval: date ? false : poll, refetchIntervalInBackground: false });
+}
+export function checklistStatusQuery(token: string | null, store: number | null) {
+  return queryOptions({ queryKey: checklistKeys.status(store), queryFn: ({ signal }) => checklistApi.status(token!, signal),
+    enabled: Boolean(token && store), refetchInterval: 30_000, refetchIntervalInBackground: false });
+}
+export function checklistShiftsQuery(token: string | null, store: number | null) {
+  return queryOptions({ queryKey: checklistKeys.shifts(store), queryFn: ({ signal }) => checklistApi.shifts(token!, signal), enabled: Boolean(token && store) });
+}
+export function checklistMembersQuery(token: string | null, store: number | null) {
+  return queryOptions({ queryKey: checklistKeys.members(store), queryFn: ({ signal }) => checklistApi.members(token!, signal), enabled: Boolean(token && store) });
+}
+export function checklistSettingsQuery(token: string | null, store: number | null) {
+  return queryOptions({ queryKey: checklistKeys.settings(store), queryFn: ({ signal }) => checklistApi.settings(token!, signal), enabled: Boolean(token && store) });
+}
+export function checklistMeQuery(token: string | null, store: number | null, user: number | null) {
+  return queryOptions({ queryKey: checklistKeys.me(store, user), queryFn: ({ signal }) => checklistApi.me(token!, signal), enabled: Boolean(token && store && user) });
+}
+export function checklistCardQuery(token: string | null, store: number | null, id: number) {
+  return queryOptions({ queryKey: checklistKeys.card(store, id), queryFn: ({ signal }) => checklistApi.card(token!, id, signal), enabled: Boolean(token && store && id) });
+}
+export function checklistRecordsQuery(token: string | null, store: number | null, viewer: number | null, user: number | null, month: string) {
+  return queryOptions({ queryKey: checklistKeys.records(store, viewer, user, month), queryFn: ({ signal }) => checklistApi.records(token!, month, user, signal), enabled: Boolean(token && store && viewer) });
+}
+export function checklistDayQuery(token: string | null, store: number | null, viewer: number | null, user: number | null, day: string | null) {
+  return queryOptions({ queryKey: checklistKeys.day(store, viewer, user, day), queryFn: ({ signal }) => checklistApi.recordDay(token!, day!, user, signal), enabled: Boolean(token && store && viewer && day) });
 }

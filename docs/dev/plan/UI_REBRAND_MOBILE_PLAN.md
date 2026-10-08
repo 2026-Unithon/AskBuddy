@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 진행: P0~P4 완료(합성 API 브라우저 검사 통과), 다음 P5. 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
+2026-10-06 · 상태: **총괄 계획 승인됨(U6~U8 반영). 진행: P0~P4 완료(합성 API 브라우저 검사 통과), P5 프론트 구현(2026-10-08), 최종 검증 결과는 P5 프론트 계획 참고. 실행: 직접 실행, P5 백엔드만 subagent-driven + 별도 검토.** 브랜치 `ui/rebrand-mobile` (worktree `../2026unithon-web`, `origin/main` `4bb145c` 기준)
 
 **Goal:** Figma `AskBuddy — 리브랜딩 · MVP 화면` 의 `4-1 확정 · 모바일 (390)` 페이지를 `web/` 에 구현한다. Figma에 없는 MVP 계약 상태(검수·인용·CLARIFY/ESCALATE·오류·합류 승인 등)는 같은 시각 언어로 추가 화면을 만들어 채운다. 근무조 체크리스트는 백엔드까지 이 브랜치에서 만든다.
 
@@ -167,17 +167,15 @@ P1~P4는 기존 API만 쓰므로 서로 독립이다. P5는 백엔드가 있어 
 
 ### P5 근무조 체크리스트 (백엔드 포함)
 
-상세 계획 첫 Task가 설계 확정이다. 아래는 초안이며 P5 상세 계획에서 검토 후 MVP·TODO에 반영한다.
+확정 계약은 [P5 설계](UI_REBRAND_P5_CHECKLIST.md), 백엔드 계획은 [P5 백엔드](UI_REBRAND_P5_CHECKLIST_PLAN.md), 프론트 진행·검증은 [P5 프론트](UI_REBRAND_P5_FRONTEND_PLAN.md)를 따른다. 아래는 확정된 구현 범위다.
 
-- 근무조 `store_shifts(store_id, shift_id, name, starts_at_local time, ends_at_local time, sort_order, archived_at)` — 점주가 자유롭게 추가·이름 변경·시간 변경·삭제(보관)·순서 변경. 0개 허용
-- 체크리스트 원천 = **승인 카드**. 카테고리에 `kind`(`GENERAL`/`CHECKLIST`)를 두고 `CHECKLIST` 카테고리의 공개 카드의 사실(절차 순서)을 체크 항목으로 쓴다. 카드↔근무조 지정 `checklist_card_shifts(store_id, card_id, shift_id)`. 지정 없는 체크리스트 카드는 "전체"에 표시
-- 일일 체크 `checklist_checks(store_id, business_date, card_id, card_version_id, fact_key, checked_by, checked_at, unchecked_at)` — **매장 단위**(누가 했는지는 점주 화면에 노출하지 않음, Figma 규칙). 공개 버전이 바뀌면 그날 체크를 새 버전 기준으로 다시 계산
-- 근무조 완료 `shift_completions(store_id, business_date, shift_id, completed_by, completed_at)` — 직원 "다 했어요"
-- `business_date` 는 매장 시간대로 계산한다. `stores.timezone` (기본 `Asia/Seoul`) 추가. 자정을 넘는 근무조(예: 18:00~02:00)는 시작일에 귀속
-- API(직원·점주 JWT, `store_id` 는 JWT에서): `GET/POST/PATCH/DELETE /checklist/shifts`, `PUT /checklist/cards/{card_id}/shifts`, `GET /checklist/today`, `POST /checklist/checks`(멱등), `DELETE /checklist/checks/{...}`, `POST /checklist/shifts/{shift_id}/complete`, 점주 `GET /checklist/status`
-- 화면: 직원 `/staff`(현재 근무조 칩·남은 개수·실제 count 진행 막대·체크·"다 했어요" → 완료 화면), 점주 `/owner` 상단 영업 현황 카드(근무조별 진행, 마감 후 "마감 끝났어요·체크리스트 N개·끝난 시각"), 설정 근무조 편집, 카드 상세 근무조 지정
-- 완료 기준: `store-isolation-check` 통과, API 단위 테스트(다른 매장 404, 멱등 체크, 버전 변경, 자정 넘김 근무조, 근무조 0개), 브라우저로 직원 체크 → 점주 현황 반영
-- 충돌 주의: migration 번호는 시작 시점의 `supabase/migrations/` 최신 다음으로 잡고, 머지 전 `main` 과 다시 맞춘다
+- 점주가 자유롭게 근무조 이름·시간·개수·순서를 정한다. 0개도 허용한다
+- 체크 항목은 승인 카드 공개 버전 본문의 한 줄이며, 키는 `(card_version_id, line_no)`다. 카테고리 종류나 사실 키에 기대지 않는다
+- 카드와 근무조를 직접 연결한다. 공통은 별도로 선택하며 마지막 근무조에서 뺀 카드는 체크리스트에서 빠진다
+- 매장 체크 상태는 공유한다. 개인 제출·기록은 구성원 설정을 따르며 점주 현황에 제출자의 이름을 표시하지 않는다
+- 영업일은 서버가 계산한다. 프론트는 응답 날짜를 보내고 날짜 변경 시 어제 창에서 저장 하나로 반영·제출한다
+- 직원 오늘 할 일·완료·질문창, 점주 진행 현황, 개인 기록 달력, 근무조·직원 담당·카드 연결·기록 설정을 구현한다
+- 검증은 `pnpm check`, 매장 격리 검사, 체크리스트 API 단위 테스트, 합성 API 브라우저 검사·기존 리브랜딩 회귀로 구분한다. 공유 개발 DB migration 적용은 별도 항목으로 유지한다
 
 ### P6 합류 — 범위 밖 (U7)
 
