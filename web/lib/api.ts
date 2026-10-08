@@ -72,7 +72,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return error.detail || fallback;
 }
 
-async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
+export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
   const { timeoutMs = TIMEOUT_MS, sessionExpiry = true, ...fetchInit } = init ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

@@ -173,6 +173,22 @@ async def set_member_shifts(member_id: PathId, body: IdList, db: Db, claims: Api
     return {"member_id": member_id, "shift_ids": sorted(set(body.ids))}
 
 
+@router.get("/settings")
+# store-isolation-ok: require_member가 JWT 매장으로 읽은 현재 구성원·매장 설정만 반환한다
+async def get_settings(db: Db, claims: ApiClaims) -> dict[str, Any]:
+    member = await require_member(db, claims)
+    require_owner_member(member)
+    return {"business_day_starts_at": member.day_starts_at.isoformat(timespec="minutes"),
+            "staff_records_visible": member.staff_records_visible, "timezone": member.timezone}
+
+
+@router.get("/me")
+# store-isolation-ok: require_member가 JWT 매장·사용자로 읽은 본인 설정만 반환한다
+async def get_me(db: Db, claims: ApiClaims) -> dict[str, Any]:
+    member = await require_member(db, claims)
+    return {"personal_records_enabled": member.personal}
+
+
 @router.patch("/settings")
 async def update_settings(body: Settings, db: Db, claims: ApiClaims) -> dict[str, Any]:
     member = await require_member(db, claims)

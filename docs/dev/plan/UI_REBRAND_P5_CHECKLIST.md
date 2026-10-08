@@ -1,7 +1,7 @@
 # P5 근무조 체크리스트 — 설계
 
-2026-10-06 · 상태: **설계 확정(3차) · 백엔드 구현 완료(2026-10-07, 미커밋).** 상위 계획 [UI_REBRAND_MOBILE_PLAN.md](UI_REBRAND_MOBILE_PLAN.md) P5 · 브랜치 `ui/rebrand-mobile`
-구현은 이 문서 확정 뒤 별도 구현 계획(`UI_REBRAND_P5_CHECKLIST_PLAN.md`)으로 쪼개 subagent-driven 으로 진행한다(U8).
+2026-10-06 · 상태: **설계 확정(3차) · 백엔드 구현 완료(2026-10-07) · 프론트 구현(2026-10-08).** 상위 계획 [UI_REBRAND_MOBILE_PLAN.md](UI_REBRAND_MOBILE_PLAN.md) P5 · 브랜치 `ui/rebrand-mobile`
+백엔드는 별도 구현 계획(`UI_REBRAND_P5_CHECKLIST_PLAN.md`)을 따랐다. 프론트는 U8에 따라 직접 구현하고 [프론트 구현·검증](UI_REBRAND_P5_FRONTEND_PLAN.md)에 진행을 기록한다.
 
 ## 1. 목적
 
@@ -186,9 +186,12 @@ create table if not exists checklist_submissions (
 | `GET/POST /checklist/shifts`, `PATCH/DELETE /checklist/shifts/{id}` | 점주 | 근무조 CRUD. DELETE = 보관. 이름 중복 409 |
 | `PUT /checklist/shifts/order` | 점주 | 순서 일괄 |
 | `POST /checklist/shifts/preset` | 점주 | 활성 근무조 0개일 때만 오픈·미들·마감 생성, 아니면 409 |
-| `PUT /checklist/shifts/{id}/cards` | 점주 | `{card_ids}` 그 근무조 카드 통째 교체(카드는 `checklist_cards` 에 자동 등록) |
+| `PUT /checklist/shifts/{id}/cards` | 점주 | `{ids}` 그 근무조 카드 통째 교체(카드는 `checklist_cards` 에 자동 등록) |
 | `PUT /checklist/cards/{card_id}` | 점주 | `{checklist:bool, shift_ids:[...]}` 그 카드의 체크리스트 여부·근무조 통째 교체. `shift_ids=[]` = 공통 |
-| `GET /checklist/members`, `PUT /checklist/members/{member_id}/shifts` | 점주 | 직원별 담당 근무조 조회·교체(`[]` = 전체) |
+| `GET /checklist/members`, `PUT /checklist/members/{member_id}/shifts` | 점주 | 직원별 담당 근무조 조회·교체(`{ids:[]}` = 전체) |
+| `GET /checklist/settings` | 점주 | 현재 영업일 시작 시각·알바생 기록 조회 설정·매장 시간대 |
+| `GET /checklist/me` | 점주·직원 | 본인의 `personal_records_enabled` |
+| `GET /checklist/cards/{card_id}` | 점주 | 현재 `{card_id, checklist, shift_ids}` |
 | `PATCH /checklist/settings` | 점주 | `{business_day_starts_at?, staff_records_visible?}` |
 | `PATCH /checklist/me` | 점주·직원 | `{personal_records_enabled}` 내 기록 남기기 |
 
@@ -215,8 +218,10 @@ create table if not exists checklist_submissions (
 
 - **API 단위 테스트**(`api/tests/test_checklist_*.py`): 다른 매장 404 · STAFF 의 점주 경로 403 · 직원이 남의 기록 403 · 체크 멱등 · 범위 밖 체크 409 · 버전 바뀌면 옛 체크 미반영 · 제외 카드 숨김 · 범위 계산(근무조 0개 / 담당 없음 / 담당 있음, 한 카드 여러 근무조 중복 없이) · 자정 넘는 근무조와 영업일 경계 · 제출 멱등과 개수 고정 · 어제 창: 바로 전날·미제출만 허용, 이미 제출이면 409, 그 이전 날짜 409 · 내 기록 끈 동안 이벤트·updated_by 없음, 제출 personal=false · 점주 알바생 기록 끄면 조회만 막히고 다시 켜면 그 기간 포함 보임 · preset·이름 중복 409
 - `python3 .claude/skills/store-isolation-check/check_store_id.py api/app/checklist`
-- 합성 API 브라우저 검사(`verify_ui_rebrand.cjs`): 체크·실패 되돌림·제출 시트·어제 창(저장만, 실패 시 입력 유지)·점주 현황·근무조 편집·카드 상세 연결·직원 담당·마이페이지 달력·내 기록 끔·알바생 기록 끔
+- 합성 API 브라우저 검사(`verify_ui_checklist.cjs`, 기존 화면 회귀는 `verify_ui_rebrand.cjs`): 체크·실패 되돌림·제출 시트·어제 창(저장만, 실패 시 입력 유지)·점주 현황·근무조 편집·카드 상세 연결·직원 담당·마이페이지 달력·내 기록 끔·알바생 기록 끔
 - 로컬 DB migration 적용(빈 DB 재구성 포함, `verify_r_schema_rebuild.py` 영향 확인)
+
+2026-10-08 구현: `/staff`는 오늘 할 일, 점주 현황은 `/owner`, 기록은 `/owner/me`·`/staff/me`, 근무조·영업일·알바생 기록 설정은 `/owner/shifts`, 직원 담당은 `/owner/members`다. 신규 화면은 사용자 확인에 따라 기존 초록색 모바일 UI·공통 컴포넌트로 구성했다. 현재 설정 복원을 위해 `GET /checklist/settings`·`GET /checklist/me`를 추가했다.
 
 ## 9. 확인이 필요한 것
 

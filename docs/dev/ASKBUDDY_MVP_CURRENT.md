@@ -669,7 +669,7 @@ VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 
 | 지식 제안 | `/learn/knowledge-proposals`, approve, dismiss |
 | FAQ | `GET /learn/faqs` |
 | 알림 | support, subscriptions, list, read |
-| 체크리스트 | `GET/POST/PATCH/DELETE /checklist/shifts…`, `/checklist/today`, `PUT /checklist/checks`, `POST /checklist/submissions`, `GET /checklist/status`, `GET /checklist/records…`, `PATCH /checklist/settings`, `PATCH /checklist/me` |
+| 체크리스트 | `GET/POST/PATCH/DELETE /checklist/shifts…`, `/checklist/today`, `PUT /checklist/checks`, `POST /checklist/submissions`, `GET /checklist/status`, `GET /checklist/records…`, `GET/PATCH /checklist/settings`, `GET/PATCH /checklist/me` |
 | 진단 | `/health`(공개), `/preflight`(운영자 전용, `/ops/login` 토큰) |
 
 ## 18-2. 중요 응답 계약

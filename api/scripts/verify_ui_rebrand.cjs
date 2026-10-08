@@ -1,4 +1,4 @@
-// 리브랜딩 화면(P2~P4) 브라우저 상태 검사. API 는 명시적 합성 fixture 이며 운영·로컬 자료를 쓰지 않는다.
+// 리브랜딩 화면 회귀 검사. P5 상세 검증은 verify_ui_checklist.cjs. 합성 fixture이며 실제 자료를 쓰지 않는다.
 // 실행: next start -p 3011 을 띄운 뒤 NODE_PATH=<playwright> node api/scripts/verify_ui_rebrand.cjs
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
@@ -104,6 +104,12 @@ const BASE = 'http://127.0.0.1:3011';
         payload = { item_id: 5, card_id: 1, published_version_id: 10, status: state.item.status, counts: { total: 2, done: 1, reconfirm_required: 0 } };
       } else if (p === '/learn/v2/pending') payload = { questions: [], next_after: null };
       else if (p === '/learn/v2/sessions') payload = { sessions: [] };
+      else if (p === '/checklist/today') payload = { business_date: '2026-10-08', previous_business_date: '2026-10-07', previous_submitted: true,
+        scope: { all: true, shift_ids: [] }, current_shift_id: null, upcoming: false, shifts: [], groups: [],
+        view: { total: 0, done: 0 }, scope_counts: { total: 0, done: 0 }, my_submission: null };
+      else if (p === '/checklist/status') payload = { business_date: '2026-10-08', current_shift_id: null, shifts: [], scope_counts: { total: 0, done: 0 }, last_submission: null };
+      else if (p === '/checklist/cards/1') payload = { card_id: 1, checklist: false, shift_ids: [] };
+      else if (p === '/checklist/shifts') payload = { items: [] };
       else return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
     });
@@ -300,6 +306,9 @@ const BASE = 'http://127.0.0.1:3011';
     check('ask from recipe prefills question', (await sp.getByLabel('모르는 거 물어보기').inputValue()).startsWith('합성 라테'));
     state.roadmapEmpty = true;
     await sp.goto(`${BASE}/staff`);
+    await sp.getByText('아직 오늘 할 일이 없어요', { exact: true }).waitFor();
+    check('staff home opens checklist instead of redirect', new URL(sp.url()).pathname === '/staff');
+    await sp.getByRole('link', { name: '레시피', exact: true }).click();
     await sp.waitForURL('**/staff/recipes');
     await sp.getByText('아직 준비된 학습 자료가 없어요', { exact: true }).waitFor();
     check('empty roadmap shows reason not samples', await sp.locator('a[href^="/staff/recipes/"]').count() === 0);
