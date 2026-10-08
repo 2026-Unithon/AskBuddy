@@ -57,3 +57,23 @@ async def assemble_cards(
         usage_context=usage_context, raw_sink=raw_sink,
         **({"usage_sink": usage_sink} if mode == "real" else {}),
     )
+
+
+async def assemble_card_plan(
+    *, source_id: int, entities: list[dict], category_names: list[str],
+    glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,
+):
+    """사실 조립(W3a) — 이름표 배치만 받는다. real/mock 은 ingest_mode 로 고른다."""
+    mode = get_settings().ingest_mode
+    if mode == "real":
+        from app.ingest.extract import gemini as impl
+    else:
+        from app.ingest.extract import mock as impl
+
+    logger.info("assemble_card_plan source=%s entities=%d", source_id, len(entities))
+    return await impl.assemble_plan(
+        source_id=source_id, entities=entities,
+        category_names=category_names, glossary=glossary,
+        usage_context=usage_context, raw_sink=raw_sink,
+        **({"usage_sink": usage_sink} if mode == "real" else {}),
+    )

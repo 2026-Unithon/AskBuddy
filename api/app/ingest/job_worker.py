@@ -16,6 +16,8 @@ PARTIAL_RETRY_UNAVAILABLE_MESSAGE = (
     "구간 구성이 바뀌어 잃은 구간만 다시 읽을 수 없습니다. 자료를 새로 올려 주세요."
 )
 PARTIAL_RETRY_FAILED_MESSAGE = "잃은 구간을 다시 읽다가 실패했습니다. 다시 시도해 주세요."
+# W3a — 새 카드는 없지만 검수할 사실(REVIEW_PENDING)이 남은 자료
+NO_NEW_CARD_PENDING_MESSAGE = "새 카드 없이 검수할 사실이 남았습니다."
 
 
 def final_job_status(*, total: int, failed: int, cards: int,
@@ -44,6 +46,9 @@ def _run_tag(started_at) -> int | None:
 
 
 async def process_ingest_job(store_id: int, job_id: int) -> None:
+    # 설정은 쓰는 시점에 읽는다 — 테스트가 app.config.get_settings 를 바꾼다
+    from app.config import get_settings
+
     pool = get_pool()
     async with pool.acquire() as conn:
         claimed = await conn.fetchrow(
@@ -112,18 +117,48 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     store_id,
                     source_id,
                 )
-                card_count = int(
-                    await conn.fetchval(
-                        """
-                        select count(*) from knowledge_cards
-                        where store_id = $1 and source_id = $2 and origin_job_id = $3
-                        """,
-                        store_id,
-                        source_id,
-                        job_id,
+                # W3a — 켜면 이 자료 occurrence 가 이어진 카드 수로 센다(다른 자료가 만든
+                # 카드에 실렸어도 이 자료의 결과다). 꺼지면 지금 질의 그대로
+                fact_assembly_on = bool(
+                    getattr(get_settings(), "w_fact_assembly_enabled", False))
+                review_pending = 0
+                if fact_assembly_on:
+                    card_count = int(
+                        await conn.fetchval(
+                            """
+                            select count(distinct card_id) from fact_occurrences
+                            where store_id = $1 and source_id = $2 and disposition = 'LINKED'
+                            """,
+                            store_id,
+                            source_id,
+                        )
+                        or 0
                     )
-                    or 0
-                )
+                    review_pending = int(
+                        await conn.fetchval(
+                            """
+                            select count(*) from fact_occurrences
+                            where store_id = $1 and source_id = $2
+                              and disposition = 'REVIEW_PENDING'
+                            """,
+                            store_id,
+                            source_id,
+                        )
+                        or 0
+                    )
+                else:
+                    card_count = int(
+                        await conn.fetchval(
+                            """
+                            select count(*) from knowledge_cards
+                            where store_id = $1 and source_id = $2 and origin_job_id = $3
+                            """,
+                            store_id,
+                            source_id,
+                            job_id,
+                        )
+                        or 0
+                    )
                 if lost_ids and source is not None and source["status"] == "FAILED":
                     # 잃은 구간 재시도가 예외로 끝났다. 앞서 만든 카드는 그대로 있다.
                     # FAILED 로 적으면 다음 재시도가 전체를 다시 돌려 카드가 겹치므로
@@ -148,7 +183,11 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                 elif card_count == 0:
                     result_status = "NO_RESULT"
                     error_code = "NO_RESULT"
-                    error_message = "추출된 업무 카드가 없습니다."
+                    error_message = (
+                        NO_NEW_CARD_PENDING_MESSAGE
+                        if fact_assembly_on and review_pending > 0
+                        else "추출된 업무 카드가 없습니다."
+                    )
                 else:
                     # 카드가 나왔어도 잃은 구간이 있으면 성공으로 적지 않는다
                     lost = await conn.fetchrow(

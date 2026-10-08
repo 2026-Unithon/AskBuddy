@@ -247,6 +247,18 @@ R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W
   삭제된 자료를 다시 처리하지 않는다. Storage 원본 파일의 물리 삭제 여부는 추후 논의로 결정한다(2026-09-27 사용자).
 - R 이 할 일은 없다. v2 인용은 이미 `sources.source_availability` 를 읽어 `인용 끊김` 을 표시한다.
 
+## 11. W3a 사실 블록 공개판 (2026-10-08)
+
+W3a 구현(브랜치 `w/w3a-fact-assembly`)을 R 이 확인해 주기를 요청한다. R 소유 파일은 고치지 않았다.
+
+- 바뀌는 것: 플래그 `w_fact_assembly_enabled`(기본 꺼짐)로 만든 사실 카드 판은 블록(`QUANTITIES|STEPS|NOTES`)에 `fact_revision_ids` 를 싣고, 공개판 `fact_revisions` 에 그 판들이 근거(`FactProvenance`: 파일은 `source_id`+`occurrence_id`, 점주 답변은 `w_owner_answer_raw_publish` 일 때만)와 함께 실린다. 카드 `entity_id` 는 실제 대상 id, `variant` 는 카드 판 규격이 하나일 때 채운다(`api/app/publish/content.py` `_fact_card`). 레거시 카드는 그대로다(`entity_id=str(card_id)`, RAW, `fact_revisions` 없음, snapshot hash 불변). 사실 블록 여부는 플래그가 아니라 `card_block_facts` 행으로 가른다.
+- 결정성: 근거는 카드 판에 고정(`card_version_fact_provenance`)되므로 같은 카드 판을 다시 실으면 같은 content 다(색인 벡터 재사용 키 유지). 선행(`requires`)은 같은 카드 판 안 같은 사실의 판으로 푼다. 근거는 사실당 최대 50.
+- 카드 제목: 대상 정식 이름, 나뉜 카드만 ` i/n` 을 붙인다. 규격은 제목에 넣지 않는다(블록 머리 줄 `[수치 · ICE]` 와 `PublishedCard.variant`). R planner 가 카드 전체 제목 언급으로 대상을 찾기 때문이다.
+- MESSAGE 근거 위치: 카톡 자료의 occurrence 는 `card_evidence` 에 `MESSAGE` 로 들어가며 locator 키는 `line`(`{"line": N}`)이다.
+- **entity_id 이름공간 충돌(계약 변경 요청).** 레거시 카드의 `entity_id` 는 `card_id`(`knowledge_cards` 전역 identity)이고 사실 카드의 `entity_id` 는 실제 대상 id(`knowledge_entities` 전역 identity)다. 둘은 같은 숫자 범위를 쓰고 계약 `EntityId` 가 `^[0-9]+$` 라 접두어로도 못 가른다. 한 공개판에서 둘이 같으면 R planner 가 레거시 카드 질문에 다른 대상의 사실을 고르고 대상 일치 검사도 통과한다. **W 는 당분간 공개를 거절한다** — `build_knowledge_content` 가 같은 공개판의 레거시 카드 `entity_id` 와 사실 카드·사실 판 `entity_id` 가 겹치면 `InvalidContent` 로 멈춘다(fail closed, 레거시 판 내용·hash 불변). 섞인 매장에서 숫자가 겹치면 R 계약이 바뀔 때까지 승인 공개가 막힌다. 이미 공개된 레거시 hash 를 지키려면 레거시 쪽이 아니라 실제 대상 id 쪽 표현을 옮겨야 한다.
+- 알려진 한계: 사실 카드를 점주가 자유 편집한 판(`OWNER_EDIT`, 블록 없음)은 RAW 로 공개되고 `entity_id` 가 카드 id 로 돌아가며 그 카드 사실은 `fact_revisions` 에서 빠진다(W3b 가 대체). 규격 없음 블록은 "공통" 이 아니라 미확정이다.
+- W 가 확인한 것(합성 매장, `api/scripts/verify_w3a_fact_assembly.py`): B2 공개판 모양, B3 R `hybrid_search`·`decide`·`save_answer` 가 ANSWER 로 공개 사실을 인용(인용 fact_revision·source·block 이 공개판과 일치), B4 재공개 결정성, B5 점주 편집 판 한계. 실제 R 화면·운영 데이터는 확인하지 않았다.
+
 ---
 
 ## R 이 할 일 (우선순위 순)
@@ -266,3 +278,10 @@ R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W
    (a) R 이 `4bb145c`(2026-10-05)에서 `FactProvenance` 를 `source_id XOR owner_answer_id`(파일 출처면 `occurrence_id` 필수)로 바꿨다(`api/app/contracts/snapshot.py:35-55`).
    (b) W3-0 §3-4 확인(2026-10-07, 코드 변경 없음): R 트리거 `askbuddy_owner_original_immutable`(`supabase/migrations/20260917130000_m3_owner_answer_delivery.sql:43-56`)가 R revision 이 있는 점주 답변의 삭제·원문 수정을 막고, 앱 코드(`api/app`)에는 `owner_answers`·`pending_questions`(답변으로 cascade)를 지우는 경로가 없다. 따라서 W 링크(`fact_revision_meta.owner_answer_id`·`fact_owner_answer_links`)의 `on delete restrict` 가 새로 막는 앱 삭제 경로는 없다. 매장 삭제는 기존처럼 불변 원장 때문에 막히고, 데모 매장은 보관 방식으로 처리한다(현행 유지).
 9. **새 `fact_revisions` 삽입은 W 서비스(`api/app/ingest/fact_ledger.py`·`fact_revisions.py`)를 거치기를 권한다.** W 는 revision 마다 `knowledge_facts`·`fact_revision_meta` 를 짝지어 두고 `fact_revisions.entity_id`·`fact_id` 에는 FK 가 없다. 권고일 뿐이며 임의 id 를 넣는 R 의 기존 verify 스크립트는 그대로 동작한다.
+10. **R 필수 검토 — 미완료 (W3-4).** W3a 사실 블록 공개판(§11)을 R 쪽이 받는지 확인해 결과를 이 문서나 R 기록에 남기고 W 에 알린다. 그 전에는 W 가 W3-4 를 완료로 표시하지 않는다.
+    (a) 분할 카드(제목 ` 2/3`)는 R planner 의 카드 전체 제목 언급 매칭(`planner.decide`)에 걸리지 않는다. 카드 제목이 아니라 대상 이름·별칭으로 대상을 찾도록 해 달라.
+    (b) 점주가 편집한 사실 카드 판(블록 없음)은 RAW 로 공개되고 `entity_id` 가 카드 id 로 바뀐다. 같은 카드의 `entity_id` 가 판에 따라 바뀔 때 R 의 캐시·명확화 문맥·일반 의미 승인 설정이 영향을 받는지 확인해 달라(W3b 전 알려진 한계).
+    (c) R 렌더러(`approved_renderer.render`)·색인(`documents()`)·인용 검증(`answer_storage`)이 사실 블록 snapshot(`fact_revisions`, 실제 `entity_id`, 채워진 `variant`, 파일 근거 `source_id`+`occurrence_id`)을 받는지 확인해 달라. 렌더러 머리줄과 블록 머리 줄의 규격 중복·규격 없음 표시도 정해 달라. D19 다규격 카드에서 CLARIFY 로 규격을 확정한 뒤 그 규격 블록만 인용하는지 포함한다.
+    (d) 카톡 자료 근거의 MESSAGE locator 키가 `line`(`{"line": N}`)이다. 근거 패널·인용 표시가 이 키를 받는지 확인해 달라.
+    (e) 과거 인용 재현: 사실 블록 카드의 과거 판에 대한 인용이 이후 재공개·새 판 뒤에도 같은 근거로 재현되는지 확인해 달라.
+    (f) **계약 변경 요청 — entity_id 이름공간 분리(§11).** 레거시 카드 `entity_id`(=`card_id`)와 사실 대상 `entity_id` 가 같은 숫자 공간을 쓴다. W 는 지금 충돌 시 공개를 거절한다. 계약(`contracts/*`)·검증기(`contracts/validate.py`)에서 두 이름공간을 나누는 방식을 R 이 정해 달라. 정해질 때까지 W3a 플래그를 켜지 않는다.

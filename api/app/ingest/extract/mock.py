@@ -9,8 +9,9 @@ from collections import defaultdict
 
 from app.config import get_settings
 from app.ingest import raw_responses, reuse
-from app.ingest.schemas import (Evidence, ExtractedAssertion, ExtractedCard,
-                                ExtractedFact, ExtractionResult, FactExtractionResult)
+from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion, ExtractedCard,
+                                ExtractedFact, ExtractionResult, FactExtractionResult,
+                                PlannedBlock, PlannedCard)
 
 
 # 원래 응답 행의 model 열. 실제 모델명이 아니다 — mode='mock' 과 함께 합성 응답임을 밝힌다
@@ -106,3 +107,42 @@ def _assembled(source_id, facts, category_names) -> ExtractionResult:
                                  confidence=r["확실함"], ref=r["ref"]) for r in rows],
             evidence=Evidence(source_id=source_id, timestamp_sec=min(r["근거시각"] for r in rows))))
     return ExtractionResult(cards=cards)
+
+
+async def assemble_plan(*, source_id, entities, category_names, glossary,
+                        usage_context=None, raw_sink=None):
+    """사실 조립(W3a) 합성 대역. 실제 경로와 같은 완성 프롬프트로 기록·재사용한다."""
+    from app.ingest.extract.gemini import render_card_plan_prompt
+
+    prompt = (render_card_plan_prompt(entities=entities, category_names=category_names,
+                                      glossary=glossary)
+              if raw_sink is not None and usage_context is not None else "")
+    return await _as_recorded(lambda: _planned(entities, category_names),
+                              CardPlanBatch, raw_sink=raw_sink,
+                              usage_context=usage_context, prompt=prompt)
+
+
+def _planned(entities, category_names) -> CardPlanBatch:
+    """규칙대로 배치한 합성 계획. 서버 검증(card_plan.validate_proposals)을 통과한다.
+
+    대상마다 카드 하나. 규격 문자열이 처음 나온 순서로 묶고, 묶음마다
+    QUANTITIES(단계 아님·부정 아님)·STEPS(단계, 순서 오름차순)·NOTES(단계 아님·부정) 블록.
+    """
+    category = category_names[0] if category_names else "기타"
+    cards = []
+    for entity in entities:
+        by_variant: dict[str, list[dict]] = {}
+        for fact in entity["사실"]:
+            by_variant.setdefault(fact["규격"], []).append(fact)
+        blocks = []
+        for facts in by_variant.values():
+            quantities = [f["id"] for f in facts if f["순서"] == 0 and not f["부정"]]
+            # sorted 는 안정 정렬이다 — 같은 순서 값은 입력 순서를 지킨다
+            steps = [f["id"] for f in sorted((f for f in facts if f["순서"] > 0),
+                                             key=lambda f: f["순서"])]
+            notes = [f["id"] for f in facts if f["순서"] == 0 and f["부정"]]
+            for kind, refs in (("QUANTITIES", quantities), ("STEPS", steps), ("NOTES", notes)):
+                if refs:
+                    blocks.append(PlannedBlock(kind=kind, facts=refs))
+        cards.append(PlannedCard(entity=entity["대상"], category_name=category, blocks=blocks))
+    return CardPlanBatch(cards=cards)

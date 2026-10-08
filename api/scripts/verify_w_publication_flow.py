@@ -927,3 +927,6 @@ async def verify(pool, admin):
 
     print(f"Verified {len(passed)} W publish checks")
 
+    # W3a 대상 단위 사실 조립 — 기존 시나리오·패치 밖에서 새 매장으로 돈다
+    from verify_w3a_fact_assembly import verify as verify_w3a
+    await verify_w3a(pool, admin)

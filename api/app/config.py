@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     w_entity_candidate_max: int = Field(default=5, ge=0, le=20)
     # W2-4 — 업로드 사실의 IDENTICAL|NEW|SUPPLEMENT|CONFLICT 검수 제안. w_entity_revision_enabled 가 필요하다
     w_upload_proposals_enabled: bool = False
+    # W3a — 대상 단위 사실 조립(CardPlan)·서버 검증·렌더링·블록 고정·occurrence 처분. w_entity_revision_enabled 가 필요하다
+    w_fact_assembly_enabled: bool = False
 
     # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.
     ingest_voice_max_bytes: int | None = None
@@ -146,6 +148,8 @@ class Settings(BaseSettings):
     extract_max_output_tokens: int | None = Field(default=None, ge=1)
     assemble_batch_facts: int = Field(default=200, ge=1)
     assemble_max_output_tokens: int | None = Field(default=None, ge=1)
+    # W3-1b — 조립 배치 동시 호출 수. 1 이면 앞 배치부터 차례대로(기존 동작). 실제 동시 모델 호출 상한은 ingest_model_concurrency
+    assemble_concurrency: int = Field(default=1, ge=1)
     # 잘린 추출을 반으로 나눠 다시 뽑는 깊이 상한 (W1-2). 0 이면 나누지 않는다(기본, 꺼 둠).
     # 깊이 d 까지 나누면 한 구간이 최대 2^(d+1)-1 번 호출된다 — 비용 상한을 함께 본다
     extract_truncation_split_max_depth: int = Field(default=0, ge=0, le=4)
@@ -221,6 +225,8 @@ class Settings(BaseSettings):
         # 업로드 제안은 대상·판 연결 결과를 읽는다. 연결이 꺼져 있으면 비교할 사실이 없다
         if self.w_upload_proposals_enabled and not self.w_entity_revision_enabled:
             raise ValueError("w_upload_proposals_enabled requires w_entity_revision_enabled")
+        if self.w_fact_assembly_enabled and not self.w_entity_revision_enabled:
+            raise ValueError("w_fact_assembly_enabled requires w_entity_revision_enabled")
         return self
 
     @model_validator(mode="after")

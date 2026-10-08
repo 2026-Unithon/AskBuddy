@@ -262,7 +262,8 @@ async def _fix_blocks(conn, *, store_id: int, manifest: dict[int, int],
                     # 한 장만으로 조립해 계약 검증까지 여기서 걸러 둔다
                     await build_knowledge_content(
                         conn, store_id=store_id, manifest={card_id: version_id},
-                        glossary_version=glossary_version)
+                        glossary_version=glossary_version,
+                        allow_owner_answer=allow_owner_answer)
             except (NoProvenance, ValueError) as exc:
                 if card_id in changed_ids:
                     if isinstance(exc, NoProvenance):
@@ -360,7 +361,7 @@ async def publish_cards(
 
         content = await build_knowledge_content(
             conn, store_id=store_id, manifest=manifest,
-            glossary_version=glossary_version)
+            glossary_version=glossary_version, allow_owner_answer=allow_owner_answer)
 
     expected_publication_revision = publication["publication_revision"]
 

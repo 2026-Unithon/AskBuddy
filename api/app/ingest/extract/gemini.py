@@ -13,7 +13,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.ingest import raw_responses
 from app.ingest.providers.types import CallResult  # noqa: F401  (기존 import 경로 호환)
-from app.ingest.schemas import (ExtractionResult, FactExtractionResult,
+from app.ingest.schemas import (CardPlanBatch, ExtractionResult, FactExtractionResult,
                                 LocatedFactExtractionResult)
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,9 @@ ASSEMBLE_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "assemble_cards.ko.txt")
 FACTS_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "extract_facts.ko.txt")
+# W3a 사실 조립 — 이름표만 고르고 배치한다
+CARD_PLAN_PROMPT_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "assemble_card_plan.ko.txt")
 # W1-4 위치 표지 판. extract_locator_hints 를 켰을 때만 쓴다
 FACTS_LOCATOR_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_locator.ko.txt")
@@ -268,6 +271,40 @@ async def assemble(
     return result
 
 
+async def assemble_plan(
+    *, source_id: int, entities: list[dict], category_names: list[str],
+    glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,
+) -> CardPlanBatch:
+    """사실 조립(W3a) — 대상별 사실 이름표를 카드 블록에 배치한다.
+
+    모델은 이름표·카테고리·블록 종류만 낸다. 제목·본문은 서버가 렌더링한다.
+    잘린 응답·파싱 실패는 그대로 실패다 — 호출부가 배치 단위로 실패를 다룬다.
+    """
+    s = get_settings()
+    if not s.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 가 없다")
+    if not entities:
+        return CardPlanBatch()
+
+    prompt = render_card_plan_prompt(entities=entities, category_names=category_names,
+                                     glossary=glossary)
+
+    started = time.perf_counter()
+    reply = await _measured_call(prompt, [], usage_sink, usage_context,
+                                 prompt_hash=_hash(prompt), schema=CardPlanBatch,
+                                 raw_sink=raw_sink,
+                                 max_output_tokens=getattr(s, "assemble_max_output_tokens", None))
+    usage = reply.usage
+    result = await raw_responses.parse_checked(
+        _mark_sink(raw_sink, reply), usage_context, reply.raw_response_id, reply.finish_reason,
+        lambda: CardPlanBatch.model_validate_json(reply.text), what="카드 계획 조립")
+    result._raw_response_id = reply.raw_response_id
+    logger.info("assemble_plan source=%s 대상 %d개 → 카드 %d장 (%.1fs) usage=%s",
+                source_id, len(entities), len(result.cards),
+                time.perf_counter() - started, usage or "미보고")
+    return result
+
+
 def render_facts_prompt(*, source_type: str, text: str, glossary,
                         locator_hints: bool = False) -> str:
     """사실 추출 프롬프트 완성본. 재사용 키(W1-3)는 이 완성본 전체를 hash 한다.
@@ -288,6 +325,16 @@ def render_assemble_prompt(*, facts: list[dict], category_names: list[str], glos
             .replace("{glossary}", _glossary_block(list(glossary or [])))
             .replace("{facts_json}",
                      json.dumps(facts, ensure_ascii=False, indent=1)))
+
+
+def render_card_plan_prompt(*, entities: list[dict], category_names: list[str],
+                            glossary) -> str:
+    """사실 조립 프롬프트 완성본. 같은 입력이면 같은 문자열이다(재사용 키)."""
+    return (CARD_PLAN_PROMPT_PATH.read_text(encoding="utf-8")
+            .replace("{categories}", _category_block(category_names))
+            .replace("{glossary}", _glossary_block(list(glossary or [])))
+            .replace("{entities_json}",
+                     json.dumps(entities, ensure_ascii=False, indent=1)))
 
 
 def _mark_sink(raw_sink, reply: "CallResult"):

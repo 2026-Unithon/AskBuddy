@@ -50,6 +50,8 @@ TENANT_TABLES = {
     "fact_owner_answer_links",
     # W2-4 업로드 검수 제안 (가산)
     "upload_change_proposals", "upload_change_proposal_facts",
+    # W3a 카드 판 블록·근거 (가산)
+    "card_version_blocks", "card_block_facts", "card_version_fact_provenance",
 }
 CONN_HINTS = ("asyncpg.Connection", "Connection", "Db")
 # 라우트 핸들러는 store_id 를 인자가 아니라 JWT 에서 꺼내는 것이 정답이다 (불변식 4).

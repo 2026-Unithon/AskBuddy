@@ -141,7 +141,8 @@ class Harness:
             if card_id in h.ensure_errors:
                 raise h.ensure_errors[card_id]
 
-        async def build(conn, *, store_id, manifest, glossary_version):
+        async def build(conn, *, store_id, manifest, glossary_version,
+                        allow_owner_answer=False):
             for card_id in manifest:
                 if card_id in h.build_errors:
                     raise h.build_errors[card_id]
