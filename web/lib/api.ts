@@ -491,6 +491,9 @@ export type CardDetailDto = {
     created_at: string;
   }>;
   updated_at: string;
+  // W3b: 초안 판에 블록 사실이 있으면 사실 카드. 편집 플래그는 서버 설정 그대로
+  fact_card: boolean;
+  fact_edit_enabled: boolean;
 };
 
 export type CardFilters = {
@@ -539,6 +542,152 @@ export async function mutateProductCard(cardId: number, action: "approve" | "exc
     method: "POST",
     headers: authHeader(token),
     timeoutMs: action === "approve" ? 30_000 : TIMEOUT_MS,
+  });
+}
+
+// ---- /cards/{id}/facts — W3b 사실 카드 편집 (api/app/cards/fact_edit_schemas.py 와 같은 모양) ----
+
+export type FactPolarity = "AFFIRM" | "NEGATE";
+export type EditBlockKind = "QUANTITIES" | "STEPS" | "NOTES";
+
+export type FactVariant = { temperature: "HOT" | "ICE" | null; size: string | null };
+
+export type FactFields = {
+  sentence: string;
+  polarity: FactPolarity;
+  value: string | null;
+  unit: string | null;
+  conditions: string[];
+  exceptions: string[];
+  step_order: number | null;
+  variant: FactVariant;
+  predicate: string | null;
+};
+
+export type EditItem =
+  | { op: "KEEP"; fact_revision_id: number }
+  | { op: "MODIFY"; fact_revision_id: number; fact: FactFields }
+  | { op: "ADD"; client_ref: string; fact: FactFields };
+
+export type EditBlock = { kind: EditBlockKind; items: EditItem[] };
+
+export type FactEditRequest = {
+  expected_version_id: number;
+  idempotency_key: string;
+  blocks: EditBlock[];
+  deleted_fact_revision_ids: number[];
+};
+
+export type FactParseRequest = {
+  text: string;
+  mode: "ADD" | "MODIFY";
+  base_fact_revision_id: number | null;
+};
+
+export type ParsedFactProposal = {
+  client_ref: string;
+  fact: FactFields;
+  block_kind: EditBlockKind;
+  warnings: string[];
+};
+
+export type FactParseResponse = {
+  mode: "ADD" | "MODIFY";
+  proposals: ParsedFactProposal[];
+  warnings: string[];
+};
+
+export type FactOrigin = {
+  kind: "SOURCE" | "OWNER_ANSWER" | "OWNER_TEXT";
+  source_id: number | null;
+  source_title: string | null;
+  source_type: string | null;
+  source_availability: "AVAILABLE" | "DELETED" | "UNAVAILABLE" | null;
+  locator_type: string | null;
+  locator: Record<string, unknown>;
+  owner_answer_id: number | null;
+  created_at: string | null;
+};
+
+export type FactRequirement = { fact_id: number; label: string };
+
+export type FactRow = {
+  fact_revision_id: number;
+  fact_id: number;
+  position: number;
+  sentence: string;
+  assertion: string;
+  subject: string | null;
+  predicate: string | null;
+  variant: FactVariant;
+  value: string | null;
+  unit: string | null;
+  polarity: FactPolarity;
+  step_order: number | null;
+  conditions: string[];
+  exceptions: string[];
+  requires: FactRequirement[];
+  change_kind: string | null;
+  previous_sentence: string | null;
+  origins: FactOrigin[];
+  edit_block: "CHANGED_ELSEWHERE" | "MOVED_ENTITY" | null;
+};
+
+export type FactBlockView = {
+  block_id: string;
+  kind: EditBlockKind | "RAW";
+  order: number;
+  variant: FactVariant;
+  facts: FactRow[];
+};
+
+export type CardFactsView = {
+  card_id: number;
+  version_id: number;
+  title: string;
+  entity_id: number | null;
+  entity_name: string | null;
+  review_status: CardReviewStatus;
+  published_version_id: number | null;
+  editable: boolean;
+  entity_problem: "MIXED_ENTITY" | "MERGED_ENTITY" | null;
+  blocks: FactBlockView[];
+};
+
+export type FactRevisionResult = {
+  op: "MODIFY" | "ADD";
+  client_ref: string | null;
+  base_fact_revision_id: number | null;
+  fact_revision_id: number;
+};
+
+export type FactEditResult = CardMutationResult & {
+  changed: boolean;
+  edit_id: number;
+  revisions: FactRevisionResult[];
+};
+
+export async function getCardFacts(cardId: number, token: string, signal?: AbortSignal) {
+  return fetchJson<CardFactsView>(`/cards/${cardId}/facts`, { headers: authHeader(token), signal });
+}
+
+// 분석은 모델을 부르므로 길게 기다린다. 상태를 남기지 않는다
+export async function parseCardFacts(cardId: number, body: FactParseRequest, token: string) {
+  return fetchJson<FactParseResponse>(`/cards/${cardId}/facts/parse`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+    timeoutMs: 20_000,
+  });
+}
+
+// 같은 idempotency_key 로 다시 보내면 서버가 처음 결과를 그대로 돌려준다
+export async function saveCardFacts(cardId: number, body: FactEditRequest, token: string) {
+  return fetchJson<FactEditResult>(`/cards/${cardId}/facts`, {
+    method: "PUT",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+    timeoutMs: 15_000,
   });
 }
 

@@ -496,6 +496,9 @@ async def process(
     if src.get("source_availability") == "DELETED":
         # D20: 삭제된 자료는 원본 접근이 해제됐다. 다시 추출하지 않는다
         raise HTTPException(409, "삭제된 자료는 다시 처리할 수 없습니다")
+    if src["source_type"] == "OWNER_TEXT":
+        # W3b: 점주가 카드 화면에서 직접 적은 글은 파일이 없다. 추출 대상이 아니다
+        raise HTTPException(409, "점주 직접 입력 자료는 다시 처리할 수 없습니다")
 
     if src["status"] == "PROCESSING":
         # 폴링 중 재호출. 새로 돌리지 않고 현재 상태를 그대로 돌려준다

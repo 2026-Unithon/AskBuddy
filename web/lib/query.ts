@@ -56,6 +56,7 @@ import {
   getLearnItem,
   getIngestJob,
   getIngestCapabilities,
+  getCardFacts,
   getProductCard,
   getRoadmap,
   getReclassificationJob,
@@ -97,6 +98,7 @@ export const queryKeys = {
   cardLists: (storeId: number | null) => ["cards", storeId] as const,
   cards: (storeId: number | null, filters: CardFilters) => [...queryKeys.cardLists(storeId), filters] as const,
   card: (storeId: number | null, cardId: number) => ["card", storeId, cardId] as const,
+  cardFacts: (storeId: number | null, cardId: number) => ["card-facts", storeId, cardId] as const,
   productCategories: (storeId: number | null) => ["product-categories", storeId] as const,
   reclassification: (storeId: number | null, jobId: number) => ["reclassification", storeId, jobId] as const,
   proposals: (storeId: number | null) => ["knowledge-proposals", storeId] as const,
@@ -196,6 +198,16 @@ export function cardQuery(token: string | null, storeId: number | null, cardId: 
     queryKey: queryKeys.card(storeId, cardId),
     queryFn: ({ signal }) => getProductCard(cardId, token!, signal),
     enabled: Boolean(token && storeId && cardId > 0),
+    staleTime: 15_000,
+  });
+}
+
+// W3b 사실 카드의 초안 판을 사실 줄 단위로. 사실 카드일 때만 켠다
+export function cardFactsQuery(token: string | null, storeId: number | null, cardId: number, enabled: boolean) {
+  return queryOptions({
+    queryKey: queryKeys.cardFacts(storeId, cardId),
+    queryFn: ({ signal }) => getCardFacts(cardId, token!, signal),
+    enabled: enabled && Boolean(token && storeId && cardId > 0),
     staleTime: 15_000,
   });
 }

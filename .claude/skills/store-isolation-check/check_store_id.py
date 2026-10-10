@@ -53,6 +53,8 @@ TENANT_TABLES = {
     "upload_change_proposals", "upload_change_proposal_facts",
     # W3a 카드 판 블록·근거 (가산)
     "card_version_blocks", "card_block_facts", "card_version_fact_provenance",
+    # W3b 카드 사실 편집 (가산)
+    "card_fact_edits",
     # P5 근무조 체크리스트 (가산)
     "store_shifts", "checklist_cards", "checklist_card_shifts", "member_shifts",
     "checklist_checks", "checklist_check_events", "checklist_submissions",
