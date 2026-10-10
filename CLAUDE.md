@@ -5,6 +5,7 @@
 > 남은 작업과 실행 순서는 `docs/dev/DEV_TODO_CURRENT.md`를 따른다.
 > 2026-09-14 동기화: 두 담당자 W/R 경계와 새 AI 계약은 MVP 30~31절, 평가 분모·승격은 실험설계가 정본이다. 아래 과거 요약은 현재 코드의 구현 완료나 새 작업의 운영 실행 권한을 대신하지 않는다.
 > pull `65c2403` 이후 C0 결정·담당·PR 선행 관계는 `docs/dev/C0_DECISIONS_AND_PLAN.md`, 재현 검토는 `docs/dev/review/C0_REVIEW_20260914.md`를 읽는다. 타입 기반·기존 22개 unit은 확인됐으나 C0 전체 완료는 아니다.
+> 2026-10-10: W 다음 작업(사실→카드 단일 경로·입구 분류기·공지·로직별 추출기)은 `docs/dev/plan/W_FACT_ONLY_ROADMAP_20261010.md` 에서 시작한다. 외부 모델 관찰 템플릿은 `docs/dev/templates/extraction_observation/`.
 > 사용자 원가 회신 반영: `docs/dev/plan/C0_COST_MEASUREMENT_PLAN.md`의 CP-00A~C 원가 계측을 먼저 구현한다. 미래 사용량은 첫 달/안정기 시나리오로 다루며 실제 metadata·비용을 수집한다.
 
 ---
