@@ -277,6 +277,31 @@ R 이 할 일 목록(아래)에 11번을 더했다. 모두 `[ ]` 이며 R 확인
 
 ---
 
+## 13. 사실→카드 단일 경로 · 1회 삭제 · 입구 분류기 · 공지 (2026-10-10 계획)
+
+W 가 다음 세 단계를 계획했다(아직 구현 전, 사용자 결정 2026-10-10). R 소유 파일과 `contracts/*` 는 고치지 않는다. 설계:
+`W_PHASE_A_FACT_ONLY_DESIGN_20261010.md`(A), `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md`(B), `W_PHASE_C_NOTICE_KNOWLEDGE_TAB_DESIGN_20261010.md`(C). 시작 안내: `W_FACT_ONLY_ROADMAP_20261010.md`.
+
+**Phase A — 레거시 RAW 제거(배포 전에 R 이 알아야 할 것)**
+- W 는 **RAW 블록 카드를 더 공개하지 않는다.** 업로드 옛 조립, 점주 답변 RAW 카드(`create_owner_answer_card`), 점주 자유 본문 편집(`PATCH /cards/{id}/draft`)을 지우고, 블록 없는 판은 공개를 거절한다. 공개판의 모든 카드가 사실 블록 카드가 된다. W 플래그 `w_entity_revision_enabled`·`w_upload_proposals_enabled`·`w_fact_assembly_enabled`·`w_fact_card_edit_enabled`·`w_owner_answer_raw_publish` 는 없어진다(항상 켜진 동작).
+- **점주 답변이 사실이 된다.** W worker 가 답변 글을 `OWNER_TEXT` 자료로 저장해 사실 추출 → 원장 → 조립으로 보낸다. 새 대상이면 사실 카드를 자동 공개, 이미 공개된 카드의 대상이면 그 카드의 새 초안 + 점주 승인 대기. W 는 R `knowledge_loop.build_knowledge_plan` 을 **더 부르지 않는다.** R 라우터가 부르는 `approve_owner_proposal(...)` 모양과 `ApplyOwnerAnswerResult` 계약은 그대로다.
+- 점주 답변 근거는 `OWNER_TEXT` 자료 occurrence(`source_id`+`occurrence_id`)로 온다. 점주 답변 id 연결은 W 가 보존한다.
+- **1회 삭제 migration(배포 때 한 번)**이 지식·자료와 함께 **R 표를 비운다**: `r_answer_citations`, `r_answer_receipts`, `message_citations`, `knowledge_snapshots`·`snapshot_card_versions`, `knowledge_publications`, `r_index_publications`·`r_index_preparations`·`r_index_documents`, 지워진 공개판을 가리키는 공개 멱등 기록(`r-initial-empty` 포함). 불변 트리거는 그 migration 트랜잭션 안에서만 잠깐 끈다. R 표 구조는 바꾸지 않는다. 질문·점주 답변·채팅 문장·비용 원장은 남는다. 되돌리기는 배포 워크플로의 migration 직전 DB 백업뿐이다.
+
+**Phase B — 입구 분류기·정규화기·점주 답변 첨부**
+- 업로드·점주 답변마다 싼 분류 호출 1회로 로직(`RECIPE`·`PROCEDURE`·`POLICY`·`REFERENCE`·`NOTICE`·`NONE`)을 정한다. 공개 계약은 그대로다.
+- 새 자료 형식 docx·hwp(문서), avi(영상). 인용에 보이는 자료 종류가 늘어난다.
+- **점주 답변에 파일 첨부**: web 이 W 업로드 경로로 올리고 W 새 API 가 그 자료를 **대기 질문 id** 에 묶는다(`owner_answer_attachments`). R 답변 제출 API 는 그대로다.
+- 사실에 로직별 확장 칸 `ext`(예: 공지 기간)가 생기지만 원장에만 두고 **공개 계약에는 넣지 않는다.**
+
+**Phase C — 공지사항·매장 지식 탭**
+- 공지 자료의 지식 변경은 카드(새 초안 → 승인), 기간 있는 알림은 새 공지 표(`store_notices`)로 간다. 공지는 카드·snapshot 이 아니라 R 답변 근거가 아니다.
+- 직원 화면 상단 공지 버튼·매장 지식 탭. 직원 화면 web 파일의 주 편집자는 계획 단계에서 확인한다.
+
+R 이 할 일 12·13번을 더했다.
+
+---
+
 ## R 이 할 일 (우선순위 순)
 
 1. ~~`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체~~ — 완료(PR #25) (1·2번).
@@ -306,3 +331,18 @@ R 이 할 일 목록(아래)에 11번을 더했다. 모두 `[ ]` 이며 R 확인
     (a) 인용·출처 표시에서 `source_type='OWNER_TEXT'` 를 "사장님 직접 입력" 으로 보이게 해 달라. 지금 v2 인용 상세·인용 칩 응답에는 `source_type` 이 없어 점주 직접 입력 근거가 일반 파일 자료(AVAILABLE)처럼 보이고 자료 제목 "카드 직접 입력 · …" 이 그대로 나온다. 깨지지는 않는 표시 문제이며 R 응답·화면 변경이 필요하다.
     (b) 점주 편집 판(`OWNER_CORRECTION`·`OWNER_ADD` 사실이 든 사실 블록 카드)이 실린 snapshot 을 R 렌더러·색인·인용 검증이 받는지 확인해 달라(10번 W3-4 필수 검토와 함께).
     (c) 점주 삭제로 생기는 `fact_occurrences` `EXCLUDED`(`OWNER_REMOVED`)가 R 쪽 계산에 영향이 없는지 확인해 달라.
+12. **Phase A 배포 전 확인 (§13).** `[ ]`
+    (a) **10번(W3-4 필수 검토)을 Phase A 배포 전에 끝내 달라.** 배포 뒤 모든 카드가 사실 블록 카드라 R 렌더러·색인·인용 검증이 그것을 받는지가 곧 서비스 전체 동작이다.
+    (b) RAW 블록 처리(R 렌더러·색인·인용 검증, 계약 `BlockKind` 의 `RAW`)를 지울지 R 이 정한다. W 는 RAW 를 더 만들지 않는다. 계약 변경은 R 결정이다.
+    (c) W 가 `knowledge_loop.build_knowledge_plan` 을 부르지 않게 된다. R 쪽에서 안 쓰이게 되는지 확인해 달라. 2번(`RawSpan.source_id=None`)·`W_OWNER_ANSWER_RAW_PUBLISH` 는 점주 답변 RAW 경로가 없어져 닫힌다.
+    (d) 5번: W 가 Phase A 에서 `publish_new_proposal`·`publish_existing_proposal`·`prepare_proposal` 을 지운다. v1 `/pending/{id}/answer`(R `learn/router.py`)가 이 함수들이나 옛 승인 경로에 기대지 않는지 확인해 달라. 기대면 W 에 알려 달라(삭제 전에 맞춘다).
+    (e) 지식 제안 화면이 제안의 관계 종류값(NEW·SUPPLEMENT·CONFLICT 등)에 기대면 바뀐 값이 맞는지 확인해 달라.
+    (f) 인용 표시에서 점주 답변 근거(`OWNER_TEXT` 자료 + 점주 답변 연결)를 "점주 답변" 으로 보이게 해 달라(11-a 와 합침).
+    (g) **1회 삭제 뒤**: ① 첫 직원 질문에서 `ensure_initial_publication` 이 빈 공개판을 만드는지, ② 카드 0개일 때 정상 빈 상태("아직 등록된 지식이 없어요")가 나오는지, ③ 인용이 지워진 옛 채팅 답변이 "근거 보기" 없이 깨지지 않고 보이는지, ④ 7번(공개판 없는 매장의 점주 답변 후보 검색 = 빈 후보)이 동작하는지 확인해 달라.
+    (h) 10-f(entity_id 이름공간)는 레거시 카드가 없어져 데이터상 해소된다. 닫을지, 계약 분리를 그대로 할지 정해 달라.
+13. **Phase B·C 확인 (§13).** `[ ]`
+    (a) 점주 답변 화면이 R 소유면 첨부 UI 를 붙여 달라: 파일 선택 → W 업로드(`POST /ingest/upload-url`) → W 첨부 API → 업로드가 끝나야 제출 버튼을 켠다. W API 를 먼저 준비한다.
+    (b) 인용 표시가 모르는 자료 종류(docx·hwp·avi 등)를 만나도 깨지지 않게(기본 이름표) 해 달라.
+    (c) 사실의 `ext`(공지 기간 등)는 공개 계약에 없다. R 답변에 쓰려면 그때 계약을 검토한다(지금 할 일 없음).
+    (d) 공지사항(`store_notices`)은 R 답변 근거가 아니다. 공지 내용을 답변에 쓰려면 그때 계약을 검토한다.
+    (e) 직원 화면(상단 공지 버튼·매장 지식 탭)이 R 소유 파일이면 알려 달라. W 가 화면 요구를 인계로 넘긴다.
