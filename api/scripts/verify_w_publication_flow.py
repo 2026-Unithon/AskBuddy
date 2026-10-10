@@ -930,3 +930,7 @@ async def verify(pool, admin):
     # W3a 대상 단위 사실 조립 — 기존 시나리오·패치 밖에서 새 매장으로 돈다
     from verify_w3a_fact_assembly import verify as verify_w3a
     await verify_w3a(pool, admin)
+
+    # W3b 점주 사실 카드 편집 — W3a 뒤 새 매장으로 돈다
+    from verify_w3b_card_fact_edit import verify as verify_w3b
+    await verify_w3b(pool, admin)

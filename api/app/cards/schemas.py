@@ -83,6 +83,9 @@ class CardDetail(BaseModel):
     evidence: list[CardEvidence] = Field(default_factory=list)
     events: list[CardReviewEvent] = Field(default_factory=list)
     updated_at: datetime
+    # W3b — 사실 카드(블록 사실이 고정된 초안)인지, 사실 단위 고치기가 열려 있는지
+    fact_card: bool = False
+    fact_edit_enabled: bool = False
 
 
 class DraftUpdateRequest(BaseModel):

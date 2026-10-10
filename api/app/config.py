@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     w_upload_proposals_enabled: bool = False
     # W3a — 대상 단위 사실 조립(CardPlan)·서버 검증·렌더링·블록 고정·occurrence 처분. w_entity_revision_enabled 가 필요하다
     w_fact_assembly_enabled: bool = False
+    # W3b — 점주 사실 카드 편집(텍스트 분석·저장 API). 끄면 사실 카드는 읽기만 된다. 인증·매장 격리·승인 확인과 무관
+    w_fact_card_edit_enabled: bool = False
+    # W3b — 사실 분석 입력 글자 수 상한
+    card_fact_parse_max_chars: int = Field(default=1000, ge=1, le=4000)
+    # W3b — 분석 제안 수 상한. 넘으면 앞에서부터 이만큼만 + TOO_MANY_FACTS 경고
+    card_fact_parse_max_facts: int = Field(default=10, ge=1, le=50)
 
     # 실제 자료 측정 전에는 null이다. 값이 설정된 제한만 서버가 강제한다.
     ingest_voice_max_bytes: int | None = None

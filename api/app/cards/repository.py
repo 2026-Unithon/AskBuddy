@@ -152,6 +152,26 @@ async def get_card_for_update(
     )
 
 
+async def has_block_facts(
+    conn: asyncpg.Connection, store_id: int, version_id: int | None
+) -> bool:
+    """카드 판에 블록 사실이 고정돼 있으면(사실 카드) True."""
+    if version_id is None:
+        return False
+    return bool(
+        await conn.fetchval(
+            """
+            select exists(
+              select 1 from card_block_facts
+              where store_id = $1 and card_version_id = $2
+            )
+            """,
+            store_id,
+            version_id,
+        )
+    )
+
+
 async def get_version(conn: asyncpg.Connection, store_id: int, version_id: int | None):
     if version_id is None:
         return None

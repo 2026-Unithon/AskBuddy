@@ -24,6 +24,7 @@ import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { CardAssignment } from "@/components/checklist/card-assignment";
 import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
+import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
 
 const STATUS: Record<CardDetailDto["review_status"], { label: string; tone: "brand" | "warn" | "neutral" | "danger" }> = {
   PENDING: { label: "공개 전", tone: "neutral" },
@@ -37,7 +38,8 @@ function formatDate(iso: string) {
 }
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
-// 사실 단위 편집(10-05 결정)은 W3 API 가 생기면 이 화면의 "고치기"에 붙인다.
+// 사실 카드(card.fact_card)는 W3b 사실 단위 편집(/cards/{id}/facts)으로 고친다. 제목은 읽기 전용(D-7).
+// 사실 카드가 아닌 옛 카드는 아래 자유 글 편집을 그대로 쓴다.
 export default function OwnerCardPage() {
   const params = useParams<{ cardId: string }>();
   const cardId = /^\d+$/.test(params.cardId) ? Number(params.cardId) : 0;
@@ -49,6 +51,8 @@ export default function OwnerCardPage() {
   const [confirmExclude, setConfirmExclude] = useState(false);
   const [moving, setMoving] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
+  const factCard = Boolean(detail.data?.fact_card);
+  const factEditor = useFactCardEditor(cardId, factCard);
 
   const refresh = () =>
     Promise.all([
@@ -78,8 +82,10 @@ export default function OwnerCardPage() {
   });
   const status = useMutation({
     mutationFn: (action: "approve" | "exclude" | "restore") => mutateProductCard(cardId, action, state.token!),
-    onSuccess: async () => {
+    onSuccess: async (_result, action) => {
       setConfirmExclude(false);
+      // 마지막 사실을 빼려다 카드를 지운 경우: 편집 초안을 닫는다
+      if (action === "exclude") factEditor.cancel();
       await refresh();
     },
     onError: onConflict,
@@ -178,9 +184,12 @@ export default function OwnerCardPage() {
     );
   }
 
-  return (
+  const screen = (
     <Screen
       footer={
+        factEditor.editing ? (
+          <FactCardEditFooter editor={factEditor} />
+        ) : (
         <>
           {actionError && status.variables !== "exclude" && (
             <ErrorInline
@@ -200,15 +209,24 @@ export default function OwnerCardPage() {
                   공개하기
                 </Button>
               )}
-              <Button variant={canPublish ? "secondary" : "primary"} onClick={startEdit}>
-                고치기
-              </Button>
+              {card.fact_card ? (
+                factEditor.canEdit && (
+                  <Button variant={canPublish ? "secondary" : "primary"} onClick={factEditor.start}>
+                    고치기
+                  </Button>
+                )
+              ) : (
+                <Button variant={canPublish ? "secondary" : "primary"} onClick={startEdit}>
+                  고치기
+                </Button>
+              )}
               <Button variant="secondary" onClick={() => setConfirmExclude(true)}>
                 지우기
               </Button>
             </>
           )}
         </>
+        )
       }
     >
       <BackButton href="/owner/cards" label="카드" />
@@ -226,12 +244,17 @@ export default function OwnerCardPage() {
         {unpublishedDraft && <Chip size="sm" tone="warn">고친 내용 공개 전</Chip>}
       </div>
       <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{title}</h1>
+      {card.fact_card && <Caption className="-mt-2">제목은 메뉴·업무 이름이에요</Caption>}
       {card.review_status === "NEEDS_REVIEW" && card.needs_review_reason && (
         <p className="rounded-[14px] bg-warn-50 px-3.5 py-2.5 text-[13px] leading-[1.45] text-warn-700">{card.needs_review_reason}</p>
       )}
-      <Surface className="px-[18px] py-4">
-        <NumberedContent content={content} />
-      </Surface>
+      {card.fact_card ? (
+        <FactCardPanel editor={factEditor} card={card} />
+      ) : (
+        <Surface className="px-[18px] py-4">
+          <NumberedContent content={content} />
+        </Surface>
+      )}
       {!excluded && card.review_status === "APPROVED" && card.published && <CardAssignment cardId={cardId} />}
       {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용이 보여요 · {card.published.title}</Caption>}
       <Caption>
@@ -274,6 +297,18 @@ export default function OwnerCardPage() {
       </Sheet>
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>
+  );
+  if (!card.fact_card) return screen;
+  return (
+    <>
+      {screen}
+      <FactCardSheets
+        editor={factEditor}
+        onExcludeCard={() => status.mutate("exclude")}
+        excludePending={status.isPending && status.variables === "exclude"}
+        excludeError={status.variables === "exclude" ? status.error : null}
+      />
+    </>
   );
 }
 

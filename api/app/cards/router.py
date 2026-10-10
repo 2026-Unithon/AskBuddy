@@ -7,7 +7,23 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 
+from app.cards import fact_edit
+from app.cards import fact_edit_repo as fact_repo
+from app.cards import fact_parse
 from app.cards import repository as repo
+from app.cards.fact_edit_plan import CardFactState, EditError
+from app.cards.fact_edit_schemas import (
+    CardFactsView,
+    FactBlockView,
+    FactEditRequest,
+    FactEditResult,
+    FactOrigin,
+    FactRequirement,
+    FactParseRequest,
+    FactParseResponse,
+    FactRow,
+    FactVariant,
+)
 from app.cards.schemas import (
     CardCategory,
     CardDetail,
@@ -23,6 +39,7 @@ from app.cards.schemas import (
 )
 from app.deps import Db, get_pool
 from app.errors import ApiClaims, ApiError
+from app.ingest.card_plan import PlanFact
 from app.ingest.embed import card_usage_context
 from app.ingest.preprocess.storage import create_signed_read_url
 from app.publish import CardChange, publish_cards
@@ -210,6 +227,16 @@ async def _detail(db: Db, store_id: int, card_id: int, role: str) -> CardDetail:
             CardReviewEvent(**{**dict(item), "metadata": _json_object(item["metadata"])})
             for item in await repo.list_events(db, store_id, card_id)
         ]
+    # 직원은 초안을 보지 않으므로 사실 카드 표시·편집 가능 여부도 점주에게만 준다
+    fact_card = False
+    fact_edit_enabled = False
+    if role == "OWNER":
+        from app.config import get_settings
+
+        fact_card = await repo.has_block_facts(db, store_id, row["draft_version_id"])
+        fact_edit_enabled = bool(
+            getattr(get_settings(), "w_fact_card_edit_enabled", False)
+        )
     return CardDetail(
         card_id=card_id,
         review_status=row["review_status"],
@@ -223,6 +250,8 @@ async def _detail(db: Db, store_id: int, card_id: int, role: str) -> CardDetail:
         evidence=evidence,
         events=events,
         updated_at=row["updated_at"],
+        fact_card=fact_card,
+        fact_edit_enabled=fact_edit_enabled,
     )
 
 
@@ -243,6 +272,11 @@ async def update_draft(
             raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
         if card["review_status"] == "EXCLUDED":
             raise ApiError(409, "CARD_EXCLUDED", "제외된 카드를 먼저 복원해 주세요.")
+        # W3b — 사실 카드의 본문을 통째로 바꾸면 고정된 사실과 어긋난다. 사실 단위로만 고친다
+        if await repo.has_block_facts(db, store_id, card["draft_version_id"]):
+            raise ApiError(
+                409, "FACT_CARD_TEXT_EDIT_BLOCKED", "사실 카드는 사실 단위로 고쳐 주세요."
+            )
         if card["draft_version_id"] != req.expected_version_id:
             raise ApiError(
                 409,
@@ -569,3 +603,200 @@ async def get_evidence(card_id: int, db: Db, claims: ApiClaims) -> list[CardEvid
         card["published_version_id"] if role == "STAFF" else card["draft_version_id"]
     )
     return await _evidence_items(db, store_id, int(version_id)) if version_id else []
+
+
+# ── W3b 사실 카드 읽기 ──────────────────────────────────────────────────────
+
+_OTHER_CARD_LABEL = "(다른 카드)"
+
+
+def requirement_labels(
+    requires_fact_ids: tuple[int, ...] | list[int], by_fact: dict[int, PlanFact]
+) -> list[FactRequirement]:
+    """선행 사실 라벨. 같은 카드 단계면 "{n}번", 단계가 아니면 문장 앞 40자, 카드에 없으면 "(다른 카드)"."""
+    out: list[FactRequirement] = []
+    for fact_id in requires_fact_ids:
+        target = by_fact.get(fact_id)
+        if target is None:
+            label = _OTHER_CARD_LABEL
+        elif target.step_order is not None:
+            label = f"{target.step_order}번"
+        else:
+            label = " ".join(target.original_assertion.split())[:40]
+        out.append(FactRequirement(fact_id=fact_id, label=label))
+    return out
+
+
+def fact_row_view(
+    fact: PlanFact,
+    position: int,
+    extra: dict[str, Any],
+    by_fact: dict[int, PlanFact],
+    edit_block: str | None,
+) -> FactRow:
+    """판 하나 → 화면 줄. 수치면 value=decimal 문자열(뒤 0 없음)+unit, 아니면 value_text(unit 없음)."""
+    if fact.quantity_value is not None:
+        value: str | None = format(fact.quantity_value.normalize(), "f")
+        unit = fact.quantity_unit
+    else:
+        value, unit = fact.value_text, None
+    return FactRow(
+        fact_revision_id=fact.fact_revision_id,
+        fact_id=fact.fact_id,
+        position=position,
+        sentence=fact.original_assertion,
+        assertion=fact.assertion,
+        subject=fact.subject,
+        predicate=fact.predicate,
+        variant=FactVariant(temperature=fact.variant_temperature, size=fact.variant_size),
+        value=value,
+        unit=unit,
+        polarity=fact.polarity,
+        step_order=fact.step_order,
+        conditions=list(fact.conditions),
+        exceptions=list(fact.exceptions),
+        requires=requirement_labels(fact.requires_fact_ids, by_fact),
+        change_kind=extra.get("change_kind"),
+        previous_sentence=extra.get("previous_sentence"),
+        origins=[FactOrigin(**o) for o in extra.get("origins", [])],
+        edit_block=edit_block,  # type: ignore[arg-type]
+    )
+
+
+def build_facts_view(
+    state: CardFactState,
+    rows: dict[int, dict[str, Any]],
+    heads: dict[int, fact_repo.HeadInfo],
+    *,
+    flag_on: bool,
+) -> CardFactsView:
+    """고정 상태 + 판별 칸 + head 분류 → 응답. 순서는 state 그대로(블록 순 → 줄 순)."""
+    by_fact = {p.fact.fact_id: p.fact for p in state.pinned}
+    blocks: list[FactBlockView] = []
+    for block_id, kind, order in state.blocks:
+        lines = [p for p in state.pinned if p.block_id == block_id]
+        facts = [
+            fact_row_view(
+                p.fact,
+                p.position,
+                rows.get(p.fact.fact_revision_id, {}),
+                by_fact,
+                heads[p.fact.fact_id].edit_block if p.fact.fact_id in heads else None,
+            )
+            for p in lines
+        ]
+        variant = facts[0].variant if facts else FactVariant()
+        blocks.append(
+            FactBlockView(
+                block_id=block_id, kind=kind, order=order, variant=variant, facts=facts
+            )  # type: ignore[arg-type]
+        )
+    return CardFactsView(
+        card_id=state.card_id,
+        version_id=state.version_id,
+        title=state.title,
+        entity_id=state.entity_id,
+        entity_name=state.entity_name or None,
+        review_status=state.review_status,  # type: ignore[arg-type]
+        published_version_id=state.published_version_id,
+        editable=bool(
+            flag_on and state.review_status != "EXCLUDED" and state.entity_problem is None
+        ),
+        entity_problem=state.entity_problem,  # type: ignore[arg-type]
+        blocks=blocks,
+    )
+
+
+@router.get("/{card_id}/facts", response_model=CardFactsView)
+async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFactsView:
+    """사실 카드의 초안 판을 사실 줄 단위로 돌려준다. 점주 전용, 트랜잭션 없이 읽는다."""
+    from app.config import get_settings
+
+    _, store_id, _ = _identity(claims, owner_only=True)
+    card = await repo.get_card(db, store_id, card_id)
+    if card is None:
+        raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
+    not_fact = ApiError(409, "NOT_FACT_CARD", "사실 단위로 고칠 수 있는 카드가 아닙니다.")
+    if card["draft_version_id"] is None:
+        raise not_fact
+    state = await fact_repo.load_card_fact_state(
+        db, store_id, card_id, int(card["draft_version_id"])
+    )
+    if state is None:
+        raise not_fact
+    rows = await fact_repo.load_fact_rows(db, store_id, state)
+    # 대상이 하나로 정해진 카드만 head 대상 비교가 뜻이 있다
+    heads: dict[int, fact_repo.HeadInfo] = {}
+    if state.entity_problem is None:
+        heads = await fact_repo.classify_head(
+            db, store_id, {p.fact.fact_id: p.fact.fact_revision_id for p in state.pinned},
+            state.entity_id,
+        )
+    flag_on = bool(getattr(get_settings(), "w_fact_card_edit_enabled", False))
+    return build_facts_view(state, rows, heads, flag_on=flag_on)
+
+
+@router.post("/{card_id}/facts/parse", response_model=FactParseResponse)
+async def parse_card_facts(
+    card_id: int, req: FactParseRequest, db: Db, claims: OwnerClaims
+) -> FactParseResponse:
+    """점주가 쓴 문장을 사실 후보로 나눠 제안만 돌려준다(저장 없음). 트랜잭션을 열지 않는다."""
+    from app.config import get_settings
+
+    _, store_id, _ = _identity(claims, owner_only=True)
+    settings = get_settings()
+    if not getattr(settings, "w_fact_card_edit_enabled", False):
+        raise ApiError(403, "FACT_EDIT_DISABLED", "사실 단위 고치기는 아직 열리지 않았어요.")
+    max_chars = int(getattr(settings, "card_fact_parse_max_chars", 1000))
+    if len(req.text) > max_chars:
+        raise ApiError(
+            422, "PARSE_TEXT_TOO_LONG", f"글은 {max_chars}자까지 분석할 수 있어요.",
+            details={"max_chars": max_chars},
+        )
+    card = await repo.get_card(db, store_id, card_id)
+    if card is None:
+        raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
+    if card["review_status"] == "EXCLUDED":
+        raise ApiError(409, "CARD_EXCLUDED", "제외된 카드를 먼저 복원해 주세요.")
+    not_fact = ApiError(409, "NOT_FACT_CARD", "사실 단위로 고칠 수 있는 카드가 아닙니다.")
+    if card["draft_version_id"] is None:
+        raise not_fact
+    state = await fact_repo.load_card_fact_state(
+        db, store_id, card_id, int(card["draft_version_id"])
+    )
+    if state is None:
+        raise not_fact
+    if state.entity_problem is not None:
+        raise ApiError(
+            409, "CARD_ENTITY_MOVED", "메뉴 정리가 바뀌어 이 카드에서 고칠 수 없어요.",
+            details={"entity_problem": state.entity_problem},
+        )
+    if req.mode == "MODIFY" and not any(
+        p.fact.fact_revision_id == req.base_fact_revision_id for p in state.pinned
+    ):
+        raise ApiError(422, "PARSE_BASE_INVALID", "고칠 사실이 이 카드에 없어요.")
+    # 읽기는 끝났다. 모델 호출 동안 이 요청은 연결을 쥐지 않는다
+    return await fact_parse.parse_card_text(
+        get_pool(), store_id=store_id, card_id=card_id, state=state, req=req
+    )
+
+
+@router.put("/{card_id}/facts", response_model=FactEditResult)
+async def save_card_facts(
+    card_id: int, req: FactEditRequest, db: Db, claims: OwnerClaims
+) -> FactEditResult:
+    """사실 편집 저장 → 새 초안 판. 공개판은 재승인 전까지 그대로다. 모델을 부르지 않는다."""
+    from app.config import get_settings
+
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    if not getattr(get_settings(), "w_fact_card_edit_enabled", False):
+        raise ApiError(403, "FACT_EDIT_DISABLED", "사실 단위 고치기는 아직 열리지 않았어요.")
+    try:
+        async with db.transaction():
+            return await fact_edit.save_fact_edit(
+                db, store_id, card_id=card_id, actor_id=user_id, req=req
+            )
+    except EditError as e:
+        raise ApiError(
+            e.status, e.code, fact_edit.message_for(e.code), details=e.details or None
+        ) from None

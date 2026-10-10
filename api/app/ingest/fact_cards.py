@@ -22,7 +22,7 @@ import asyncpg
 
 from app.ingest import card_plan
 from app.ingest import repository as repo
-from app.ingest.card_plan import EntityGroup, EntityPlanResult, ValidatedCard
+from app.ingest.card_plan import EntityGroup, EntityPlanResult, PlanFact, ValidatedCard
 from app.ingest.fact_assembly import _value_of
 
 logger = logging.getLogger(__name__)
@@ -342,6 +342,61 @@ async def _source_fact_ids(conn: asyncpg.Connection, store_id: int,
     return [int(r["source_fact_id"]) for r in rows]
 
 
+async def write_version_evidence(conn: asyncpg.Connection, store_id: int, version_id: int,
+                                 origins: Sequence[Origin], *,
+                                 excerpts: Mapping[int, str] | None = None) -> None:
+    """카드 판 근거(card_evidence) — 출처 자료마다 그 자료의 가장 앞 occurrence 위치 하나.
+
+    excerpts = {자료 id: 발췌}. 발췌가 있는 자료만 excerpt 를 채운다(W3a 호출은 None).
+    """
+    first: dict[int, Origin] = {}
+    for o in sorted((o for o in origins if o.occurrence_id is not None),
+                    key=lambda o: o.occurrence_id):
+        first.setdefault(o.source_id, o)
+    for sid in sorted(first):
+        locator_type, locator = _evidence_locator(first[sid])
+        excerpt = (excerpts or {}).get(sid)
+        if excerpt is None:
+            await conn.execute(
+                "insert into card_evidence (store_id, version_id, source_id, locator_type, "
+                "locator) values ($1, $2, $3, $4, $5::jsonb)",
+                store_id, version_id, sid, locator_type,
+                json.dumps(locator, ensure_ascii=False))
+        else:
+            await conn.execute(
+                "insert into card_evidence (store_id, version_id, source_id, locator_type, "
+                "locator, excerpt) values ($1, $2, $3, $4, $5::jsonb, $6)",
+                store_id, version_id, sid, locator_type,
+                json.dumps(locator, ensure_ascii=False), excerpt)
+
+
+async def replace_legacy_facts(conn: asyncpg.Connection, store_id: int, card_id: int,
+                               revisions: Sequence[int], facts: Mapping[int, PlanFact],
+                               canonical_name: str, confidence: Mapping[int, float]) -> None:
+    """레거시 facts 교체 + card_facts 링크. 코드 이전이 끝나면 끊는다.
+
+    confidence = {fact_id: 신뢰도(0~100)}. 없는 사실은 0.0.
+    """
+    await conn.execute(
+        "delete from facts f using knowledge_cards k "
+        "where f.card_id = k.card_id and k.store_id = $1 and k.card_id = $2",
+        store_id, card_id)
+    seen_facts: set[int] = set()
+    legacy: list[tuple[str, str, str, float]] = []
+    for r in revisions:
+        f = facts[r]
+        if f.fact_id in seen_facts:
+            continue
+        seen_facts.add(f.fact_id)
+        legacy.append(((f.subject or canonical_name)[:100],
+                       (f.predicate or "")[:100], _value_of(f)[:500],
+                       confidence.get(f.fact_id, 0.0)))
+    await repo.insert_facts(conn, card_id, legacy)
+    card_fact_ids = sorted({facts[r].fact_id for r in revisions})
+    await repo.link_card_facts(conn, store_id, card_id,
+                               await _source_fact_ids(conn, store_id, card_fact_ids))
+
+
 async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_id: int,
                              job_id: int | None, category_version: int,
                              categories: Mapping[str, int], state: EntityCardState,
@@ -474,36 +529,9 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
         if is_new:
             new_versions.append(version_id)
             await pin_card_version(conn, store_id, version_id, card, provenance)
-            # 출처 자료마다 근거 위치 하나 — 그 자료의 가장 앞 occurrence
-            first: dict[int, Origin] = {}
-            for o in sorted((o for o in origins if o.occurrence_id is not None),
-                            key=lambda o: o.occurrence_id):
-                first.setdefault(o.source_id, o)
-            for sid in sorted(first):
-                locator_type, locator = _evidence_locator(first[sid])
-                await conn.execute(
-                    "insert into card_evidence (store_id, version_id, source_id, locator_type, "
-                    "locator) values ($1, $2, $3, $4, $5::jsonb)",
-                    store_id, version_id, sid, locator_type,
-                    json.dumps(locator, ensure_ascii=False))
-            # 레거시 facts 교체 — 코드 이전이 끝나면 끊는다
-            await conn.execute(
-                "delete from facts f using knowledge_cards k "
-                "where f.card_id = k.card_id and k.store_id = $1 and k.card_id = $2",
-                store_id, card_id)
-            seen_facts: set[int] = set()
-            legacy: list[tuple[str, str, str, float]] = []
-            for r in revisions:
-                f = facts[r]
-                if f.fact_id in seen_facts:
-                    continue
-                seen_facts.add(f.fact_id)
-                legacy.append(((f.subject or group.canonical_name)[:100],
-                               (f.predicate or "")[:100], _value_of(f)[:500],
-                               fact_confidence.get(f.fact_id, 0.0)))
-            await repo.insert_facts(conn, card_id, legacy)
-            await repo.link_card_facts(conn, store_id, card_id,
-                                       await _source_fact_ids(conn, store_id, card_fact_ids))
+            await write_version_evidence(conn, store_id, version_id, origins)
+            await replace_legacy_facts(conn, store_id, card_id, revisions, facts,
+                                       group.canonical_name, fact_confidence)
 
         await conn.execute(
             "update knowledge_cards set review_status = $3, needs_review_reason = $4 "

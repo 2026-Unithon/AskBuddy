@@ -28,6 +28,11 @@ FACTS_PROMPT_PATH = (
 # W3a 사실 조립 — 이름표만 고르고 배치한다
 CARD_PLAN_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "assemble_card_plan.ko.txt")
+# W3b 점주 입력 문장 분석 — 사실 후보 제안만 만든다
+PARSE_OWNER_PROMPT_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "parse_owner_fact.ko.txt")
+# 이 머리 줄 다음 줄부터 끝까지가 JSON 입력이다
+PARSE_INPUT_MARKER = "## 점주 입력"
 # W1-4 위치 표지 판. extract_locator_hints 를 켰을 때만 쓴다
 FACTS_LOCATOR_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_locator.ko.txt")
@@ -302,6 +307,35 @@ async def assemble_plan(
     logger.info("assemble_plan source=%s 대상 %d개 → 카드 %d장 (%.1fs) usage=%s",
                 source_id, len(entities), len(result.cards),
                 time.perf_counter() - started, usage or "미보고")
+    return result
+
+
+def render_owner_fact_prompt(payload: dict) -> str:
+    """점주 문장 분석 프롬프트 완성본. 같은 입력이면 같은 문자열이다(재사용 키)."""
+    return (PARSE_OWNER_PROMPT_PATH.read_text(encoding="utf-8").rstrip("\n")
+            + f"\n\n{PARSE_INPUT_MARKER}\n"
+            + json.dumps(payload, ensure_ascii=False))
+
+
+async def parse_owner_facts(
+    *, payload: dict, usage_sink=None, usage_context=None, raw_sink=None,
+) -> FactExtractionResult:
+    """W3b — 점주가 쓴 문장을 사실 후보로 나눈다. 저장하지 않는다. 스키마는 위치 표지 없는 판이다."""
+    s = get_settings()
+    if not s.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 가 없다")
+    prompt = render_owner_fact_prompt(payload)
+    started = time.perf_counter()
+    reply = await _measured_call(prompt, [], usage_sink, usage_context,
+                                 prompt_hash=_hash(prompt),
+                                 schema=FactExtractionResult, raw_sink=raw_sink,
+                                 max_output_tokens=getattr(s, "extract_max_output_tokens", None))
+    result = await raw_responses.parse_checked(
+        _mark_sink(raw_sink, reply), usage_context, reply.raw_response_id, reply.finish_reason,
+        lambda: FactExtractionResult.model_validate_json(reply.text), what="점주 사실 분석")
+    result._raw_response_id = reply.raw_response_id
+    logger.info("parse_owner_facts %.1fs 사실 %d건 usage=%s", time.perf_counter() - started,
+                len(result.assertions), reply.usage or "미보고")
     return result
 
 

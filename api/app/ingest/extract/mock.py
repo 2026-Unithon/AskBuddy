@@ -5,6 +5,7 @@ mode='mock' 으로 남아 모델 성능 집계와 섞이지 않는다 (D10).
 재사용 키(W1-3)도 실제 경로와 같은 완성 프롬프트로 계산·저장·조회한다. model·mode 가 키에
 들어가므로 mock 응답이 실제 호출에 되쓰이는 일은 없다. mock 은 원가 원장에 쓰지 않는다.
 """
+import re
 from collections import defaultdict
 
 from app.config import get_settings
@@ -146,3 +147,29 @@ def _planned(entities, category_names) -> CardPlanBatch:
                     blocks.append(PlannedBlock(kind=kind, facts=refs))
         cards.append(PlannedCard(entity=entity["대상"], category_name=category, blocks=blocks))
     return CardPlanBatch(cards=cards)
+
+
+_NUMBER_UNIT = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(ml|g|kg|l|개|번|초|분|회|잔|컵|스푼|펌프|샷)?")
+_NEGATIONS = ("않", "금지", "말 것", "하지 마")
+
+
+async def parse_owner_facts(*, payload, usage_context=None, raw_sink=None):
+    """W3b 점주 문장 분석 합성 대역. 결정적으로 한 건을 만든다. 실제 경로와 같은 프롬프트로 기록한다."""
+    from app.ingest.extract.gemini import render_owner_fact_prompt
+
+    prompt = (render_owner_fact_prompt(payload)
+              if raw_sink is not None and usage_context is not None else "")
+    return await _as_recorded(lambda: _parsed_owner_fact(payload), FactExtractionResult,
+                              raw_sink=raw_sink, usage_context=usage_context, prompt=prompt)
+
+
+def _parsed_owner_fact(payload) -> FactExtractionResult:
+    text = str(payload.get("text", ""))
+    found = _NUMBER_UNIT.search(text)
+    value, unit = (found.group(1) or "", found.group(2) or "") if found else ("", "")
+    return FactExtractionResult(assertions=[ExtractedAssertion(
+        local_ref="o1", original_assertion=text.strip(),
+        subject=str(payload.get("entity_name", "")), attribute="", value=value, unit=unit,
+        polarity="NEGATE" if any(k in text for k in _NEGATIONS) else "AFFIRM",
+        variant="", confidence=1.0)])

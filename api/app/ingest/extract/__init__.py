@@ -77,3 +77,20 @@ async def assemble_card_plan(
         usage_context=usage_context, raw_sink=raw_sink,
         **({"usage_sink": usage_sink} if mode == "real" else {}),
     )
+
+
+async def parse_owner_facts(
+    *, payload: dict, usage_sink=None, usage_context=None, raw_sink=None,
+) -> FactExtractionResult:
+    """W3b — 점주가 카드에 쓴 문장을 사실 후보로 나눈다. 저장하지 않는다. real/mock 은 ingest_mode 로 고른다."""
+    mode = get_settings().ingest_mode
+    logger.info("parse_owner_facts mode=%s", mode)
+    if mode == "real":
+        from app.ingest.extract import gemini as impl
+        return await impl.parse_owner_facts(
+            payload=payload, usage_sink=usage_sink, usage_context=usage_context,
+            raw_sink=raw_sink)
+    # mock 도 원래 응답 기록은 남긴다. 원가 원장에는 쓰지 않는다 — 과금이 없다
+    from app.ingest.extract import mock as impl
+    return await impl.parse_owner_facts(
+        payload=payload, usage_context=usage_context, raw_sink=raw_sink)

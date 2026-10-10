@@ -76,7 +76,7 @@ W 공개 경로의 실제 DB 검증은 `api/scripts/verify_w_publication_flow.py
 | W1 | 모델 원래 응답의 보관 기간·삭제 방식(개인정보가 섞일 수 있다) | 자료 tombstone 과 같이 보존, 물리 삭제는 개인정보 삭제 절차 |
 | W2 | 두 대상 이름이 같은 대상인지 서버가 정하는 규칙 | 매장별 정규화 이름 + 별칭 표. 단어 유사도만으로 합치지 않고 애매하면 검수로 |
 | W2 | 자료끼리 값이 충돌할 때 검수 화면에서 무엇을 기본으로 보여줄지 | 양쪽 값·출처·날짜를 나란히, 기본 선택 없음(권위·최신성은 정렬 참고만) |
-| W3 | 카드 편집으로 업무 의미가 바뀌면 새 점주 작성 사실로 기록하고 재승인 — 편집 화면 설계 | 값·조건 편집은 사실 편집 UI, 문구만 바꾸는 편집은 표시 문구로 분리 |
+| W3 | 카드 편집으로 업무 의미가 바뀌면 새 점주 작성 사실로 기록하고 재승인 — 편집 화면 설계 | 값·조건 편집은 사실 편집 UI, 문구만 바꾸는 편집은 표시 문구로 분리 — **이행됨(W3b, 2026-10-09): 값·조건 편집 = 사실 편집 UI, 표현만의 편집 = 이번 범위 밖** |
 | W3a | `w_fact_assembly_enabled` 배포판 켜기 시점 | W3b 이후 (사실 단위 검수 화면 전에는 켜지 않는다) |
 | W3 | `contracts/*` 계약 변경이 필요해지면 R 합의 | 가능한 한 현재 계약(`CardPlan`·`CardBlock`·`FactRevision`) 안에서 해결 |
 | J2 | 동시 처리 수·재시도 횟수·lease 길이 | 동시 1~2, 재시도 3, lease 5분 + heartbeat |
@@ -226,6 +226,8 @@ TODO 근거: W3 절 + W4 의 "fact_revision 블록 고정" 남은 것. **이 Pha
 
 > 2026-10-08: W3a 구현·단위 테스트(1910 passed, 4 xfailed)·실제 DB 검증(`api/scripts/verify_w3a_fact_assembly.py`, 재구축 검증 통과)을 마쳤다. 수집 경로 동작은 플래그 `w_fact_assembly_enabled` 뒤(기본 꺼짐, `w_entity_revision_enabled` 필요)이다. 실제 모델로는 재지 않았다(유료 호출 0). R 필수 검토(W3-4)는 요청만 했다(`W_TO_R_PUBLICATION_HANDOFF_20260927.md` §11). 점주 검수 화면(W3-5)은 W3b 이며 아직 시작하지 않았다.
 
+> 2026-10-09 W3b(점주 사실 단위 검수·편집, 브랜치 `w/w3b-card-review`): 사실 카드에서 사실 단위로 보기·고치기·추가·빼기·순서 바꾸기를 만들었다(읽기 `GET /cards/{id}/facts`, 글 분석 `POST …/facts/parse`, 저장 `PUT …/facts`). 플래그 `w_fact_card_edit_enabled` 기본 꺼짐. 사실 블록 카드의 자유 본문 PATCH 는 409 `FACT_CARD_TEXT_EDIT_BLOCKED` 로 거절하고(레거시 RAW 카드는 지금 편집 그대로), 편집은 새 사실 판(`OWNER_CORRECTION`·`OWNER_ADD`)과 새 카드 판으로 남겨 재승인한다. 사용자 결정 Q1 = A(2026-10-09): 점주가 고치거나 넣은 사실의 출처는 파일 없는 새 자료 종류 `OWNER_TEXT`(`contracts/*` 변경 없음). 검증: 단위 2154 passed·6 skipped·4 xfailed·131 subtests, 실제 DB 재구축 종료 코드 0(PASS 1071줄, W3b M1·D1~D2·R1~R3·P1~P3·S1~S12·A1~A3 와 기존 W3a 시나리오 그대로), 격리 검사 위반 15건 모두 기존 `ingest/repository.py`(새 위반 0), `pnpm check` 종료 코드 0, 합성 API 로 화면을 확인하는 Playwright 66개 검사(390×844·360×800). 이 화면 검사는 API 응답을 가로채는 합성 fixture 라 **실제 FastAPI·DB 와 붙인 종단 실행이 아니다.** 유료 모델 호출 0(지출 0). 아직 켜지 않았다. 남은 것은 `docs/dev/DEV_TODO_CURRENT.md` W3 절과 이 절의 "W3a 플래그 켜기 전 점검", R 쪽 확인은 `W_TO_R_PUBLICATION_HANDOFF_20260927.md` §12. 2026-10-10 최종 리뷰 수정: 기존 절차 중간에 단계를 끼워 넣을 수 있게 했다(새 단계는 분석 번호 자리에 들어가고 위·아래로 옮기면 뒤 단계 번호를 다시 매김, `PLAN_STEP_ORDER` 거절 전용 문구) — 단위 2156 passed·6 skipped·4 xfailed, `pnpm check` 0, Playwright 77개 검사. 문서 정정: W3b 가 막은 RAW 화 경로는 **점주 자유 본문 PATCH 뿐**이고 점주 답변 SUPPLEMENT/CONFLICT 승인 경로는 열려 있으며, 검수 대기(DEFER) 사실 화면은 없다 — 둘 다 W3a 켜기 전 점검 항목.
+
 ### Task W3-1. 조립 출력 = CardPlan
 - [x] `api/prompts/assemble_card_plan.ko.txt` 새 프롬프트(옛 `assemble_cards.ko.txt` 는 플래그 꺼짐 경로용으로 그대로). 모델은 대상 이름표·카테고리·블록 종류·사실 이름표만 낸다(`CardPlanBatch`, `api/app/ingest/schemas.py`). 제목·문장·수량·단위·조건·부정·예외는 모델이 쓰지 않고 서버가 렌더링한다. 남은 것: 실제 모델로 재지 않았다(합성 대역 검증). 카드 제목은 서버가 대상 이름(+분할 시 ` i/n`)으로 만든다. 규격은 제목이 아니라 블록 머리 줄과 `PublishedCard.variant` 가 싣는다.
 - [x] 조립 입력은 **대상 단위**로 모은 사실 revision 이다(`api/app/ingest/fact_assembly.py`). 자료 단위가 아니다.
@@ -260,11 +262,12 @@ W3a 는 조립 입력을 대상 단위로 바꾸므로 큰 자료에서 배치 �
 
 ### Task W3-5. 검수 화면
 - 2026-10-05 사용자 확정: [W/R 공유 기준](../review/WR_CARD_EDIT_FACT_REVIEW_20261005.md)의 **사실·문장 단위 추가·수정·삭제·순서 변경**을 따른다. 기존 fact 값만 편집하도록 제한하지 않는다. 새 사실은 텍스트로 입력·확인하며 표현만의 편집은 이번 범위에 포함하지 않는다. 아래 §3의 편집 화면 질문은 이 방향으로 확정됐다.
-- [ ] 점주 카드 검수 화면(`web/app/owner/cards/[cardId]/page.tsx`, 목업 `UI/`)에 값·규격·조건·예외·순서·근거 원문을 모두 보인다.
+- [~] 점주 카드 검수 화면(`web/app/owner/cards/[cardId]/page.tsx`, 목업 `UI/`)에 값·규격·조건·예외·순서·근거 원문을 모두 보인다.
       숫자가 없는 금지·예외도 숨기지 않는다. 수정·추가·제외를 허용한다.
-- [ ] 생성 시 카드 표시 내용과 fact의 연결을 보존하고, 새 입력의 사실 확인과 추가·수정·삭제·순서 변경 저장을 연결한다. 삭제는 새 초안에서 참조 제외로 처리하고 과거 승인본·인용·다른 카드의 사실을 보존한다. 마지막 사실 삭제는 카드 제외·정상 빈 상태와 연결한다.
-- [ ] 편집으로 업무 의미가 바뀌면 새 점주 작성 사실 revision 으로 기록하고 재승인한다(§3 결정).
-- [ ] web 변경 후 `pnpm check` 와 저장소 스킬 `web-async-state-check`·`ui-state-walkthrough` 를 쓴다. 브라우저를 못 띄웠으면 그렇게 보고한다.
+      구현: 값·규격·조건·예외·순서·`하지 않음`·근거(문장·자료 이름·위치)를 보이고 사실 고치기·추가·빼기·순서 바꾸기·카드 제외를 허용한다. 순서 단계 추가는 분석된 번호 자리에 끼우고, 새로 넣은 단계는 위·아래로 옮길 수 있으며 뒤 단계 번호를 다시 매긴다(기존 절차 중간에 끼워 넣기; 다시 매긴 단계는 번호만 바뀐 새 판). 서버가 단계 번호 순서로 거절하면(`CARD_LAYOUT_INVALID`·`PLAN_STEP_ORDER`) 자리를 옮기라는 문구를 보인다. **남은 것: 자료 원문 발췌(raw span)는 화면에 싣지 않는다(문장+자료 이름+위치만). 실제 API·DB 와 붙인 화면 종단 실행 없음.**
+- [x] 생성 시 카드 표시 내용과 fact의 연결을 보존하고, 새 입력의 사실 확인과 추가·수정·삭제·순서 변경 저장을 연결한다. 삭제는 새 초안에서 참조 제외로 처리하고 과거 승인본·인용·다른 카드의 사실을 보존한다. 마지막 사실 삭제는 카드 제외·정상 빈 상태와 연결한다. — 서버는 실제 DB 시나리오 S1~S12(저장·삭제·순서·처분·멱등), 마지막 사실 삭제는 `CARD_WOULD_BE_EMPTY` 와 화면의 기존 제외 흐름 연결(합성 화면 검사). 값을 비우는 수정은 거절하고 "빼고 새로 넣기" 로 안내한다(후속은 DEV_TODO).
+- [x] 편집으로 업무 의미가 바뀌면 새 점주 작성 사실 revision 으로 기록하고 재승인한다(§3 결정). — 실제 DB 시나리오 A1(편집 판은 재승인 전까지 공개판 그대로, 승인하면 사실 블록으로 공개), A2(R 답변이 편집 사실을 ANSWER 로 인용), A3(과거 snapshot 불변) PASS. 문장만 바꾼 편집도 새 판이 되고 말투만의 변경은 의미로 막지 않는다(설계 D-3).
+- [x] web 변경 후 `pnpm check` 와 저장소 스킬 `web-async-state-check`·`ui-state-walkthrough` 를 쓴다. 브라우저를 못 띄웠으면 그렇게 보고한다. — `pnpm check` 종료 코드 0, `web-async-state-check` 절차 확인, `ui-state-walkthrough` 는 Playwright(합성 API 가로채기) 77개 검사(390×844·360×800, 최종 수정에서 단계 끼워 넣기 시나리오 추가). **실제 FastAPI·DB 와 붙인 종단 확인은 하지 않았다.** web 에는 단위 테스트 러너가 없다.
 
 ### W2 에서 넘어온 것
 - [x] 병합 뒤 재처리하면 병합된 대상 아래의 옛 PENDING 업로드 제안과 남은 대상 아래의 새 PENDING 제안이 중복된다. — W3-0 §3-3-2: 병합된 대상의 PENDING 제안을 그 자료에 살아 있는 대상 제안이 없으면 **옮기고(MOVED)**, 살아 있는 제안이 PENDING_REVIEW 이면 옛 제안을 **SUPERSEDED** 로 닫고, 그 밖의 경우(살아 있는 제안이 이미 결정됨)는 옛 제안을 PENDING 으로 **남겨 둔다(KEPT_PENDING)**. 모두 `PROPOSAL_MOVED` 이력이 남고 결정된 제안은 건드리지 않는다.
@@ -287,15 +290,18 @@ W3a 는 조립 입력을 대상 단위로 바꾸므로 큰 자료에서 배치 �
 W3a 에서 확인한 것(합성 데이터·합성 모델 대역, 실제 DB `api/scripts/verify_w3a_fact_assembly.py`): 다른 매장·없는 참조, HOT/ICE 교환, 부정·조건·예외 삭제, 순서 변경 차단(단위 `test_w3a_card_plan.py` 와 DB 시나리오 P), 승인 미리보기 = 저장 본문, 자료마다 occurrence 처분 누락 0(E), 사실 카드 승인 → R 검색(`hybrid_search`)·`decide` → ANSWER 가 공개 사실을 인용(B3, 인용 fact_revision·source·block 대조). 시나리오 id: L1~L4(조립 입력·호출·재사용), P1~P12(카드 판·블록·근거·처분), E1~E12(파이프라인·작업 종단), B1~B7(공개판·R 답변·재공개 결정성·점주 편집 판). 결과: 단위 1910 passed, 4 xfailed, 131 subtests; 재구축 검증 종료 코드 0, PASS 928줄; 격리 검사 위반 15건(모두 기존 `ingest/repository.py`), 새 위반 0. 실제 모델·유료 호출은 없다(지출 0).
 
 ### W3a 플래그 켜기 전 점검 (`w_fact_assembly_enabled`)
-- [ ] 배포판에서 켜는가 — **사용자 결정 대기.** 권장: W3b(사실 단위 검수 화면) 전에는 켜지 않는다(공개 카드 대상의 새 자료 DEFER·대체 카드·검수 대기 사실을 볼 화면이 없다).
+- [ ] 배포판에서 켜는가 — **사용자 결정 대기.** 권장: W3b(사실 단위 검수 화면) 전에는 켜지 않는다(공개 카드 대상의 새 자료 DEFER·대체 카드·검수 대기 사실을 볼 화면이 없다). W3b 는 **사실 카드 편집 화면만** 만들었다(합성 화면 검사까지, 실제 API 종단 미실행). 검수 대기(`REVIEW_PENDING`, 사유 `EXISTING_CARD` 등 DEFER)·대체 카드 사실을 보여 주거나 카드에 잇는 화면·API 는 아직 없다 — 이 전제는 열려 있다(아래 항목). 켜는 결정은 사용자 몫이다.
+- [ ] **검수 대기(DEFER) 사실을 볼 화면.** `REVIEW_PENDING` occurrence(사유 `EXISTING_CARD` 등)를 읽는 API·화면이 없다(`api/app` 에서는 `job_worker.py` 의 개수 세기뿐, `web/` 에는 없음). 또 점주가 고친 초안(OWNER_EDIT)·공개 카드가 있는 대상은 이후 새 업로드가 모두 DEFER 된다(`api/app/ingest/fact_cards.py` `_card_state`). W3b 편집 화면은 고정된 판만 보이고 새 사실은 손으로 다시 쓰는 `OWNER_TEXT` 로만 넣으므로(파일 근거를 잇지 못함) 이 화면을 대신하지 않는다. 켜기 전에 만든다.
+- [ ] **점주 답변 승인이 사실 카드를 RAW 판으로 되돌린다.** 점주 답변 SUPPLEMENT/CONFLICT 승인(`api/app/learn/knowledge_apply.py` — 블록 없는 초안 `create_draft`, 블록 없는 OWNER_ANSWER 판 바로 공개)이 `card_block_facts` 를 보지 않아, 공개 사실 카드에 승인되면 그 카드의 사실이 공개판 `fact_revisions` 에서 빠지고 `entity_id` 가 카드 id 로 돌아간다(R 할 일 10-b 와 같은 결과). W3b 가 막은 것은 점주 **자유 본문 PATCH** 뿐이다. 켜기 전에 사실 카드면 거절(409)하거나 사실 편집 경로로 보내게 고친다.
+- [ ] W3a 를 켤 때 `w_fact_card_edit_enabled` 도 같이 켠다(꺼져 있으면 사실 카드를 고칠 수 없다, W3b D-1). migration `20261009090000_w_card_fact_edit.sql` 도 서버보다 먼저 적용한다.
 - [ ] migration `20261008090000_w_fact_assembly.sql` 적용 확인(배포 워크플로가 서버보다 먼저 적용).
 - [ ] `W_ENTITY_REVISION_ENABLED=true` 가 먼저다(설정 검증이 막는다).
 - [ ] `ASSEMBLE_CONCURRENCY` 기본 1. 올리는 것은 실제 모델 지연·rate limit 확인 뒤 사용자.
 - [ ] 평가 하네스(`api/scripts/run_extract_eval.py`)가 플래그 상태와 `assemble_card_plan.ko.txt` digest 를 기록하게 한다(W5 선행).
 - [ ] **entity_id 이름공간(R 과 합의).** 레거시 카드 `entity_id`(=`card_id`)와 사실 대상 `entity_id` 가 같은 숫자 공간이다. 지금은 W 가 충돌 시 공개를 거절한다(`build_knowledge_content` `InvalidContent`). R 계약·검증기에서 이름공간을 나누기 전에는 켜지 않는다(인계 §11·R 할 일 10-f).
-- [ ] **대상 분리 뒤 영구 DEFER.** 대상 E 에서 F 를 떼어내도 옛 occurrence 는 E 카드에 `LINKED` 로 남고 `card_facts` 는 더하기만 하므로, F 의 관련 카드로 E 카드가 계속 잡혀 F 가 영구 DEFER(EXISTING_CARD) 된다. 켜기 전에 처리 방식을 정하고 구현한다(W3b 설계 입력).
-- [ ] **작업 `card_count` 의미.** 켜진 매장의 `card_count` 는 "새 카드" 가 아니라 이 자료 occurrence 가 `LINKED` 로 이어진 서로 다른 카드 수다(같은 카드가 여러 자료에 겹쳐 세지고 재처리도 1 이상이라 SUCCEEDED). 켜기 전에 의미 또는 완료 알림 문구("새 카드 N장")를 고친다.
-- 알아둘 것: 꺼짐은 오늘과 같고, 이미 승인된 사실 카드는 플래그를 꺼도 계속 공개된다(데이터 롤백 아님). 사실 카드를 점주가 자유 편집하면 블록 없는 판 → RAW 공개로 돌아간다(W3b 전 알려진 한계).
+- [ ] **대상 분리 뒤 영구 DEFER.** 대상 E 에서 F 를 떼어내도 옛 occurrence 는 E 카드에 `LINKED` 로 남고 `card_facts` 는 더하기만 하므로, F 의 관련 카드로 E 카드가 계속 잡혀 F 가 영구 DEFER(EXISTING_CARD) 된다. 켜기 전에 처리 방식을 정하고 구현한다(W3b 설계 입력). **W3b 범위 밖(W3b 설계 D-14), 아직 안 했다.**
+- [ ] **작업 `card_count` 의미.** 켜진 매장의 `card_count` 는 "새 카드" 가 아니라 이 자료 occurrence 가 `LINKED` 로 이어진 서로 다른 카드 수다(같은 카드가 여러 자료에 겹쳐 세지고 재처리도 1 이상이라 SUCCEEDED). 켜기 전에 의미 또는 완료 알림 문구("새 카드 N장")를 고친다. **W3b 범위 밖(W3b 설계 D-14), 아직 안 했다.**
+- 알아둘 것: 꺼짐은 오늘과 같고, 이미 승인된 사실 카드는 플래그를 꺼도 계속 공개된다(데이터 롤백 아님). 사실 카드를 점주가 **자유 본문 PATCH** 로 고치면 블록 없는 판 → RAW 공개로 돌아가던 경로는 W3b 로 막았다(사실 블록 카드의 자유 본문 PATCH 는 409, 사실 편집으로만 고친다. 플래그 `w_fact_card_edit_enabled` 가 꺼져 있으면 사실 카드는 고칠 수 없다). **점주 답변 SUPPLEMENT/CONFLICT 승인 경로(`knowledge_apply`)는 아직 열려 있다** — 위 항목.
 
 ---
 

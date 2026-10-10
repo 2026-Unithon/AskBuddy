@@ -261,6 +261,22 @@ W3a 구현(브랜치 `w/w3a-fact-assembly`)을 R 이 확인해 주기를 요청�
 
 ---
 
+## 12. W3b 점주 사실 편집 (2026-10-09)
+
+W3b(브랜치 `w/w3b-card-review`)가 점주의 사실 단위 편집을 열었다. 플래그 `w_fact_card_edit_enabled` 기본 꺼짐. R 소유 파일과 `contracts/*` 는 고치지 않았다(사용자 결정 Q1 = A, 2026-10-09). R 이 확인해 주기를 요청한다.
+
+- 편집한 카드 판의 공개 모양: 카드 판 `change_source` 는 `OWNER_EDIT` 이지만 **사실 블록 카드**다(사실 블록 여부는 W3a 와 같이 `card_block_facts` 행, 즉 데이터로 가른다). 공개판에 `fact_revisions` 가 실리고 `entity_id`·`variant` 도 W3a 와 같다. 점주 **자유 본문 PATCH** 로 사실 카드가 RAW 로 공개되고 사실이 빠지던 경로(§11 알려진 한계, R 이 할 일 10-b)는 막았다(사실 블록 카드의 자유 본문 PATCH 는 409 `FACT_CARD_TEXT_EDIT_BLOCKED`). **점주 답변 SUPPLEMENT/CONFLICT 승인 경로(`api/app/learn/knowledge_apply.py`)는 아직 사실 카드에 블록 없는 판을 올린다** — 승인되면 그 카드는 RAW 로 공개되고 `entity_id` 가 카드 id 로 돌아가며 사실이 `fact_revisions` 에서 빠진다(10-b 와 같은 결과). W 가 W3a 켜기 전에 막을 일로 남겼다(`docs/dev/plan/W_NEXT_PLAN_20260928.md` W3a 켜기 전 점검). 레거시 RAW 카드는 그대로다.
+- 새 사실 판 종류: 고친 사실은 `OWNER_CORRECTION`(기존 판을 `supersedes`), 점주가 넣은 사실은 `OWNER_ADD`. 점주가 뺀 사실은 새 카드 판에서 참조만 빠지고 과거 판·과거 snapshot 은 그대로다.
+- 근거: 점주 편집·입력 사실의 근거는 파일 없는 새 자료 종류 `sources.source_type='OWNER_TEXT'` 의 occurrence 다(`locator` 는 `LINE n`, 점주가 쓴 글의 줄). `file_url`·`content_hash` 는 비어 있다. `FactProvenance` 는 파일 출처 모양(`source_id`+`occurrence_id`) 그대로라 **계약 변경이 없다.** (Q1 = B 였다면 계약·검증기 변경이 필요했을 것이다. 고르지 않았다.)
+- 과거 snapshot 불변: 편집·재승인 뒤에도 이미 공개된 snapshot 의 content/hash 는 바뀌지 않는다(실제 DB 시나리오 A3).
+- 재승인 전에는 공개판이 그대로다. 점주가 승인해야 새 판이 공개된다(A1). R 답변이 편집된 사실을 ANSWER 로 인용하는 것을 합성 매장에서 확인했다(A2: `hybrid_search`·`decide`·`save_answer`, 실제 R 화면·운영 데이터는 확인하지 않음).
+- 점주가 사실을 빼면 그 사실의 `fact_occurrences` 처분이 `EXCLUDED`(사유 `OWNER_REMOVED`)가 된다. 다른 카드 초안에 같은 사실이 있으면 그쪽으로 옮기고 `EXCLUDED` 로 두지 않는다.
+- OWNER_TEXT 자료는 작업(`ingest_jobs`)이 없다. `POST /ingest/process` 는 OWNER_TEXT 를 409 로 거절하게 고쳤다. `POST /ingest/jobs` 에는 OWNER_TEXT 전용 분기가 없고, OWNER_TEXT 자료는 만들 때부터 상태가 `DONE` 이라 기존 `SOURCE_NOT_READY`(409)로 거절된다. R 읽기 경로(`answer_storage.current_source_overlay`, `v2_router.citation_detail`)는 `source_availability` 만 읽고 파일 링크를 내지 않아 깨지지 않음을 읽어서 확인했다.
+
+R 이 할 일 목록(아래)에 11번을 더했다. 모두 `[ ]` 이며 R 확인 전에는 W 가 W3-4 를 완료로 표시하지 않는다.
+
+---
+
 ## R 이 할 일 (우선순위 순)
 
 1. ~~`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체~~ — 완료(PR #25) (1·2번).
@@ -281,7 +297,12 @@ W3a 구현(브랜치 `w/w3a-fact-assembly`)을 R 이 확인해 주기를 요청�
 10. **R 필수 검토 — 미완료 (W3-4).** W3a 사실 블록 공개판(§11)을 R 쪽이 받는지 확인해 결과를 이 문서나 R 기록에 남기고 W 에 알린다. 그 전에는 W 가 W3-4 를 완료로 표시하지 않는다.
     (a) 분할 카드(제목 ` 2/3`)는 R planner 의 카드 전체 제목 언급 매칭(`planner.decide`)에 걸리지 않는다. 카드 제목이 아니라 대상 이름·별칭으로 대상을 찾도록 해 달라.
     (b) 점주가 편집한 사실 카드 판(블록 없음)은 RAW 로 공개되고 `entity_id` 가 카드 id 로 바뀐다. 같은 카드의 `entity_id` 가 판에 따라 바뀔 때 R 의 캐시·명확화 문맥·일반 의미 승인 설정이 영향을 받는지 확인해 달라(W3b 전 알려진 한계).
+        W3b 뒤 상태(2026-10-10): 점주 **자유 본문 PATCH** 로 생기는 경로는 사실 블록 카드에서 막혔다(§12). 이 상황은 **레거시 RAW 카드**와 **점주 답변 SUPPLEMENT/CONFLICT 승인 판**(`knowledge_apply`, 사실 카드에도 블록 없는 판을 올림)으로 아직 생긴다. 확인 요청은 그대로다.
     (c) R 렌더러(`approved_renderer.render`)·색인(`documents()`)·인용 검증(`answer_storage`)이 사실 블록 snapshot(`fact_revisions`, 실제 `entity_id`, 채워진 `variant`, 파일 근거 `source_id`+`occurrence_id`)을 받는지 확인해 달라. 렌더러 머리줄과 블록 머리 줄의 규격 중복·규격 없음 표시도 정해 달라. D19 다규격 카드에서 CLARIFY 로 규격을 확정한 뒤 그 규격 블록만 인용하는지 포함한다.
     (d) 카톡 자료 근거의 MESSAGE locator 키가 `line`(`{"line": N}`)이다. 근거 패널·인용 표시가 이 키를 받는지 확인해 달라.
     (e) 과거 인용 재현: 사실 블록 카드의 과거 판에 대한 인용이 이후 재공개·새 판 뒤에도 같은 근거로 재현되는지 확인해 달라.
     (f) **계약 변경 요청 — entity_id 이름공간 분리(§11).** 레거시 카드 `entity_id`(=`card_id`)와 사실 대상 `entity_id` 가 같은 숫자 공간을 쓴다. W 는 지금 충돌 시 공개를 거절한다. 계약(`contracts/*`)·검증기(`contracts/validate.py`)에서 두 이름공간을 나누는 방식을 R 이 정해 달라. 정해질 때까지 W3a 플래그를 켜지 않는다.
+11. **W3b 점주 사실 편집 확인 (§12).** `[ ]`
+    (a) 인용·출처 표시에서 `source_type='OWNER_TEXT'` 를 "사장님 직접 입력" 으로 보이게 해 달라. 지금 v2 인용 상세·인용 칩 응답에는 `source_type` 이 없어 점주 직접 입력 근거가 일반 파일 자료(AVAILABLE)처럼 보이고 자료 제목 "카드 직접 입력 · …" 이 그대로 나온다. 깨지지는 않는 표시 문제이며 R 응답·화면 변경이 필요하다.
+    (b) 점주 편집 판(`OWNER_CORRECTION`·`OWNER_ADD` 사실이 든 사실 블록 카드)이 실린 snapshot 을 R 렌더러·색인·인용 검증이 받는지 확인해 달라(10번 W3-4 필수 검토와 함께).
+    (c) 점주 삭제로 생기는 `fact_occurrences` `EXCLUDED`(`OWNER_REMOVED`)가 R 쪽 계산에 영향이 없는지 확인해 달라.
