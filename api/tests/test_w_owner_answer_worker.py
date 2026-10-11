@@ -1,8 +1,8 @@
-"""점주 답변 반영 worker 의 결정·트랜잭션 경계를 검증한다 (W, Task 5).
+"""점주 답변 반영 worker 의 결정·트랜잭션 경계를 검증한다 (Phase A Task 6).
 
-R 인계 함수·관계 분석·publish_cards·DB 보조 함수는 patch 한다. 여기서 보는 것은
-**relation 별로 어떤 결과를 어느 트랜잭션에서 R 에 알리는가** 다. 실제 DB 는
-Task 7 통합 스크립트가 돈다.
+R 인계 함수·사실 수집(owner_text)·publish_cards·DB 보조 함수는 patch 한다. 여기서 보는 것은
+**이어진 카드 판정별로 어떤 결과를 어느 트랜잭션에서 R 에 알리는가** 다. 실제 DB 는
+verify_w_fact_only (b)·verify_w_publication_flow §9 가 돈다.
 """
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ from unittest.mock import AsyncMock, patch
 
 from app.cards import owner_answer_worker as worker
 from app.errors import ApiError
-from app.learn.knowledge_loop import KnowledgePlan
+from app.ingest.owner_text import AnswerCard
 from app.publish.approval import CardChange, PublishCardsResult
 
 STORE = 7
 MOD = "app.cards.owner_answer_worker"
+OT = "app.ingest.owner_text"
+SOURCE = 300
 CLAIM = dict(event_id="41", owner_answer_id="501", claim_token="tok", attempt=1, stale=False)
 
 
@@ -60,12 +62,15 @@ class FakePool:
             self.held -= 1
 
 
-def _plan(relation, *, target=None, auto_publish=False):
-    return KnowledgePlan(
-        relation_type=relation, target_card_id=target,
-        target_version_id=(target * 10 if target else None),
-        category_id=3, category_name="음료", proposed_title="질문", proposed_content="답",
-        reason="이유", auto_publish=auto_publish)
+def card(cid, *, draft, published=None, status="PENDING", reason=None):
+    return AnswerCard(card_id=cid, draft_version_id=draft, published_version_id=published,
+                      review_status=status, needs_review_reason=reason)
+
+
+NEW_A = card(90, draft=900)
+NEW_B = card(91, draft=910)
+LINKED = card(55, draft=550, published=550, status="APPROVED")
+CHANGED = card(55, draft=551, published=550, status="APPROVED", reason="NEW_FACTS")
 
 
 def _context(proposal=None):
@@ -85,6 +90,20 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             self.finished.append((result, conn.is_in_transaction(), list(self.log)))
             self.log.append(f"finish:{result.status}")
 
+        async def ensure(conn, store_id, **kw):
+            # 자료 보장은 트랜잭션 안에서만 부를 수 있다(실제 함수가 RuntimeError)
+            assert conn.is_in_transaction() and store_id == STORE
+            self.log.append("ensure")
+            return SOURCE, self.source_status
+
+        async def ingest(pool, **kw):
+            self.ingest_held = self.pool.held
+            self.log.append("ingest")
+            return self.fact_count
+
+        self.source_status = "PROCESSING"
+        self.fact_count = 2
+        self.ingest_held = None
         self.patches = [
             patch(f"{MOD}.claim_owner_event", AsyncMock(return_value=dict(CLAIM))),
             patch(f"{MOD}.heartbeat_owner_event", AsyncMock(return_value=True)),
@@ -92,32 +111,44 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             patch(f"{MOD}._load_context", AsyncMock(return_value=_context())),
             patch(f"{MOD}._insert_proposal",
                   AsyncMock(side_effect=lambda conn, **kw: dict(
-                      proposal_id=70, status=kw["status"], relation_type=kw["plan"].relation_type,
+                      proposal_id=70, status=kw["status"], relation_type=kw["relation"],
                       result_card_id=kw.get("result_card_id"),
                       result_version_id=kw.get("result_version_id")))),
             patch(f"{MOD}._linked_target", AsyncMock(return_value=(550, 12))),
             patch(f"{MOD}._set_proposal", AsyncMock()),
             patch(f"{MOD}._flag_target_review", AsyncMock()),
             patch(f"{MOD}._lock_publication", AsyncMock()),
-            patch(f"{MOD}._owner_answer_card", AsyncMock(return_value=None)),
-            patch(f"{MOD}.create_owner_answer_card", AsyncMock(return_value=(90, 900))),
-            patch(f"{MOD}.DbUsageSink", lambda pool: object()),
+            patch(f"{MOD}._card_text", AsyncMock(return_value=("카드 제목", "카드 본문", 4))),
+            patch(f"{MOD}.resolve_owner_answer_category", AsyncMock(return_value=8)),
+            patch(f"{OT}.ensure_owner_answer_source", side_effect=ensure),
+            patch(f"{OT}.ingest_owner_text", side_effect=ingest),
+            patch(f"{OT}.answer_cards", AsyncMock(return_value=[NEW_A])),
+            patch(f"{OT}.answer_fact_count", AsyncMock(side_effect=lambda *a, **k: self.fact_count)),
+            patch(f"{OT}.owner_answer_source", AsyncMock(return_value=SOURCE)),
         ]
         self.mocks = [p.start() for p in self.patches]
-        self.claim, self.heartbeat = self.mocks[0], self.mocks[1]
-        self.load, self.insert = self.mocks[3], self.mocks[4]
-        self.linked_target = self.mocks[5]
-        self.create = self.mocks[10]
+        (self.claim, self.heartbeat, _, self.load, self.insert, self.linked_target,
+         self.set_proposal, self.flag, _, self.card_text, self.resolve, self.ensure,
+         self.ingest, self.cards, _, self.source) = self.mocks
 
     def tearDown(self):
         for p in self.patches:
             p.stop()
 
-    def _plan_mock(self, plan):
-        return patch(f"{MOD}.build_knowledge_plan", AsyncMock(return_value=plan))
-
     async def _run(self):
         return await worker.process_next_owner_event(self.pool, store_id=STORE)
+
+    def _publish_ok(self, check=None):
+        async def publish(pool, **kw):
+            self.assertEqual(self.finished, [])     # hook 전에는 finish 가 없다
+            if check is not None:
+                check(kw)
+            conn = FakeConn(self.log)
+            async with conn.transaction():
+                self.log.append("publish_tx")
+                await kw["in_transaction"](conn, 300, 13)
+            return PublishCardsResult(status="PUBLISHED", snapshot_id=300, knowledge_revision=13)
+        return patch(f"{MOD}.publish_cards", side_effect=publish)
 
     # --- claim ---
     async def test_claim_none_returns_none(self):
@@ -130,51 +161,113 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._run(), "STALE")
         self.assertEqual(self.finished, [])
 
-    # --- relation 4종 ---
+    # --- 사실 수집 ---
+    async def test_collects_facts_through_owner_text_without_holding_connection(self):
+        self.cards.return_value = [LINKED]
+        self.assertEqual(await self._run(), "LINKED")
+        kw = self.ensure.call_args.kwargs
+        self.assertEqual((kw["owner_answer_id"], kw["actor_id"], kw["question"], kw["answer"]),
+                         (501, 20, "질문", "답"))
+        kw = self.ingest.call_args.kwargs
+        self.assertEqual((kw["store_id"], kw["source_id"], kw["question"], kw["answer"]),
+                         (STORE, SOURCE, "질문", "답"))
+        self.assertIsInstance(kw["run_tag"], int)
+        # 추출·조립(모델 호출) 중에는 풀 연결을 쥐지 않는다
+        self.assertEqual(self.ingest_held, 0)
+        self.assertLess(self.log.index("ensure"), self.log.index("ingest"))
+
+    async def test_done_source_skips_ingest(self):
+        self.source_status = "DONE"
+        self.cards.return_value = [LINKED]
+        self.assertEqual(await self._run(), "LINKED")
+        self.ingest.assert_not_called()
+        self.cards.assert_awaited()
+
+    async def test_relation_analysis_is_gone(self):
+        self.assertFalse(hasattr(worker, "build_knowledge_plan"))
+        self.assertFalse(hasattr(worker, "create_owner_answer_card"))
+        self.assertFalse(hasattr(worker, "_record_plan"))
+
+    # --- 판정별 결과 ---
     async def test_identical_current_card_is_linked(self):
-        with self._plan_mock(_plan("IDENTICAL", target=55)):
-            self.assertEqual(await self._run(), "LINKED")
+        self.cards.return_value = [LINKED]
+        self.assertEqual(await self._run(), "LINKED")
         result, in_tx, _ = self.finished[0]
         self.assertEqual((result.status, result.card_id, result.knowledge_revision),
                          ("LINKED", "55", "12"))
         self.assertTrue(in_tx)
-        kwargs = self.insert.await_args.kwargs
-        self.assertEqual((kwargs["status"], kwargs["result_card_id"], kwargs["result_version_id"]),
-                         ("LINKED", 55, 550))
+        kw = self.insert.await_args.kwargs
+        self.assertEqual((kw["status"], kw["relation"], kw["result_card_id"],
+                          kw["result_version_id"], kw["target_card_id"], kw["target_version_id"]),
+                         ("LINKED", "IDENTICAL", 55, 550, 55, 550))
+        self.assertEqual(kw["reason"], "OWNER_ANSWER_LINKED")
 
     async def test_identical_not_in_current_publication_demotes_to_review(self):
+        self.cards.return_value = [LINKED]
         self.linked_target.return_value = None
-        with self._plan_mock(_plan("IDENTICAL", target=55)):
-            self.assertEqual(await self._run(), "REVIEW")
+        self.assertEqual(await self._run(), "REVIEW")
         self.assertEqual(self.finished[0][0].status, "REVIEW")
         self.assertEqual(self.insert.await_args.kwargs["status"], "PENDING_REVIEW")
+        self.assertEqual(self.flag.await_args.kwargs,
+                         dict(store_id=STORE, card_id=55, relation="IDENTICAL"))
 
-    async def test_supplement_and_conflict_go_to_review(self):
-        for relation in ("SUPPLEMENT", "CONFLICT"):
-            self.finished.clear()
-            with self._plan_mock(_plan(relation, target=55)):
-                self.assertEqual(await self._run(), "REVIEW")
-            result, in_tx, _ = self.finished[0]
-            self.assertEqual(result.status, "REVIEW")
-            self.assertTrue(in_tx)
-            self.assertEqual(self.insert.await_args.kwargs["status"], "PENDING_REVIEW")
+    async def test_changed_published_card_is_supplement_review(self):
+        self.cards.return_value = [CHANGED, NEW_A]
+        self.assertEqual(await self._run(), "REVIEW")
+        result, in_tx, _ = self.finished[0]
+        self.assertEqual(result.status, "REVIEW")
+        self.assertTrue(in_tx)
+        kw = self.insert.await_args.kwargs
+        self.assertEqual((kw["status"], kw["relation"], kw["target_card_id"],
+                          kw["target_version_id"], kw["reason"]),
+                         ("PENDING_REVIEW", "SUPPLEMENT", 55, 550, "OWNER_ANSWER_REVIEW"))
+        # 제목·본문은 첫 카드의 초안 판, 카테고리는 그 카드의 것
+        self.assertEqual((kw["title"], kw["content"], kw["category_id"]),
+                         ("카드 제목", "카드 본문", 4))
+        self.assertEqual(self.card_text.await_args.kwargs["card"], CHANGED)
+        self.assertEqual([c.kwargs["card_id"] for c in self.flag.await_args_list], [55, 90])
+        self.assertTrue(all(c.kwargs["relation"] == "SUPPLEMENT"
+                            for c in self.flag.await_args_list))
 
-    async def test_new_publishes_and_finishes_only_inside_hook(self):
-        async def publish(pool, **kw):
-            self.assertEqual(self.finished, [])     # hook 전에는 finish 가 없다
-            self.assertEqual(kw["changes"], [CardChange(90, 900, 900)])
+    async def test_no_facts_goes_to_review_with_question_and_answer(self):
+        self.fact_count = 0
+        self.cards.return_value = []
+        with patch(f"{MOD}.publish_cards", AsyncMock()) as publish:
+            self.assertEqual(await self._run(), "REVIEW")
+        publish.assert_not_awaited()
+        kw = self.insert.await_args.kwargs
+        self.assertEqual((kw["status"], kw["relation"], kw["reason"], kw["title"],
+                          kw["content"], kw["category_id"], kw["target_card_id"]),
+                         ("PENDING_REVIEW", "NEW", "NO_FACTS", "질문", "답", 8, None))
+        self.assertEqual(self.resolve.await_args.kwargs, dict(store_id=STORE, category_id=None))
+        self.flag.assert_not_awaited()
+
+    async def test_facts_without_cards_is_pending_review(self):
+        self.cards.return_value = []
+        self.assertEqual(await self._run(), "REVIEW")
+        self.assertEqual(self.insert.await_args.kwargs["reason"], "FACTS_PENDING")
+
+    async def test_new_card_needing_review_goes_to_review(self):
+        self.cards.return_value = [card(90, draft=900, status="NEEDS_REVIEW",
+                                        reason="NO_PROVENANCE")]
+        with patch(f"{MOD}.publish_cards", AsyncMock()) as publish:
+            self.assertEqual(await self._run(), "REVIEW")
+        publish.assert_not_awaited()
+        kw = self.insert.await_args.kwargs
+        self.assertEqual((kw["relation"], kw["status"]), ("NEW", "PENDING_REVIEW"))
+
+    async def test_new_publishes_all_cards_and_finishes_only_inside_hook(self):
+        self.cards.return_value = [NEW_A, NEW_B]
+
+        def check(kw):
+            self.assertEqual(kw["changes"], [CardChange(90, 900, 900), CardChange(91, 910, 910)])
             self.assertEqual(kw["idempotency_key"], "owner-answer:501")
             self.assertEqual((kw["member_id"], kw["actor_user_id"]), (2, 20))
             self.assertEqual(kw["usage_context"].stage, "EMBED")
-            conn = FakeConn(self.log)
-            async with conn.transaction():
-                self.log.append("publish_tx")
-                await kw["in_transaction"](conn, 300, 13)
-            return PublishCardsResult(status="PUBLISHED", snapshot_id=300, knowledge_revision=13)
 
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards", side_effect=publish):
+        with self._publish_ok(check) as publish:
             self.assertEqual(await self._run(), "PUBLISHED")
+        publish.assert_awaited_once()
         self.assertEqual(len(self.finished), 1)
         result, in_tx, before = self.finished[0]
         self.assertEqual((result.status, result.card_id, result.knowledge_revision),
@@ -182,86 +275,114 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(in_tx)
         self.assertIn("publish_tx", before)
         self.assertEqual(self.insert.await_args.kwargs["status"], "ANALYZED")
-        self.create.assert_awaited_once()
-
-    async def test_new_without_auto_publish_goes_to_review(self):
-        with self._plan_mock(_plan("NEW", auto_publish=False)), \
-                patch(f"{MOD}.publish_cards", AsyncMock()) as publish:
-            self.assertEqual(await self._run(), "REVIEW")
-        publish.assert_not_awaited()
-        self.create.assert_not_awaited()
+        self.assertEqual(self.set_proposal.await_args.kwargs,
+                         dict(store_id=STORE, proposal_id=70, status="PUBLISHED",
+                              result_card_id=90, result_version_id=900))
 
     async def test_no_provenance_becomes_review(self):
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards",
-                      AsyncMock(return_value=PublishCardsResult(status="NO_PROVENANCE"))):
+        with patch(f"{MOD}.publish_cards",
+                   AsyncMock(return_value=PublishCardsResult(status="NO_PROVENANCE"))):
             self.assertEqual(await self._run(), "REVIEW")
         result, in_tx, _ = self.finished[0]
         self.assertEqual(result.status, "REVIEW")
         self.assertTrue(in_tx)
+        self.assertEqual(self.set_proposal.await_args.kwargs["status"], "PENDING_REVIEW")
 
     async def test_stale_publish_is_retryable_failure(self):
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards",
-                      AsyncMock(return_value=PublishCardsResult(status="STALE"))):
+        with patch(f"{MOD}.publish_cards",
+                   AsyncMock(return_value=PublishCardsResult(status="STALE"))):
             self.assertEqual(await self._run(), "FAILED")
         result = self.finished[0][0]
         self.assertEqual((result.status, result.retryable, result.error.code),
                          ("FAILED", True, "STALE_PUBLICATION"))
 
     async def test_invalid_content_publish_is_non_retryable_failure(self):
-        """빈·과대 답변 원문은 색인 장애가 아니라 되풀이해도 같은 실패다(final fix #3)."""
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards",
-                      AsyncMock(return_value=PublishCardsResult(status="INVALID_CONTENT"))):
+        with patch(f"{MOD}.publish_cards",
+                   AsyncMock(return_value=PublishCardsResult(status="INVALID_CONTENT"))):
             self.assertEqual(await self._run(), "FAILED")
         result = self.finished[0][0]
         self.assertEqual((result.status, result.retryable, result.error.code),
                          ("FAILED", False, "INVALID_CONTRACT"))
 
-    async def test_existing_analyzed_proposal_reuses_card(self):
+    # --- 재시도 ---
+    async def test_existing_analyzed_proposal_rereads_cards_and_publishes(self):
         self.load.return_value = _context(dict(proposal_id=70, status="ANALYZED",
                                                relation_type="NEW", result_card_id=None,
                                                result_version_id=None))
-        self.mocks[9].return_value = (90, 900)
-        plan = AsyncMock()
-        with patch(f"{MOD}.build_knowledge_plan", plan), \
-                patch(f"{MOD}.publish_cards",
-                      AsyncMock(return_value=PublishCardsResult(
-                          status="ALREADY_APPLIED", snapshot_id=300, knowledge_revision=13))):
+        with patch(f"{MOD}.publish_cards",
+                   AsyncMock(return_value=PublishCardsResult(
+                       status="ALREADY_APPLIED", snapshot_id=300,
+                       knowledge_revision=13))) as publish:
             self.assertEqual(await self._run(), "PUBLISHED")
-        plan.assert_not_awaited()
-        self.create.assert_not_awaited()
+        self.ensure.assert_not_called()
+        self.ingest.assert_not_called()
+        self.insert.assert_not_awaited()
+        self.assertEqual(self.source.await_args.kwargs, dict(owner_answer_id=501))
+        self.assertEqual(publish.await_args.kwargs["changes"], [CardChange(90, 900, 900)])
         self.assertEqual(self.finished[0][0].status, "PUBLISHED")
 
-    async def test_existing_linked_proposal_finishes_without_plan(self):
+    async def test_existing_analyzed_proposal_now_needing_review_reports_review(self):
+        self.load.return_value = _context(dict(proposal_id=70, status="ANALYZED",
+                                               relation_type="NEW", result_card_id=None,
+                                               result_version_id=None))
+        self.cards.return_value = [card(90, draft=900, status="NEEDS_REVIEW",
+                                        reason="NO_PROVENANCE")]
+        with patch(f"{MOD}.publish_cards", AsyncMock()) as publish, \
+                patch(f"{MOD}._retarget_proposal", AsyncMock()) as retarget:
+            self.assertEqual(await self._run(), "REVIEW")
+        publish.assert_not_awaited()
+        # 상태만이 아니라 관계·대상·사유도 새 판정으로 맞춘다(Task 6 minor 1)
+        outcome = retarget.await_args.kwargs["outcome"]
+        self.assertEqual((retarget.await_args.kwargs["proposal_id"], outcome.kind,
+                          outcome.relation), (70, "REVIEW", "NEW"))
+        self.set_proposal.assert_not_awaited()
+        self.assertTrue(self.finished[0][1])
+
+    async def test_resume_demoted_to_supplement_retargets_proposal(self):
+        self.load.return_value = _context(dict(proposal_id=70, status="ANALYZED",
+                                               relation_type="NEW", result_card_id=None,
+                                               result_version_id=None))
+        self.cards.return_value = [CHANGED]
+        with patch(f"{MOD}.publish_cards", AsyncMock()), \
+                patch(f"{MOD}._retarget_proposal", AsyncMock()) as retarget:
+            self.assertEqual(await self._run(), "REVIEW")
+        outcome = retarget.await_args.kwargs["outcome"]
+        self.assertEqual((outcome.relation, outcome.target.card_id), ("SUPPLEMENT", 55))
+
+    async def test_existing_analyzed_proposal_without_source_fails(self):
+        self.load.return_value = _context(dict(proposal_id=70, status="ANALYZED",
+                                               relation_type="NEW", result_card_id=None,
+                                               result_version_id=None))
+        self.source.return_value = None
+        self.assertEqual(await self._run(), "FAILED")
+        self.assertEqual(self.finished[0][0].error.code, "INVALID_REFERENCE")
+
+    async def test_existing_linked_proposal_finishes_without_collecting(self):
         self.load.return_value = _context(dict(proposal_id=70, status="LINKED",
                                                relation_type="IDENTICAL", result_card_id=55,
                                                result_version_id=550))
-        plan = AsyncMock()
-        with patch(f"{MOD}.build_knowledge_plan", plan):
-            self.assertEqual(await self._run(), "LINKED")
-        plan.assert_not_awaited()
+        self.assertEqual(await self._run(), "LINKED")
+        self.ensure.assert_not_called()
+        self.ingest.assert_not_called()
         self.assertEqual(self.finished[0][0].card_id, "55")
 
     # --- 실패 ---
     async def test_exception_finishes_failed_in_separate_tx(self):
-        with patch(f"{MOD}.build_knowledge_plan", AsyncMock(side_effect=RuntimeError("x"))):
-            self.assertEqual(await self._run(), "FAILED")
+        self.ingest.side_effect = RuntimeError("x")
+        self.assertEqual(await self._run(), "FAILED")
         result, in_tx, _ = self.finished[0]
         self.assertEqual((result.status, result.error.code), ("FAILED", "INTERNAL_ERROR"))
         self.assertFalse(result.retryable)
-
         self.assertTrue(in_tx)
 
-    async def test_missing_candidate_index_is_retryable_failure_not_new(self):
-        with patch(f"{MOD}.build_knowledge_plan", AsyncMock(side_effect=ApiError(
-                503, 'INDEX_UNAVAILABLE', 'missing active index', retryable=True))):
-            self.assertEqual(await self._run(), 'FAILED')
+    async def test_api_error_during_ingest_keeps_its_retryable_code(self):
+        self.ingest.side_effect = ApiError(503, "INDEX_UNAVAILABLE", "missing active index",
+                                           retryable=True)
+        self.assertEqual(await self._run(), "FAILED")
         result = self.finished[0][0]
-        self.assertEqual(result.error.code, 'INDEX_UNAVAILABLE')
+        self.assertEqual(result.error.code, "INDEX_UNAVAILABLE")
         self.assertTrue(result.retryable)
-        self.create.assert_not_awaited()
+        self.insert.assert_not_awaited()
 
     async def test_hook_failure_rolls_back_publish_then_finishes_failed(self):
         async def finish(conn, *, store_id, event_id, claim_token, result):
@@ -275,8 +396,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                 await kw["in_transaction"](conn, 300, 13)
             return PublishCardsResult(status="PUBLISHED", snapshot_id=300, knowledge_revision=13)
 
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards", side_effect=publish), \
+        with patch(f"{MOD}.publish_cards", side_effect=publish), \
                 patch(f"{MOD}.finish_owner_event", side_effect=finish):
             self.assertEqual(await self._run(), "FAILED")
         self.assertIn("tx_rollback", self.log)
@@ -296,8 +416,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                 await kw["in_transaction"](conn, 300, 13)
             return PublishCardsResult(status="PUBLISHED", snapshot_id=300, knowledge_revision=13)
 
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards", side_effect=publish):
+        with patch(f"{MOD}.publish_cards", side_effect=publish):
             self.assertEqual(await self._run(), "PUBLISHED")
 
     async def test_new_publish_lease_lost_after_prepare_stops_without_finish(self):
@@ -308,52 +427,61 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                 return PublishCardsResult(status="LEASE_LOST")
             raise AssertionError("after_prepare 가 False 를 돌려줘야 한다")
 
-        with self._plan_mock(_plan("NEW", auto_publish=True)), \
-                patch(f"{MOD}.publish_cards", side_effect=publish):
+        with patch(f"{MOD}.publish_cards", side_effect=publish):
             self.assertEqual(await self._run(), "FAILED")
         # 다른 worker 몫이다. FAILED 보고도 하지 않는다
         self.assertEqual(self.finished, [])
 
-    async def test_relation_analysis_does_not_hold_pool_connection(self):
-        """관계 분석(모델 호출)은 ShortSession 으로 받아 호출 중 연결을 쥐지 않는다."""
-        from app.db_session import ShortSession
-        seen = {}
-
-        async def plan(db, store_id, question, answer, **kw):
-            seen["db"] = db
-            seen["held"] = self.pool.held
-            return _plan("SUPPLEMENT", target=55)
-
-        with patch(f"{MOD}.build_knowledge_plan", side_effect=plan):
-            self.assertEqual(await self._run(), "REVIEW")
-        self.assertIsInstance(seen["db"], ShortSession)
-        self.assertIs(seen["db"].pool, self.pool)
-        self.assertEqual(seen["held"], 0)
-
     async def test_heartbeat_lost_stops_without_finish(self):
         self.heartbeat.return_value = False
-        plan = AsyncMock()
-        with patch(f"{MOD}.build_knowledge_plan", plan):
-            self.assertEqual(await self._run(), "FAILED")
-        plan.assert_not_awaited()
+        self.assertEqual(await self._run(), "FAILED")
+        self.ensure.assert_not_called()
+        self.ingest.assert_not_called()
+        self.assertEqual(self.finished, [])
+
+    async def test_heartbeat_lost_after_ingest_stops_without_recording(self):
+        beats = iter([True, True, False])
+        self.heartbeat.side_effect = lambda *a, **k: next(beats)
+        self.assertEqual(await self._run(), "FAILED")
+        self.ingest.assert_called_once()
+        self.insert.assert_not_awaited()
         self.assertEqual(self.finished, [])
 
     async def test_failed_finish_error_is_logged_not_raised(self):
         async def finish(conn, **kw):
             raise ApiError(409, "IDEMPOTENCY_CONFLICT", "lease lost")
 
-        with patch(f"{MOD}.build_knowledge_plan", AsyncMock(side_effect=RuntimeError("x"))), \
-                patch(f"{MOD}.finish_owner_event", side_effect=finish):
+        self.ingest.side_effect = RuntimeError("x")
+        with patch(f"{MOD}.finish_owner_event", side_effect=finish):
             self.assertEqual(await self._run(), "FAILED")
 
     async def test_missing_owner_membership_is_non_retryable_failure(self):
         ctx = _context()
         ctx["owner"] = None
         self.load.return_value = ctx
-        with self._plan_mock(_plan("NEW", auto_publish=True)):
-            self.assertEqual(await self._run(), "FAILED")
+        self.assertEqual(await self._run(), "FAILED")
         result = self.finished[0][0]
         self.assertEqual((result.error.code, result.retryable), ("NOT_FOUND", False))
+        self.ensure.assert_not_called()
+
+
+class FlagTargetReviewSqlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_does_not_overwrite_safety_reasons(self):
+        """NO_PROVENANCE·FACT_CONFLICT_OPEN·FALLBACK:* 는 덮지 않는다 — 사유 없음·NEW_FACTS 만."""
+
+        class Db:
+            calls = []
+
+            async def execute(self, sql, *args):
+                Db.calls.append((sql, args))
+
+        await worker._flag_target_review(Db(), store_id=STORE, card_id=55, relation="SUPPLEMENT")
+        sql, args = Db.calls[0]
+        self.assertIn("needs_review_reason is null or needs_review_reason = $4", sql)
+        self.assertEqual(args, (STORE, 55, "OWNER_ANSWER_SUPPLEMENT", "NEW_FACTS"))
+        Db.calls.clear()
+        await worker._flag_target_review(Db(), store_id=STORE, card_id=None, relation="NEW")
+        self.assertEqual(Db.calls, [])
 
 
 class LoopTests(unittest.IsolatedAsyncioTestCase):
@@ -457,32 +585,20 @@ class SetProposalSqlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(uses), {"$3::varchar"})
 
 
-class CreateOwnerAnswerCardTests(unittest.IsolatedAsyncioTestCase):
-    async def test_creates_draft_without_publishing(self):
-        from app.learn.knowledge_apply import create_owner_answer_card
-
+class RetargetProposalSqlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retarget_updates_relation_target_reason_in_store(self):
         class Db:
-            def __init__(self):
-                self.sql = []
-                self.values = iter([3, 90, 900])   # 카테고리, card_id, draft_version_id
-
-            async def fetchval(self, sql, *args):
-                self.sql.append(sql)
-                return next(self.values)
+            calls = []
 
             async def execute(self, sql, *args):
-                self.sql.append(sql)
+                Db.calls.append((sql, args))
 
-        db = Db()
-        self.assertEqual(await create_owner_answer_card(
-            db, store_id=STORE, category_id=3, title="t", content="c",
-            answer_id=501, actor_id=20), (90, 900))
-        joined = "\n".join(db.sql)
-        self.assertIn("false, 'AUTOMATIC'", joined)
-        self.assertNotIn("is_verified = true", joined)
-        self.assertNotIn("published_version_id", joined)
-        self.assertIn("change_source = 'OWNER_ANSWER'", joined)
-        self.assertIn("update owner_answers set card_id", joined)
+        outcome = worker.AnswerOutcome("REVIEW", "SUPPLEMENT", (CHANGED,), CHANGED)
+        await worker._retarget_proposal(Db(), store_id=STORE, proposal_id=70, outcome=outcome)
+        sql, args = Db.calls[0]
+        self.assertIn("status = 'PENDING_REVIEW'", sql)
+        self.assertIn("where store_id = $1 and proposal_id = $2", sql)
+        self.assertEqual(args, (STORE, 70, "SUPPLEMENT", 55, 550, "OWNER_ANSWER_REVIEW"))
 
 
 class SqlConn(FakeConn):
@@ -528,11 +644,11 @@ class LinkedPreconditionTests(unittest.IsolatedAsyncioTestCase):
 
         async def insert(conn, **kw):
             self.log.append(f"insert:{kw['status']}")
-            return dict(proposal_id=70, status=kw["status"], relation_type="IDENTICAL",
+            return dict(proposal_id=70, status=kw["status"], relation_type=kw["relation"],
                         result_card_id=kw.get("result_card_id"),
                         result_version_id=kw.get("result_version_id"))
 
-        self.plan = AsyncMock(return_value=_plan("IDENTICAL", target=55))
+        self.cards = AsyncMock(return_value=[LINKED])
         self.set_proposal = AsyncMock()
         self.patches = [
             patch(f"{MOD}.claim_owner_event", AsyncMock(return_value=dict(CLAIM))),
@@ -542,9 +658,11 @@ class LinkedPreconditionTests(unittest.IsolatedAsyncioTestCase):
             patch(f"{MOD}._insert_proposal", side_effect=insert),
             patch(f"{MOD}._set_proposal", self.set_proposal),
             patch(f"{MOD}._flag_target_review", AsyncMock()),
+            patch(f"{MOD}._card_text", AsyncMock(return_value=("t", "c", 4))),
             patch(f"{MOD}.current_manifest", AsyncMock(return_value={55: 550})),
-            patch(f"{MOD}.build_knowledge_plan", self.plan),
-            patch(f"{MOD}.DbUsageSink", lambda pool: object()),
+            patch(f"{OT}.ensure_owner_answer_source", AsyncMock(return_value=(SOURCE, "DONE"))),
+            patch(f"{OT}.answer_cards", self.cards),
+            patch(f"{OT}.answer_fact_count", AsyncMock(return_value=1)),
         ]
         for p in self.patches:
             p.start()
@@ -568,10 +686,8 @@ class LinkedPreconditionTests(unittest.IsolatedAsyncioTestCase):
                        None):
             self.log.clear()
             self.finished.clear()
-            self.plan.reset_mock()
             self.assertEqual(await self._run(broken), "REVIEW", broken)
             self.assertEqual([r.status for r in self.finished], ["REVIEW"])
-            self.assertEqual(self.plan.await_count, 1)
             self.assertIn("insert:PENDING_REVIEW", self.log)
             self.assertLess(self.log.index("lock_publication"),
                             self.log.index("insert:PENDING_REVIEW"))
@@ -581,7 +697,7 @@ class LinkedPreconditionTests(unittest.IsolatedAsyncioTestCase):
                 proposal_id=70, status="LINKED", relation_type="IDENTICAL",
                 result_card_id=55, result_version_id=550)))):
             self.assertEqual(await self._run(dict(APPROVED, review_status="PENDING")), "REVIEW")
-        self.plan.assert_not_awaited()
+        self.cards.assert_not_awaited()
         self.assertEqual([r.status for r in self.finished], ["REVIEW"])
         self.assertEqual(self.set_proposal.await_args.kwargs["status"], "PENDING_REVIEW")
 

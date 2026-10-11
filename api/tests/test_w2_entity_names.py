@@ -99,12 +99,6 @@ def test_candidate_reason():
     assert candidate_reason("음료z", "음료y") == "EDIT1"
 
 
-def test_config_flags_default_off():
+def test_candidate_max_default():
     s = Settings(_env_file=None)
-    assert s.w_entity_revision_enabled is False
     assert s.w_entity_candidate_max == 5
-    assert s.w_upload_proposals_enabled is False
-    with pytest.raises(ValueError):
-        Settings(_env_file=None, w_upload_proposals_enabled=True)
-    ok = Settings(_env_file=None, w_upload_proposals_enabled=True, w_entity_revision_enabled=True)
-    assert ok.w_upload_proposals_enabled is True

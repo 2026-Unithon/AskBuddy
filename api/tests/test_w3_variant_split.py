@@ -1,8 +1,7 @@
 """W3-0 §3-1 — HOT/ICE 가 함께 적힌 사실을 원장에서 규격별 두 사실로 나눈다.
 
-순수 함수와 파이프라인 연결(_persist_ledger·_persist)을 본다. 설정은 필드가 몇 개뿐인
-NS 로 patch 한다(F18). 모델·DB 는 부르지 않는다. 실제 DB 동작은
-scripts/verify_w3_flag_readiness.py 의 T2·T8 이 본다.
+순수 함수와 파이프라인 연결(_persist_ledger)을 본다. 설정은 필드가 몇 개뿐인
+NS 로 patch 한다(F18). 모델·DB 는 부르지 않는다.
 """
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
@@ -11,8 +10,7 @@ import pytest
 
 from app.ingest import fact_ledger, pipeline, variant_split
 from app.ingest.entity_names import strip_temperature
-from app.ingest.schemas import (ExtractedCard, ExtractedFact, ExtractionResult,
-                                LocatedAssertion, LocatedEvidence)
+from app.ingest.schemas import LocatedAssertion, LocatedEvidence
 
 
 def _a(ref, *, variant="HOT/ICE", requires=(), value="2"):
@@ -121,16 +119,8 @@ async def _ledger(settings, assertions, ids):
 
 
 @pytest.mark.asyncio
-async def test_persist_ledger_flag_off_keeps_multi_variant_row():
-    rows, occ, out = await _ledger(_settings(w_entity_revision_enabled=False), [_a("f1")], [70])
-    assert [(r["local_ref"], r["variant"]) for r in rows] == [("f1", "HOT/ICE")]
-    assert out == {"f1": 70} and len(occ) == 1
-
-
-@pytest.mark.asyncio
-async def test_persist_ledger_flag_on_splits_rows_and_occurrences():
-    rows, occ, out = await _ledger(_settings(w_entity_revision_enabled=True), [_a("f1")],
-                                   [70, 71])
+async def test_persist_ledger_splits_rows_and_occurrences():
+    rows, occ, out = await _ledger(_settings(), [_a("f1")], [70, 71])
     assert [(r["local_ref"], r["variant"]) for r in rows] == [("f1~HOT", "HOT"),
                                                               ("f1~ICE", "ICE")]
     assert out == {"f1~HOT": 70, "f1~ICE": 71}
@@ -141,35 +131,11 @@ async def test_persist_ledger_flag_on_splits_rows_and_occurrences():
 
 
 @pytest.mark.asyncio
-async def test_persist_ledger_flag_on_without_multi_is_identical_to_off():
-    def items():
-        return [_a("f1", variant="HOT"), _a("f2", variant="", requires=["f1"])]
-    off = await _ledger(_settings(w_entity_revision_enabled=False), items(), [70, 71])
-    on = await _ledger(_settings(w_entity_revision_enabled=True), items(), [70, 71])
-    assert on == off
-
-
-@pytest.mark.asyncio
-async def test_persist_links_card_ref_to_both_split_facts():
-    conn = NS(fetchval=AsyncMock(return_value="SCAN"))
-    link = AsyncMock()
-    state = AsyncMock()
-    card = ExtractedCard(category_name="기타", title="음료Z", content="에스프레소 2샷",
-                         confidence=.9, facts=[ExtractedFact(
-                             object_name="음료Z", attribute="에스프레소", value="2",
-                             confidence=.9, ref="f1")])
-    with patch.object(pipeline.repo, "insert_card", AsyncMock(return_value=9)), \
-         patch.object(pipeline.repo, "insert_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "link_card_facts", link), \
-         patch.object(pipeline.repo, "insert_card_evidence", AsyncMock()), \
-         patch.object(pipeline.repo, "set_assembly_state", state), \
-         patch("app.config.get_settings", return_value=_settings()):
-        await pipeline._persist(conn, 3, 5, {"기타": 1}, ExtractionResult(cards=[card]),
-                                job_id=None, category_version=1,
-                                ledger_ids={"f1~HOT": 70, "f1~ICE": 71, "f2": 72})
-    assert link.await_args.args == (conn, 3, 9, [70, 71])
-    assert [c.args for c in state.await_args_list] == [
-        (conn, 3, [70, 71], "LINKED"), (conn, 3, [72], "DROPPED")]
+async def test_persist_ledger_without_multi_variant_keeps_rows():
+    rows, occ, out = await _ledger(
+        _settings(), [_a("f1", variant="HOT"), _a("f2", variant="", requires=["f1"])], [70, 71])
+    assert [(r["local_ref"], r["variant"]) for r in rows] == [("f1", "HOT"), ("f2", None)]
+    assert out == {"f1": 70, "f2": 71} and len(occ) == 2
 
 
 @pytest.mark.asyncio
@@ -177,8 +143,8 @@ async def test_persist_ledger_rerun_under_retry_is_idempotent_and_keeps_input():
     """retry_io 가 같은 입력으로 _persist_ledger 를 다시 돌려도 같은 행이고 입력은 그대로다."""
     items = [_a("f1"), _a("f2", variant="HOT", requires=["f1"])]
     snapshot = [a.model_dump() for a in items]
-    first = await _ledger(_settings(w_entity_revision_enabled=True), items, [70, 71, 72])
-    second = await _ledger(_settings(w_entity_revision_enabled=True), items, [70, 71, 72])
+    first = await _ledger(_settings(), items, [70, 71, 72])
+    second = await _ledger(_settings(), items, [70, 71, 72])
     assert first == second
     assert [a.model_dump() for a in items] == snapshot
     assert items[0].check_flags == [] or all(

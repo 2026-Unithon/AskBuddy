@@ -352,18 +352,17 @@ def test_view_blocks_variant_and_editable():
     pinned = (PinnedFact(f1, "b1", "QUANTITIES", 1), PinnedFact(f2, "b1", "QUANTITIES", 2))
     state = _stub_state(pinned=pinned,
                         blocks=(("b1", "QUANTITIES", 1), ("raw1", "RAW", 2)))
-    view = build_facts_view(state, {}, {}, flag_on=True)
+    view = build_facts_view(state, {}, {})
     assert [b.kind for b in view.blocks] == ["QUANTITIES", "RAW"]
     assert view.blocks[0].variant.temperature == "ICE"  # 첫 사실의 규격
     assert view.blocks[1].facts == [] and view.blocks[1].variant.temperature is None
     assert view.editable is True and view.version_id == 60 and view.entity_name == "음료Z"
-    assert build_facts_view(state, {}, {}, flag_on=False).editable is False
     excluded = _stub_state(pinned=pinned, review_status="EXCLUDED",
                            blocks=(("b1", "QUANTITIES", 1),))
-    assert build_facts_view(excluded, {}, {}, flag_on=True).editable is False
+    assert build_facts_view(excluded, {}, {}).editable is False
     mixed = _stub_state(pinned=pinned, entity_problem="MIXED_ENTITY", entity_id=None,
                         blocks=(("b1", "QUANTITIES", 1),))
-    v = build_facts_view(mixed, {}, {}, flag_on=True)
+    v = build_facts_view(mixed, {}, {})
     assert v.editable is False and v.entity_problem == "MIXED_ENTITY"
 
 
@@ -372,6 +371,6 @@ def test_view_applies_head_edit_block_per_fact():
     f1 = _fact(1, fid=11)
     state = _stub_state(pinned=(PinnedFact(f1, "b1", "QUANTITIES", 1),))
     heads = {11: repo.HeadInfo(11, 1, 5, 9, None, "CHANGED_ELSEWHERE")}
-    view = build_facts_view(state, {}, heads, flag_on=True)
+    view = build_facts_view(state, {}, heads)
     assert view.blocks[0].facts[0].edit_block == "CHANGED_ELSEWHERE"
     assert view.editable is True  # 줄 단위 막힘은 editable 을 끄지 않는다

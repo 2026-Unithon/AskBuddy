@@ -491,9 +491,8 @@ export type CardDetailDto = {
     created_at: string;
   }>;
   updated_at: string;
-  // W3b: 초안 판에 블록 사실이 있으면 사실 카드. 편집 플래그는 서버 설정 그대로
+  // W3b: 초안 판에 블록 사실이 있으면 사실 카드
   fact_card: boolean;
-  fact_edit_enabled: boolean;
 };
 
 export type CardFilters = {
@@ -528,14 +527,6 @@ export type CardMutationResult = {
   updated_at: string;
   undo_until: string | null;
 };
-
-export async function updateProductCardDraft(cardId: number, title: string, content: string, expectedVersionId: number, token: string) {
-  return fetchJson<CardMutationResult>(`/cards/${cardId}/draft`, {
-    method: "PATCH",
-    headers: authHeader(token),
-    body: JSON.stringify({ title, content, expected_version_id: expectedVersionId }),
-  });
-}
 
 export async function mutateProductCard(cardId: number, action: "approve" | "exclude" | "restore", token: string) {
   return fetchJson<CardMutationResult>(`/cards/${cardId}/${action}`, {

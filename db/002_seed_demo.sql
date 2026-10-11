@@ -88,42 +88,11 @@ join (values
   ('마감 업무',   '정산 및 시건',       3)
 ) as v(stage_nm, nm, ord) on v.stage_nm = g.stage_name;
 
--- 8. 지식카드 3건 (하드코딩 — M1 프론트 개발용) ------------------------
-insert into knowledge_cards (store_id, category_id, title, content, confidence, is_verified)
-select s.store_id, c.category_id, v.title, v.content, v.conf, true
-from stores s
-join (values
-  ('재고정리', '우유 보관 위치',
-   '우유는 언더카운터 냉장고 2단 왼쪽 칸에 보관합니다. 오픈 전 유통기한을 반드시 확인하세요.', 87.00),
-  ('재고정리', '시럽·소스류 위치',
-   '시럽과 소스류는 에스프레소 머신 오른쪽 선반, 싱크대 위 첫 번째 칸에 있습니다.', 82.00),
-  ('음료제작', '아이스 아메리카노 레시피',
-   '아이스 아메리카노는 샷 2개가 기본입니다. 얼음은 컵의 8부까지 채웁니다.', 91.00)
-) as v(cat, title, content, conf) on true
-join task_categories c on c.store_id = s.store_id and c.category_name = v.cat
-where s.store_slug = 'demo-cafe';
+-- 8. 지식카드·카드 연결·초기 진행도는 심지 않는다 -----------------------
+-- 데모 카드는 자료 업로드(fact-only 경로)로 만든다. 카드 0장에서 시작하므로
+-- 첫 직원 질문은 근거 없음으로 점주에게 이관된다.
 
--- 9. 체크리스트 ↔ 카드 연결 -------------------------------------------
-update roadmap_items i
-set card_id = c.card_id
-from knowledge_cards c
-join stores s on s.store_id = c.store_id and s.store_slug = 'demo-cafe'
-where i.item_name = '식자재 보관 위치' and c.title = '우유 보관 위치';
-
--- 10. 초기 진행도 (박지호: 2단계까지 완료) -----------------------------
-insert into learning_progress (member_id, item_id, status, completed_at)
-select m.member_id, i.item_id,
-       case when g.stage_order = 1 then 'DONE'
-            when g.stage_order = 2 then 'IN_PROGRESS'
-            else 'LOCKED' end,
-       case when g.stage_order = 1 then now() else null end
-from store_members m
-join users u on u.user_id = m.user_id and u.name = '박지호'
-join stores s on s.store_id = m.store_id and s.store_slug = 'demo-cafe'
-join roadmap_stages g on g.store_id = s.store_id
-join roadmap_items i on i.stage_id = g.stage_id;
-
--- 11. 대기 질문 2건 (대시보드 개발용) ----------------------------------
+-- 9. 대기 질문 2건 (대시보드 개발용) ----------------------------------
 insert into pending_questions (store_id, member_id, question_text, miss_reason, status)
 select s.store_id, m.member_id, v.q, v.reason, 'WAITING'
 from stores s
@@ -137,7 +106,7 @@ where s.store_slug = 'demo-cafe';
 -- =====================================================================
 -- 검증 쿼리
 --   select count(*) from roadmap_items;      -- 16
---   select count(*) from knowledge_cards;    -- 3
+--   select count(*) from knowledge_cards;    -- 0
 --   select code from invite_codes;           -- demoInviteToken0000001
 --   select store_id from stores where store_slug='demo-cafe';
 -- 주의: card_embeddings 는 시드에 없다. 워커가 임베딩을 채워야 검색이 동작한다.

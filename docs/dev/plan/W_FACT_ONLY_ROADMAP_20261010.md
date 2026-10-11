@@ -33,7 +33,7 @@
 | 순서 | 단계 | 한 줄 목표 | 설계 | 상태 |
 |---|---|---|---|---|
 | 0 | **Phase 0** 외부 모델 관찰 | 지시문 30개(로직 × 형식) × 4모델(Opus·Sonnet·Sol·Luna)을 실행기가 격리 환경에서 자동 실행(원본은 사용자가 넣음). A 이전에 시작, A~C 와 병행 가능 | `docs/dev/templates/extraction_observation/README.md`, 결과 폴더 `추출결과/관찰/README.md` | 준비 완료(지시문·폴더 2026-10-10). **사용자 실행 대기** |
-| 1 | **Phase A** 레거시 제거 | RAW 를 만드는 W 경로 삭제, W 플래그 제거, 점주 답변→사실, 공개 카드 대상 새 사실→새 초안, 1회 삭제 migration | `W_PHASE_A_FACT_ONLY_DESIGN_20261010.md` | 설계 완료, **구현 계획부터** |
+| 1 | **Phase A** 레거시 제거 | RAW 를 만드는 W 경로 삭제, W 플래그 제거, 점주 답변→사실, 공개 카드 대상 새 사실→새 초안, 1회 삭제 migration | `W_PHASE_A_FACT_ONLY_DESIGN_20261010.md` | 구현 완료(브랜치 `w/phase-a-fact-only`), 배포 대기. 절차서 `FACT_ONLY_ROLLOUT.md` |
 | 2 | **Phase B** 분류기·정규화기·체크리스트 | 입구 2곳(업로드·점주 답변) → 정규화기 훑기 → 분류 1회 → 본 추출. 새 확장자 avi·docx·hwp, 점주 답변 첨부, 사실 `ext`, 체크리스트 카드 단위, 분류기 테스트, 다수결 참조 일반화 | `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md` | 설계 완료 |
 | 3 | **Phase C** 공지·매장 지식 탭 | 공지사항(기간·회색·안 본 개수), 매장 지식 탭(맨 위 공지사항 + 카테고리 → 카드) | `W_PHASE_C_NOTICE_KNOWLEDGE_TAB_DESIGN_20261010.md` | 설계 완료(가정 2개 2026-10-10 확정) |
 | 4 | **Phase D** 로직별 전용 추출기 | `PROCEDURE`·`POLICY`·`REFERENCE` 전용 추출기와 로직별 본 추출 깊이 | 관찰 분석(`docs/dev/review/OBSERVATION_<LOGIC>_*.md`)이 근거 | 관찰 결과 대기 |

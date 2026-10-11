@@ -13,40 +13,9 @@ SourceStatus = Literal["UPLOADED", "PROCESSING", "DONE", "FAILED"]
 
 # ── 추출 결과 (Gemini response_schema) ─────────────────────────────────────
 
-class ExtractedFact(BaseModel):
-    object_name: str
-    attribute: str
-    value: str
-    confidence: float = Field(ge=0, le=1)
-    # 원장에 적힌 사실의 이름표. 조립이 어느 사실을 골랐는지 잇는다 (W1).
-    # 빈 값이면 잇지 못한 것이고, 그것도 세어서 드러낸다
-    ref: str = ""
-
-
 class Evidence(BaseModel):
     source_id: int = 0
     timestamp_sec: int = 0
-
-
-class ExtractedCard(BaseModel):
-    category_name: str
-    title: str
-    content: str
-    confidence: float = Field(ge=0, le=1)
-    facts: list[ExtractedFact] = []
-    evidence: Evidence = Evidence()
-
-
-class ExtractionResult(BaseModel):
-    cards: list[ExtractedCard] = []
-    unresolved: list[str] = []
-    # 서버가 채운다 (W1-1). 필드가 아니라 모델에 보내는 response_schema 에 실리지 않는다
-    _raw_response_id: int | None = PrivateAttr(default=None)
-
-    @property
-    def raw_response_id(self) -> int | None:
-        """이 결과를 만든 원래 응답 행. 기록하지 않은 호출(미리보기)이면 None."""
-        return self._raw_response_id
 
 
 # ── 사실 추출 (W1) ─────────────────────────────────────────────────────────
@@ -132,7 +101,7 @@ class LocatedFactExtractionResult(FactExtractionResult):
     assertions: list[LocatedAssertion] = []
 
 
-# ── 사실 조립 계획 (W3a, 플래그 w_fact_assembly_enabled) ──────────────────
+# ── 사실 조립 계획 (W3a) ──────────────────
 # 모델은 이름표(E…·F…)·카테고리·블록 종류만 낸다. 제목·문장·값 필드를 두지 않는다 —
 # 카드 제목과 본문은 서버가 사실 판에서 렌더링한다(card_plan).
 

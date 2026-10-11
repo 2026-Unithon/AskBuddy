@@ -10,7 +10,7 @@ import { cardFactsQuery, checklistKeys, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
-import { CARD_EXCLUDED_TEXT, FACT_EDIT_DISABLED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
+import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
 import { FactRowItem, blockLabel } from "./fact-row";
 import { disturbsLocked, fieldsOf, isModified, moveStepRows, useFactEditDraft, type DraftBlock } from "./use-fact-edit-draft";
 
@@ -55,7 +55,7 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
         actions.clear();
         setNotice(CARD_EXCLUDED_TEXT);
         await invalidateCard();
-      } else if (code === "CARD_ENTITY_MOVED" || code === "FACT_EDIT_DISABLED") {
+      } else if (code === "CARD_ENTITY_MOVED") {
         // 입력은 그대로 두고, 읽기 화면이 바뀐 편집 가능 여부를 보이게 다시 읽는다
         await invalidateCard();
       }
@@ -233,7 +233,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
       )}
       {editor.notice && excluded && <Caption className="text-danger-700">{editor.notice}</Caption>}
       {!editor.editing && !view.editable && !excluded && (
-        <Caption>{!card.fact_edit_enabled ? FACT_EDIT_DISABLED_TEXT : view.entity_problem ? ENTITY_TEXT : "지금은 이 카드를 사실 단위로 고칠 수 없어요."}</Caption>
+        <Caption>{view.entity_problem ? ENTITY_TEXT : "지금은 이 카드를 사실 단위로 고칠 수 없어요."}</Caption>
       )}
       {!editor.editing && view.editable && editor.hasRaw && !excluded && <Caption>{RAW_TEXT}</Caption>}
       {draft

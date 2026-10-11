@@ -13,7 +13,6 @@ import pytest
 
 from app.ingest import impact, pipeline
 from app.ingest.impact import classify_fact, proposal_relation, variant_compatible
-from app.ingest.schemas import ExtractedCard, ExtractedFact, ExtractionResult
 
 
 # ── classify_fact ───────────────────────────────────────────────────────────
@@ -113,58 +112,31 @@ def test_impact_sql_filters_by_store():
 
 # ── 파이프라인 연결 (F18) ──────────────────────────────────────────────────
 
-def _settings(**extra):
-    return NS(gemini_model="gemini-synthetic", extract_temperature=0.0, ingest_mode="mock",
-              extract_locator_hints=False, **extra)
-
-
-def _card():
-    return ExtractedCard(category_name="기타", title="음료Z", content="물 10ml", confidence=.9,
-                         facts=[ExtractedFact(object_name="음료Z", attribute="물", value="10",
-                                              confidence=.9, ref="f1")])
-
-
-async def _run_persist(settings):
-    conn = NS(fetchval=AsyncMock(return_value="SCAN"))
+async def _run_persist():
+    conn = NS()
     record = AsyncMock(return_value=1)
     order: list[str] = []
-    set_state = AsyncMock(side_effect=lambda *a, **k: order.append("assembly_state"))
     record.side_effect = lambda *a, **k: order.append("proposals")
-    with patch.object(pipeline.repo, "insert_card", AsyncMock(return_value=9)), \
-         patch.object(pipeline.repo, "insert_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "link_card_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "insert_card_evidence", AsyncMock()), \
-         patch.object(pipeline.repo, "set_assembly_state", set_state), \
-         patch("app.ingest.fact_ledger.card_entity_for", AsyncMock(return_value=None)), \
-         patch("app.ingest.entities.lock_store_knowledge", AsyncMock()), \
-         patch.object(impact, "record_upload_proposals", record), \
-         patch("app.config.get_settings", return_value=settings):
-        await pipeline._persist(conn, 3, 5, {"기타": 1}, ExtractionResult(cards=[_card()]),
-                                job_id=11, category_version=1, ledger_ids={"f1": 77})
+    prepared = pipeline.PreparedAssembly(
+        entity_ids=(), states={}, groups={}, held=(), data_errors={},
+        planning=NS(failed_entity_ids=(), unresolved=[], proposals={}))
+    counts = NS(missing=0, total=0, linked=0, review_pending=0, excluded=0)
+    with patch("app.ingest.entities.lock_store_knowledge", AsyncMock()), \
+         patch("app.ingest.fact_cards.record_unresolvable_occurrences", AsyncMock()), \
+         patch("app.ingest.fact_cards.disposition_counts", AsyncMock(return_value=counts)), \
+         patch.object(impact, "record_upload_proposals", record):
+        await pipeline._persist_fact_cards(conn, 3, 5, {"기타": 1}, prepared,
+                                           job_id=11, category_version=1)
     return conn, record, order
 
 
 @pytest.mark.asyncio
-async def test_persist_flag_absent_does_not_record_proposals():
-    _, record, _ = await _run_persist(_settings())
-    record.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_persist_flag_off_does_not_record_proposals():
-    _, record, _ = await _run_persist(_settings(w_entity_revision_enabled=True,
-                                                w_upload_proposals_enabled=False))
-    record.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_persist_flag_on_records_after_assembly_state_with_same_conn():
-    conn, record, order = await _run_persist(_settings(w_entity_revision_enabled=True,
-                                                       w_upload_proposals_enabled=True))
+async def test_persist_fact_cards_always_records_proposals_with_same_conn():
+    conn, record, order = await _run_persist()
     record.assert_awaited_once()
     assert record.await_args.args == (conn, 3, 5)
     assert record.await_args.kwargs == {"job_id": 11}
-    assert order[-1] == "proposals" and "assembly_state" in order
+    assert order == ["proposals"]
 
 
 # ── 결정 J — 항목은 PENDING_REVIEW 제안에서만 지금 계산으로 갱신 ──────────

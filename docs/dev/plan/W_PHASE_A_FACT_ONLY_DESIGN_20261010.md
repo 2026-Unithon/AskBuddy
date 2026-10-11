@@ -103,6 +103,7 @@
 - Storage 버킷 `sources` 파일은 SQL 로 못 지운다 → `api/scripts/wipe_storage_sources.py`(사용자 실행, 기본 `--dry-run`, 매장별 목록·삭제).
 - 지운 뒤 첫 직원 질문 → R `ensure_initial_publication` 이 빈 공개판을 만든다(F11). 실제 DB 로 확인한다.
 - 되돌리기는 배포 워크플로의 migration 직전 DB 백업뿐(F14). 절차서 첫 단계에서 백업 성공을 확인한다.
+- **2026-10-10 구현 결정(위 8단계 문구와 다른 점).** `knowledge_publications` 행은 지우지 않고 `current_snapshot_id` 만 비운다(공개판 revision 이 뒤로 가지 않게 하려는 것이며, 그 뒤에도 `ensure_initial_publication` 이 동작한다). `operations` 는 `operation='PUBLISH'` 행만 지우고(`r-initial-empty` 포함) `VISIBILITY` 멱등 행은 남긴다. 또 `quality_evaluations` 에 행이 하나라도 있으면 migration 이 오류로 멈추고 아무것도 지우지 않는다(`ingest_jobs` 를 RESTRICT 로 가리키며 평가 기록은 지우지 않는다). 배포 전 `select count(*) from quality_evaluations;` 가 0 이어야 한다(`FACT_ONLY_ROLLOUT.md` §0).
 
 ### A-D6 배포판 env
 - **추가할 플래그 없음**(A-D1).

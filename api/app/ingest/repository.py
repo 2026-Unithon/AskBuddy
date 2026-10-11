@@ -208,9 +208,9 @@ async def insert_card(
 ) -> int:
     """추출 카드는 항상 is_verified=false. 점주 승인 전에는 검색에 노출되지 않는다.
 
-    entity_id 는 W2 플래그를 켰을 때만 채운다(새 카드만). None 이면 이전과 같은 null 이다.
+    entity_id 는 새 카드에만 채운다. None 이면 null 로 둔다.
     """
-    return await conn.fetchval(
+    card_id = await conn.fetchval(
         "insert into knowledge_cards "
         "  (store_id, category_id, source_id, title, content, confidence, is_verified, "
         "   origin_job_id, category_version, entity_id) "
@@ -219,6 +219,17 @@ async def insert_card(
         title[:MAX_TITLE_LEN], content, confidence, origin_job_id, category_version,
         entity_id,
     )
+    # 레거시 트리거가 없어졌다 — 판 1 과 초안 포인터를 여기서 잇는다(Phase A)
+    version_id = await conn.fetchval(
+        "insert into card_versions (store_id, card_id, version_no, title, content, change_source) "
+        "values ($1, $2, 1, $3, $4, 'EXTRACTION') returning version_id",
+        store_id, card_id, title[:MAX_TITLE_LEN], content,
+    )
+    await conn.execute(
+        "update knowledge_cards set draft_version_id = $3 where store_id = $1 and card_id = $2",
+        store_id, card_id, version_id,
+    )
+    return card_id
 
 
 async def insert_facts(

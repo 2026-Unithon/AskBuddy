@@ -52,21 +52,11 @@ class Settings(BaseSettings):
     # 직원 답변은 기본적으로 근거 제한 LLM을 사용하되, 호출/검증 실패 시 카드 원문으로 폴백한다.
     answer_mode: Literal["extractive", "grounded_llm"] = "grounded_llm"
     frame_interval_sec: int = 3
-    # R이 출처 없는 원문 인용을 처리하기 전까지 점주 답변 출처 카드를 공개하지 않는다
-    w_owner_answer_raw_publish: bool = False
     # 점주 답변 반영 worker. 켜면 lifespan 이 주기마다 OWNER_ANSWER_SUBMITTED 사건을 소비한다
     w_owner_answer_worker_enabled: bool = False
     w_owner_answer_worker_interval_sec: int = 10
-    # W2 — 원장 사실을 서버 대상·불변 판·occurrence 로 잇는다. 끄면 수집 DB 쓰기가 이전과 같다
-    w_entity_revision_enabled: bool = False
     # W2 — 같은 대상 후보 제안 상한(새 대상 하나당). 0 이면 제안하지 않는다
     w_entity_candidate_max: int = Field(default=5, ge=0, le=20)
-    # W2-4 — 업로드 사실의 IDENTICAL|NEW|SUPPLEMENT|CONFLICT 검수 제안. w_entity_revision_enabled 가 필요하다
-    w_upload_proposals_enabled: bool = False
-    # W3a — 대상 단위 사실 조립(CardPlan)·서버 검증·렌더링·블록 고정·occurrence 처분. w_entity_revision_enabled 가 필요하다
-    w_fact_assembly_enabled: bool = False
-    # W3b — 점주 사실 카드 편집(텍스트 분석·저장 API). 끄면 사실 카드는 읽기만 된다. 인증·매장 격리·승인 확인과 무관
-    w_fact_card_edit_enabled: bool = False
     # W3b — 사실 분석 입력 글자 수 상한
     card_fact_parse_max_chars: int = Field(default=1000, ge=1, le=4000)
     # W3b — 분석 제안 수 상한. 넘으면 앞에서부터 이만큼만 + TOO_MANY_FACTS 경고
@@ -241,11 +231,6 @@ class Settings(BaseSettings):
         # 겹침이 창보다 크거나 같으면 구간마다 앞 구간 전체를 다시 본다
         if self.video_segment_sec > 0 and self.video_segment_overlap_sec >= self.video_segment_sec:
             raise ValueError("video_segment_overlap_sec must be < video_segment_sec")
-        # 업로드 제안은 대상·판 연결 결과를 읽는다. 연결이 꺼져 있으면 비교할 사실이 없다
-        if self.w_upload_proposals_enabled and not self.w_entity_revision_enabled:
-            raise ValueError("w_upload_proposals_enabled requires w_entity_revision_enabled")
-        if self.w_fact_assembly_enabled and not self.w_entity_revision_enabled:
-            raise ValueError("w_fact_assembly_enabled requires w_entity_revision_enabled")
         return self
 
     @model_validator(mode="after")

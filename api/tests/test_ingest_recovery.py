@@ -1,12 +1,10 @@
-"""동일 개수의 구간 변경과 조립 실패를 성공으로 보지 않는 회귀."""
+"""동일 개수의 구간 변경을 같은 구간으로 보지 않는 회귀."""
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.ingest import recovery, extract
-from app.ingest.pipeline import assemble_assertions
-from app.ingest.schemas import ExtractedAssertion
+from app.ingest import recovery
 
 
 def settings(**kw):
@@ -26,17 +24,6 @@ def test_same_count_changed_content_settings_and_media_are_distinct(tmp_path):
     assert baseline != fingerprint(config=settings(video_segment_sec=120))
     image.write_bytes(b'second')
     assert baseline != fingerprint()
-
-
-@pytest.mark.asyncio
-async def test_product_assembly_failure_propagates_but_preview_can_report_unresolved():
-    assertion = ExtractedAssertion(local_ref='f1', original_assertion='물 10ml',
-        subject='음료Z', attribute='물', value='10', unit='ml', confidence=.9)
-    with patch.object(extract, 'assemble_cards', AsyncMock(side_effect=RuntimeError('synthetic'))):
-        with pytest.raises(RuntimeError, match='카드 조립 실패'):
-            await assemble_assertions(source_id=1, assertions=[assertion], categories=['기타'], glossary=[], strict=True)
-        result = await assemble_assertions(source_id=1, assertions=[assertion], categories=['기타'], glossary=[])
-        assert not result.cards and result.unresolved
 
 
 @pytest.mark.asyncio

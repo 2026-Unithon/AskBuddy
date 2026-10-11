@@ -11,9 +11,7 @@ import pytest
 
 from app.ingest import extract, job_repository, job_worker, pipeline
 from app.ingest.pipeline import ExtractionOutcome, _extract_facts_all
-from app.ingest.schemas import (
-    Evidence, ExtractedAssertion, ExtractedCard, ExtractionResult,
-)
+from app.ingest.schemas import Evidence, ExtractedAssertion
 
 
 def _assertion(ref: str) -> ExtractedAssertion:
@@ -186,7 +184,6 @@ class _Pool:
 
 async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
     from app.config import get_settings
-    from app.ingest.schemas import ExtractedCard
     extract_calls = []
 
     async def fake_extract_facts(**kw):
@@ -214,12 +211,11 @@ async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
          patch.object(pipeline.repo, "glossary", AsyncMock(return_value=[])), \
          patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
-         patch.object(pipeline, "assemble_assertions",
-                      AsyncMock(return_value=ExtractionResult(cards=[ExtractedCard(
-                          category_name='기타', title='합성', content='원두 18g', confidence=.9)], unresolved=[]))), \
+         patch.object(pipeline, "_prepare_fact_assembly",
+                      AsyncMock(return_value=NS(planning=NS(unresolved=[])))), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(pipeline, "_record_segment_failures", record), \
-         patch.object(pipeline, "_persist", persist):
+         patch.object(pipeline, "_persist_fact_cards", persist):
         returned = await pipeline.process_source(
             1, 2, job_id=5, retry_segments=retry_segments,
             expected_segments_total=expected_total)
@@ -527,15 +523,14 @@ async def _run_with_ledger(tmp_path, ledger, *, run_tag, retry_segments=None,
         extracted.append(seg)
         return NS(assertions=[_assertion("f1")], unresolved=[])
 
-    async def fake_assemble_cards(**kw):
-        ledger.start(kw["usage_context"])
-        facts = kw["facts"]
-        assembled.append(len(facts))
-        # strict 조립은 사실이 있는데 카드가 0장이면 실패로 본다 — 실제 조립처럼
-        # 사실이 있으면 카드를 만든다
-        cards = [ExtractedCard(category_name='기타', title='합성',
-                               content='원두 18g', confidence=.9)] if facts else []
-        return ExtractionResult(cards=cards, unresolved=[])
+    async def fake_prepare(pool, store_id, source_id, **kw):
+        # 실제 조립처럼 모델 호출 전에 receipt 를 먼저 적는다(배치 plan0).
+        # 이번 실행에서 뽑은 사실이 없으면 조립할 대상이 없어 호출하지 않는다
+        if extracted:
+            ledger.start(pipeline._ctx_for(kw["usage_base"], source_id, "ASSEMBLE",
+                                           segment_id="plan0"))
+            assembled.append(1)
+        return NS(planning=NS(unresolved=[]))
 
     src = {"source_id": 2, "store_id": 1, "source_type": "VIDEO",
            "file_url": "x", "content_hash": "h", "status": "PROCESSING"}
@@ -554,10 +549,10 @@ async def _run_with_ledger(tmp_path, ledger, *, run_tag, retry_segments=None,
          patch.object(pipeline.repo, "glossary", AsyncMock(return_value=[])), \
          patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
-         patch.object(extract, "assemble_cards", fake_assemble_cards), \
+         patch.object(pipeline, "_prepare_fact_assembly", fake_prepare), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(pipeline, "_record_segment_failures", record), \
-         patch.object(pipeline, "_persist", persist):
+         patch.object(pipeline, "_persist_fact_cards", persist):
         await pipeline.process_source(
             1, 2, job_id=5, run_tag=run_tag, retry_segments=retry_segments,
             expected_segments_total=3 if retry_segments else None)

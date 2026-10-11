@@ -108,8 +108,8 @@ class Harness:
         self.publish_outcome = PublishOutcome(status="PUBLISHED", knowledge_revision=4,
                                               snapshot_id=12, publication_revision=4)
         self.no_provenance: set[int] = set()
-        # 카드별로 블록 고정·조립에서 던질 예외
-        self.ensure_errors: dict[int, Exception] = {}
+        # 카드별로 공개 직전 내용 확인에서 던질 예외
+        self.check_errors: dict[int, Exception] = {}
         self.build_errors: dict[int, Exception] = {}
         self.activate_exc: Exception | None = None
         self.prepare_calls: list = []
@@ -133,17 +133,13 @@ class Harness:
         async def current_manifest(conn, *, store_id):
             return dict(h.manifest)
 
-        async def ensure_raw_blocks(conn, *, store_id, card_id, card_version_id,
-                                    allow_owner_answer):
-            h.log.append(f"ensure:{card_id}")
-            if card_id in h.no_provenance:
-                raise NoProvenance(str(card_id))
-            if card_id in h.ensure_errors:
-                raise h.ensure_errors[card_id]
-
-        async def build(conn, *, store_id, manifest, glossary_version,
-                        allow_owner_answer=False):
+        async def build(conn, *, store_id, manifest, glossary_version):
             for card_id in manifest:
+                h.log.append(f"check:{card_id}")
+                if card_id in h.no_provenance:
+                    raise NoProvenance(str(card_id))
+                if card_id in h.check_errors:
+                    raise h.check_errors[card_id]
                 if card_id in h.build_errors:
                     raise h.build_errors[card_id]
             h.built_manifest = dict(manifest)
@@ -180,7 +176,6 @@ class Harness:
                          ("_read_publication", read_publication),
                          ("_read_cards", read_cards),
                          ("current_manifest", current_manifest),
-                         ("ensure_raw_blocks", ensure_raw_blocks),
                          ("build_knowledge_content", build),
                          ("prepare_index_request", prepare),
                          ("_lock_publication", lock_publication),
@@ -346,7 +341,7 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
         # 블록 고정 트랜잭션은 통째로 롤백된다 — savepoint 와 바깥 트랜잭션 둘 다
         prep = self.h.log[self.h.log.index("read_publication"):]
         fix = prep[prep.index("tx_begin"):prep.index("release")]
-        self.assertEqual(fix, ["tx_begin", "tx_begin", "ensure:5",
+        self.assertEqual(fix, ["tx_begin", "tx_begin", "check:5",
                                "tx_rollback", "tx_rollback"])
         self.assertNotIn("tx_commit", self.h.log)
 
@@ -359,7 +354,7 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.h.publish_calls[0]["card_versions"], [(5, 50)])
         # 7 의 savepoint 만 롤백되고 바깥 블록 고정 트랜잭션은 커밋된다
         prep = self.h.log[self.h.log.index("read_publication"):]
-        fix = prep[:prep.index("release")]
+        fix = [e for e in prep[:prep.index("release")] if not e.startswith("check:")]
         self.assertEqual(fix.count("tx_rollback"), 1)
         self.assertEqual(fix[-1], "tx_commit")
 
@@ -469,16 +464,16 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
     async def test_unchanged_bad_legacy_card_is_dropped_not_blocking(self):
         """변경하지 않는 카드의 어떤 고정·조립 실패도 그 카드만 뺀다(final fix #3)."""
         cases = [
-            ("ensure", InvalidContent("빈 원문")),
-            ("ensure", InvalidContent("블록 상한 초과")),
-            ("ensure", ValueError("버전 없음")),
+            ("check", InvalidContent("빈 원문")),
+            ("check", InvalidContent("블록 상한 초과")),
+            ("check", ValueError("버전 없음")),
             ("build", ValueError("블록 없음")),
         ]
         for where, exc in cases:
             with self.subTest(where=where, exc=str(exc)):
                 self.h = Harness()
                 self.h.start(self)
-                target = self.h.ensure_errors if where == "ensure" else self.h.build_errors
+                target = self.h.check_errors if where == "check" else self.h.build_errors
                 target[7] = exc
                 with self.assertLogs(MOD, level="WARNING"):
                     result = await self.h.run()
@@ -486,13 +481,14 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.h.built_manifest, {5: 50})
                 self.assertEqual(self.h.publish_calls[0]["card_versions"], [(5, 50)])
                 prep = self.h.log[self.h.log.index("read_publication"):]
-                fix = prep[:prep.index("release")]
+                fix = [e for e in prep[:prep.index("release")]
+                       if not e.startswith("check:")]
                 # 7 의 savepoint 만 롤백, 바깥 블록 고정 트랜잭션은 커밋
                 self.assertEqual(fix.count("tx_rollback"), 1)
                 self.assertEqual(fix[-1], "tx_commit")
 
     async def test_changed_card_invalid_content_rolls_back_whole_fix(self):
-        self.h.ensure_errors[5] = InvalidContent("빈 원문")
+        self.h.check_errors[5] = InvalidContent("빈 원문")
         result = await self.h.run()
         self.assertEqual(result, PublishCardsResult(status="INVALID_CONTENT"))
         self.assertEqual(self.h.prepare_calls, [])
@@ -509,7 +505,7 @@ class PublishCardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.h.prepare_calls, [])
 
     async def test_changed_card_other_value_error_propagates(self):
-        self.h.ensure_errors[5] = ValueError("카드 버전을 찾을 수 없다")
+        self.h.check_errors[5] = ValueError("카드 버전을 찾을 수 없다")
         with self.assertRaises(ValueError):
             await self.h.run()
         self.assertEqual(self.h.prepare_calls, [])

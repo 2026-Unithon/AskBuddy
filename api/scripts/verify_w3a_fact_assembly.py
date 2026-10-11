@@ -1,15 +1,14 @@
 """실제 DB: W3a 대상 단위 사실 조립 합성 종단 검증. 모델은 합성 대역이다(비용 0).
 
 verify_w_publication_flow.verify() 끝에서 부른다(verify_r_schema_rebuild 가 부르는 W 검증).
-시나리오마다 새 합성 매장을 만든다. 사실 원장은 verify_w3_flag_readiness._process 로 만든다
-(W2 두 플래그 켬, 옛 조립 대역).
+시나리오마다 새 합성 매장을 만든다. 사실 원장은 _process(= _ledger) 로 만든다.
   L1 대상 단위 입력 — 두 자료의 같은 대상 사실이 한 묶음으로, 규격 미해결 판은 뺀다
   L2 병합 뒤 입력 — 살아 있는 대상만, RELINK head, 선행이 fact_id 로 그대로 풀린다
   L3 격리 — 다른 매장 id 로 부르면 빈 결과
   L4 사실 조립 호출 기록 — 원래 응답(ASSEMBLE·plan0)·원가 시도, 같은 입력 재사용
   P1~P12 카드 판·블록·근거 고정과 occurrence 처분(fact_cards). 원장은 _persist_ledger 로 직접
-    만들어 옛 조립 카드를 만들지 않는다
-  E1~E12 파이프라인 연결 종단 — process_source·job_worker 를 합성 대역으로 돌린다(플래그 켬/끔)
+    만들어 카드를 따로 만들지 않는다
+  E1~E12 파이프라인 연결 종단 — process_source·job_worker 를 합성 대역으로 돌린다
   B1~B7 공개판에 사실 싣기 — 레거시 판 불변, 사실 블록·사실 판·근거·실제 대상 id, R 검색·답변 소비,
     재공개 결정성, 점주 편집 판, 근거 없음·대상 불일치 거절
 출력 줄 머리는 `PASS W3a <시나리오 id> <설명>`.
@@ -24,7 +23,7 @@ from unittest.mock import AsyncMock, patch
 import asyncpg
 
 import app.config
-from app.cards import repository as cards_repo
+from app.cards.fact_edit import create_owner_edit_version
 from app.config import Settings
 from app.contracts.common import Quantity, Variant
 from app.contracts.usage import UsageContext
@@ -39,14 +38,13 @@ from app.ingest.entity_names import normalize_alias
 from app.ingest.extract import gemini, mock
 from app.ingest.raw_responses import DbRawResponseSink
 from app.ingest.reuse import CACHE_STATE_REUSED
-from app.ingest.schemas import (CardPlanBatch, ExtractedAssertion, ExtractedCard, ExtractedFact,
-                                ExtractionResult, FactExtractionResult, PlannedBlock, PlannedCard)
+from app.ingest.schemas import (CardPlanBatch, ExtractedAssertion, FactExtractionResult,
+                                PlannedBlock, PlannedCard)
 from app.learn.answer_storage import save_answer
 from app.learn.planner import decide
 from app.publish.approval import CardChange, publish_cards
 from app.reg.hybrid import hybrid_search, read_current_index
 from app.usage.recorder import DbUsageSink
-from verify_w3_flag_readiness import _process
 from verify_w_entity_revision import _MODEL_SETTINGS, _fact, _new_owner_answer, _w2_counts
 from verify_w_partial_extraction import _new_source, _seed
 
@@ -191,8 +189,7 @@ async def _l4(db, pool, w, group):
 
     categories = list(await repo.enabled_categories(db, w.store))
     model_settings = NS(**vars(_MODEL_SETTINGS), extract_reuse_enabled=True)
-    settings = Settings(_env_file=None, w_entity_revision_enabled=True,
-                        w_upload_proposals_enabled=True)
+    settings = Settings(_env_file=None)
 
     async def run(base):
         with ExitStack() as stack:
@@ -253,11 +250,23 @@ async def _ledger(db, store, source, facts, *, title=None):
     if title is not None:
         await db.execute("update sources set title=$3 where store_id=$1 and source_id=$2",
                          store, source, title)
-    settings = Settings(_env_file=None, w_entity_revision_enabled=True)
+    settings = Settings(_env_file=None)
     assertions = [ExtractedAssertion.model_validate(f) for f in facts]
     with patch.object(app.config, "get_settings", lambda: settings):
         async with db.transaction():
             await pipeline._persist_ledger(db, store, source, "SCAN", assertions)
+
+
+async def _process(db, pool, store, user, source, parts, *, run_tag):
+    """parts = [(구간 글, 사실 목록)] 의 사실을 원장에만 적는다(카드 없음). 모델·pipeline 을 부르지 않는다."""
+    await _ledger(db, store, source, [f for _, facts in parts for f in facts])
+
+
+async def _make_legacy(db, store, source):
+    """블록 없는 옛 카드 하나(사실 조립 이전에 만든 카드 모양). 카드 id 를 돌려준다."""
+    category = (await repo.enabled_categories(db, store))["기타"]
+    return await repo.insert_card(db, store, category_id=category, source_id=source,
+                                  title="합성 레거시 카드", content="컵 크기 355ml", confidence=50)
 
 
 async def _entity(db, store, name):
@@ -506,9 +515,10 @@ async def _p4(db, w, card_id):
                      "where store_id=$1 and card_id=$2", w.store, card_id)
     approved = await _card(db, w.store, card_id)
     state = await fact_cards.entity_card_state(db, w.store, w.z)
-    check("(a) 승인(공개 포인터) → DEFER",
-          approved["published_version_id"] is not None and state.mode == "DEFER"
-          and state.card_ids == (card_id,) and state.reason == fact_cards.REASON_EXISTING_CARD)
+    # Phase A(A-D4): 공개판이 곧 초안인 자동 사실 카드 한 장은 새 사실을 붙인 새 초안을 받는다
+    check("(a) 승인(공개 포인터) → REDRAFT",
+          approved["published_version_id"] is not None and state.mode == "REDRAFT"
+          and state.card_ids == (card_id,) and state.reason is None)
 
     f = await _fresh_written(db)
     check("새 매장 — 자동 사실 카드면 REASSEMBLE",
@@ -520,9 +530,9 @@ async def _p4(db, w, card_id):
 
     f = await _fresh_written(db)
     row = await _card(db, f.store, f.card)
-    await cards_repo.create_draft(db, f.store, f.card, title=row["title"],
-                                  content=row["content"] + " 점주 보탬", actor_id=f.user,
-                                  source_version_id=row["draft_version_id"])
+    # 자유 글 편집(create_draft)은 없어졌다 — 점주 편집 판(OWNER_EDIT)을 명시적으로 만든다
+    await create_owner_edit_version(db, f.store, f.card, title=row["title"],
+                                    content=row["content"] + " 점주 보탬", actor_id=f.user)
     state = await fact_cards.entity_card_state(db, f.store, f.z)
     check("(c) 점주 편집 초안 → DEFER", state.mode == "DEFER" and state.card_ids == (f.card,))
 
@@ -786,9 +796,8 @@ async def _p12(db):
         state = await fact_cards.entity_card_state(db, f.store, f.z)
         row = await _card(db, f.store, f.card)
         if action == "편집":
-            await cards_repo.create_draft(db, f.store, f.card, title=row["title"],
-                                          content=row["content"] + " 점주 보탬", actor_id=f.user,
-                                          source_version_id=row["draft_version_id"])
+            await create_owner_edit_version(db, f.store, f.card, title=row["title"],
+                                            content=row["content"] + " 점주 보탬", actor_id=f.user)
         else:
             await db.execute("update knowledge_cards set review_status='APPROVED' "
                              "where store_id=$1 and card_id=$2", f.store, f.card)
@@ -870,24 +879,18 @@ _W2_REASONS = {"W2_UNASSEMBLED", "VARIANT_SUBJECT_MISMATCH", "VARIANT_MULTI"}
 CUP, SOAP, MACHINE = "컵", "세제", "머신"
 
 
-def _w3a_settings(*, fact_assembly=True, proposals=False, concurrency=1, batch_facts=200,
-                  hints=False):
-    return Settings(_env_file=None, w_entity_revision_enabled=True,
-                    w_upload_proposals_enabled=proposals,
-                    w_fact_assembly_enabled=fact_assembly, assemble_concurrency=concurrency,
+def _w3a_settings(*, concurrency=1, batch_facts=200, hints=False):
+    return Settings(_env_file=None, assemble_concurrency=concurrency,
                     assemble_batch_facts=batch_facts, extract_segment_concurrency=2,
                     extract_locator_hints=hints)
 
 
 def _fake_model(parts, category, calls, *, plan_override=None, fail_batches=()):
-    """합성 모델 대역. 사실 추출 → 구간 사실, 사실 조립 → mock._planned(또는 override),
-    그 밖(옛 조립) → 주어마다 카드 하나(W3-0 대역과 같다). 호출 기록을 calls 에 남긴다.
+    """합성 모델 대역. 사실 추출 → 구간 사실, 사실 조립 → mock._planned(또는 override).
+    호출 기록을 calls 에 남긴다.
 
     fail_batches 는 이 대역이 받은 사실 조립 호출 번호(0부터)다.
     """
-    segmented = len(parts) > 1
-    cited = [(f"seg{index}:{f['local_ref']}" if segmented else f["local_ref"], f)
-             for index, (_, facts) in enumerate(parts, start=1) for f in facts]
     plan_no = [0]
 
     async def fake_call(prompt, media, schema=None, max_output_tokens=None):
@@ -905,16 +908,7 @@ def _fake_model(parts, category, calls, *, plan_override=None, fail_batches=()):
                 raise ValueError(f"합성 배치 실패 {n}")
             body = (plan_override or mock._planned)(payload, [category])
             return gemini.CallResult(body.model_dump_json(), {}, "STOP")
-        calls.append(("LEGACY", ()))
-        by_subject: dict[str, list[ExtractedFact]] = {}
-        for ref, f in cited:
-            by_subject.setdefault(f["subject"], []).append(ExtractedFact(
-                object_name=f["subject"], attribute=f["attribute"], value=f["value"],
-                confidence=.9, ref=ref))
-        cards = [ExtractedCard(category_name=category, title=subject, content="합성 카드",
-                               confidence=.9, facts=facts)
-                 for subject, facts in by_subject.items()]
-        return gemini.CallResult(ExtractionResult(cards=cards).model_dump_json(), {}, "STOP")
+        raise AssertionError(f"예상하지 못한 스키마 {schema}")
 
     return fake_call
 
@@ -958,10 +952,10 @@ async def _queue(db, store, user, source, *, status):
     return job_id
 
 
-async def _process_w3a(db, pool, store, user, source, parts, *, run_tag, fact_assembly=True,
-                       proposals=False, concurrency=1, batch_facts=200, plan_override=None,
+async def _process_w3a(db, pool, store, user, source, parts, *, run_tag,
+                       concurrency=1, batch_facts=200, plan_override=None,
                        fail_batches=(), hints=False, expect="DONE"):
-    """process_source 를 합성 대역으로 돌린다(verify_w3_flag_readiness._process 방식).
+    """process_source 를 합성 대역으로 돌린다.
 
     parts = [(구간 글, 사실 목록)]. 둘 이상이면 구간으로 나눠 동시에 2개씩 뽑는다.
     """
@@ -970,8 +964,7 @@ async def _process_w3a(db, pool, store, user, source, parts, *, run_tag, fact_as
     calls: list = []
     fake = _fake_model(parts, category, calls, plan_override=plan_override,
                        fail_batches=fail_batches)
-    settings = _w3a_settings(fact_assembly=fact_assembly, proposals=proposals,
-                             concurrency=concurrency, batch_facts=batch_facts, hints=hints)
+    settings = _w3a_settings(concurrency=concurrency, batch_facts=batch_facts, hints=hints)
     with _w3a_patches(pool, settings, fake, parts, hints=hints):
         await pipeline.process_source(store, source, job_id=job_id, run_tag=run_tag)
     state = await db.fetchrow("select status, error_message from sources "
@@ -1086,9 +1079,8 @@ async def _e1(db, pool):
         "select count(*) from extraction_raw_responses where store_id=$1 "
         "and stage='ASSEMBLE' and segment_id='plan0'", s) == 1)
     plans = _plans(run.calls)
-    check("사실 조립 호출 1(대상 둘)·옛 조립(ExtractionResult) 호출 0",
-          len(plans) == 1 and set(plans[0]) == {Z, CUP}
-          and not [c for c in run.calls if c[0] == "LEGACY"])
+    check("사실 조립 호출 1(대상 둘)",
+          len(plans) == 1 and set(plans[0]) == {Z, CUP})
     return NS(user=user, store=s, src_a=src_a, z=z, cup=cup, card_z=card_z["card_id"])
 
 
@@ -1183,7 +1175,10 @@ async def _e4(db, pool):
 
 async def _e5(db, pool, w):
     check = _checker("E5")
-    await db.execute("update knowledge_cards set review_status = 'APPROVED' "
+    # 수동 배정 승인 카드 — 카드 쓰기를 보류(DEFER)하는 경로. 공개 자동 카드의 새 초안(A-D4)은
+    # verify_w_fact_only (c) 가 본다
+    await db.execute("update knowledge_cards set review_status = 'APPROVED', "
+                     "assignment_type = 'MANUAL' "
                      "where store_id = $1 and card_id = $2", w.store, w.card_z)
     before = await _card(db, w.store, w.card_z)
     versions = len(await _versions(db, w.store, w.card_z))
@@ -1191,7 +1186,7 @@ async def _e5(db, pool, w):
     run = await _process_w3a(db, pool, w.store, w.user, src_c, [(
         "합성 자료 본문 C — 시럽 20ml, 뚜껑", [
             _assertion("f1", Z, "시럽", "20", "ml"),
-            _assertion("f2", CUP, "뚜껑", "1", "개")])], run_tag=805, proposals=True)
+            _assertion("f2", CUP, "뚜껑", "1", "개")])], run_tag=805)
     after = await _card(db, w.store, w.card_z)
     check("음료Z 카드 판 수·공개·초안 포인터 그대로",
           before["published_version_id"] is not None
@@ -1375,11 +1370,11 @@ async def _e9(db, pool):
     check("사용량 시도 3 으로 같다", outcome[1][2] == outcome[4][2] == 3)
 
 
-async def _run_job(db, pool, store, user, source, parts, *, fact_assembly=True):
+async def _run_job(db, pool, store, user, source, parts):
     job_id = await _queue(db, store, user, source, status="QUEUED")
     category = next(iter(await repo.enabled_categories(db, store)))
     fake = _fake_model(parts, category, [])
-    with _w3a_patches(pool, _w3a_settings(fact_assembly=fact_assembly), fake, parts):
+    with _w3a_patches(pool, _w3a_settings(), fake, parts):
         await job_worker.process_ingest_job(store, job_id)
     return await db.fetchrow(
         "select status, card_count, error_code, error_message from ingest_job_sources "
@@ -1395,7 +1390,9 @@ async def _e10(db, pool):
     check("새 카드 자료 — card_count 1·SUCCEEDED",
           (row["status"], row["card_count"]) == ("SUCCEEDED", 1))
     z = await _entity(db, s, Z)
-    await db.execute("update knowledge_cards set review_status = 'APPROVED' "
+    # 수동 배정 승인 카드 — DEFER 만 있는 자료(공개 자동 카드라면 A-D4 새 초안이 반영된다)
+    await db.execute("update knowledge_cards set review_status = 'APPROVED', "
+                     "assignment_type = 'MANUAL' "
                      "where store_id = $1 and entity_id = $2", s, z)
     src2 = await _new_source(db, s, user, "SCAN")
     row = await _run_job(db, pool, s, user, src2, [("합성 자료 본문 E10-2", [
@@ -1403,14 +1400,7 @@ async def _e10(db, pool):
     check("DEFER 만 있는 자료 — card_count 0·NO_RESULT·새 문구",
           (row["status"], row["card_count"], row["error_code"], row["error_message"])
           == ("NO_RESULT", 0, "NO_RESULT", job_worker.NO_NEW_CARD_PENDING_MESSAGE)
-          and row["error_message"] == "새 카드 없이 검수할 사실이 남았습니다.")
-    user, s, _ = await _seed(db)
-    src3 = await _new_source(db, s, user, "SCAN")
-    row = await _run_job(db, pool, s, user, src3, [("합성 자료 본문 E10-3", [])],
-                         fact_assembly=False)
-    check("플래그 꺼짐 — 지금 문구",
-          (row["status"], row["card_count"], row["error_message"])
-          == ("NO_RESULT", 0, "추출된 업무 카드가 없습니다."))
+          and row["error_message"] == "카드에 반영되지 않고 검수할 사실이 남았습니다.")
 
 
 async def _e11(db, pool):
@@ -1443,26 +1433,6 @@ async def _e11(db, pool):
     check("X occurrence 는 Y 가 쓴 카드로 LINKED",
           _all(await _source_occurrences(db, s, src_x), "LINKED", card_id=card_y))
     check("처분 누락 0", (await fact_cards.disposition_counts(db, s, src_x)).missing == 0)
-
-
-async def _e12(db, pool):
-    check = _checker("E12")
-    user, s, _ = await _seed(db)
-    src = await _new_source(db, s, user, "VIDEO")
-    run = await _process_w3a(db, pool, s, user, src, _E1_PARTS, run_tag=812,
-                             fact_assembly=False)
-    check("옛 조립 대역(ExtractionResult) 호출·사실 조립 호출 0",
-          [c for c in run.calls if c[0] == "LEGACY"] and _plans(run.calls) == [])
-    check("card_block_facts·card_version_fact_provenance 0행", all([
-        await db.fetchval(f"select count(*) from {t} where store_id=$1", s) == 0
-        for t in ("card_block_facts", "card_version_fact_provenance")]))
-    rows = await _source_occurrences(db, s, src)
-    check("occurrence 는 W2 사유 그대로",
-          len(rows) == 5 and all(r["disposition"] == "REVIEW_PENDING"
-                                 and r["reason"] in _W2_REASONS for r in rows))
-    cards = await _store_cards(db, s)
-    check("카드 본문 = 옛 대역 본문", len(cards) == 2
-          and all(c["content"] == "합성 카드" for c in cards))
 
 
 # ── B: 공개판에 사실 싣기 (publish/content) ─────────────────────────────────
@@ -1515,7 +1485,7 @@ async def _hashed_source(db, store, user):
 
 
 async def _fact_store(db, pool, parts, *, run_tag):
-    """새 합성 매장 + 점주 멤버 + 사실 카드(플래그 켬 처리)."""
+    """새 합성 매장 + 점주 멤버 + 사실 카드."""
     user, s, _ = await _seed(db)
     member = await _member(db, s, user)
     src = await _hashed_source(db, s, user)
@@ -1543,7 +1513,6 @@ async def _snapshot_row(db, store, snapshot_id):
                                   "and snapshot_id=$2", store, snapshot_id))
 
 
-_B1_LEGACY = [("합성 자료 본문 B1 — 컵 355ml", [_assertion("f1", CUP, "크기", "355", "ml")])]
 _B_Z = [("합성 자료 본문 B — 음료Z ICE 물 225ml, 얼음, 샷, 시럽 없음", [
     _assertion("f1", Z, "물", "225", "ml", variant="ICE"),
     _assertion("f2", Z, "얼음 담기", "컵에 얼음", variant="ICE", order=1),
@@ -1553,23 +1522,22 @@ _B_Z = [("합성 자료 본문 B — 음료Z ICE 물 225ml, 얼음, 샷, 시럽 
 
 
 async def _b1(db, pool):
+    """블록 없는 레거시 카드는 공개하지 않는다(Phase A — 원문 RAW 공개 경로 없음)."""
     check = _checker("B1")
     user, s, _ = await _seed(db)
     w = NS(user=user, store=s, member=await _member(db, s, user))
     src = await _hashed_source(db, s, user)
-    await _process_w3a(db, pool, s, user, src, _B1_LEGACY, run_tag=901, fact_assembly=False)
-    (legacy,) = [c["card_id"] for c in await _store_cards(db, s)]
+    legacy = await _make_legacy(db, s, src)
+    versions = await db.fetch(
+        "select v.version_id, v.version_no, v.change_source from card_versions v "
+        "join knowledge_cards k on k.store_id = v.store_id and k.draft_version_id = v.version_id "
+        "where v.store_id=$1 and v.card_id=$2", s, legacy)
+    check("insert_card 가 판 1(EXTRACTION)을 만들고 초안 포인터를 둔다",
+          [(r["version_no"], r["change_source"]) for r in versions] == [(1, "EXTRACTION")])
     first = await _approve(db, pool, w, legacy, "w3a-b1-legacy")
-    check("레거시 카드 공개 PUBLISHED", first.status == "PUBLISHED")
-    snap = await _index(pool, s)
-    card = snap.card(str(legacy))
-    check("fact_revisions == ()·entity_id == card_id·RAW 블록",
-          snap.fact_revisions == () and card.entity_id == str(legacy)
-          and card.blocks and all(b.kind == "RAW" and b.raw_span_id for b in card.blocks))
-    spans = {b.raw_span_id for b in card.blocks}
-    before_card = card.model_dump()
-    before_spans = [r.model_dump() for r in snap.raw_spans if r.raw_span_id in spans]
-    before_row = await _snapshot_row(db, s, first.snapshot_id)
+    check("레거시(블록 없는) 카드 공개 INVALID_CONTENT",
+          first.status == "INVALID_CONTENT"
+          and (await _card(db, s, legacy))["published_version_id"] is None)
 
     src_z = await _hashed_source(db, s, user)
     await _process_w3a(db, pool, s, user, src_z, _B_Z, run_tag=902)
@@ -1577,16 +1545,9 @@ async def _b1(db, pool):
     (card_z,) = await _entity_cards(db, s, z)
     second = await _approve(db, pool, w, card_z, "w3a-b1-fact")
     snap2 = await _index(pool, s)
-    check("사실 카드 더 공개 — PUBLISHED·사실 실림",
-          second.status == "PUBLISHED" and snap2.snapshot_id != snap.snapshot_id
-          and len(snap2.fact_revisions) == 4)
-    check("레거시 PublishedCard·RawSpan 완전히 같다",
-          snap2.card(str(legacy)).model_dump() == before_card
-          and [r.model_dump() for r in snap2.raw_spans if r.raw_span_id in spans]
-          == before_spans)
-    check("앞 snapshot 행(snapshot_hash 포함) 불변",
-          await _snapshot_row(db, s, first.snapshot_id) == before_row
-          and before_row["snapshot_hash"] == snap.snapshot_hash)
+    check("사실 카드 공개 — PUBLISHED·사실 실림·레거시 카드·RawSpan 없음",
+          second.status == "PUBLISHED" and len(snap2.fact_revisions) == 4
+          and snap2.card(str(legacy)) is None and snap2.raw_spans == ())
 
 
 async def _b2(db, pool):
@@ -1694,12 +1655,16 @@ async def _b4(db, pool, w):
     await _process_w3a(db, pool, w.store, w.user, src, [(
         "합성 자료 본문 B4 — 음료Z ICE 물 225ml", [
             _assertion("f1", Z, "물", "225", "ml", variant="ICE")])], run_tag=931)
-    added = await db.fetch("select fact_revision_id, disposition, reason from fact_occurrences "
+    added = await db.fetch("select fact_revision_id, disposition, reason, card_id from fact_occurrences "
                            "where store_id=$1 and source_id=$2", w.store, src)
-    check("새 자료 occurrence 는 같은 head 판·EXISTING_CARD 대기",
+    card = await _card(db, w.store, w.card)
+    # Phase A(A-D4): 공개된 자동 사실 카드는 REDRAFT 로 간다. 같은 사실이면 그 카드에 바로 잇고
+    # 새 초안을 만들지 않는다(예전 기대: EXISTING_CARD 검수 대기)
+    check("새 자료 occurrence 는 같은 head 판·공개 카드에 LINKED·새 초안 없음",
           len(added) == 1 and str(added[0]["fact_revision_id"]) in w.facts_dump
-          and (added[0]["disposition"], added[0]["reason"])
-          == ("REVIEW_PENDING", fact_cards.REASON_EXISTING_CARD))
+          and (added[0]["disposition"], added[0]["reason"], added[0]["card_id"])
+          == ("LINKED", None, w.card)
+          and card["draft_version_id"] == card["published_version_id"])
     result = await _publish(pool, w.store, w.member, w.user, [], "w3a-b4-republish")
     snap = await _index(pool, w.store)
     check("재공개 PUBLISHED·새 snapshot",
@@ -1711,25 +1676,24 @@ async def _b4(db, pool, w):
 
 
 async def _b5(db, pool):
+    """자유 글 점주 편집 판(블록 없음)은 공개하지 않는다 — 공개판은 그대로(Phase A)."""
     check = _checker("B5")
     w = await _fact_store(db, pool, _B_Z, run_tag=941)
     (card_id,) = [c["card_id"] for c in await _store_cards(db, w.store)]
     check("사실 카드 먼저 공개", (await _approve(db, pool, w, card_id, "w3a-b5-a")).status
           == "PUBLISHED" and (await _index(pool, w.store)).fact_revisions)
+    published = (await _card(db, w.store, card_id))["published_version_id"]
+    before = (await _index(pool, w.store)).model_dump()
     async with db.transaction():
-        draft = (await _card(db, w.store, card_id))["draft_version_id"]
-        edited = await cards_repo.create_draft(
+        edited = await create_owner_edit_version(
             db, w.store, card_id, title="음료Z 점주 편집", content="합성 점주 편집 본문",
-            actor_id=w.user, source_version_id=draft)
+            actor_id=w.user)
     result = await _approve(db, pool, w, card_id, "w3a-b5-b")
-    snap = await _index(pool, w.store)
-    card = snap.card(str(card_id))
-    check("점주 편집 판 공개 PUBLISHED", result.status == "PUBLISHED"
-          and card.card_version_id == str(edited))
-    check("편집 판은 RAW 블록·entity_id == card_id·그 카드 사실 없음(알려진 한계)",
-          card.entity_id == str(card_id)
-          and all(b.kind == "RAW" and b.raw_span_id for b in card.blocks)
-          and snap.fact_revisions == ())
+    check("블록 없는 점주 편집 판 공개 INVALID_CONTENT",
+          result.status == "INVALID_CONTENT" and edited != published)
+    check("공개 포인터·현재 공개판 그대로",
+          (await _card(db, w.store, card_id))["published_version_id"] == published
+          and (await _index(pool, w.store)).model_dump() == before)
 
 
 async def _two_card_store(db, pool, run_tag):
@@ -1816,7 +1780,6 @@ async def verify(pool, admin) -> None:
     await _e9(db, pool)
     await _e10(db, pool)
     await _e11(db, pool)
-    await _e12(db, pool)
     await _b1(db, pool)
     b = await _b2(db, pool)
     await _b3(db, pool)

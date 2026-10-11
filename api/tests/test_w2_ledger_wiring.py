@@ -1,4 +1,4 @@
-"""W2-2 파이프라인 연결 — 플래그 꺼짐이면 이전과 같고, 켜면 같은 conn 으로 판 연결을 부른다.
+"""W2-2 파이프라인 연결 — 원장 저장은 같은 conn 으로 판 연결을 항상 부른다.
 
 설정은 필드가 몇 개뿐인 NS 로 patch 한다(F18). 모델·DB 는 부르지 않는다.
 """
@@ -7,12 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.ingest import entities, fact_ledger, pipeline
+from app.ingest import fact_ledger, pipeline
 from app.ingest.entity_names import parse_variant
 from app.ingest.fact_keys import (REASON_UNASSEMBLED, REASON_VARIANT_MISMATCH,
                                   REASON_VARIANT_MULTI)
-from app.ingest.schemas import (ExtractedCard, ExtractedFact, ExtractionResult,
-                                LocatedAssertion, LocatedEvidence)
+from app.ingest.schemas import LocatedAssertion, LocatedEvidence
 
 
 def _settings(**extra):
@@ -43,96 +42,11 @@ async def _run_ledger(settings, ids):
 
 
 @pytest.mark.asyncio
-async def test_flag_absent_does_not_link():
-    _, link, out = await _run_ledger(_settings(), [78, 77, 78])
-    link.assert_not_awaited()
-    assert out == {"f1": 78, "f2": 77, "f3": 78}
-
-
-@pytest.mark.asyncio
-async def test_flag_off_does_not_link():
-    _, link, _ = await _run_ledger(_settings(w_entity_revision_enabled=False), [78, 77, 78])
-    link.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_flag_on_links_with_the_same_conn_and_sorted_unique_ids():
-    conn, link, _ = await _run_ledger(_settings(w_entity_revision_enabled=True), [78, 77, 78])
+async def test_ledger_returns_keys_and_links_with_the_same_conn_and_sorted_unique_ids():
+    conn, link, out = await _run_ledger(_settings(), [78, 77, 78])
     link.assert_awaited_once()
     assert link.await_args.args == (conn, 3, 5, [77, 78])
-
-
-def _card():
-    return ExtractedCard(category_name="기타", title="음료Z", content="물 10ml", confidence=.9,
-                         facts=[ExtractedFact(object_name="음료Z", attribute="물", value="10",
-                                              confidence=.9, ref="f1")])
-
-
-async def _run_persist(settings, entity, calls=None):
-    conn = NS(fetchval=AsyncMock(return_value="SCAN"))
-    calls = [] if calls is None else calls
-    insert_card = AsyncMock(return_value=9, side_effect=lambda *a, **k: calls.append("card") or 9)
-    card_entity = AsyncMock(return_value=entity)
-    lock = AsyncMock(side_effect=lambda *a, **k: calls.append("lock"))
-    with patch.object(pipeline.repo, "insert_card", insert_card), \
-         patch.object(entities, "lock_store_knowledge", lock), \
-         patch("app.ingest.impact.record_upload_proposals", AsyncMock()), \
-         patch.object(pipeline.repo, "insert_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "link_card_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "insert_card_evidence", AsyncMock()), \
-         patch.object(pipeline.repo, "set_assembly_state", AsyncMock()), \
-         patch.object(fact_ledger, "card_entity_for", card_entity), \
-         patch("app.config.get_settings", return_value=settings):
-        await pipeline._persist(conn, 3, 5, {"기타": 1}, ExtractionResult(cards=[_card()]),
-                                job_id=None, category_version=1,
-                                ledger_ids={"f1": 77, "f2": 78})
-    _run_persist.last_lock = lock
-    return conn, insert_card, card_entity
-
-
-@pytest.mark.asyncio
-async def test_persist_flag_absent_inserts_card_without_entity():
-    _, insert_card, card_entity = await _run_persist(_settings(), 42)
-    card_entity.assert_not_awaited()
-    assert insert_card.await_args.kwargs["entity_id"] is None
-
-
-@pytest.mark.asyncio
-async def test_persist_flag_on_passes_card_entity_to_insert_card():
-    conn, insert_card, card_entity = await _run_persist(
-        _settings(w_entity_revision_enabled=True), 42)
-    assert card_entity.await_args.args == (conn, 3, [77])
-    assert insert_card.await_args.kwargs["entity_id"] == 42
-
-
-@pytest.mark.asyncio
-async def test_persist_flags_off_takes_no_store_lock():
-    calls = []
-    await _run_persist(_settings(w_entity_revision_enabled=False,
-                                 w_upload_proposals_enabled=False), 42, calls)
-    _run_persist.last_lock.assert_not_awaited()
-    assert calls == ["card"]
-
-
-@pytest.mark.asyncio
-async def test_persist_flags_absent_takes_no_store_lock():
-    calls = []
-    await _run_persist(_settings(), 42, calls)
-    _run_persist.last_lock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("flags", [
-    {"w_entity_revision_enabled": True},
-    {"w_entity_revision_enabled": True, "w_upload_proposals_enabled": True},
-    {"w_upload_proposals_enabled": True},
-])
-async def test_persist_flag_on_takes_store_lock_before_insert_card(flags):
-    # 매장 잠금 → 대상 행 순서 (merge_entities 와 같은 순서라야 교착하지 않는다)
-    calls = []
-    conn, _, _ = await _run_persist(_settings(**flags), 42, calls)
-    assert calls[0] == "lock" and calls.index("lock") < calls.index("card")
-    assert _run_persist.last_lock.await_args.args == (conn, 3)
+    assert out == {"f1": 78, "f2": 77, "f3": 78}
 
 
 def _row(variant=""):

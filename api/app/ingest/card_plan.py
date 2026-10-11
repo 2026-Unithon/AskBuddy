@@ -369,6 +369,50 @@ def fallback_cards(group: EntityGroup, *, category_name: str) -> tuple[Validated
         raise PlanInvalid(DATA_TOO_LARGE, e.code) from e
 
 
+def _kind_of(f: PlanFact) -> str:
+    """fallback_cards 와 같은 종류 규칙."""
+    if f.step_order is not None:
+        return "STEPS"
+    if f.polarity == "AFFIRM" and f.quantity_value is not None:
+        return "QUANTITIES"
+    return "NOTES"
+
+
+def append_facts(layout: Sequence[tuple[str, tuple[int, ...]]], group: EntityGroup,
+                 new_ids: Sequence[int], *, category_name: str) -> ValidatedCard:
+    """공개 판 배치를 그대로 두고 새 사실만 붙인다. 모델을 부르지 않는다(A-D4).
+
+    layout 은 공개 판의 (종류, 판 id 들) 블록 순서다. 새 사실은 같은 종류·같은 규격의 첫 블록
+    끝에 붙는다. STEPS 는 (단계 순서, 판 id) 로 다시 줄 세운다. 맞는 블록이 없으면 그 종류의
+    새 블록을 끝에 둔다. 검증은 validate_proposals 가 하고, 카드가 한 장이 아니면 거절한다.
+    """
+    by_id = {f.fact_revision_id: f for f in group.facts}
+    blocks: list[tuple[str, list[int]]] = []
+    for kind, ids in layout:
+        if any(r not in by_id for r in ids):
+            raise PlanInvalid(PLAN_OUTSIDE_GROUP, "layout")
+        blocks.append((kind, list(ids)))
+    for rid in new_ids:
+        f = by_id.get(rid)
+        if f is None:
+            raise PlanInvalid(PLAN_OUTSIDE_GROUP, f"new={rid}")
+        kind = _kind_of(f)
+        target = next((ids for k, ids in blocks
+                       if k == kind and ids and by_id[ids[0]].variant == f.variant), None)
+        if target is None:
+            blocks.append((kind, [rid]))
+            continue
+        target.append(rid)
+        if kind == "STEPS":
+            target.sort(key=lambda r: (by_id[r].step_order, r))
+    proposal = ProposedCard(category_name,
+                            tuple(ProposedBlock(k, tuple(ids)) for k, ids in blocks))
+    cards = validate_proposals(group, [proposal])
+    if len(cards) != 1:
+        raise PlanInvalid(DATA_TOO_LARGE, "append")
+    return cards[0]
+
+
 def plan_entity(group: EntityGroup, proposals: Sequence[ProposedCard]) -> EntityPlanResult:
     data_error = check_group(group)
     if data_error:

@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, patch
 import asyncpg
 
 from app.ingest import pipeline, extract, recovery, job_repository
-from app.ingest.schemas import ExtractedAssertion, ExtractedCard, ExtractedFact, ExtractionResult
+from app.ingest.extract import mock
+from app.ingest.schemas import ExtractedAssertion
 from verify_w_partial_extraction import _seed, _new_source
 
 
@@ -42,9 +43,7 @@ async def verify(db, dsn):
         counts['assembly'] += 1
         if phase['fail_assembly']:
             raise RuntimeError('synthetic assembly failure')
-        return ExtractionResult(cards=[ExtractedCard(category_name='기타', title='합성 카드', content=f["값"],
-            confidence=.9, facts=[ExtractedFact(object_name='음료Z', attribute='물', value=f['값'],
-            ref=f['ref'], confidence=.9)]) for f in kw['facts']])
+        return mock._planned(kw['entities'], kw['category_names'])
     async def state():
         return await recovery.load(db, store, job, source)
     async def cards():
@@ -57,7 +56,7 @@ async def verify(db, dsn):
                 (pipeline, 'get_pool', lambda: pool),
                 (pipeline, '_preprocess', AsyncMock(side_effect=lambda *a, **kw: ('source', [], segments))),
                 (pipeline.shutil, 'rmtree', lambda *a, **kw: None),
-                (extract, 'extract_facts', extract_fake), (extract, 'assemble_cards', assemble_fake),
+                (extract, 'extract_facts', extract_fake), (extract, 'assemble_card_plan', assemble_fake),
             ]:
                 stack.enter_context(patch.object(obj, name, replacement))
             await run()
@@ -107,7 +106,8 @@ async def verify(db, dsn):
             assert await job_repository.reset_retryable_sources(db, store, job, include_no_result=True) == 1
             assert await state() == pending
             await run()
-            assert await cards() == 2 and counts['extract'] == extract_count
+            # 같은 대상의 카드는 하나다 — 새 사실이 늘어도 카드 행은 그대로 다시 조립된다
+            assert await cards() == 1 and counts['extract'] == extract_count
             finished = await state()
             assert finished['phase'] == 'COMMITTED' and not finished['outcome']['failed_segment_ids']
             assert not finished['outcome']['assertions'] and not finished['ledger_ids']
@@ -115,7 +115,7 @@ async def verify(db, dsn):
             assert await db.fetchval('select count(*) from source_facts where store_id=$1 and source_id=$2', store, source) == 2
             before = counts.copy()
             await run()
-            assert await cards() == 2 and counts == before
+            assert await cards() == 1 and counts == before
             try:
                 async with db.transaction():
                     await recovery.replace(db, store, job, source, pending, finished)

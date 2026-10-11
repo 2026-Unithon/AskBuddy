@@ -13,7 +13,6 @@ Task 1 (W2-1 대상):
   E6 병합된 대상의 별칭은 살아남은 대상으로 따라간다 · 정규화 불가 이름은 대상 결정 불가
 
 Task 2 (W2-2 원장 → 판·occurrence, process_source + 합성 모델 대역):
-  R0 플래그 꺼짐 — W2 표 0행, 새 카드 entity_id null, 원장·원장 위치 행 수는 켠 경우와 같다
   R1 영상 순서 + PDF 수량 → 한 대상, 사실·판 4, occurrence 는 각 자료로, 충돌 0
   R2 HOT/ICE 분리 · 같은 값의 HOT/ICE 도 두 사실
   R3 수치 충돌 양쪽 보존 — 두 사실·두 판, OPEN NUMERIC 충돌 1, 검수 목록에 선택 칸 없음
@@ -43,7 +42,7 @@ Task 4 (W2-4 영향 카드·업로드 검수 제안, publish_cards 로 실제 �
   P3 영향 없는 카드 보존 — X·Y·Z 행 전체(to_jsonb, updated_at 포함)·공개 포인터·배정·카테고리,
      snapshot 행 수·current snapshot hash 가 B 전후 동일. Y 는 영향 목록에 없다
   P4 B 재처리 → 제안·항목 행 수·내용 불변
-  P5 첫 자료만 있는 새 매장 → 모두 NEW · 플래그 꺼짐 → 제안 0행
+  P5 첫 자료만 있는 새 매장 → 모두 NEW
   P6 ICE 뿐인 승인 카드 Z 와 같은 대상의 HOT 사실 → Z 는 영향 없음, NEW
   P7 (결정 J) 자료 처리 → 같은 대상 다른 값 카드 승인 → 재처리: 머리 CONFLICT 로 올라가고 항목도
      CONFLICT·충돌 상대·영향 카드로 갱신 · DISMISSED 제안은 새 사실 재처리에도 머리·항목 그대로
@@ -55,13 +54,12 @@ Task 5 (W2-4 ③ 대상 병합·분리·재연결, 한 합성 매장 + 실제 �
      relink_fact(70 → 우유 거품) → 새 슬롯에서 같은 쌍 OPEN, 같은 대상·낡은 head → ValueError·Stale
   S2 카페라떼/카페라테 후보 → merge_entities → 사실 이동, 별칭 카페라테 가 keep 에서 조회, merged MERGED,
      resolve_entity("카페라테") = keep, 같은 값 두 사실은 둘 다 남고 충돌 아님, 후보 CONFIRMED_SAME,
-     decide_candidate DISMISSED·이력. 병합 뒤 새 자료는 keep 에 MATCHED·새 카드 entity=keep
+     decide_candidate DISMISSED·이력. 병합 뒤 새 자료는 keep 에 MATCHED·사실은 keep 대상의 카드에 실림
   S3 공개본 보존 — S1·S2 전후 카드 행·card_versions·card_facts·snapshot 수·current hash·업로드 제안 동일
   S4 다른 매장 entity_id 로 relink → LookupError·행 수 불변, 직접 쓰기는 복합 FK 실패,
      다른 매장 id 로 split·merge·후보 결정 → LookupError
 
-W3-0 (설계 W3_0_FLAG_READINESS_DESIGN §3-6): verify() 끝에서 scripts/verify_w3_flag_readiness.py 를
-부른다 — 두 플래그를 켠 합성 종단 검증 T1~T8.
+업로드는 항상 사실 경로(대상·판 연결·검수 제안·사실 조립)로 간다. 플래그 켜기/끄기 비교 검증은 없다.
 """
 import importlib
 import json
@@ -79,8 +77,9 @@ from app.ingest.entities import (AliasTaken, EntityUnresolvable, add_owner_alias
                                  find_entity_by_alias, list_candidates, lock_store_knowledge,
                                  resolve_entity)
 from app.ingest.extract import gemini
-from app.ingest.schemas import (ExtractedCard, ExtractedFact, ExtractionResult,
-                                FactExtractionResult)
+from app.ingest import fact_assembly
+from app.ingest.extract import mock
+from app.ingest.schemas import FactExtractionResult
 from verify_w_partial_extraction import _new_source, _seed
 
 
@@ -286,7 +285,7 @@ class _Ingest:
     async def __aexit__(self, *exc):
         await self.pool.close()
 
-    async def run(self, store, user, source, facts, *, run_tag, enabled=True, proposals=False):
+    async def run(self, store, user, source, facts, *, run_tag):
         db = self.db
         job_id = await db.fetchval(
             "insert into ingest_jobs (store_id, created_by, title, status, category_version, "
@@ -302,15 +301,12 @@ class _Ingest:
             if schema is not None and issubclass(schema, FactExtractionResult):
                 body = FactExtractionResult.model_validate({"assertions": facts})
                 return gemini.CallResult(body.model_dump_json(), {}, "STOP")
-            card = ExtractedCard(
-                category_name=category, title=facts[0]["subject"], content="합성 카드",
-                confidence=.9, facts=[ExtractedFact(
-                    object_name=f["subject"], attribute=f["attribute"], value=f["value"],
-                    confidence=.9, ref=f["local_ref"]) for f in facts])
-            return gemini.CallResult(ExtractionResult(cards=[card]).model_dump_json(), {}, "STOP")
+            # 사실 조립 — 입력 대상 묶음을 규칙대로 배치한 합성 계획
+            payload = json.loads(prompt.split(fact_assembly.PLAN_INPUT_MARKER, 1)[1])
+            return gemini.CallResult(mock._planned(payload, [category]).model_dump_json(),
+                                     {}, "STOP")
 
-        settings = Settings(_env_file=None, w_entity_revision_enabled=enabled,
-                            w_upload_proposals_enabled=proposals)
+        settings = Settings(_env_file=None)
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: self.pool),
@@ -370,9 +366,8 @@ async def _scenario_ledger(db, dsn) -> None:
         check("occurrence 는 각 자료로 — 영상 3(TIMESTAMP)·PDF 1",
               [(o["source_id"], o["locator_type"]) for o in occ]
               == [(video, "TIMESTAMP")] * 3 + [(scan, "WHOLE_SOURCE")])
-        check("occurrence 는 모두 REVIEW_PENDING·W2_UNASSEMBLED",
-              all((o["disposition"], o["reason"]) == ("REVIEW_PENDING", "W2_UNASSEMBLED")
-                  for o in occ))
+        check("occurrence 는 모두 카드에 LINKED",
+              all(o["disposition"] == "LINKED" for o in occ))
         check("충돌 0", counts1["fact_conflicts"] == 0)
         check("절차 선행 관계 2건(단계 2→1, 3→2)", counts1["fact_revision_requires"] == 2)
         entity1 = await db.fetchval("select entity_id from knowledge_entities where store_id=$1", s1)
@@ -387,23 +382,11 @@ async def _scenario_ledger(db, dsn) -> None:
               (str(syrup["quantity_value"]), syrup["quantity_unit"], syrup["original_assertion"],
                syrup["subject"]) == ("20", "ml", "음료 Z 시럽 20ml", "음료 Z"))
         cards = await db.fetch("select entity_id from knowledge_cards where store_id=$1", s1)
-        check("새 카드에 대상 id", len(cards) == 2 and all(c["entity_id"] == entity1 for c in cards))
+        check("새 카드에 대상 id — 대상마다 카드 하나",
+              len(cards) == 1 and all(c["entity_id"] == entity1 for c in cards))
 
-        # R0 — 플래그 꺼짐: 같은 자료, 다른 매장
-        check = _checker("R0")
+        # R8 에서 쓸 자료 없는 다른 매장
         user0, s0, _ = await _seed(db)
-        video0 = await _new_source(db, s0, user0, "VIDEO")
-        scan0 = await _new_source(db, s0, user0, "SCAN")
-        await ingest.run(s0, user0, video0, video_facts, run_tag=211, enabled=False)
-        await ingest.run(s0, user0, scan0, scan_facts, run_tag=212, enabled=False)
-        check("W2 표 0행", all(v == 0 for v in (await _w2_counts(db, s0)).values()))
-        cards0 = await db.fetch("select entity_id from knowledge_cards where store_id=$1", s0)
-        check("새 카드 entity_id null", len(cards0) == 2
-              and all(c["entity_id"] is None for c in cards0))
-        for table in ("source_facts", "source_fact_occurrences"):
-            on = await db.fetchval(f"select count(*) from {table} where store_id=$1", s1)
-            off = await db.fetchval(f"select count(*) from {table} where store_id=$1", s0)
-            check(f"{table} 행 수는 켠 경우와 같다 ({off})", on == off and off > 0)
 
         # R8 — 격리: 다른 매장 id 로 A 의 자료·원장 id 를 넘기면 0건
         check = _checker("R8")
@@ -1070,12 +1053,12 @@ async def _scenario_proposals(db, dsn) -> None:
         src_z = await _new_source(db, s, user, "SCAN")
         await ingest.run(s, user, src_a, [_fact("f1", "음료Q", "시럽", "20", "ml"),
                                           _fact("f2", "음료Q", "얼음", "100", "g")],
-                         run_tag=401, proposals=True)
+                         run_tag=401)
         await ingest.run(s, user, src_y, [_fact("f1", "음료W", "시럽", "15", "ml")],
-                         run_tag=402, proposals=True)
+                         run_tag=402)
         await ingest.run(s, user, src_z, [_fact("f1", "음료V", "시럽", "12", "ml",
                                                 variant="ICE")],
-                         run_tag=403, proposals=True)
+                         run_tag=403)
         first = await db.fetch("select relation_type, matched_cards::text m "
                                "from upload_change_proposals where store_id=$1", s)
         check("승인 카드가 없을 때 처리한 자료 3개 → 제안 3행 모두 NEW·빈 matched_cards",
@@ -1126,7 +1109,7 @@ async def _scenario_proposals(db, dsn) -> None:
         b_facts = [_fact("f1", "음료Q", "시럽", "20", "ml"),
                    _fact("f2", "음료Q", "얼음", "150", "g"),
                    _fact("f3", "음료Q", "우유", "200", "ml")]
-        await ingest.run(s, user, src_b, b_facts, run_tag=404, proposals=True)
+        await ingest.run(s, user, src_b, b_facts, run_tag=404)
         heads = await db.fetch(
             "select proposal_id, entity_id, job_id, relation_type, status, matched_cards "
             "from upload_change_proposals where store_id=$1 and source_id=$2", s, src_b)
@@ -1179,17 +1162,22 @@ async def _scenario_proposals(db, dsn) -> None:
         # P4 — B 재처리 → 제안·항목 불변
         check = _checker("P4")
         props_before = await _proposal_rows(db, s)
-        await ingest.run(s, user, src_b, b_facts, run_tag=405, proposals=True)
+        await ingest.run(s, user, src_b, b_facts, run_tag=405)
         check("제안·항목 행 수·내용(updated_at 포함) 불변",
               await _proposal_rows(db, s) == props_before)
         check("재처리 뒤에도 X·Y·Z 행 그대로", await _card_rows(db, s, (x, y, z)) == rows_before)
 
         # P6 — ICE 뿐인 승인 카드 Z 와 같은 대상의 HOT 사실
+        # Phase A(A-D4): 공개된 자동 사실 카드는 새 사실을 붙인 새 초안을 받는다. 여기서는 영향
+        # 계산의 규격 규칙만 보려고 Z 를 수동 배정으로 옮겨 카드 쓰기를 막는다(불변식 12)
         check = _checker("P6")
+        await db.execute("update knowledge_cards set assignment_type='MANUAL' "
+                         "where store_id=$1 and card_id=$2", s, z)
+        z_before = (await _card_rows(db, s, (z,)))[z]
         src_hot = await _new_source(db, s, user, "KAKAO")
         await ingest.run(s, user, src_hot, [_fact("f1", "음료V", "시럽", "10", "ml",
                                                   variant="HOT")],
-                         run_tag=406, proposals=True)
+                         run_tag=406)
         hot = await db.fetchrow(
             "select p.relation_type, p.matched_cards::text m, i.relation_type item, "
             "i.affected_card_ids from upload_change_proposals p "
@@ -1199,7 +1187,7 @@ async def _scenario_proposals(db, dsn) -> None:
         check("Z 는 영향 없음 → NEW·빈 matched_cards",
               (hot["relation_type"], hot["m"], hot["item"]) == ("NEW", "[]", "NEW")
               and z not in list(hot["affected_card_ids"]))
-        check("Z 행 그대로", (await _card_rows(db, s, (z,)))[z] == rows_before[z])
+        check("Z 행 그대로", (await _card_rows(db, s, (z,)))[z] == z_before)
 
         # P7 (결정 J) — 자료 처리 → 같은 대상 다른 값 카드 승인 → 자료 재처리
         check = _checker("P7")
@@ -1210,9 +1198,11 @@ async def _scenario_proposals(db, dsn) -> None:
         first7 = await _new_source(db, s7, user7, "SCAN")
         other7 = await _new_source(db, s7, user7, "VOICE")
         first_facts = [_fact("f1", "음료K", "시럽", "30", "ml")]
-        await ingest.run(s7, user7, first7, first_facts, run_tag=409, proposals=True)
+        # 대상마다 카드가 하나다. 먼저 처리한 자료(40 ml)가 카드를 만들고 두 자료의 사실이 거기 실린다.
+        # 자료는 자기가 만든 카드에 제안하지 않으므로, 30 ml 자료의 재처리가 그 카드에 CONFLICT 를 낸다
         await ingest.run(s7, user7, other7, [_fact("f1", "음료K", "시럽", "40", "ml")],
-                         run_tag=410, proposals=True)
+                         run_tag=410)
+        await ingest.run(s7, user7, first7, first_facts, run_tag=409)
         before7 = await db.fetch(
             "select p.source_id, p.relation_type head, i.relation_type item "
             "from upload_change_proposals p join upload_change_proposal_facts i "
@@ -1239,7 +1229,7 @@ async def _scenario_proposals(db, dsn) -> None:
             "update upload_change_proposals set status='DISMISSED', decided_by=$3, "
             "decided_at=now() where store_id=$1 and source_id=$2", s7, other7, user7)
         dismissed_before = await _proposal_rows(db, s7)
-        await ingest.run(s7, user7, first7, first_facts, run_tag=411, proposals=True)
+        await ingest.run(s7, user7, first7, first_facts, run_tag=411)
         head7 = await db.fetchrow(
             "select proposal_id, relation_type, status, matched_cards "
             "from upload_change_proposals where store_id=$1 and source_id=$2", s7, first7)
@@ -1261,7 +1251,7 @@ async def _scenario_proposals(db, dsn) -> None:
         # 기각된 자료를 새 사실과 함께 재처리 → 기각 제안은 항목도 머리도 그대로
         await ingest.run(s7, user7, other7, [_fact("f1", "음료K", "시럽", "40", "ml"),
                                              _fact("f2", "음료K", "우유", "150", "ml")],
-                         run_tag=412, proposals=True)
+                         run_tag=412)
         dismissed_id = await db.fetchval(
             "select proposal_id from upload_change_proposals where store_id=$1 and source_id=$2",
             s7, other7)
@@ -1277,23 +1267,17 @@ async def _scenario_proposals(db, dsn) -> None:
                                    "and sf.fact_id=l.source_fact_id "
                                    "where l.store_id=$1 and sf.source_id=$2", s7, other7) == 2)
 
-        # P5 — 첫 자료만 있는 새 매장 · 플래그 꺼짐
+        # P5 — 첫 자료만 있는 새 매장
         check = _checker("P5")
         user5, s5, _ = await _seed(db)
         first5 = await _new_source(db, s5, user5, "SCAN")
-        await ingest.run(s5, user5, first5, b_facts, run_tag=407, proposals=True)
+        await ingest.run(s5, user5, first5, b_facts, run_tag=407)
         rows5 = await db.fetch(
             "select p.relation_type head, p.matched_cards::text m, i.relation_type item "
             "from upload_change_proposals p join upload_change_proposal_facts i "
             "on i.store_id=p.store_id and i.proposal_id=p.proposal_id where p.store_id=$1", s5)
         check("머리·항목 모두 NEW", len(rows5) == 3 and all(
             (r["head"], r["m"], r["item"]) == ("NEW", "[]", "NEW") for r in rows5))
-        off = await _new_source(db, s5, user5, "VOICE")
-        await ingest.run(s5, user5, off, [_fact("f1", "음료Q", "설탕", "5", "g")],
-                         run_tag=408, proposals=False)
-        check("제안 플래그 꺼짐 → 그 자료 제안 0행", await _count(
-            db, "select count(*) from upload_change_proposals where store_id=$1 "
-                "and source_id=$2", s5, off) == 0)
         check("새 매장 제안은 첫 자료의 1행뿐", await _count(
             db, "select count(*) from upload_change_proposals where store_id=$1", s5) == 1)
         async with db.transaction():
@@ -1371,17 +1355,17 @@ async def _scenario_entity_admin(db, dsn) -> None:
         src_steam = await _new_source(db, s, user, "VOICE")
         await ingest.run(s, user, src_milk, [_fact("f1", "우유", "보관 위치", "냉장고 2칸"),
                                              _fact("f2", "우유", "스팀 온도", "65", "도")],
-                         run_tag=501, proposals=True)
+                         run_tag=501)
         await ingest.run(s, user, src_steam, [_fact("f1", "우유", "스팀 온도", "70", "도")],
-                         run_tag=502, proposals=True)
+                         run_tag=502)
         # 합성: 카페라떼·카페라테 → 대상 둘 + 후보(E2 와 같은 경우). 같은 값 시럽 20 ml 가 양쪽에 있다
         src_latte = await _new_source(db, s, user, "SCAN")
         src_latte2 = await _new_source(db, s, user, "VOICE")
         await ingest.run(s, user, src_latte, [_fact("f1", "카페라떼", "시럽", "20", "ml")],
-                         run_tag=503, proposals=True)
+                         run_tag=503)
         await ingest.run(s, user, src_latte2, [_fact("f1", "카페라테", "시럽", "20", "ml"),
                                                _fact("f2", "카페라테", "우유", "200", "ml")],
-                         run_tag=504, proposals=True)
+                         run_tag=504)
 
         # S3 기준 — 우유 자료 카드를 실제 발행해 공개본을 만든다
         card_ids = [r["card_id"] for r in await db.fetch(
@@ -1661,10 +1645,13 @@ async def _scenario_entity_admin(db, dsn) -> None:
         "select l.entity_id, l.link_kind, l.fact_id from source_fact_revision_links l "
         "join source_facts f on f.store_id=l.store_id and f.fact_id=l.source_fact_id "
         "where l.store_id=$1 and f.source_id=$2", s, src_after)
-    check("병합 뒤 새 자료 카페라테 → keep 에 MATCHED(가장 작은 fact_id), 새 카드 entity=keep",
+    check("병합 뒤 새 자료 카페라테 → keep 에 MATCHED(가장 작은 fact_id), 사실은 keep 대상의 카드에 실림",
           link is not None and tuple(new_link) == (keep, "MATCHED", latte["fact_id"])
-          and await db.fetchval("select entity_id from knowledge_cards where store_id=$1 "
-                                "and source_id=$2", s, src_after) == keep)
+          and await db.fetchval(
+              "select c.entity_id from fact_occurrences o join knowledge_cards c "
+              "on c.store_id = o.store_id and c.card_id = o.card_id "
+              "where o.store_id=$1 and o.source_id=$2 and o.disposition='LINKED'",
+              s, src_after) == keep)
 
     # S4 — 다른 매장의 대상·후보·사실
     check = _checker("S4")
@@ -1709,7 +1696,4 @@ async def verify(db, dsn):
         await _scenario_revisions(db, dsn)
         await _scenario_proposals(db, dsn)
         await _scenario_entity_admin(db, dsn)
-        # W3-0 §3-6 — 두 플래그를 켠 합성 종단 검증. 순환 import 를 피해 여기서 부른다
-        from verify_w3_flag_readiness import verify as verify_w3_0
-        await verify_w3_0(db, dsn)
     print("PASS W entity revision all scenarios")

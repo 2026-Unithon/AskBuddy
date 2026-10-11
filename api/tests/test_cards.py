@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.cards.repository import _status_clause
 from app.cards.router import _identity, _json_object, require_owner
-from app.cards.schemas import CategoryUpdateRequest, DraftUpdateRequest
+from app.cards.schemas import CategoryUpdateRequest
 from app.errors import ApiError
 
 
@@ -20,13 +20,6 @@ class CardsTest(unittest.IsolatedAsyncioTestCase):
     def test_needs_review_includes_reason(self):
         clause, _ = _status_clause("needs_review", staff=False)
         self.assertIn("needs_review_reason is not null", clause)
-
-    def test_draft_text_is_trimmed(self):
-        req = DraftUpdateRequest(
-            title="  우유 위치  ", content="  둘째 선반  ", expected_version_id=1
-        )
-        self.assertEqual(req.title, "우유 위치")
-        self.assertEqual(req.content, "둘째 선반")
 
     def test_category_update_requires_positive_id(self):
         with self.assertRaises(ValidationError):

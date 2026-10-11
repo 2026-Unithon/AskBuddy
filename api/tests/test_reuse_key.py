@@ -13,7 +13,7 @@ from app.contracts.usage import UsageContext
 from app.ingest import raw_responses, reuse
 from app.ingest.extract import gemini, mock
 from app.ingest.pipeline import _extract_facts_all
-from app.ingest.schemas import ExtractionResult, FactExtractionResult
+from app.ingest.schemas import CardPlanBatch, FactExtractionResult
 
 GOOD = json.dumps({"assertions": [dict(
     local_ref="f1", original_assertion="음료Z 물 10ml", subject="음료Z",
@@ -341,16 +341,17 @@ async def test_lookup_error_falls_back_to_model_call():
 
 
 @pytest.mark.asyncio
-async def test_assemble_reuses_same_facts_prompt():
+async def test_assemble_plan_reuses_same_entities_prompt():
     sink, calls = MemorySink(), Calls(gemini.CallResult(
-        ExtractionResult().model_dump_json(), {}, "STOP"))
-    kw = dict(source_id=5, facts=[{"ref": "f1"}], category_names=["기타"], glossary=[],
-              raw_sink=sink)
+        CardPlanBatch().model_dump_json(), {}, "STOP"))
+    kw = dict(source_id=5, entities=[{"대상": "음료Z", "사실": [
+        {"id": "F1", "규격": "", "순서": 0, "부정": False}]}], category_names=["기타"],
+        glossary=[], raw_sink=sink)
     with patch.object(gemini, "get_settings", return_value=_settings()), \
          patch.object(gemini, "_call", calls):
-        await gemini.assemble(usage_context=_ctx("ASSEMBLE"), **kw)
-        await gemini.assemble(usage_context=_ctx("ASSEMBLE"), **kw)
-        await gemini.assemble(usage_context=_ctx("ASSEMBLE"), **{**kw, "category_names": ["기타", "음료"]})
+        await gemini.assemble_plan(usage_context=_ctx("ASSEMBLE"), **kw)
+        await gemini.assemble_plan(usage_context=_ctx("ASSEMBLE"), **kw)
+        await gemini.assemble_plan(usage_context=_ctx("ASSEMBLE"), **{**kw, "category_names": ["기타", "음료"]})
     assert len(calls.prompts) == 2
 
 

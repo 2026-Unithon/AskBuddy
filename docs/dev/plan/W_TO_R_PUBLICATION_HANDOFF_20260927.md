@@ -235,7 +235,7 @@ R 이 점주 답변 후보 검색을 활성 공개 색인으로 옮겨(PR #26) W
 - `api/app/publish/bootstrap.py`: 매장 상태 `READY / MISSING / OUTDATED / EMPTY` 를 판정하고, MISSING·OUTDATED 면
   현재 승인 카드 그대로 한 번 재발행(`publish_cards(changes=[])`)해 색인을 만든다. 출처 없는 레거시 카드는 빠진다(경고 로그).
 - `api/scripts/bootstrap_store_index.py`: 기본은 점검만 한다. `--apply` 를 붙여야 재발행한다(임베딩 비용).
-  **`W_OWNER_ANSWER_WORKER_ENABLED=true` 전에 한 번 돌린다.** 데모 시드(`demo_seed.py`)도 이 함수로 색인을 만든다.
+  **`W_OWNER_ANSWER_WORKER_ENABLED=true` 전에 한 번 돌린다.** 데모 시드(`demo_seed.py`)는 카드 없이 매장·계정·로드맵 틀·대기 질문만 심고 색인은 만들지 않는다. **데모 카드는 자료 업로드로 만든다.**
 - worker 는 READY 가 아닌 매장의 사건을 건너뛰고 상태가 바뀔 때만 한 번 경고한다. 사건은 소비하지 않고 남는다.
 - 운영 점검 화면(`preflight`)의 "시드 임베딩" 항목을 "공개 색인"(승인 카드가 있는 매장 수 대비 색인 있는 매장 수)으로 바꿨다.
 
@@ -300,6 +300,25 @@ W 가 다음 세 단계를 계획했다(아직 구현 전, 사용자 결정 2026
 
 R 이 할 일 12·13번을 더했다.
 
+### Phase A 구현 (2026-10-10, 브랜치 `w/phase-a-fact-only`)
+
+위 계획대로 구현했다(배포 전). R 이 확인·결정할 것은 "R 이 할 일" 12·14·15 에 모았다.
+
+- **12-(d) 답: 코드로 확인 — Phase A 에서 지움(R 확인 대기).** R `learn/router.py` 는 옛 함수 3개(`publish_new_proposal`·`publish_existing_proposal`·`prepare_proposal`)를 import 하지 않는다. W 는 이 3개를 Phase A 의 다음 작업에서 지운다. R 이 틀렸다고 보면 지우기 전에 알려 달라.
+- **v1 경로의 변화.** v1 `/learn/pending/{id}/answer`·`/learn/knowledge-proposals/{id}/approve` 는 이제 **사실 초안이 없는 제안**을 `approve_owner_proposal` 이 `ValueError` 로 거절하고 라우터가 409 로 바꾼다. 메시지: "예전 방식 제안이라 카드로 만들 수 없어요. 카드 화면에서 직접 고쳐 주세요." v1 로 새 점주 답변 제안을 만들면 `NEW` 는 `FAILED` 가 된다(점주 원문 전달은 그대로). 웹 `/owner/questions` 목록과 `/owner/cards/proposals` 가 아직 v1 을 쓴다 → **R 이 할 일 14.**
+- **`relation_type` 의미 변화(12-(e) 답).** `NEW` = 새 카드(들), `SUPPLEMENT` = 이미 공개된 카드에 새 초안, `IDENTICAL` = 이미 공개된 같은 사실. `CONFLICT` 는 더 만들지 않는다. reason 에 `NO_FACTS`(답변에서 사실이 나오지 않음)·`FACTS_PENDING`(사실 추출·조립이 아직 안 끝남)이 생겼다. 승인하면 **그 답변이 만든 초안 카드를 전부 공개**한다. `approve_owner_proposal(...)` 모양과 `ApplyOwnerAnswerResult` 계약은 그대로다.
+- **점주 답변 근거(12-(f) 표시 요청 유지).** `OWNER_TEXT` 자료 occurrence(`source_id`+`occurrence_id`)로 온다. 자료와 답변의 연결은 새 표 `owner_answer_sources`(migration `20261010090000`)가 쥔다. R 인용 표시는 "점주 답변" 으로 보여 달라.
+- **점주 답변 검토 이유.** 대상 카드에 붙이는 점주 답변 검토 이유는 `NO_PROVENANCE`·`FACT_CONFLICT_OPEN`·`FALLBACK:*` 를 덮어쓰지 않는다. 공개된 카드의 재초안은 `needs_review_reason` 을 계산된 이유 또는 `NEW_FACTS` 로 둔다.
+- **R 소유 검증 3개를 W 가 고쳤다(사용자 결정 P-3).** R 이 확인해 달라.
+  - `verify_r_legacy_publication.py`: v1 `NEW` 가 이제 `FAILED` 인 것을 기대하도록 바꿨고, 지워진 설정을 패치하던 줄(오류 때 Settings repr 이 새어 나갈 수 있었다)을 지웠다.
+  - `verify_r_w3_consumer.py`: 공개 호출에 `version=1` 을 명시했다.
+  - `verify_r_owner_candidates.py`: 사실 카드 fixture 로 바꿨다. worker 검사는 이제 "DB 연결이 임베딩 중이 아니라 **모델·추출 호출 중에** 풀려 있음"을 증명한다 → **R 이 이 바뀐 의미가 맞는지 확인해 달라.**
+  - 또 W 가 `verify_w_publication_flow.py` 에서 R `verify_r_owner_citations` 호출을 지웠다. 그 검증은 점주 답변 RAW span 이 있다고 전제했는데 이제 RAW 가 없다. `api/scripts/verify_r_owner_citations.py` 파일은 지우지 않았고 그대로 남아 있다. W 흐름이 더 부르지 않을 뿐이므로, R 이 쓸지(고칠지)·지울지 정해 달라.
+- **1회 삭제 migration 에서 R 표 처리.** 비우는 R 표는 위 계획과 같다. 구현에서 달라진 점: `knowledge_publications` 행은 **지우지 않고** `current_snapshot_id` 만 비운다(revision 역행 방지, `ensure_initial_publication` 은 그대로 동작). `operations` 는 `operation='PUBLISH'`(`r-initial-empty` 포함)만 지우고 `VISIBILITY` 멱등 행은 남긴다. **R 표 중 `r_owner_knowledge_states` 등은 비우지 않아** 지워진 카드에 대한 상태 글이 남을 수 있다 → 14 에 포함.
+- **알림 문구.** W 는 작업 `card_count` 의미를 "이 자료가 이어진 카드 수" 로 바꿨다. 알림 문구가 "새 카드" 라고 하면 틀리게 된다 → **R 이 할 일 15.**
+- **12-(h) 처리.** 레거시 카드가 1회 삭제로 없어져 entity_id 이름공간 충돌 가드를 지웠다(블록 없는 판 공개 거절로 대체). 계약 분리를 할지는 R 이 정한다.
+- 데모 시드는 이제 카드를 만들지 않는다(자료를 올려 카드를 만든다). 배포 절차는 `FACT_ONLY_ROLLOUT.md`.
+
 ---
 
 ## R 이 할 일 (우선순위 순)
@@ -312,7 +331,7 @@ R 이 할 일 12·13번을 더했다.
    정리의 보관 개수·일수(N·M)는 W·R이 추후 함께 정하며, 그 전에는 정리를 켜지 않는다.
 4. ~~점주 답변 후보 검색을 새 색인으로 이전~~ — 완료(PR #26). W 가 `card_embeddings` 호환 쓰기를 지웠다(§6).
    `expected_card_revisions` 계약 결정은 남았다.
-5. **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). 옮기면 W 가 옛 함수 3개를 지운다.
+5. **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). W 가 2026-10-10 Phase A 에서 옛 함수 3개(와 `create_owner_answer_card`)를 지웠다(코드 확인: R `learn/router.py` 는 import 하지 않음, R 확인 대기).
 6. **`card_embeddings` 를 읽는 옛 경로(`/reg/retrieve`, 평가 러너) 정리 후 테이블 삭제 migration** 을 함께 정한다 (§6).
 7. **공개판이 없는 매장의 점주 답변 후보 검색은 빈 후보를 돌려준다** (§6). 새 매장의 첫 점주 답변이 막히지 않게 한다.
 8. ~~`FactProvenance.source_id` 필수 · `owner_answer_id` FK `on delete restrict` 점검~~ — **닫힘, R 이 할 일 없음.**
@@ -346,3 +365,8 @@ R 이 할 일 12·13번을 더했다.
     (c) 사실의 `ext`(공지 기간 등)는 공개 계약에 없다. R 답변에 쓰려면 그때 계약을 검토한다(지금 할 일 없음).
     (d) 공지사항(`store_notices`)은 R 답변 근거가 아니다. 공지 내용을 답변에 쓰려면 그때 계약을 검토한다.
     (e) 직원 화면(상단 공지 버튼·매장 지식 탭)이 R 소유 파일이면 알려 달라. W 가 화면 요구를 인계로 넘긴다.
+14. **v1 점주 답변·제안 화면을 v2 로 옮기거나 닫는다 (Phase A, 새 항목).** `[ ]`
+    (a) 웹 `/owner/questions` 목록과 `/owner/cards/proposals` 가 v1 `/learn/pending/{id}/answer`·`/learn/knowledge-proposals/{id}/approve` 를 쓴다. 사실 초안이 없는 v1 제안은 승인 때 409 가 나고 v1 `NEW` 는 `FAILED` 가 된다. 화면을 v2 로 옮기거나 v1 을 닫아 달라.
+    (b) 1회 삭제 뒤 R 표 `r_owner_knowledge_states` 등이 지워진 카드에 대한 상태 글을 가질 수 있다. 정리가 필요한지 정해 달라.
+    (c) `verify_r_legacy_publication.py`·`verify_r_w3_consumer.py`·`verify_r_owner_candidates.py` 의 W 수정(Phase A 절 참고)을 확인해 달라.
+15. **작업 완료 알림 문구를 바꿔 달라 (Phase A, 새 항목).** `[ ]` `notifications/service.py` 의 "새 카드가 준비됐어요 / 검토할 업무 카드 N개" 를 "카드 N장에 반영됐어요" 쪽으로. W 가 `card_count` 의미를 "이 자료가 이어진 카드 수" 로 바꿨다.

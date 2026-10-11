@@ -193,7 +193,6 @@ class _NoDb:
 
 
 class _Settings:
-    w_fact_card_edit_enabled = True
     card_fact_parse_max_chars = 1000
     card_fact_parse_max_facts = 10
 
@@ -227,18 +226,6 @@ REQ = FactParseRequest(text="물 20ml")
 
 
 @pytest.mark.asyncio
-async def test_flag_off_is_403_before_any_db_read():
-    class Off(_Settings):
-        w_fact_card_edit_enabled = False
-    get_card, load_state = AsyncMock(), AsyncMock()
-    with pytest.raises(ApiError) as e:
-        await _route(REQ, settings=Off, get_card=get_card, load_state=load_state)
-    get_card.assert_not_called()
-    load_state.assert_not_called()
-    assert e.value.status_code == 403 and e.value.code == "FACT_EDIT_DISABLED"
-
-
-@pytest.mark.asyncio
 async def test_text_too_long_422():
     class Short(_Settings):
         card_fact_parse_max_chars = 3
@@ -249,15 +236,6 @@ async def test_text_too_long_422():
     load_state.assert_not_called()
     assert e.value.status_code == 422 and e.value.code == "PARSE_TEXT_TOO_LONG"
     assert e.value.details == {"max_chars": 3}
-
-
-@pytest.mark.asyncio
-async def test_missing_flag_attr_means_off():
-    class Bare:
-        pass
-    with pytest.raises(ApiError) as e:
-        await _route(REQ, settings=Bare)
-    assert e.value.code == "FACT_EDIT_DISABLED"
 
 
 @pytest.mark.asyncio

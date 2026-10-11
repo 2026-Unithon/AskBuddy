@@ -12,6 +12,7 @@ verify_r_schema_rebuild 가 만든 새 UUID DB(모든 migration 적용)의 연�
   9. 재사용은 다른 매장으로 새지 않는다 (키에도, 조회 WHERE 에도 매장)
  10. 잘린 응답은 재사용 후보가 아니다. PARTIAL 재시도는 잃은 구간만 새로 부르고 사실을 겹치지 않는다
 """
+import json
 from contextlib import ExitStack
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
@@ -24,12 +25,19 @@ from app.contracts.usage import UsageContext
 from app.ingest import extract, pipeline, raw_responses
 from app.ingest import repository as repo
 from app.ingest.extract import gemini
-from app.ingest.schemas import (ExtractedCard, ExtractedFact, ExtractionResult,
-                                FactExtractionResult)
+from app.ingest import fact_assembly
+from app.ingest.extract import mock
+from app.ingest.schemas import FactExtractionResult
 from verify_w_partial_extraction import _new_source, _seed
 
 GOOD = ('{"assertions": [{"local_ref": "f1", "original_assertion": "음료Z 물 10ml", '
         '"subject": "음료Z", "attribute": "물", "value": "10", "unit": "ml", "confidence": 0.9}]}')
+
+
+def _plan_reply(prompt, category):
+    """사실 조립 프롬프트의 대상 목록을 규칙대로 배치한 합성 계획 응답."""
+    payload = json.loads(prompt.split(fact_assembly.PLAN_INPUT_MARKER, 1)[1])
+    return gemini.CallResult(mock._planned(payload, [category]).model_dump_json(), {}, "STOP")
 
 
 def _ctx(store, source, job, segment=None, stage="EXTRACT"):
@@ -160,7 +168,7 @@ async def verify(db, dsn):
         rows = await raw_responses.list_raw_responses(db, store, source_id=mock_source)
         check("mock 경로도 구간·조립마다 같은 기록을 남긴다",
               [(r["stage"], r["segment_id"]) for r in rows]
-              == [("EXTRACT", "seg1"), ("EXTRACT", "seg2"), ("ASSEMBLE", None)]
+              == [("EXTRACT", "seg1"), ("EXTRACT", "seg2"), ("ASSEMBLE", "plan0")]
               and all(r["mode"] == "mock" and r["parsed_ok"] is True and r["run_tag"] == 77
                       and r["job_id"] == job for r in rows)
               and await db.fetchval("select status from sources where store_id=$1 and source_id=$2",
@@ -183,11 +191,7 @@ async def verify(db, dsn):
                 if "줄A" in prompt:
                     return gemini.CallResult('{"assertions": [{"local_ref": "f1"', {}, "MAX_TOKENS")
                 return gemini.CallResult(GOOD, {}, "STOP")
-            card = ExtractedCard(category_name=category, title="음료Z", content="물 10ml",
-                                 confidence=.9, facts=[ExtractedFact(
-                                     object_name="음료Z", attribute="물", value="10",
-                                     confidence=.9, ref="seg2:f1")])
-            return gemini.CallResult(ExtractionResult(cards=[card]).model_dump_json(), {}, "STOP")
+            return _plan_reply(prompt, category)
 
         split_on = Settings(_env_file=None, extract_truncation_split_max_depth=1)
         with ExitStack() as stack:
@@ -207,7 +211,7 @@ async def verify(db, dsn):
         check("잘린 응답도 원래 응답으로 남고 실패로 표시된다",
               [(r["stage"], r["segment_id"], r["finish_reason"], r["parsed_ok"]) for r in rows]
               == [("EXTRACT", "seg1", "MAX_TOKENS", False), ("EXTRACT", "seg1.1", "MAX_TOKENS", False),
-                  ("EXTRACT", "seg2", "STOP", True), ("ASSEMBLE", None, "STOP", True)]
+                  ("EXTRACT", "seg2", "STOP", True), ("ASSEMBLE", "plan0", "STOP", True)]
               and all("MAX_TOKENS" in r["error"] for r in rows if r["parsed_ok"] is False))
         seg = await db.fetchrow(
             "select segments_total, segments_failed, failed_segment_ids from ingest_job_sources "
@@ -233,12 +237,7 @@ async def verify(db, dsn):
                 calls.append((tag, "EXTRACT" if schema is FactExtractionResult else "ASSEMBLE"))
                 if schema is FactExtractionResult:
                     return gemini.CallResult(GOOD, {"prompt_tokens": 5, "completion_tokens": 7}, "STOP")
-                refs = [ref for ref in ("seg1:f1", "seg2:f1") if ref in prompt]
-                card = ExtractedCard(category_name=category, title="음료Z", content="물 10ml",
-                                     confidence=.9, facts=[ExtractedFact(
-                                         object_name="음료Z", attribute="물", value="10",
-                                         confidence=.9, ref=refs[0])])
-                return gemini.CallResult(ExtractionResult(cards=[card]).model_dump_json(), {}, "STOP")
+                return _plan_reply(prompt, category)
             return _call
 
         async def run(target_store, source, job_id, run_tag, tag, settings=base_settings,

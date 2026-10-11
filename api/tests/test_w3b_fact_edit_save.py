@@ -444,38 +444,13 @@ class _Db:
         return _Tx()
 
 
-async def test_route_flag_off_is_403_before_db(monkeypatch):
-    from types import SimpleNamespace
-
-    import app.config
-    from app.cards import router
-    from app.errors import ApiError
-
-    save = AsyncMock()
-    monkeypatch.setattr(router.fact_edit, "save_fact_edit", save)
-    monkeypatch.setattr(app.config, "get_settings",
-                        lambda: SimpleNamespace(w_fact_card_edit_enabled=False))
-    db = _Db()
-    with pytest.raises(ApiError) as e:
-        await router.save_card_facts(CARD, _req(), db,
-                                     {"user_id": ACTOR, "store_id": STORE, "role": "OWNER"})
-    assert (e.value.status_code, e.value.code) == (403, "FACT_EDIT_DISABLED")
-    assert db.opened == 0
-    save.assert_not_awaited()
-
-
 async def test_route_maps_edit_error_and_uses_jwt_store(monkeypatch):
-    from types import SimpleNamespace
-
-    import app.config
     from app.cards import router
     from app.errors import ApiError
 
     save = AsyncMock(side_effect=EditError(409, "CARD_VERSION_CONFLICT",
                                            {"current_version_id": 9}))
     monkeypatch.setattr(router.fact_edit, "save_fact_edit", save)
-    monkeypatch.setattr(app.config, "get_settings",
-                        lambda: SimpleNamespace(w_fact_card_edit_enabled=True))
     db = _Db()
     with pytest.raises(ApiError) as e:
         await router.save_card_facts(CARD, _req(), db,

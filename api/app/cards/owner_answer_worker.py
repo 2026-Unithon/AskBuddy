@@ -1,16 +1,20 @@
-"""점주 답변 반영 worker (W, Task 5).
+"""점주 답변 반영 worker (W, Phase A Task 6).
 
 R 이 남긴 `OWNER_ANSWER_SUBMITTED` 사건을 claim 해서 점주 답변을 지식에 반영하고
 그 결과(LINKED / REVIEW / PUBLISHED / FAILED)를 R 에 돌려준다.
 
-  - IDENTICAL: 현재 공개판에 있는 카드면 LINKED. 아니면 REVIEW 로 강등한다.
-  - SUPPLEMENT·CONFLICT: 공개본을 바꾸지 않고 REVIEW(검수 대기 제안).
-  - NEW(자동 공개 가능): 초안 카드를 만들고 `publish_cards` 로 공개한다. R 완료
-    보고(`finish_owner_event`)는 **발행 트랜잭션 hook 안에서만** 부른다 — finish 가
-    실패하면 발행까지 통째로 롤백돼 R 이 모르는 공개판이 남지 않는다.
-  - 실패: 별도 트랜잭션에서 FAILED 를 보고한다. 재시도 여부는 ERROR_TABLE 이 정한다.
+관계 분석(R knowledge_loop)을 부르지 않는다 — 점주 답변도 사실 수집 경로를 탄다.
+  1. 답변 하나에 파일 없는 자료(OWNER_TEXT) 하나를 보장한다(owner_answer_sources).
+  2. 그 자료에서 사실을 뽑아 원장 → 사실 조립 → 사실 카드까지 만든다(업로드와 같은 길).
+  3. 그 자료가 이어진 카드로 결과를 정한다(`decide_outcome`).
+     - 사실 0개 / 이어진 카드 없음 / 공개 카드에 새 초안 / 검수 필요 새 카드 → REVIEW
+     - 새 카드만 있고 모두 검수 사유 없음 → 그 카드들을 `publish_cards` 로 공개(PUBLISHED).
+       R 완료 보고(`finish_owner_event`)는 **발행 트랜잭션 hook 안에서만** 부른다 —
+       finish 가 실패하면 발행까지 통째로 롤백돼 R 이 모르는 공개판이 남지 않는다.
+     - 이미 공개된 같은 사실에만 이어짐 → LINKED(현재 서빙 가능할 때만, 아니면 REVIEW)
+  4. 실패: 별도 트랜잭션에서 FAILED 를 보고한다. 재시도 여부는 ERROR_TABLE 이 정한다.
 
-claim 뒤에는 연결을 오래 잡지 않는다. 관계 분석·색인 준비 같은 긴 단계 사이에
+claim 뒤에는 연결을 오래 잡지 않는다. 추출·조립·색인 준비 같은 긴 단계 사이에
 heartbeat 를 부르고, lease 를 잃었으면 아무것도 보고하지 않고 멈춘다(다른 worker 몫).
 매장 격리는 코드 책임이다 (D1). 모든 조회는 store_id 로 제한한다.
 """
@@ -18,6 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
+from typing import Sequence
 
 import asyncpg
 
@@ -25,10 +32,11 @@ from app.config import get_settings
 from app.contracts.errors import ERROR_TABLE, ErrorDetail
 from app.contracts.publication import ApplyOwnerAnswerResult
 from app.contracts.usage import UsageContext
-from app.db_session import ShortSession
 from app.errors import ApiError
-from app.learn.knowledge_apply import create_owner_answer_card
-from app.learn.knowledge_loop import build_knowledge_plan
+from app.ingest import owner_text
+from app.ingest.fact_cards import REVIEW_NEW_FACTS
+from app.ingest.owner_text import AnswerCard
+from app.learn.knowledge_apply import resolve_owner_answer_category
 from app.learn.owner_handoff import (
     CONSUMER,
     claim_owner_event,
@@ -38,7 +46,6 @@ from app.learn.owner_handoff import (
 from app.publish.approval import CardChange, publish_cards
 from app.publish.bootstrap import READY, EMPTY, index_status
 from app.publish.content import current_manifest
-from app.usage import DbUsageSink
 from app.usage.gemini import UsageStartError
 
 logger = logging.getLogger(__name__)
@@ -96,8 +103,10 @@ async def _load_context(conn, *, store_id: int, owner_answer_id: int) -> dict:
                 proposal=dict(proposal) if proposal else None)
 
 
-async def _insert_proposal(conn, *, store_id: int, answer_id: int, plan, status: str,
-                           result_card_id: int | None = None,
+async def _insert_proposal(conn, *, store_id: int, answer_id: int, relation: str,
+                           target_card_id: int | None, target_version_id: int | None,
+                           category_id: int, title: str, content: str, reason: str,
+                           status: str, result_card_id: int | None = None,
                            result_version_id: int | None = None) -> dict:
     """answer_id 당 제안 1행을 멱등으로 남기고, 실제로 남아 있는 행을 돌려준다."""
     await conn.execute(
@@ -110,9 +119,8 @@ async def _insert_proposal(conn, *, store_id: int, answer_id: int, plan, status:
                   case when $10::varchar = 'LINKED' then now() else null end)
         on conflict (answer_id) do nothing
         """,
-        store_id, answer_id, plan.relation_type, plan.target_card_id,
-        plan.target_version_id, plan.category_id, plan.proposed_title[:200],
-        plan.proposed_content, plan.reason, status, result_card_id, result_version_id)
+        store_id, answer_id, relation, target_card_id, target_version_id, category_id,
+        title[:200], content, reason, status, result_card_id, result_version_id)
     row = await conn.fetchrow(
         """
         select proposal_id, status, relation_type, result_card_id, result_version_id
@@ -191,30 +199,35 @@ async def _linked_target(conn, *, store_id: int, card_id: int | None) -> tuple[i
 
 async def _flag_target_review(conn, *, store_id: int, card_id: int | None,
                               relation: str) -> None:
-    """검수 대상 카드에 사유를 남긴다. 레거시 점주 답변 경로와 같은 표시다."""
+    """검수 대상 카드에 점주 답변 사유를 남긴다.
+
+    안전 신호(NO_PROVENANCE·FACT_CONFLICT_OPEN·FALLBACK:* 등)는 덮지 않는다. 사유가 없거나
+    단순히 새 사실이 붙었다는 표시(NEW_FACTS)일 때만 OWNER_ANSWER_<relation> 으로 바꾼다.
+    """
     if card_id is None:
         return
     await conn.execute(
         """
         update knowledge_cards set needs_review_reason = $3
         where store_id = $1 and card_id = $2 and review_status <> 'EXCLUDED'
+          and (needs_review_reason is null or needs_review_reason = $4)
         """,
-        store_id, card_id, f"OWNER_ANSWER_{relation}")
+        store_id, card_id, f"OWNER_ANSWER_{relation}", REVIEW_NEW_FACTS)
 
 
-async def _owner_answer_card(conn, *, store_id: int, answer_id: int) -> tuple[int, int] | None:
-    """앞선 시도가 만든 카드(owner_answers.card_id)와 그 현재 초안 버전."""
+async def _card_text(conn, *, store_id: int, card: AnswerCard) -> tuple[str, str, int] | None:
+    """제안에 적을 카드 초안 판의 제목·본문과 카드 카테고리."""
     row = await conn.fetchrow(
         """
-        select k.card_id, k.draft_version_id
-        from owner_answers oa
-        join knowledge_cards k on k.card_id = oa.card_id
-        where k.store_id = $1 and oa.answer_id = $2
+        select v.title, v.content, k.category_id
+        from knowledge_cards k
+        join card_versions v on v.store_id = k.store_id and v.card_id = k.card_id
+        where k.store_id = $1 and k.card_id = $2 and v.version_id = $3
         """,
-        store_id, answer_id)
-    if row is None or row["draft_version_id"] is None:
+        store_id, card.card_id, card.draft_version_id)
+    if row is None:
         return None
-    return int(row["card_id"]), int(row["draft_version_id"])
+    return row["title"] or "", row["content"] or "", int(row["category_id"])
 
 
 async def _stores_with_pending(pool) -> list[int]:
@@ -325,71 +338,174 @@ async def _heartbeat(pool, *, store_id: int, event_id: int, token: str) -> None:
 # 처리
 # ---------------------------------------------------------------------------
 
-async def _record_plan(conn, *, store_id: int, event_id: int, token: str,
-                       answer_id: int, actor_id: int, plan) -> tuple[str | None, dict, tuple | None]:
-    """계획을 제안으로 남긴다. LINKED·REVIEW 는 같은 트랜잭션에서 보고까지 닫는다.
+@dataclass(frozen=True)
+class AnswerOutcome:
+    kind: str  # NO_FACTS | FACTS_PENDING | REVIEW | PUBLISH | LINKED
+    relation: str  # NEW | SUPPLEMENT | IDENTICAL (knowledge_change_proposals.relation_type)
+    cards: tuple[AnswerCard, ...]
+    target: AnswerCard | None
 
-    반환: (보고한 상태 또는 None, 제안 행, NEW 카드 (card_id, draft_version_id)).
-    상태가 None 이면 NEW 공개 단계가 남았다.
+
+def decide_outcome(fact_count: int, cards: Sequence[AnswerCard]) -> AnswerOutcome:
+    """점주 답변 자료가 이어진 카드로 결과를 정한다(설계 A-D3 를 카드 단위로).
+
+    - 사실 0개 → NO_FACTS(검수). 사실은 있으나 이어진 카드 없음(보류) → FACTS_PENDING(검수).
+    - 공개 카드에 새 초안이 생겼거나 새 카드가 검수 필요 → REVIEW
+      (공개 카드 변경이 있으면 SUPPLEMENT·대상=첫 변경 카드, 아니면 NEW).
+    - 새 카드만 있고 모두 PENDING·사유 없음 → PUBLISH(새 카드만 공개, 이미 공개된 같은 카드는 그대로).
+    - 공개 카드에만 이어지고 바뀐 판 없음 → LINKED(IDENTICAL).
     """
-    relation = plan.relation_type
-    if relation == "IDENTICAL":
-        linked = await _linked_target(conn, store_id=store_id, card_id=plan.target_card_id)
+    if fact_count == 0:
+        return AnswerOutcome("NO_FACTS", "NEW", (), None)
+    if not cards:
+        return AnswerOutcome("FACTS_PENDING", "NEW", (), None)
+    new = [c for c in cards if c.published_version_id is None]
+    changed = [c for c in cards if c.published_version_id is not None
+               and c.draft_version_id != c.published_version_id]
+    linked = [c for c in cards if c.published_version_id is not None
+              and c.draft_version_id == c.published_version_id]
+    blocked = [c for c in new if c.review_status != "PENDING" or c.needs_review_reason]
+    if changed or blocked:
+        return AnswerOutcome("REVIEW", "SUPPLEMENT" if changed else "NEW",
+                             tuple(changed + new), changed[0] if changed else None)
+    if new:
+        return AnswerOutcome("PUBLISH", "NEW", tuple(new), None)
+    return AnswerOutcome("LINKED", "IDENTICAL", tuple(linked), linked[0])
+
+
+def _outcome_reason(outcome: AnswerOutcome) -> str:
+    if outcome.kind in ("NO_FACTS", "FACTS_PENDING"):
+        return outcome.kind
+    return f"OWNER_ANSWER_{outcome.kind}"
+
+
+async def _read_outcome(conn, *, store_id: int, source_id: int) -> AnswerOutcome:
+    cards = await owner_text.answer_cards(conn, store_id, source_id=source_id)
+    count = await owner_text.answer_fact_count(conn, store_id, source_id=source_id)
+    return decide_outcome(count, cards)
+
+
+async def _flag_outcome(conn, *, store_id: int, outcome: AnswerOutcome) -> None:
+    """검수로 넘기는 결과의 카드마다 점주 답변 사유를 남긴다(안전 신호는 덮지 않는다)."""
+    targets = outcome.cards or ((outcome.target,) if outcome.target is not None else ())
+    for card in targets:
+        await _flag_target_review(conn, store_id=store_id, card_id=card.card_id,
+                                  relation=outcome.relation)
+
+
+async def _record_outcome(conn, *, store_id: int, event_id: int, token: str,
+                          answer_id: int, outcome: AnswerOutcome, question: str,
+                          answer: str) -> tuple[str | None, dict]:
+    """판정을 제안으로 남긴다. LINKED·REVIEW 는 같은 트랜잭션에서 보고까지 닫는다.
+
+    반환: (보고한 상태 또는 None, 제안 행). 상태가 None 이면 PUBLISH 공개 단계가 남았다.
+    """
+    text = (await _card_text(conn, store_id=store_id, card=outcome.cards[0])
+            if outcome.cards else None)
+    if text is not None:
+        title, content, category_id = text
+    else:
+        # 카드가 없으면(사실 0개·보류) 질문·답변을 그대로 적고 시스템 '기타' 로 둔다
+        title, content = question, answer
+        category_id = await resolve_owner_answer_category(conn, store_id=store_id,
+                                                          category_id=None)
+    target = outcome.target
+    fields = dict(store_id=store_id, answer_id=answer_id, relation=outcome.relation,
+                  target_card_id=target.card_id if target is not None else None,
+                  target_version_id=target.published_version_id if target is not None else None,
+                  category_id=category_id, title=title, content=content,
+                  reason=_outcome_reason(outcome))
+
+    if outcome.kind == "LINKED":
+        linked = await _linked_target(conn, store_id=store_id, card_id=target.card_id)
         if linked is not None:
             version_id, knowledge_revision = linked
-            proposal = await _insert_proposal(
-                conn, store_id=store_id, answer_id=answer_id, plan=plan, status="LINKED",
-                result_card_id=plan.target_card_id, result_version_id=version_id)
+            proposal = await _insert_proposal(conn, **fields, status="LINKED",
+                                              result_card_id=target.card_id,
+                                              result_version_id=version_id)
             if proposal["status"] != "LINKED":
                 return await _finish_recorded(conn, store_id=store_id, event_id=event_id,
-                                              token=token, proposal=proposal), proposal, None
+                                              token=token, proposal=proposal), proposal
             await conn.execute(
                 """
                 update owner_answers set card_id = $3
                 where answer_id = $2
                   and question_id in (select question_id from pending_questions where store_id = $1)
                 """,
-                store_id, answer_id, plan.target_card_id)
+                store_id, answer_id, target.card_id)
             return await _finish(conn, store_id=store_id, event_id=event_id, token=token,
-                                 status="LINKED", card_id=plan.target_card_id,
-                                 knowledge_revision=knowledge_revision), proposal, None
-    elif relation == "NEW" and plan.auto_publish:
-        proposal = await _insert_proposal(conn, store_id=store_id, answer_id=answer_id,
-                                          plan=plan, status="ANALYZED")
+                                 status="LINKED", card_id=target.card_id,
+                                 knowledge_revision=knowledge_revision), proposal
+        # 이어진 카드가 지금 서빙 가능한 공개 카드가 아니다. 검수로 넘긴다
+    elif outcome.kind == "PUBLISH":
+        proposal = await _insert_proposal(conn, **fields, status="ANALYZED")
         if proposal["status"] != "ANALYZED":
             return await _finish_recorded(conn, store_id=store_id, event_id=event_id,
-                                          token=token, proposal=proposal), proposal, None
-        # 앞선 시도가 만든 카드가 있으면 재사용한다. 같은 답변으로 카드를 두 번 만들지 않는다
-        card = await _owner_answer_card(conn, store_id=store_id, answer_id=answer_id)
-        if card is None:
-            card = await create_owner_answer_card(
-                conn, store_id=store_id, category_id=plan.category_id,
-                title=plan.proposed_title[:200], content=plan.proposed_content,
-                answer_id=answer_id, actor_id=actor_id)
-        return None, proposal, card
+                                          token=token, proposal=proposal), proposal
+        return None, proposal
 
-    # SUPPLEMENT·CONFLICT, 공개판에 없는 IDENTICAL, 자동 공개 불가 NEW
-    proposal = await _insert_proposal(conn, store_id=store_id, answer_id=answer_id,
-                                      plan=plan, status="PENDING_REVIEW")
+    # NO_FACTS·FACTS_PENDING·REVIEW, 서빙 불가 LINKED
+    proposal = await _insert_proposal(conn, **fields, status="PENDING_REVIEW")
     if proposal["status"] != "PENDING_REVIEW":
         return await _finish_recorded(conn, store_id=store_id, event_id=event_id,
-                                      token=token, proposal=proposal), proposal, None
-    await _flag_target_review(conn, store_id=store_id, card_id=plan.target_card_id,
-                              relation=relation)
+                                      token=token, proposal=proposal), proposal
+    await _flag_outcome(conn, store_id=store_id, outcome=outcome)
     return await _finish(conn, store_id=store_id, event_id=event_id, token=token,
-                         status="REVIEW"), proposal, None
+                         status="REVIEW"), proposal
+
+
+async def _retarget_proposal(conn, *, store_id: int, proposal_id: int,
+                             outcome: AnswerOutcome) -> None:
+    """제안을 검수 대기로 돌리며 관계·대상·사유를 새 판정에 맞춘다.
+
+    그래야 `_finish_proposal` 의 카드별 사유 재표시가 이 제안을 찾고, 검수 화면의
+    관계 표시도 실제와 맞는다(Task 6 minor 1).
+    """
+    target = outcome.target
+    await conn.execute(
+        """
+        update knowledge_change_proposals
+        set status = 'PENDING_REVIEW', relation_type = $3, target_card_id = $4,
+            target_version_id = $5, reason = $6, error = null
+        where store_id = $1 and proposal_id = $2
+        """,
+        store_id, proposal_id, outcome.relation,
+        target.card_id if target is not None else None,
+        target.published_version_id if target is not None else None,
+        _outcome_reason(outcome))
+
+
+async def _resume_analyzed(pool, *, store_id: int, event_id: int, token: str,
+                           answer_id: int, proposal: dict) -> str | tuple[AnswerCard, ...]:
+    """앞선 시도가 ANALYZED(공개 대기)까지 남겼다. 카드를 다시 읽어 같은 판정으로 이어간다.
+
+    여전히 PUBLISH 면 공개할 카드를 돌려준다. 그 사이 판정이 바뀌었으면(점주가 고침 등)
+    제안을 검수 대기로 돌리고 REVIEW 로 보고한 상태 문자열을 돌려준다.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            source_id = await owner_text.owner_answer_source(conn, store_id,
+                                                             owner_answer_id=answer_id)
+            if source_id is None:
+                raise _Failed("INVALID_REFERENCE", "점주 답변 자료를 찾을 수 없습니다.")
+            outcome = await _read_outcome(conn, store_id=store_id, source_id=source_id)
+            if outcome.kind == "PUBLISH":
+                return outcome.cards
+            await _retarget_proposal(conn, store_id=store_id,
+                                     proposal_id=int(proposal["proposal_id"]), outcome=outcome)
+            await _flag_outcome(conn, store_id=store_id, outcome=outcome)
+            return await _finish(conn, store_id=store_id, event_id=event_id, token=token,
+                                 status="REVIEW")
 
 
 async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
                        answer_id: int, owner: dict, proposal: dict,
-                       card: tuple[int, int] | None) -> str:
-    if card is None:
-        # 앞선 시도가 ANALYZED 까지 남겼다. 그때 만든 카드를 이어서 공개한다
-        async with pool.acquire() as conn:
-            card = await _owner_answer_card(conn, store_id=store_id, answer_id=answer_id)
-    if card is None:
+                       cards: Sequence[AnswerCard]) -> str:
+    """새 사실 카드 초안 전부를 한 번에 공개한다. 결과 카드는 첫 카드다."""
+    if not cards:
         raise _Failed("INVALID_REFERENCE", "점주 답변 카드를 찾을 수 없습니다.")
-    card_id, draft_version_id = card
+    first = cards[0]
+    card_id, draft_version_id = first.card_id, first.draft_version_id
     proposal_id = int(proposal["proposal_id"])
 
     await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
@@ -399,6 +515,13 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
         await _set_proposal(conn, store_id=store_id, proposal_id=proposal_id,
                             status="PUBLISHED", result_card_id=card_id,
                             result_version_id=draft_version_id)
+        await conn.execute(
+            """
+            update owner_answers set card_id = $3
+            where answer_id = $2
+              and question_id in (select question_id from pending_questions where store_id = $1)
+            """,
+            store_id, answer_id, card_id)
         await _finish(conn, store_id=store_id, event_id=event_id, token=token,
                       status="PUBLISHED", card_id=card_id,
                       knowledge_revision=knowledge_revision)
@@ -411,7 +534,7 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
     result = await publish_cards(
         pool, store_id=store_id, member_id=int(owner["member_id"]),
         actor_user_id=int(owner["user_id"]),
-        changes=[CardChange(card_id, draft_version_id, draft_version_id)],
+        changes=[CardChange(c.card_id, c.draft_version_id, c.draft_version_id) for c in cards],
         idempotency_key=f"owner-answer:{answer_id}",
         usage_context=_usage_context(store_id, event_id, "EMBED", "embed"),
         in_transaction=hook, after_prepare=extend_lease)
@@ -434,7 +557,7 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
                     proposal=dict(proposal_id=proposal_id, status="PUBLISHED",
                                   result_card_id=card_id))
     if result.status == "NO_PROVENANCE":
-        # 출처 없는 점주 답변 카드를 아직 공개하지 않는다(플래그 OFF). 검수로 넘긴다
+        # 근거 없는 사실 카드(드문 경우)는 공개하지 않는다. 검수로 넘긴다
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await _set_proposal(conn, store_id=store_id, proposal_id=proposal_id,
@@ -442,7 +565,7 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
                 return await _finish(conn, store_id=store_id, event_id=event_id,
                                      token=token, status="REVIEW")
     if result.status == "INVALID_CONTENT":
-        # 답변 원문이 비었거나 블록 상한을 넘는다. 다시 해도 같으므로 재시도하지 않는다
+        # 카드 본문이 비었거나 블록 상한을 넘는다. 다시 해도 같으므로 재시도하지 않는다
         raise _Failed("INVALID_CONTRACT", "답변 내용이 비어 있거나 너무 길어 공개할 수 없습니다.")
     if result.status == "STALE":
         code = result.error_code if result.error_code in ERROR_TABLE else "STALE_PUBLICATION"
@@ -461,33 +584,46 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
         raise _Failed("NOT_FOUND", "매장 점주 멤버십을 찾을 수 없습니다.")
 
     if proposal is not None and proposal["status"] != "ANALYZED":
-        # 앞선 시도가 결론까지 남겼다. 분석을 다시 부르지 않고 보고만 한다
+        # 앞선 시도가 결론까지 남겼다. 수집을 다시 하지 않고 보고만 한다
         async with pool.acquire() as conn:
             async with conn.transaction():
                 return await _finish_recorded(conn, store_id=store_id, event_id=event_id,
                                               token=token, proposal=proposal)
 
-    card = None
+    question, answer = source["question_text"], source["answer_text"]
     if proposal is None:
-        await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
-        # 관계 분석은 모델을 부른다. 쿼리마다 연결을 짧게 빌리는 ShortSession 을 넘겨
-        # 모델 호출 중에는 풀 연결을 쥐지 않는다(build_knowledge_plan 은 트랜잭션을 쓰지 않는다)
-        plan = await build_knowledge_plan(
-            ShortSession(pool), store_id, source["question_text"], source["answer_text"],
-            usage_context=_usage_context(store_id, event_id, "RELATION", "relation"),
-            usage_sink=DbUsageSink(pool))
         await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
         async with pool.acquire() as conn:
             async with conn.transaction():
-                finished, proposal, card = await _record_plan(
+                source_id, status = await owner_text.ensure_owner_answer_source(
+                    conn, store_id, owner_answer_id=answer_id,
+                    actor_id=int(owner["user_id"]), question=question, answer=answer)
+        if status != "DONE":
+            # 추출·조립은 모델을 부른다. ingest_owner_text 는 연결을 짧게만 빌린다
+            await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
+            await owner_text.ingest_owner_text(
+                pool, store_id=store_id, source_id=source_id, question=question,
+                answer=answer, run_tag=int(time.time() * 1000))
+            await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                outcome = await _read_outcome(conn, store_id=store_id, source_id=source_id)
+                finished, proposal = await _record_outcome(
                     conn, store_id=store_id, event_id=event_id, token=token,
-                    answer_id=answer_id, actor_id=int(owner["user_id"]), plan=plan)
+                    answer_id=answer_id, outcome=outcome, question=question, answer=answer)
         if finished is not None:
             return finished
+        cards = outcome.cards
+    else:
+        resumed = await _resume_analyzed(pool, store_id=store_id, event_id=event_id,
+                                         token=token, answer_id=answer_id, proposal=proposal)
+        if isinstance(resumed, str):
+            return resumed
+        cards = resumed
 
     return await _publish_new(pool, store_id=store_id, event_id=event_id, token=token,
                               answer_id=answer_id, owner=owner, proposal=proposal,
-                              card=card)
+                              cards=cards)
 
 
 async def process_next_owner_event(pool, *, store_id: int) -> str | None:

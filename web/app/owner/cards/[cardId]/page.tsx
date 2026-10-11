@@ -19,7 +19,7 @@ import {
   TextButton,
   focusRing,
 } from "@/components/kit";
-import { ApiError, apiErrorMessage, moveProductCard, mutateProductCard, updateProductCardDraft, type CardDetailDto } from "@/lib/api";
+import { ApiError, apiErrorMessage, moveProductCard, mutateProductCard, type CardDetailDto } from "@/lib/api";
 import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { CardAssignment } from "@/components/checklist/card-assignment";
 import { checklistKeys } from "@/lib/query";
@@ -39,15 +39,13 @@ function formatDate(iso: string) {
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
 // 사실 카드(card.fact_card)는 W3b 사실 단위 편집(/cards/{id}/facts)으로 고친다. 제목은 읽기 전용(D-7).
-// 사실 카드가 아닌 옛 카드는 아래 자유 글 편집을 그대로 쓴다.
+// 사실 카드가 아닌 카드는 읽기만 한다(1회 삭제 뒤엔 없다).
 export default function OwnerCardPage() {
   const params = useParams<{ cardId: string }>();
   const cardId = /^\d+$/.test(params.cardId) ? Number(params.cardId) : 0;
   const { state } = useApp();
   const client = useQueryClient();
   const detail = useQuery(cardQuery(state.token, state.storeId, cardId));
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ title: "", content: "" });
   const [confirmExclude, setConfirmExclude] = useState(false);
   const [moving, setMoving] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
@@ -68,18 +66,6 @@ export default function OwnerCardPage() {
   };
 
   const card = detail.data;
-  const saveDraft = useMutation({
-    mutationFn: () => {
-      const version = card?.draft?.version_id ?? card?.published?.version_id;
-      if (!version) throw new Error("고칠 버전을 찾지 못했어요.");
-      return updateProductCardDraft(cardId, form.title, form.content, version, state.token!);
-    },
-    onSuccess: async () => {
-      setEditing(false);
-      await refresh();
-    },
-    onError: onConflict,
-  });
   const status = useMutation({
     mutationFn: (action: "approve" | "exclude" | "restore") => mutateProductCard(cardId, action, state.token!),
     onSuccess: async (_result, action) => {
@@ -132,58 +118,6 @@ export default function OwnerCardPage() {
   const statusView = STATUS[card.review_status];
   const actionError = status.error;
 
-  const startEdit = () => {
-    setForm({ title, content });
-    setEditing(true);
-    saveDraft.reset();
-  };
-
-  if (editing) {
-    return (
-      <Screen
-        footer={
-          <>
-            {saveDraft.error && (
-              <ErrorInline
-                message={
-                  saveDraft.error instanceof ApiError && saveDraft.error.status === 409
-                    ? "그사이 카드가 바뀌었어요. 최신 내용을 확인한 뒤 다시 저장해 주세요. 입력 내용은 그대로 두었어요."
-                    : apiErrorMessage(saveDraft.error, "이 변경은 저장되지 않았어요. 입력 내용은 그대로 두었어요.")
-                }
-              />
-            )}
-            <Button loading={saveDraft.isPending} disabled={!form.title.trim() || !form.content.trim()} onClick={() => saveDraft.mutate()}>
-              고친 내용 저장
-            </Button>
-            <Button variant="secondary" disabled={saveDraft.isPending} onClick={() => setEditing(false)}>
-              그만두기
-            </Button>
-          </>
-        }
-      >
-        <p className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink">고치기</p>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink-muted">제목</span>
-          <input
-            value={form.title}
-            onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
-            className={`min-h-12 rounded-[16px] bg-surface px-4 text-[16px] text-ink shadow-card ${focusRing}`}
-          />
-        </label>
-        <label className="flex flex-1 flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink-muted">내용 · 한 줄에 하나씩</span>
-          <textarea
-            value={form.content}
-            onChange={(event) => setForm((prev) => ({ ...prev, content: event.target.value }))}
-            rows={8}
-            className={`min-h-48 rounded-[16px] bg-surface p-4 text-[16px] leading-[1.6] text-ink shadow-card ${focusRing}`}
-          />
-        </label>
-        <Caption>저장하면 고친 내용은 공개 전 상태로 남아요. 공개하기를 눌러야 직원에게 보여요.</Caption>
-      </Screen>
-    );
-  }
-
   const screen = (
     <Screen
       footer={
@@ -209,14 +143,8 @@ export default function OwnerCardPage() {
                   공개하기
                 </Button>
               )}
-              {card.fact_card ? (
-                factEditor.canEdit && (
-                  <Button variant={canPublish ? "secondary" : "primary"} onClick={factEditor.start}>
-                    고치기
-                  </Button>
-                )
-              ) : (
-                <Button variant={canPublish ? "secondary" : "primary"} onClick={startEdit}>
+              {card.fact_card && factEditor.canEdit && (
+                <Button variant={canPublish ? "secondary" : "primary"} onClick={factEditor.start}>
                   고치기
                 </Button>
               )}

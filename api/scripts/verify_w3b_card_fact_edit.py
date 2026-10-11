@@ -4,7 +4,6 @@ verify_w_publication_flow.verify() 끝에서 W3a 다음에 부른다(verify_r_sc
 시나리오마다 새 합성 매장을 만든다. 사실 카드는 verify_w3a_fact_assembly 의 도우미로 만든다.
   M1  migration — change_kind OWNER_ADD, 자료 OWNER_TEXT(작업 안 만듦), 편집 기록 불변·매장 FK
   R1~R3  읽기 (Task 3)
-  D1  사실 카드에 PATCH /draft 는 409 FACT_CARD_TEXT_EDIT_BLOCKED, 판·포인터 그대로
   D2  레거시 카드는 PATCH /draft 가 그대로 새 판을 만든다, 상세 fact_card 가 사실 카드만 True
   P1~P3  분석 (Task 4)
   S1~S12 저장 (Task 5)
@@ -24,7 +23,6 @@ import app.config
 
 from app.cards import router as card_router
 from app.cards.fact_edit_schemas import FactEditRequest, FactParseRequest, FactVariant
-from app.cards.schemas import DraftUpdateRequest
 from app.config import Settings
 from app.contracts.snapshot import KnowledgeContent
 from app.db_session import ShortSession
@@ -40,9 +38,10 @@ from app.learn.answer_storage import save_answer
 from app.learn.planner import decide
 from app.publish.service import delete_source
 from app.reg.hybrid import hybrid_search
-from verify_w3a_fact_assembly import (_B1_LEGACY, _B_Z, _VECTOR, Z, _approve, _assertion, _card,
+from verify_w3a_fact_assembly import (_B_Z, _VECTOR, Z, _approve, _assertion, _card,
                                       _entity, _fact_store, _fake_embedder, _hashed_source,
-                                      _index, _member, _pins, _process_w3a, _snapshot_row,
+                                      _index, _make_legacy, _member, _pins, _process_w3a,
+                                      _snapshot_row,
                                       _store_cards, _versions)
 from verify_w_entity_revision import _MODEL_SETTINGS
 from verify_w_partial_extraction import _seed
@@ -55,9 +54,8 @@ def _checker(scenario: str):
     return check
 
 
-def _w3b_settings(*, edit=True):
-    return Settings(_env_file=None, w_entity_revision_enabled=True, w_fact_assembly_enabled=True,
-                    w_fact_card_edit_enabled=edit)
+def _w3b_settings():
+    return Settings(_env_file=None)
 
 
 def _owner_claims(w):
@@ -153,61 +151,22 @@ async def _m1(db, pool):
           isinstance(mismatch, asyncpg.CheckViolationError))
 
 
-async def _d1(db, pool):
-    check = _checker("D1")
-    w = await _fact_store(db, pool, _B_Z, run_tag=1111)
-    (card_id,) = [c["card_id"] for c in await _store_cards(db, w.store)]
-    before = await _card(db, w.store, card_id)
-    versions = await _versions(db, w.store, card_id)
-    req = DraftUpdateRequest(title="합성 제목", content="합성 본문",
-                             expected_version_id=before["draft_version_id"])
-    error = None
-    with patch("app.config.get_settings", lambda: _w3b_settings()):
-        try:
-            await card_router.update_draft(card_id, req, ShortSession(pool), _owner_claims(w))
-        except ApiError as e:
-            error = e
-    check("사실 카드 PATCH /draft 는 409 FACT_CARD_TEXT_EDIT_BLOCKED",
-          error is not None and error.status_code == 409
-          and error.code == "FACT_CARD_TEXT_EDIT_BLOCKED")
-    after = await _card(db, w.store, card_id)
-    check("카드 판 수·초안 포인터·제목·본문 그대로",
-          len(await _versions(db, w.store, card_id)) == len(versions)
-          and after["draft_version_id"] == before["draft_version_id"]
-          and after["title"] == before["title"] and after["content"] == before["content"])
-
-
 async def _d2(db, pool):
     check = _checker("D2")
     user, s, _ = await _seed(db)
     w = type("W", (), {})()
     w.user, w.store, w.member = user, s, await _member(db, s, user)
     src = await _hashed_source(db, s, user)
-    await _process_w3a(db, pool, s, user, src, _B1_LEGACY, run_tag=1121, fact_assembly=False)
-    (legacy,) = [c["card_id"] for c in await _store_cards(db, s)]
-    legacy_card = await _card(db, s, legacy)
-    versions = await _versions(db, s, legacy)
+    legacy = await _make_legacy(db, s, src)
     with patch("app.config.get_settings", lambda: _w3b_settings()):
         detail = await card_router.get_card(legacy, ShortSession(pool), _owner_claims(w))
-        check("레거시 카드 상세 fact_card=False, fact_edit_enabled=True(플래그 켬)",
-              detail.fact_card is False and detail.fact_edit_enabled is True)
-        req = DraftUpdateRequest(title="합성 레거시 편집", content="합성 레거시 본문",
-                                 expected_version_id=legacy_card["draft_version_id"])
-        await card_router.update_draft(legacy, req, ShortSession(pool), _owner_claims(w))
-    new_versions = await _versions(db, s, legacy)
-    check("레거시 카드는 PATCH /draft 가 새 OWNER_EDIT 판을 만든다",
-          len(new_versions) == len(versions) + 1
-          and any(v["change_source"] == "OWNER_EDIT" for v in new_versions))
+    check("레거시 카드 상세 fact_card=False", detail.fact_card is False)
     # 사실 카드의 상세
     f = await _fact_store(db, pool, _B_Z, run_tag=1122)
     (fact_card,) = [c["card_id"] for c in await _store_cards(db, f.store)]
     with patch("app.config.get_settings", lambda: _w3b_settings()):
         detail = await card_router.get_card(fact_card, ShortSession(pool), _owner_claims(f))
-    check("사실 카드 상세 fact_card=True", detail.fact_card is True and detail.fact_edit_enabled)
-    with patch("app.config.get_settings", lambda: _w3b_settings(edit=False)):
-        detail = await card_router.get_card(fact_card, ShortSession(pool), _owner_claims(f))
-    check("플래그 끄면 fact_edit_enabled=False(fact_card 는 그대로)",
-          detail.fact_card is True and detail.fact_edit_enabled is False)
+    check("사실 카드 상세 fact_card=True", detail.fact_card is True)
 
 
 async def _two_source_fact_store(db, pool, *, run_tag):
@@ -222,8 +181,8 @@ async def _two_source_fact_store(db, pool, *, run_tag):
     return w
 
 
-async def _facts_view(pool, w, card_id, *, edit=True, claims=None):
-    with patch("app.config.get_settings", lambda: _w3b_settings(edit=edit)):
+async def _facts_view(pool, w, card_id, *, claims=None):
+    with patch("app.config.get_settings", lambda: _w3b_settings()):
         return await card_router.get_card_facts(card_id, ShortSession(pool),
                                                 claims or _owner_claims(w))
 
@@ -313,8 +272,7 @@ async def _r2(db, pool):
     legacy_w.user, legacy_w.store = user, s
     await _member(db, s, user)
     src = await _hashed_source(db, s, user)
-    await _process_w3a(db, pool, s, user, src, _B1_LEGACY, run_tag=1142, fact_assembly=False)
-    (legacy,) = [c["card_id"] for c in await _store_cards(db, s)]
+    legacy = await _make_legacy(db, s, src)
     error = None
     try:
         await _facts_view(pool, legacy_w, legacy, claims=_owner_claims(legacy_w))
@@ -369,9 +327,6 @@ async def _r3(db, pool):
     others = [f for b in view.blocks for f in b.facts if f.fact_id != water.fact_id]
     check("다른 곳 정정은 CHANGED_ELSEWHERE, 나머지 줄은 영향 없음",
           changed.edit_block == "CHANGED_ELSEWHERE" and all(f.edit_block is None for f in others))
-    flag_off = await _facts_view(pool, w, card_id, edit=False)
-    check("플래그를 끄면 editable=False(읽기는 된다)",
-          flag_off.editable is False and len(flag_off.blocks) == len(view.blocks))
 
 
 _FACT_TABLES = ("knowledge_facts", "fact_revisions", "card_versions")
@@ -476,9 +431,6 @@ async def _p3(db, pool):
     w = await _fact_store(db, pool, _B_Z, run_tag=1181)
     card_id, *_ = await _fact_card_id(db, w.store)
     req = FactParseRequest(text="ICE 물은 240ml")
-    e = await _api_error(_parse(pool, w, card_id, req, settings=_w3b_settings(edit=False)))
-    check("플래그 끄면 403 FACT_EDIT_DISABLED",
-          e is not None and e.status_code == 403 and e.code == "FACT_EDIT_DISABLED")
     other_user, other_store, _ = await _seed(db)
     other = {"user_id": other_user, "store_id": other_store, "role": "OWNER"}
     e = await _api_error(_parse(pool, w, card_id, req, claims=other))
@@ -487,13 +439,12 @@ async def _p3(db, pool):
     legacy_w = NS(user=user, store=s)
     await _member(db, s, user)
     src = await _hashed_source(db, s, user)
-    await _process_w3a(db, pool, s, user, src, _B1_LEGACY, run_tag=1182, fact_assembly=False)
-    (legacy,) = [c["card_id"] for c in await _store_cards(db, s)]
+    legacy = await _make_legacy(db, s, src)
     e = await _api_error(_parse(pool, legacy_w, legacy, req))
     check("레거시 카드는 409 NOT_FACT_CARD",
           e is not None and e.status_code == 409 and e.code == "NOT_FACT_CARD")
     e = await _api_error(_parse(pool, w, card_id, req, settings=Settings(
-        _env_file=None, w_fact_card_edit_enabled=True, card_fact_parse_max_chars=5)))
+        _env_file=None, card_fact_parse_max_chars=5)))
     check("글자 수 초과는 422 PARSE_TEXT_TOO_LONG(max_chars)",
           e is not None and e.status_code == 422 and e.code == "PARSE_TEXT_TOO_LONG"
           and e.details == {"max_chars": 5})
@@ -603,8 +554,8 @@ def _body(view, key, *, modify=None, delete=(), adds=(), reorder=None, expected=
         "blocks": blocks, "deleted_fact_revision_ids": list(delete)})
 
 
-async def _save(pool, w, card_id, req, *, edit=True, claims=None):
-    with patch("app.config.get_settings", lambda: _w3b_settings(edit=edit)):
+async def _save(pool, w, card_id, req, *, claims=None):
+    with patch("app.config.get_settings", lambda: _w3b_settings()):
         return await card_router.save_card_facts(card_id, req, ShortSession(pool),
                                                   claims or _owner_claims(w))
 
@@ -1088,10 +1039,6 @@ async def _s12(db, pool):
     body = _body(view, "w3b-s12-key-0001", modify={
         water.fact_revision_id: {"sentence": "음료Z 물 230ml", "value": "230"}})
     before = await _counts(db, w.store)
-    e = await _api_error(_save(pool, w, w.card, body, edit=False))
-    check("플래그 끔 → 403 FACT_EDIT_DISABLED",
-          e is not None and e.status_code == 403 and e.code == "FACT_EDIT_DISABLED")
-    check("쓰기 0", await _counts(db, w.store) == before)
     result = await _save(pool, w, w.card, body)
     card_before = await _card(db, w.store, w.card)
     src = await _hashed_source(db, w.store, w.user)
@@ -1178,7 +1125,6 @@ async def verify(pool, admin) -> None:
     await _r1(db, pool)
     await _r2(db, pool)
     await _r3(db, pool)
-    await _d1(db, pool)
     await _d2(db, pool)
     await _p1(db, pool)
     await _p2(db, pool)
@@ -1198,4 +1144,4 @@ async def verify(pool, admin) -> None:
     await _a1(db, pool, s1)
     await _a2(db, pool, s1)
     await _a3(db, pool, s1)
-    print("Verified W3b M1 R1~R3 D1 D2 P1~P3 S1~S12 A1~A3")
+    print("Verified W3b M1 R1~R3 D2 P1~P3 S1~S12 A1~A3")

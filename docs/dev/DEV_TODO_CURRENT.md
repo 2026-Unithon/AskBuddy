@@ -2,6 +2,8 @@
 
 > 2026-10-10: W 다음 단계(Phase A 레거시 RAW 제거 → B 입구 분류기·정규화기·체크리스트 카드 단위 → C 공지·매장 지식 탭 → D 로직별 추출기)의 순서·결정·시작 절차는 `docs/dev/plan/W_FACT_ONLY_ROADMAP_20261010.md`.
 
+2026-10-10 Phase A(레거시 RAW 제거·점주 답변→사실·1회 삭제) 구현 완료, 브랜치 `w/phase-a-fact-only`, **배포 대기**. W 플래그 `w_entity_revision_enabled`·`w_upload_proposals_enabled`·`w_fact_assembly_enabled`·`w_fact_card_edit_enabled`·`w_owner_answer_raw_publish` 는 코드에서 없어졌고 해당 동작은 항상 켜져 있다(아래 W2·W3a·W3b 항목의 "플래그 기본 꺼짐" 문구는 그 이전 기록이다). 점주 답변 순환은 `W_OWNER_ANSWER_WORKER_ENABLED` 만 쓴다. 배포 절차 `docs/dev/plan/FACT_ONLY_ROLLOUT.md`(배포 전 `quality_evaluations` 0건 확인 필요). R 확인 대기: 인계 문서 R 이 할 일 12·14·15. 실제 모델 실측과 배포판 종단 확인은 하지 않았다.
+
 2026-10-05 R 후속 구현: 파일 없는 사실 출처·인용, v1 공개 조정자 연결, 옛 검색 경로 이전, 신규/빈 공개판, 비활성 벡터 정리 구조를 구현했다. 전체 1,557 tests/131 subtests 및 격리 PG17의 migration 41개·통합 검증 통과. **W3 실제 조립 출력과 실자료 품질·원가·지연 인수는 남아 있다.** [구현·검증·W 인계](review/R_IMPLEMENTATION_20261005.md).
 
 2026-10-05 사용자 확정 — [fact 부분 편집·텍스트 원본·빈 상태](review/WR_CARD_EDIT_FACT_REVIEW_20261005.md). 자유 본문 편집 유지 및 표시 문구 편집 선택지는 대체됐다. 아래는 미구현 후속이며 정본의 같은 날짜 결정을 따른다.
