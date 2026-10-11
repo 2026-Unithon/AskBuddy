@@ -112,6 +112,11 @@ def test_list_error_raises_with_status():
 
 
 def test_delete_error_message_has_status(monkeypatch):
+    # CI 에는 .env 가 없어 supabase_url 이 비면 상대 URL 이 되어 httpx 가 다른 오류를 낸다
+    class S:
+        supabase_service_key = "k"; supabase_url = "http://t"; storage_bucket = "b"
+    monkeypatch.setattr(_mod, "get_settings", lambda: S())
+
     async def run():
         async with _client(lambda r: httpx.Response(500, text="boom")) as c:
             await _mod._delete_batches(["7/a"], c)
