@@ -24,8 +24,9 @@ from app.config import Settings
 from app.ingest import extract, occurrences, pipeline
 from app.ingest import repository as repo
 from app.ingest.extract import gemini
-from app.ingest.schemas import (ExtractedCard, ExtractedFact, ExtractionResult,
-                                FactExtractionResult, LocatedAssertion, LocatedEvidence,
+from app.ingest import fact_assembly
+from app.ingest.extract import mock
+from app.ingest.schemas import (FactExtractionResult, LocatedAssertion, LocatedEvidence,
                                 LocatedFactExtractionResult)
 from verify_w_partial_extraction import _new_source, _seed
 
@@ -73,11 +74,9 @@ async def verify(db, dsn):
         calls.append("EXTRACT" if is_extract else "ASSEMBLE")
         if is_extract:
             return gemini.CallResult(_facts_json(), {}, "STOP")
-        card = ExtractedCard(category_name=category, title="음료Z", content="물 10ml",
-                             confidence=.9, facts=[ExtractedFact(
-                                 object_name="음료Z", attribute="물", value="10",
-                                 confidence=.9, ref="f1")])
-        return gemini.CallResult(ExtractionResult(cards=[card]).model_dump_json(), {}, "STOP")
+        # 사실 조립 — 입력 대상 묶음을 규칙대로 배치한 합성 계획
+        payload = json.loads(prompt.split(fact_assembly.PLAN_INPUT_MARKER, 1)[1])
+        return gemini.CallResult(mock._planned(payload, [category]).model_dump_json(), {}, "STOP")
 
     async def new_job(source):
         job_id = await db.fetchval(
@@ -150,11 +149,12 @@ async def verify(db, dsn):
               and json.loads(y_occ[0]["check_flags"]) == [
                   {"field": "unit", "verdict": "UNGROUNDED_TEXT", "value": "펌프"}]
               and all(json.loads(o["check_flags"]) == [] for o in z_occ))
-        states = dict(await db.fetch(
-            "select fact_id, assembly_state from source_facts where store_id=$1 and source_id=$2",
-            store, pdf))
-        check("두 이름표 중 하나만 실려도 그 사실은 LINKED 다",
-              states[z["fact_id"]] == "LINKED" and states[y["fact_id"]] == "DROPPED")
+        dispositions = await db.fetch(
+            "select disposition, card_id from fact_occurrences where store_id=$1 and source_id=$2",
+            store, pdf)
+        check("한 사실에 근거 위치가 둘이어도 모든 occurrence 가 카드에 LINKED 된다",
+              len(dispositions) == len(occ)
+              and all(d["disposition"] == "LINKED" and d["card_id"] for d in dispositions))
 
         # 3. 같은 자료 재처리 — 모델은 다시 불리지만(재사용 꺼짐) 사실·위치는 늘지 않는다
         before_calls = len(calls)

@@ -22,8 +22,8 @@ from app.ingest import occurrences
 from app.ingest import repository as repo
 from app.ingest import recovery
 from app.ingest.preprocess import audio, document, kakao, storage, video
-from app.ingest.variant_split import split_hot_ice, split_refs
-from app.ingest.schemas import ExtractionResult, ExtractedAssertion
+from app.ingest.variant_split import split_hot_ice
+from app.ingest.schemas import ExtractedAssertion
 
 logger = logging.getLogger(__name__)
 
@@ -211,26 +211,12 @@ async def process_source(
         async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
 
-        # W3a — 켜면 대상 단위 사실 조립으로 간다. 옛 조립·_persist 를 부르지 않는다
-        fact_assembly_on = bool(getattr(get_settings(), "w_fact_assembly_enabled", False))
-        if fact_assembly_on:
-            # 입력은 짧은 연결로 읽고 놓은 뒤 모델을 부른다. 배치 실패는 strict 라 예외(FAILED)
-            prepared = await _prepare_fact_assembly(
-                pool, store_id, source_id, categories=list(categories), glossary=glossary,
-                usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True)
-            unresolved_total = len(prepared.planning.unresolved) + len(unresolved)
-        else:
-            # 조립 — 원장에 적힌 사실 중에서 고른다. 새 사실을 만들지 않는다.
-            # 모델 호출이므로 연결 밖에서 한다
-            result = await assemble_assertions(
-                source_id=source_id, assertions=assertions,
-                categories=list(categories), glossary=glossary,
-                usage_sink=usage_sink, usage_base=usage_base,
-                raw_sink=raw_sink, strict=True,
-            )
-            if assertions and not result.cards:
-                raise RuntimeError('추출 사실의 카드 조립이 완료되지 않았습니다. 조립 재시도가 필요합니다.')
-            result.unresolved.extend(unresolved)
+        # 대상 단위 사실 조립 — 입력은 짧은 연결로 읽고 놓은 뒤 모델을 부른다.
+        # 배치 실패는 strict 라 예외(FAILED)
+        prepared = await _prepare_fact_assembly(
+            pool, store_id, source_id, categories=list(categories), glossary=glossary,
+            usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True)
+        unresolved_total = len(prepared.planning.unresolved) + len(unresolved)
 
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -263,22 +249,10 @@ async def process_source(
                         f"legacy-source-{source_id}",
                     )
 
-                if fact_assembly_on:
-                    saved = await _persist_fact_cards(
-                        conn, store_id, source_id, categories, prepared,
-                        job_id=int(origin_job_id) if origin_job_id is not None else None,
-                        category_version=category_version)
-                else:
-                    saved = await _persist(
-                        conn,
-                        store_id,
-                        source_id,
-                        categories,
-                        result,
-                        job_id=int(origin_job_id) if origin_job_id is not None else None,
-                        category_version=category_version,
-                        ledger_ids=ledger_ids,
-                    )
+                saved = await _persist_fact_cards(
+                    conn, store_id, source_id, categories, prepared,
+                    job_id=int(origin_job_id) if origin_job_id is not None else None,
+                    category_version=category_version)
 
                 # 카드·구간 결과·완료를 함께 확정한다. 중간 오류는 모두 rollback한다.
                 await _record_segment_failures(
@@ -288,7 +262,7 @@ async def process_source(
         logger.info("ingest DONE source=%s cards=%d unresolved=%d "
                     "구간 %d/%d 실패 %.1fs",
                     source_id, saved,
-                    unresolved_total if fact_assembly_on else len(result.unresolved),
+                    unresolved_total,
                     outcome.segments_failed, outcome.segments_total,
                     time.perf_counter() - started)
         return None
@@ -323,8 +297,9 @@ def _usage_context(store_id: int, source_id: int, job_id: int | None,
     # 제품 작업은 실행 표지를 붙인다 — `job{J}r{tag}:`. 길이 상한 80 안이다
     # (ID 9자리·표지 13자리·seg99 에서 약 55자)
     job_scope = f"job{job_id}r{run_tag}:" if run_tag else f"job{job_id}:"
+    # 작업 없는 운영 수집(점주 답변)은 실행 표지로 재시도를 가른다
     scope = (f"run{extraction_run_id}:" if extraction_run_id
-             else job_scope if job_id else "")
+             else job_scope if job_id else f"r{run_tag}:" if run_tag else "")
     call = f"{scope}src{source_id}:{stage.lower()}"
     if segment_id:
         call = f"{call}:{segment_id}"
@@ -960,10 +935,9 @@ async def _persist_ledger(
         return {}
 
     s = get_settings()
-    if getattr(s, "w_entity_revision_enabled", False):
-        # W3-0 §3-1 — HOT/ICE 가 함께 적힌 사실을 규격별 두 사실로 나눈다(D19).
-        # 끄면 이 줄을 건너뛰어 원장 쓰기가 이전과 같다(D16). 반환 열쇠도 갈라진 이름표다
-        assertions = split_hot_ice(assertions)
+    # W3-0 §3-1 — HOT/ICE 가 함께 적힌 사실을 규격별 두 사실로 나눈다(D19).
+    # 반환 열쇠도 갈라진 이름표다
+    assertions = split_hot_ice(assertions)
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
     hints = bool(getattr(s, "extract_locator_hints", False))
     rows = []
@@ -1003,242 +977,19 @@ async def _persist_ledger(
          "check_flags": list(getattr(a, "check_flags", None) or [])}
         for a, row, fid in zip(assertions, rows, fact_ids)
     ])
-    if getattr(s, "w_entity_revision_enabled", False):
-        # W2-2 — 같은 트랜잭션에서 원장 사실을 대상·판·occurrence 로 잇는다.
-        # 끄면 이 줄을 건너뛰어 DB 쓰기가 이전과 같다
-        from app.ingest import fact_ledger
-        await fact_ledger.link_source_facts(conn, store_id, source_id, sorted(set(fact_ids)))
+    # W2-2 — 같은 트랜잭션에서 원장 사실을 대상·판·occurrence 로 잇는다
+    from app.ingest import fact_ledger
+    await fact_ledger.link_source_facts(conn, store_id, source_id, sorted(set(fact_ids)))
     return {a.local_ref: fid for a, fid in zip(assertions, fact_ids)}
 
 
-async def assemble_assertions(
-    *, source_id: int, assertions: list,
-    categories: list[str], glossary: list[dict],
-    usage_sink=None, usage_base: tuple | None = None, strict: bool = False,
-    raw_sink=None,
-):
-    """추출된 사실을 대상 단위로 묶어 카드로 만든다. 등록과 미리보기에서 공유한다.
-
-    새 사실을 만들지 않는다. 고르고 문장으로 다듬는 일만 한다.
-    조립 실패는 unresolved에 남긴다. 등록 경로는 호출 전에 사실을 원장에 저장한다.
-    """
-    from app.ingest.extract import assemble_cards
-    from app.ingest.schemas import ExtractionResult
-
-    if not assertions:
-        return ExtractionResult(cards=[], unresolved=[])
-
-    flat = [
-        {
-            "ref": a.local_ref,
-            "대상": a.subject,
-            "규격": a.as_variant() or "",
-            "속성": a.attribute,
-            "값": a.value + (f" {a.unit}" if a.unit else ""),
-            "부정": a.polarity == "NEGATE",
-            "조건": list(a.conditions),
-            "예외": list(a.exceptions),
-            "순서": a.as_order() or 0,
-            "확실함": round(a.confidence, 2),
-            "근거시각": a.evidence.timestamp_sec,
-        }
-        for a in assertions
-    ]
-    # 같은 대상의 규격은 한 카드에 남겨야 하므로 대상 묶음을 쪼개지 않는다.
-    grouped: dict[str, list[dict]] = {}
-    for fact in flat:
-        grouped.setdefault(fact["대상"], []).append(fact)
-    batches, batch = [], []
-    limit = get_settings().assemble_batch_facts
-    for group in grouped.values():
-        if batch and len(batch) + len(group) > limit:
-            batches.append(batch)
-            batch = []
-        batch.extend(group)
-    if batch:
-        batches.append(batch)
-    concurrency = int(getattr(get_settings(), "assemble_concurrency", 1) or 1)
-
-    def _call(index, facts):
-        return assemble_cards(
-            source_id=source_id, facts=facts,
-            category_names=categories, glossary=glossary,
-            usage_sink=usage_sink,
-            usage_context=_ctx_for(usage_base, source_id, "ASSEMBLE",
-                                   segment_id=f"batch{index}" if len(batches) > 1 else None),
-            raw_sink=raw_sink,
-        )
-
-    try:
-        if concurrency <= 1 or len(batches) <= 1:
-            results = []
-            for index, facts in enumerate(batches):  # 기존 동작 — 첫 실패에서 멈춘다
-                results.append(await _call(index, facts))
-        else:
-            from app.ingest.batching import gather_in_order
-            gathered = await gather_in_order(
-                [lambda i=i, f=f: _call(i, f) for i, f in enumerate(batches)],
-                concurrency=concurrency)
-            failure = next((r for r in gathered if isinstance(r, Exception)), None)
-            if failure is not None:
-                raise failure  # index 순 첫 실패 — 아래 except 가 기존처럼 처리한다
-            results = gathered
-        if len(results) == 1:
-            return results[0]  # 단일 호출은 원래 응답 ID도 보존한다
-        return ExtractionResult(cards=[card for r in results for card in r.cards],
-                                unresolved=[note for r in results for note in r.unresolved])
-    except Exception as exc:
-        if strict:
-            raise RuntimeError('카드 조립 실패 — 저장한 추출 결과로 재시도해야 합니다.') from exc
-        # 원장은 이미 적혔다. 카드를 못 만들어도 사실은 남는다
-        logger.warning("조립 실패 source=%s: %s — 원장의 사실은 남는다", source_id, exc)
-        return ExtractionResult(cards=[], unresolved=[f"조립 실패: {exc}"])
-
-
-def _ledger_keys(ledger: dict[str, int], ref: str) -> list[str]:
-    """조립이 고른 ref 의 원장 열쇠. HOT/ICE 나누기(W3-0 §3-1)로 갈라진 사실이면 두 열쇠다.
-
-    조립 모델은 나누기 전 사실 목록을 보므로 원래 ref 를 쓴다. 플래그가 꺼져 있으면
-    갈라진 열쇠가 원장에 없으므로 이전과 같다(ref 가 있으면 그것 하나, 없으면 빈 목록).
-    """
-    if ref in ledger:
-        return [ref]
-    return [key for key in split_refs(ref) if key in ledger]
-
-
-async def _persist(
-    conn: asyncpg.Connection,
-    store_id: int,
-    source_id: int,
-    categories: dict[str, int],
-    result: ExtractionResult,
-    *,
-    job_id: int | None,
-    category_version: int,
-    ledger_ids: dict[str, int] | None = None,
-) -> int:
-    """추출 카드를 is_verified=false 로 적재한다. 임베딩은 점주 승인 후에 한다.
-
-    **원장에는 쓰지 않는다** (W1). 사실은 조립 전에 이미 적혔고, 여기서는 카드가
-    그 사실을 가리키게 잇기만 한다. 예전처럼 카드에서 원장을 만들면 조립이 버린
-    사실이 사라져 추출 손실과 조립 손실을 구분할 수 없다.
-    """
-    from app.config import get_settings
-
-    saved = 0
-    ledger = ledger_ids or {}
-    linked_refs: set[str] = set()
-    unmatched: list[str] = []
-    source_type = await conn.fetchval(
-        "select source_type from sources where store_id = $1 and source_id = $2",
-        store_id,
-        source_id,
-    )
-    # W2-2 — 켜면 새 카드에 대상 id 를 단다. 기존 카드는 건드리지 않는다
-    entity_revision = bool(getattr(get_settings(), "w_entity_revision_enabled", False))
-    if entity_revision or getattr(get_settings(), "w_upload_proposals_enabled", False):
-        # 잠금 순서: 매장 잠금 → 대상 행. insert_card(entity_id=E) 가 대상 행에 FOR KEY SHARE 를
-        # 먼저 잡고 나중에 매장 잠금을 기다리면, 매장 잠금 → FOR UPDATE 순인 merge_entities 와
-        # 교착한다. 그래서 카드를 넣기 전에 매장 잠금을 먼저 잡는다(같은 트랜잭션 재진입은 무해)
-        from app.ingest import entities
-        await entities.lock_store_knowledge(conn, store_id)
-    for card in result.cards:
-        category_id = categories.get(card.category_name) or categories.get("기타")
-        if category_id is None:
-            raise RuntimeError("시스템 카테고리 '기타'가 없습니다.")
-        if card.category_name not in categories:
-            logger.info(
-                "허용 목록에 없는 카테고리 '%s' — 기타로 저장 source=%s",
-                card.category_name,
-                source_id,
-            )
-
-        # 카드 ↔ 원장 잇기 — 조립이 고른 사실의 ref 로 찾는다 (W1).
-        # 카드 저장 전에 계산한다 — W2 에서 카드의 대상을 정하는 데도 쓴다 (순수 dict 연산)
-        refs = [f.ref for f in card.facts if getattr(f, "ref", "")]
-        keys = [key for r in refs for key in _ledger_keys(ledger, r)]
-        fact_ids = [ledger[key] for key in keys]
-        entity_id = None
-        if entity_revision:
-            from app.ingest import fact_ledger
-            entity_id = await fact_ledger.card_entity_for(conn, store_id, fact_ids)
-
-        card_id = await repo.insert_card(
-            conn, store_id,
-            category_id=category_id,
-            source_id=source_id,
-            title=card.title,
-            content=card.content,
-            confidence=_to_percent(card.confidence),
-            origin_job_id=job_id,
-            category_version=category_version,
-            entity_id=entity_id,
-        )
-        # legacy facts — 코드 이전이 끝나면 끊는다 (13.3-1)
-        await repo.insert_facts(conn, card_id, [
-            (f.object_name, f.attribute, f.value, _to_percent(f.confidence))
-            for f in card.facts
-        ])
-
-        if source_type in ("VOICE", "VIDEO"):
-            locator_type = "TIMESTAMP"
-            locator = {"timestamp_sec": max(0, card.evidence.timestamp_sec)}
-        else:
-            locator_type = "WHOLE_SOURCE"
-            locator = {}
-
-        linked_refs.update(keys)
-        unmatched.extend(r for r in refs if r and not _ledger_keys(ledger, r))
-        if refs and not fact_ids:
-            # ref 를 하나도 못 이었다. 카드는 남기되 조용히 넘기지 않는다
-            logger.warning("카드 '%s' 의 사실 참조를 원장에서 찾지 못했다: %s",
-                           card.title[:30], refs[:5])
-        if fact_ids:
-            await repo.link_card_facts(conn, store_id, card_id, fact_ids)
-
-        await repo.insert_card_evidence(
-            conn,
-            store_id,
-            card_id,
-            source_id,
-            locator_type=locator_type,
-            locator=locator,
-        )
-        saved += 1
-
-    # 조립이 무엇을 싣고 무엇을 버렸는지 원장에 표시한다 (W1).
-    # **버린 것이 남아야 조립 손실을 셀 수 있다.**
-    if ledger:
-        # 같은 사실이 이름표 둘로 들어올 수 있다(두 자리에 나온 사실, W1-4). 한 이름표라도
-        # 실렸으면 그 사실은 실린 것이다 — 다른 이름표로 버림을 덮어쓰지 않는다
-        linked = sorted({ledger[r] for r in linked_refs})
-        dropped = sorted({fid for r, fid in ledger.items()
-                          if r not in linked_refs} - set(linked))
-        await repo.set_assembly_state(conn, store_id, linked, "LINKED")
-        await repo.set_assembly_state(conn, store_id, dropped, "DROPPED")
-        logger.info("조립 결과 source=%s 사실 %d건 중 실림 %d · 버림 %d%s",
-                    source_id, len(ledger), len(linked), len(dropped),
-                    f" · 못 이은 참조 {len(unmatched)}" if unmatched else "")
-
-    if getattr(get_settings(), "w_upload_proposals_enabled", False):
-        # W2-4 — 같은 트랜잭션에서 이 자료가 이은 모든 판으로 검수 제안을 남긴다.
-        # 기존 카드 행은 쓰지 않는다(결정 G). 다시 처리해도 행이 늘지 않는다
-        from app.ingest import impact
-        await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)
-
-    for item in result.unresolved:
-        logger.info("unresolved source=%s: %s", source_id, item)
-
-    return saved
-
-
-# ── W3a 대상 단위 사실 조립 (플래그 w_fact_assembly_enabled) ─────────────────
+# ── 대상 단위 사실 조립 ──────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class PreparedAssembly:
     entity_ids: tuple[int, ...]  # 이 자료가 건드린 살아 있는 대상(오름차순)
     states: dict[int, "EntityCardState"]  # 준비 때 상태
-    groups: dict[int, "EntityGroup"]  # DEFER 가 아닌 대상의 입력(사실 1개 이상)
+    groups: dict[int, "EntityGroup"]  # DEFER·REDRAFT 가 아닌 대상의 입력(사실 1개 이상)
     held: tuple["HeldFact", ...]
     data_errors: dict[int, str]  # check_group 코드
     planning: "PlanningOutcome"
@@ -1249,7 +1000,7 @@ async def _prepare_fact_assembly(pool, store_id: int, source_id: int, *, categor
                                  strict: bool) -> PreparedAssembly:
     """조립 입력을 짧은 연결로 읽고 놓은 뒤, 연결 없이 사실 조립 모델을 부른다.
 
-    DEFER 대상(공개·수동·점주 초안·레거시 카드)은 입력을 읽지 않는다. 데이터 오류 묶음은
+    DEFER 대상(수동·점주 초안·레거시 카드)과 REDRAFT 대상(공개 자동 사실 카드)은 입력을 읽지 않는다. 데이터 오류 묶음은
     모델에 보내지 않는다. 사용량 문맥은 배치마다 `plan{n}` 이다(배치가 하나여도 plan0).
     """
     from app.ingest import card_plan, fact_assembly, fact_cards
@@ -1257,8 +1008,9 @@ async def _prepare_fact_assembly(pool, store_id: int, source_id: int, *, categor
     async with pool.acquire() as conn:
         entity_ids = tuple(await fact_assembly.entities_for_source(conn, store_id, source_id))
         states = {e: await fact_cards.entity_card_state(conn, store_id, e) for e in entity_ids}
+        # REDRAFT 는 모델 없이 공개판에 새 사실만 붙이므로(A-D4) 입력을 읽지 않는다
         loaded = await fact_assembly.load_entity_groups(
-            conn, store_id, [e for e in entity_ids if states[e].mode != "DEFER"])
+            conn, store_id, [e for e in entity_ids if states[e].mode not in ("DEFER", "REDRAFT")])
     # 여기부터 연결 없음 — 모델 호출 중 DB 연결을 쥐지 않는다
     groups = {g.entity_id: g for g in loaded.groups}
     data_errors = {e: code for e, g in groups.items() if (code := card_plan.check_group(g))}
@@ -1281,7 +1033,6 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
     구체적 사유로 검수 대기로 둔다. 처분 누락이 있으면 예외로 트랜잭션을 되돌린다.
     이번에 만든 카드 판 수를 돌려준다.
     """
-    from app.config import get_settings
     from app.ingest import card_plan, entities, fact_assembly, fact_cards
 
     await entities.lock_store_knowledge(conn, store_id)
@@ -1306,6 +1057,16 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
         if before.mode == "DEFER":
             # 지금은 풀렸지만 준비 때 입력을 읽지 않았다
             await pending(fact_cards.REASON_CONCURRENT)
+            continue
+        if now.mode == "REDRAFT" or before.mode == "REDRAFT":
+            # 공개 카드에 새 사실만 붙인다(A-D4). 준비 뒤 판정이 바뀌었으면 쓰지 않는다
+            if now.mode != before.mode:
+                await pending(fact_cards.REASON_CONCURRENT)
+                continue
+            written = await fact_cards.redraft_published_card(
+                conn, store_id, source_id=source_id, state=now)
+            if written.deferred_reason is None:
+                created += len(written.new_version_ids)
             continue
         if e in prepared.data_errors:
             await pending(prepared.data_errors[e])
@@ -1346,9 +1107,8 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
         await fact_cards.mark_pending(conn, store_id, source_id=source_id,
                                       fact_ids=[h.fact_id], reason=h.reason)
 
-    if getattr(get_settings(), "w_upload_proposals_enabled", False):
-        from app.ingest import impact
-        await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)
+    from app.ingest import impact
+    await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)
 
     counts = await fact_cards.disposition_counts(conn, store_id, source_id)
     if counts.missing > 0:

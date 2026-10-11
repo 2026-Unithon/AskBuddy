@@ -62,6 +62,15 @@ async def seed(conn) -> dict:
         insert into knowledge_cards (store_id, title, content)
         values ($1, '검증용 카드', '내용') returning card_id
         """, ids["cp04-a"])
+    # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고 초안 포인터를 둔다
+    ids["version"] = await conn.fetchval(
+        """
+        insert into card_versions (store_id, card_id, version_no, title, content, change_source)
+        values ($1, $2, 1, '검증용 카드', '내용', 'EXTRACTION') returning version_id
+        """, ids["cp04-a"], ids["card"])
+    await conn.execute(
+        "update knowledge_cards set draft_version_id = $3 where store_id = $1 and card_id = $2",
+        ids["cp04-a"], ids["card"], ids["version"])
     ids["owner"] = owner
     return ids
 
@@ -222,16 +231,16 @@ async def scenario_isolation(conn, ids: dict) -> None:
         """
         insert into card_version_blocks (store_id, card_version_id, block_id,
                                          kind, block_order)
-        values ($1, 1, 'b1', 'NOTES', 1)
-        """, a)
+        values ($1, $2, 'b1', 'NOTES', 1)
+        """, a, ids["version"])
     try:
         async with conn.transaction():
             await conn.execute(
                 """
                 insert into card_block_facts (store_id, card_version_id,
                                               block_id, fact_revision_id, position)
-                values ($1, 1, 'b1', $2, 1)
-                """, a, foreign_fact)
+                values ($1, $3, 'b1', $2, 1)
+                """, a, foreign_fact, ids["version"])
         check("다른 매장의 사실을 블록에 담지 못한다", False, "들어갔다")
     except asyncpg.ForeignKeyViolationError:
         check("다른 매장의 사실을 블록에 담지 못한다", True)
@@ -241,8 +250,8 @@ async def scenario_isolation(conn, ids: dict) -> None:
         """
         insert into card_block_facts (store_id, card_version_id, block_id,
                                       fact_revision_id, position)
-        values ($1, 1, 'b1', $2, 1)
-        """, a, own)
+        values ($1, $3, 'b1', $2, 1)
+        """, a, own, ids["version"])
     check("같은 매장의 사실은 담긴다", True)
 
 

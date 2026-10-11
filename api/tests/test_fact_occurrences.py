@@ -13,7 +13,7 @@ import pytest
 from app.ingest import occurrences, pipeline
 from app.ingest.preprocess import kakao
 from app.ingest.raw_responses import schema_version
-from app.ingest.schemas import (Evidence, ExtractedAssertion, ExtractionResult,
+from app.ingest.schemas import (Evidence, ExtractedAssertion,
                                 FactExtractionResult, LocatedAssertion, LocatedEvidence,
                                 LocatedFactExtractionResult)
 
@@ -43,10 +43,9 @@ def test_located_evidence_has_page_and_line_with_zero_defaults():
     assert {"page", "line"} <= set(props)
 
 
-def test_flag_off_schemas_are_byte_identical_to_before():
-    # HEAD(630db77) 의 schemas.py 로 잰 값. 꺼짐 요청(스키마)이 바뀌지 않았음을 못 박는다
+def test_default_schemas_unchanged_by_locator_hints():
+    # HEAD(630db77) 의 schemas.py 로 잰 값. 기본(위치 힌트 없음) 요청 스키마가 바뀌지 않았음을 못 박는다
     assert schema_version(FactExtractionResult) == "FactExtractionResult/286f526e798a"
-    assert schema_version(ExtractionResult) == "ExtractionResult/b2d7b652b75c"
     assert set(Evidence.model_fields) == {"source_id", "timestamp_sec"}
 
 
@@ -124,14 +123,14 @@ def test_locator_for(source_type, evidence, expected):
     assert occurrences.locator_for(source_type, evidence, **ON) == expected
 
 
-def test_locator_for_ignores_page_and_line_when_flag_off():
+def test_locator_for_ignores_page_and_line_by_default():
     assert occurrences.locator_for("SCAN", LocatedEvidence(page=2)) == ("WHOLE_SOURCE", {})
     assert occurrences.locator_for("KAKAO", LocatedEvidence(line=2)) == ("WHOLE_SOURCE", {})
     assert occurrences.locator_for("VOICE", Evidence(timestamp_sec=9)) == (
         "TIMESTAMP", {"timestamp_sec": 9})
 
 
-def test_page_is_not_checked_when_flag_off():
+def test_page_is_not_checked_by_default():
     items = [_a(page=9)]
     assert occurrences.validate_assertions(items, source_type="SCAN", text=PDF_TEXT,
                                            media=[]) == []
@@ -416,6 +415,13 @@ class _OccurrenceConn:
         return "INSERT 0 1"
 
 
+@pytest.fixture(autouse=True)
+def _no_ledger_link():
+    # 원장 연결(대상·판)은 이 파일의 관심사가 아니다 — occurrence 쓰기만 본다
+    with patch("app.ingest.fact_ledger.link_source_facts", AsyncMock()):
+        yield
+
+
 def _settings(hints=True):
     return NS(gemini_model="gemini-synthetic", extract_temperature=0.0, ingest_mode="mock",
               extract_locator_hints=hints)
@@ -483,34 +489,8 @@ def test_occurrence_sql_filters_by_store():
     assert src.count("store_id = $1") >= 3
 
 
-# ── 조립 결과 표시: 한 사실에 이름표가 둘일 때 ───────────────────────────
-
 @pytest.mark.asyncio
-async def test_fact_linked_by_one_ref_is_not_marked_dropped_by_its_other_ref():
-    from app.ingest.schemas import ExtractedCard, ExtractedFact, ExtractionResult
-    card = ExtractedCard(category_name="기타", title="음료Z", content="물 10ml", confidence=.9,
-                         facts=[ExtractedFact(object_name="음료Z", attribute="물", value="10",
-                                              confidence=.9, ref="f1")])
-    conn = NS(fetchval=AsyncMock(return_value="SCAN"))
-    states = []
-
-    async def set_state(c, store_id, ids, state):
-        states.append((sorted(ids), state))
-
-    with patch.object(pipeline.repo, "insert_card", AsyncMock(return_value=9)), \
-         patch.object(pipeline.repo, "insert_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "link_card_facts", AsyncMock()), \
-         patch.object(pipeline.repo, "insert_card_evidence", AsyncMock()), \
-         patch.object(pipeline.repo, "set_assembly_state", set_state), \
-         patch("app.config.get_settings", return_value=_settings()):
-        await pipeline._persist(conn, 3, 5, {"기타": 1}, ExtractionResult(cards=[card]),
-                                job_id=None, category_version=1,
-                                ledger_ids={"f1": 77, "f2": 77})
-    assert states == [([77], "LINKED"), ([], "DROPPED")]
-
-
-@pytest.mark.asyncio
-async def test_flag_off_still_writes_occurrences_but_ignores_page():
+async def test_hints_off_still_writes_occurrences_but_ignores_page():
     conn = _OccurrenceConn()
     with patch.object(pipeline.repo, "insert_source_facts", AsyncMock(return_value=[77, 78])), \
          patch("app.config.get_settings", return_value=_settings(hints=False)):

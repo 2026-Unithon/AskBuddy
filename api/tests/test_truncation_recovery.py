@@ -16,9 +16,9 @@ from app.config import Settings
 from app.contracts.usage import UsageContext
 from app.ingest import extract, raw_responses, recovery
 from app.ingest.extract import gemini
-from app.ingest.pipeline import _extract_facts_all, _split_input, assemble_assertions
+from app.ingest.pipeline import _extract_facts_all, _split_input
 from app.ingest.preprocess.video import split_by_time
-from app.ingest.schemas import ExtractedAssertion, ExtractionResult, FactExtractionResult
+from app.ingest.schemas import CardPlanBatch, ExtractedAssertion, FactExtractionResult
 
 
 class FakeRawSink:
@@ -116,6 +116,10 @@ async def test_call_passes_max_output_tokens_to_config():
     assert generate.await_args.kwargs["config"].max_output_tokens == 1234
 
 
+_PLAN_ENTITIES = [{"대상": "음료Z", "사실": [
+    {"id": "F1", "규격": "", "순서": 0, "부정": False}]}]
+
+
 @pytest.mark.asyncio
 async def test_extract_and_assemble_use_their_own_limits():
     seen = []
@@ -123,14 +127,14 @@ async def test_extract_and_assemble_use_their_own_limits():
     async def fake_call(prompt, media, schema=None, max_output_tokens=None):
         seen.append(max_output_tokens)
         body = (_facts_json(["줄1"]) if schema is FactExtractionResult
-                else ExtractionResult().model_dump_json())
+                else CardPlanBatch().model_dump_json())
         return gemini.CallResult(body, {}, "STOP")
 
     with patch.object(gemini, "get_settings", return_value=_gemini_settings()), \
          patch.object(gemini, "_call", fake_call):
         await gemini.extract_facts(source_id=5, source_type="VOICE", text="t", glossary=[])
-        await gemini.assemble(source_id=5, facts=[{"ref": "f1"}], category_names=["기타"],
-                              glossary=[])
+        await gemini.assemble_plan(source_id=5, entities=_PLAN_ENTITIES, category_names=["기타"],
+                                   glossary=[])
     assert seen == [4000, 6000]
 
 
@@ -156,27 +160,13 @@ async def test_truncated_extract_is_rejected_and_marked_even_if_json_parses():
 @pytest.mark.asyncio
 async def test_truncated_assembly_fails_clearly():
     sink = FakeRawSink()
-    body = ExtractionResult().model_dump_json()
+    body = CardPlanBatch().model_dump_json()
     with patch.object(gemini, "get_settings", return_value=_gemini_settings()), \
          patch.object(gemini, "_call", AsyncMock(return_value=gemini.CallResult(body, {}, "MAX_TOKENS"))):
         with pytest.raises(raw_responses.TruncatedOutputError, match="조립"):
-            await gemini.assemble(source_id=5, facts=[{"ref": "f1"}], category_names=["기타"],
-                                  glossary=[], usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
+            await gemini.assemble_plan(source_id=5, entities=_PLAN_ENTITIES, category_names=["기타"],
+                                       glossary=[], usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
     assert sink.marks[0][1] is False
-
-
-@pytest.mark.asyncio
-async def test_truncated_assembly_is_a_retryable_pipeline_failure():
-    assertion = ExtractedAssertion(local_ref="f1", original_assertion="물 10ml",
-                                   subject="음료Z", attribute="물", value="10", confidence=.9)
-    body = ExtractionResult().model_dump_json()
-    with patch.object(extract, "get_settings", return_value=NS(ingest_mode="real")), \
-         patch.object(gemini, "get_settings", return_value=_gemini_settings()), \
-         patch.object(gemini, "_call", AsyncMock(return_value=gemini.CallResult(body, {}, "MAX_TOKENS"))):
-        with pytest.raises(RuntimeError, match="카드 조립 실패") as info:
-            await assemble_assertions(source_id=1, assertions=[assertion], categories=["기타"],
-                                      glossary=[], strict=True)
-    assert isinstance(info.value.__cause__, raw_responses.TruncatedOutputError)
 
 
 # ── 분할 규칙 ──────────────────────────────────────────────────────────

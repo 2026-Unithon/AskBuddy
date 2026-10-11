@@ -117,7 +117,6 @@ const state = {
 
 function cardDetail(cardId) {
   const fact = cardId !== 2;
-  const flagOn = cardId !== 3;
   const excluded = state.excluded.has(cardId);
   const title = cardId === 1 ? "음료Z" : cardId === 2 ? "합성 옛 카드" : `합성음료A ${cardId}`;
   return {
@@ -128,7 +127,7 @@ function cardDetail(cardId) {
     // 카드 1 은 공개판(10)이 있다 → 저장 뒤 초안 판이 달라지면 "고친 내용 공개 전"
     published: cardId === 1 ? { version_id: 10, version_no: 1, title, content: "렌더된 본문", change_source: "EXTRACTION", created_at: "2026-10-08T03:00:00Z" } : null,
     evidence: [], events: [], updated_at: "2026-10-08T03:00:00Z",
-    fact_card: fact, fact_edit_enabled: flagOn,
+    fact_card: fact,
   };
 }
 
@@ -523,20 +522,15 @@ async function handle(route) {
     check("사실 목록 404 는 볼 수 없어요·다시 시도 없음", await page.getByRole("button", { name: "다시 시도", exact: true }).count() === 0);
     await shot("16-facts-404-390");
 
-    // ── 레거시 카드는 옛 화면 (카드 2)
+    // ── 사실 카드가 아닌 카드는 읽기 전용 (카드 2)
     await page.goto(`${BASE}/owner/cards/2`);
     await text("합성 옛 카드 첫 줄").waitFor();
     check("레거시 카드: 사실 목록 없음·사실 API 호출 없음", await page.getByTestId("fact-panel").count() === 0 && !state.factsCalls[2]);
-    await page.getByRole("button", { name: "고치기", exact: true }).click();
-    check("레거시 카드: 옛 자유 글 편집", await page.getByText("내용 · 한 줄에 하나씩", { exact: true }).isVisible());
-    await shot("12-legacy-edit-390");
-
-    // ── 플래그 꺼짐 읽기 전용 (카드 3)
-    await page.goto(`${BASE}/owner/cards/3`);
-    await panel().waitFor();
-    check("플래그 꺼짐: 안내 문구·고치기 없음",
-      await text("사실 단위 고치기는 아직 열리지 않았어요.").isVisible() && await page.getByRole("button", { name: "고치기", exact: true }).count() === 0);
-    await shot("13-readonly-flag-off-390");
+    check("레거시 카드: 고치기 버튼·자유 글 입력칸 없음(읽기만)",
+      await page.getByRole("button", { name: "고치기", exact: true }).count() === 0
+      && await page.locator("textarea").count() === 0
+      && await page.getByText("내용 · 한 줄에 하나씩", { exact: true }).count() === 0);
+    await shot("12-legacy-readonly-390");
 
     // ── 대상 정리 바뀜 읽기 전용 (카드 7)
     await page.goto(`${BASE}/owner/cards/7`);

@@ -121,11 +121,10 @@ def test_parse_ok_and_text_stripped():
 def test_card_detail_defaults_keep_old_construction_working():
     now = datetime.now(timezone.utc)
     d = CardDetail(card_id=1, review_status="PENDING", assignment_type="AUTOMATIC", updated_at=now)
-    assert d.fact_card is False and d.fact_edit_enabled is False
+    assert d.fact_card is False
 
 
 def test_settings_defaults():
     s = Settings(_env_file=None)
-    assert s.w_fact_card_edit_enabled is False
     assert s.card_fact_parse_max_chars == 1000
     assert s.card_fact_parse_max_facts == 10

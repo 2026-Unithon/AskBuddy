@@ -38,9 +38,16 @@ async def verify(pool, db):
     await db.execute("insert into store_members(store_id,user_id,member_role) values($1,$2,'OWNER')", other, other_owner)
 
     async def card(store, title, content, status="APPROVED"):
-        # 승인 상태로 넣으면 트리거가 공개 버전을 만든다
-        return await db.fetchval("""insert into knowledge_cards(store_id,title,content,review_status)
+        # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고, 승인 상태면 공개 포인터도 둔다.
+        # 체크리스트는 공개 판의 본문 줄만 읽으므로 사실 블록은 필요 없다
+        card_id = await db.fetchval("""insert into knowledge_cards(store_id,title,content,review_status)
             values($1,$2,$3,$4) returning card_id""", store, title, content, status)
+        version_id = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
+            values($1,$2,1,$3,$4,'EXTRACTION') returning version_id""", store, card_id, title, content)
+        await db.execute("""update knowledge_cards set draft_version_id=$3::bigint,
+            published_version_id=case when review_status='APPROVED' then $3::bigint end
+            where store_id=$1 and card_id=$2""", store, card_id, version_id)
+        return card_id
 
     common = await card(sid, '합성 공통', '물 채우기')
     opening = await card(sid, '합성 오픈', '머신 켜기\n원두 소분')
@@ -155,7 +162,11 @@ async def verify(pool, db):
     print('PASS checklist late save only for previous unsubmitted day')
 
     # 새 공개 버전이면 그날 체크는 새로 시작
-    await db.execute("update knowledge_cards set content=$3 where store_id=$1 and card_id=$2", sid, common, '물 채우기\n컵 채우기')
+    # 레거시 트리거가 없으므로 새 판(2)을 명시적으로 만들고 초안·공개 포인터를 옮긴다
+    new_common = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
+        values($1,$2,2,'합성 공통',$3,'OWNER_EDIT') returning version_id""", sid, common, '물 채우기\n컵 채우기')
+    await db.execute("""update knowledge_cards set content=$3, draft_version_id=$4, published_version_id=$4
+        where store_id=$1 and card_id=$2""", sid, common, '물 채우기\n컵 채우기', new_common)
     with patch.object(cl, '_now', return_value=NOON):
         member = await cl.require_member(session, s)
         fresh = await cl.today_view(session, member, now_utc=NOON, selected_shift_id=None, requested_date=None, include_all=True)

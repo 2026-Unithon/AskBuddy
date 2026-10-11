@@ -2,9 +2,8 @@
 
 **색인 준비는 트랜잭션 밖, 공개 전환은 짧은 트랜잭션 하나.**
 
-  1. 준비: 공개 상태·카드 CAS 를 읽고, manifest 를 만들고, 각 카드 버전의
-     RAW 블록을 한 번의 짧은 트랜잭션으로 고정한 뒤 `KnowledgeContent` 를
-     조립한다. 연결은 여기서 놓는다.
+  1. 준비: 공개 상태·카드 CAS 를 읽고, manifest 를 만들고, 각 카드 버전이
+     사실 블록 카드인지 한 장씩 확인한 뒤 `KnowledgeContent` 를 조립한다. 연결은 여기서 놓는다.
   2. R 색인 준비: 임베딩을 부르므로 **연결을 잡지 않은 채** 호출한다.
   3. 공개: publication 잠금 → 카드 CAS 재확인 → `publish_knowledge` → 카드
      공개 포인터 → `activate_prepared_index` → (선택) 같은 트랜잭션 hook →
@@ -36,7 +35,6 @@ from app.publish.content import (
     NoProvenance,
     build_knowledge_content,
     current_manifest,
-    ensure_raw_blocks,
 )
 from app.publish.service import _lock_publication, publish_knowledge
 from app.reg.index_preparation import activate_prepared_index, prepare_index_request
@@ -238,32 +236,25 @@ def build_prepare_request(*, store_id: int, member_id: int, idempotency_key: str
 # 준비 단계
 # ---------------------------------------------------------------------------
 
-async def _fix_blocks(conn, *, store_id: int, manifest: dict[int, int],
-                      changed_ids: set[int], allow_owner_answer: bool,
-                      glossary_version: str) -> dict[int, int]:
-    """manifest 의 모든 버전에 RAW 블록을 한 트랜잭션으로 고정한다.
+async def _check_cards(conn, *, store_id: int, manifest: dict[int, int],
+                       changed_ids: set[int], glossary_version: str) -> dict[int, int]:
+    """manifest 의 카드가 사실 블록 카드인지 한 장씩 확인한다.
 
-    카드마다 savepoint 를 두고, 블록 고정 뒤 그 카드 하나만으로 조립까지 해 본다.
-    **변경하지 않는 카드**가 어떤 이유로든(출처 없음, 빈 원문, 블록 상한 초과,
-    계약 검증 실패) 실패하면 그 카드의 쓰기만 되돌리고 manifest 에서 뺀다 — 낡은
-    레거시 카드 하나 때문에 매장 전체 승인이 막히지 않게 한다(Ruling, final fix).
-    **승인 대상 카드**가 출처가 없거나 원문이 잘못됐으면 전체를 롤백하고 호출부에
-    알린다. 그 밖의 예외는 삼키지 않는다.
+    카드마다 savepoint 를 두고 그 카드 하나만으로 조립해 본다. **변경하지 않는
+    카드**가 어떤 이유로든(사실 블록 아님, 출처 없음, 계약 검증 실패) 실패하면 그
+    카드만 manifest 에서 빼고 경고한다 — 낡은 카드 하나 때문에 매장 전체 승인이
+    막히지 않게 한다. **승인 대상 카드**가 사실 블록 카드가 아니거나 출처가 없으면
+    호출부에 알린다. 그 밖의 예외는 삼키지 않는다.
     """
     kept = dict(manifest)
     async with conn.transaction():
         for card_id, version_id in sorted(manifest.items()):
             try:
                 async with conn.transaction():
-                    await ensure_raw_blocks(
-                        conn, store_id=store_id, card_id=card_id,
-                        card_version_id=version_id,
-                        allow_owner_answer=allow_owner_answer)
                     # 한 장만으로 조립해 계약 검증까지 여기서 걸러 둔다
                     await build_knowledge_content(
                         conn, store_id=store_id, manifest={card_id: version_id},
-                        glossary_version=glossary_version,
-                        allow_owner_answer=allow_owner_answer)
+                        glossary_version=glossary_version)
             except (NoProvenance, ValueError) as exc:
                 if card_id in changed_ids:
                     if isinstance(exc, NoProvenance):
@@ -309,7 +300,6 @@ async def publish_cards(
         raise ValueError("같은 카드가 두 번 실렸다")
 
     changed_ids = {c.card_id for c in changes}
-    allow_owner_answer = get_settings().w_owner_answer_raw_publish
     body_hash = digest([dataclasses.asdict(c) for c in changes])
 
     # 0. 재시도 확인 — 이미 커밋된 같은 요청이면 준비·CAS 없이 그 결과를 돌려준다.
@@ -347,9 +337,9 @@ async def publish_cards(
 
         glossary_version = publication["glossary_version"]
         try:
-            manifest = await _fix_blocks(
+            manifest = await _check_cards(
                 conn, store_id=store_id, manifest=manifest,
-                changed_ids=changed_ids, allow_owner_answer=allow_owner_answer,
+                changed_ids=changed_ids,
                 glossary_version=glossary_version)
         except _ChangedWithoutProvenance:
             return PublishCardsResult(status="NO_PROVENANCE")
@@ -361,7 +351,7 @@ async def publish_cards(
 
         content = await build_knowledge_content(
             conn, store_id=store_id, manifest=manifest,
-            glossary_version=glossary_version, allow_owner_answer=allow_owner_answer)
+            glossary_version=glossary_version)
 
     expected_publication_revision = publication["publication_revision"]
 

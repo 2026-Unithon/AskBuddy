@@ -19,7 +19,7 @@ const BASE = 'http://127.0.0.1:3011';
       { card_id: 4, review_status: 'EXCLUDED', title: '합성 지운 카드', content: '지운 내용', category: { category_id: 10, name: '음료' }, job_id: 7 },
     ],
     job: { status: 'EXTRACTING' },
-    failApprove: new Set(), failDraft: 0, failRetryJob: false, approveCalls: [],
+    failApprove: new Set(), failRetryJob: false, approveCalls: [],
     proposals: [{ proposal_id: 9, relation_type: 'CONFLICT', status: 'PENDING_REVIEW', question_text: '합성 시럽 몇 번?', answer_text: '3펌프',
       target_card_id: 1, target_version_id: 1, current_title: '합성 라테', current_content: '시럽 2펌프', proposed_title: '합성 라테', proposed_content: '시럽 3펌프', reason: '펌프 수가 달라요', category_id: 10, created_at: '2026-10-06T00:00:00Z' }],
     failProposal: true,
@@ -82,10 +82,6 @@ const BASE = 'http://127.0.0.1:3011';
         if (action === 'approve') { state.approveCalls.push(card.card_id); if (state.failApprove.has(card.card_id)) { state.failApprove.delete(card.card_id); return fail(route, 502, '합성 공개 실패'); } }
         card.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', restore: 'PENDING' }[action];
         payload = { card_id: card.card_id, review_status: card.review_status, draft_version_id: 1, published_version_id: 1, updated_at: '2026-10-06T00:00:00Z', undo_until: null };
-      } else if (/^\/cards\/\d+\/draft$/.test(p)) {
-        if (state.failDraft) { state.failDraft--; return fail(route, 409, '버전 충돌'); }
-        const card = state.cards.find((c) => c.card_id === Number(p.split('/')[2])); card.title = body.title; card.content = body.content;
-        payload = { card_id: card.card_id, review_status: card.review_status, draft_version_id: 2, published_version_id: 1, updated_at: '2026-10-06T00:00:00Z', undo_until: null };
       } else if (/^\/cards\/\d+\/category$/.test(p)) {
         const card = state.cards.find((c) => c.card_id === Number(p.split('/')[2])); card.category = { category_id: body.category_id, name: body.category_id === 11 ? '재고 · 위치' : '음료' };
         payload = { card_id: card.card_id, review_status: card.review_status, draft_version_id: 1, published_version_id: 1, updated_at: '2026-10-06T00:00:01Z', undo_until: null };
@@ -182,7 +178,7 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByText('확인할 제안이 없어요', { exact: true }).waitFor();
     check('proposal resolved empties list', true);
 
-    // 카드 상세: 고치기 충돌 시 입력 보존 → 저장, 지우기 시트, 다시 살리기, 카테고리 이동, 인용 끊김
+    // 카드 상세: 자유 편집 없음, 지우기 시트, 다시 살리기, 카테고리 이동, 인용 끊김
     await page.goto(`${BASE}/owner/cards/1`);
     await page.getByRole('heading', { name: '합성 라테' }).waitFor();
     check('detail shows numbered lines', await page.locator('ol li').count() === 3);
@@ -190,15 +186,9 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByText('합성 근거 문장', { exact: true }).waitFor();
     check('evidence expands', true);
     check('deleted source marked as broken citation', await page.getByText('인용 끊김', { exact: false }).count() >= 1);
-    await page.getByRole('button', { name: '고치기', exact: true }).click();
-    await page.getByLabel('제목').fill('합성 라테 고침');
-    state.failDraft = 1;
-    await page.getByRole('button', { name: '고친 내용 저장' }).click();
-    await page.getByText('그사이 카드가 바뀌었어요.', { exact: false }).waitFor();
-    check('draft conflict keeps input', await page.getByLabel('제목').inputValue() === '합성 라테 고침');
-    await page.getByRole('button', { name: '고친 내용 저장' }).click();
-    await page.getByRole('heading', { name: '합성 라테 고침' }).waitFor();
-    check('draft save returns to detail', state.cards[0].title === '합성 라테 고침');
+    // Phase A — 자유 본문 편집이 없어졌다. 사실 카드가 아닌 카드는 읽기만 한다
+    check('legacy card has no free-text edit', await page.getByRole('button', { name: '고치기', exact: true }).count() === 0
+      && await page.locator('textarea').count() === 0);
     await page.getByRole('button', { name: /카테고리 음료/ }).click();
     await page.getByRole('button', { name: '재고 · 위치' }).click();
     await page.getByRole('button', { name: /카테고리 재고 · 위치/ }).waitFor();

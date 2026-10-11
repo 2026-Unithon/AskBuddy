@@ -3,8 +3,8 @@
     python scripts/extract_preview.py --file data/sample_transcript.ko.txt
     INGEST_MODE=real python scripts/extract_preview.py --file data/sample_transcript.ko.txt
 
-정식 등록과 같은 사실 추출→카드 조립을 사용한다. 실제 원장/카드 저장만 생략한다.
-프롬프트는 extract_facts.ko.txt / assemble_cards.ko.txt다.
+정식 등록과 같은 사실 추출만 본다. 카드 조립은 원장·대상 상태가 필요해 DB 경로에서만 돈다.
+프롬프트는 extract_facts.ko.txt 다.
 카드를 DB 에 넣어보려면 set_transcript.py 로 주입한 뒤 /ingest/process 를 친다.
 """
 import argparse
@@ -19,9 +19,6 @@ import asyncpg  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.ingest.extract import extract_facts  # noqa: E402
-from app.ingest.pipeline import assemble_assertions  # noqa: E402
-
-THRESHOLD_NOTE = "검수 우선 노출"
 
 
 async def main() -> int:
@@ -56,37 +53,22 @@ async def main() -> int:
         source_id=0, source_type=args.source_type, text=text,
         glossary=gloss,
     )
-    result = await assemble_assertions(source_id=0, assertions=extracted.assertions,
-                                       categories=cats, glossary=gloss)
-    result.unresolved.extend(extracted.unresolved)
-
     if args.json:
-        print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
+        print(json.dumps(extracted.model_dump(), ensure_ascii=False, indent=2))
         return 0
 
     print(f"모드 {s.ingest_mode} · 허용 카테고리 {cats} · 용어 {len(gloss)}건")
-    print(f"전사문 {len(text)}자 → 사실 {len(extracted.assertions)}건 → 카드 {len(result.cards)}건\n")
+    print(f"전사문 {len(text)}자 → 사실 {len(extracted.assertions)}건\n")
 
-    threshold = s.confidence_threshold
-    for i, c in enumerate(result.cards, 1):
-        flag = f"  ← {THRESHOLD_NOTE} (D3 {threshold} 미만)" if c.confidence < threshold else ""
-        known = "" if c.category_name in cats else "  ⚠ 허용 목록 밖!"
-        print(f"[{i}] {c.title}  ({c.confidence:.2f}){flag}")
-        print(f"    카테고리: {c.category_name}{known}")
-        print(f"    {c.content}")
-        for f in c.facts:
-            print(f"      · {f.object_name} / {f.attribute} = {f.value}  ({f.confidence:.2f})")
-        print()
+    for i, a in enumerate(extracted.assertions, 1):
+        variant = f" [{a.as_variant()}]" if a.as_variant() else ""
+        print(f"[{i}] {a.subject}{variant} / {a.attribute} = {a.value}{(' ' + a.unit) if a.unit else ''}"
+              f"  ({a.confidence:.2f})")
 
-    if result.unresolved:
-        print("확인 불가 (카드로 만들지 않음):")
-        for u in result.unresolved:
+    if extracted.unresolved:
+        print("\n확인 불가 (사실로 만들지 않음):")
+        for u in extracted.unresolved:
             print(f"  - {u}")
-
-    bad = [c.category_name for c in result.cards if c.category_name not in cats]
-    if bad:
-        print(f"\n⚠ 허용 목록에 없는 카테고리 {set(bad)} — 프롬프트를 조여야 한다")
-        return 1
     return 0
 
 

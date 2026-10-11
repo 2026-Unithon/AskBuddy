@@ -97,23 +97,6 @@ async def test_global_limit_under_400_requests():
 
 
 @pytest.mark.asyncio
-async def test_assembly_batches_keep_subject_variants_together(config):
-    from app.ingest import pipeline
-    from app.ingest.schemas import ExtractedAssertion, ExtractionResult
-    config.assemble_batch_facts = 3
-    facts = [ExtractedAssertion(local_ref=f'f{i}', original_assertion='합성', subject=subject,
-        variant=str(i), attribute='양', value=str(i), confidence=.9)
-        for i, subject in enumerate(['A','B','A','B','C','C'])]
-    call = AsyncMock(return_value=ExtractionResult(cards=[], unresolved=[]))
-    with patch.object(pipeline, 'get_settings', return_value=config), patch('app.ingest.extract.assemble_cards', call):
-        await pipeline.assemble_assertions(source_id=1, assertions=facts, categories=[], glossary=[],
-                                          usage_base=(5, None, 'REGISTRATION', 'EVALUATION', 1, None))
-    assert [len(c.kwargs['facts']) for c in call.call_args_list] == [2, 2, 2]
-    assert len({c.kwargs['usage_context'].logical_call_id for c in call.call_args_list}) == 3
-    assert [{f['대상'] for f in c.kwargs['facts']} for c in call.call_args_list] == [{'A'}, {'B'}, {'C'}]
-
-
-@pytest.mark.asyncio
 async def test_db_start_retries_without_spending_and_stops_on_duplicate():
     from app.usage.recorder import DbUsageSink
     for errors, expected in (([TimeoutError()] * 3 + [7], 4),

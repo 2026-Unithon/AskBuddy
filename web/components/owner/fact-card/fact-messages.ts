@@ -3,7 +3,6 @@ import { ApiError, apiErrorMessage } from "@/lib/api";
 
 const CANNOT_SAVE = "이 변경은 저장할 수 없어요. 새로고침 뒤 다시 시도해 주세요.";
 const ENTITY_MOVED = "메뉴 정리가 바뀌어 이 카드에서 고칠 수 없어요.";
-export const FACT_EDIT_DISABLED_TEXT = "사실 단위 고치기는 아직 열리지 않았어요.";
 export const VALUE_CLEAR_TEXT = "값을 지우려면 이 사실을 빼고 새로 넣어 주세요.";
 export const PARSE_FAILED_TEXT = "분석하지 못했어요. 다시 시도해 주세요. (입력은 그대로 둬요)";
 export const NO_FACT_TEXT = "사실을 찾지 못했어요. 문장을 조금 더 구체적으로 써 주세요.";
@@ -26,7 +25,6 @@ const SAVE_MESSAGES: Record<string, string> = {
   CARD_LAYOUT_INVALID: CANNOT_SAVE,
   FACT_SET_MISMATCH: CANNOT_SAVE,
   FACT_FIELD_INVALID: CANNOT_SAVE,
-  FACT_EDIT_DISABLED: FACT_EDIT_DISABLED_TEXT,
   CARD_EXCLUDED: CARD_EXCLUDED_TEXT,
   NOT_FACT_CARD: CANNOT_SAVE,
 };
@@ -60,7 +58,6 @@ export function parseErrorMessage(error: unknown): string {
     const max = typeof error.details.max_chars === "number" ? error.details.max_chars : 1000;
     return `글은 ${max}자까지 분석할 수 있어요. (입력은 그대로 둬요)`;
   }
-  if (error.code === "FACT_EDIT_DISABLED") return FACT_EDIT_DISABLED_TEXT;
   if (error.code === "CARD_ENTITY_MOVED") return ENTITY_MOVED;
   if (error.code === "CARD_EXCLUDED") return CARD_EXCLUDED_TEXT;
   if (error.code === "PARSE_BASE_INVALID") return error.detail || "고칠 사실이 이 카드에 없어요.";

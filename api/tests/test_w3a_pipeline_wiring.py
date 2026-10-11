@@ -1,4 +1,4 @@
-"""W3a 파이프라인 연결 — 준비(짧은 연결)·저장(사유 분기·순서·누락 예외)·플래그 분기·작업 카드 수.
+"""W3a 파이프라인 연결 — 준비(짧은 연결)·저장(사유 분기·순서·누락 예외)·작업 카드 수.
 
 모듈 함수는 patch 로 대역을 둔다. 모델·DB 는 부르지 않는다. 설정은 필드 몇 개뿐인 NS 다(F18).
 """
@@ -47,13 +47,12 @@ def _planning(failed=()):
 class _Patches:
     """_persist_fact_cards 가 부르는 모듈 함수 대역. 호출 순서를 calls 에 남긴다."""
 
-    def __init__(self, *, now, reload=None, plan=None, missing=0, proposals=True):
+    def __init__(self, *, now, reload=None, plan=None, missing=0):
         self.calls: list = []
         self.now = now
         self.reload = reload or {}
         self.plan = plan or {}
         self.missing = missing
-        self.settings = NS(w_upload_proposals_enabled=proposals)
         self.mark = AsyncMock(side_effect=self._mark)
         self.write = AsyncMock(side_effect=self._write)
         self.stack = []
@@ -105,7 +104,6 @@ class _Patches:
             (fact_assembly, "load_entity_groups", self._load),
             (card_plan, "plan_entity", self._plan_entity),
             (impact, "record_upload_proposals", self._rec("proposals")),
-            (app.config, "get_settings", lambda: self.settings),
         ]:
             p = patch.object(obj, name, value)
             p.start()
@@ -179,10 +177,6 @@ async def test_persist_fact_cards_lock_and_order():
     assert p.calls == ["lock", "unresolvable", ("write", 8),
                        ("mark", (9010,), "VARIANT_UNRESOLVED"), "proposals", "counts"]
 
-    with _Patches(now={8: _state(8, "NEW")}, reload={8: _group(8)}, proposals=False) as p:
-        await _persist(prepared)
-    assert "proposals" not in p.calls
-
 
 @pytest.mark.asyncio
 async def test_persist_fact_cards_missing_raises():
@@ -255,7 +249,7 @@ async def test_prepare_skips_defer_and_data_error_and_holds_no_connection():
     assert prepared.states == states
 
 
-async def _run_source(tmp_path, *, flag: bool):
+async def _run_source(tmp_path):
     src = {"source_id": 7, "store_id": 1, "source_type": "SCAN", "file_url": "x",
            "content_hash": "h", "status": "PROCESSING"}
     conn = AsyncMock()
@@ -269,13 +263,10 @@ async def _run_source(tmp_path, *, flag: bool):
     outcome = ExtractionOutcome([], [], 1, 0, [], {})
     prepared = PreparedAssembly((), {}, {}, (), {}, _planning())
     mocks = NS(
-        assemble=AsyncMock(return_value=NS(cards=["카드"], unresolved=[])),
-        persist=AsyncMock(return_value=1),
         prepare=AsyncMock(return_value=prepared),
         persist_facts=AsyncMock(return_value=2),
     )
-    settings = Settings(_env_file=None, w_entity_revision_enabled=True,
-                        w_fact_assembly_enabled=flag)
+    settings = Settings(_env_file=None)
     with patch.object(pipeline, "get_pool", return_value=Pool()), \
          patch.object(pipeline, "_preprocess", AsyncMock(return_value=("본문", [], []))), \
          patch.object(pipeline.repo, "get_source", AsyncMock(return_value=src)), \
@@ -285,8 +276,6 @@ async def _run_source(tmp_path, *, flag: bool):
          patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
          patch.object(pipeline, "_extract_facts_all", AsyncMock(return_value=outcome)), \
          patch.object(pipeline, "_record_segment_failures", AsyncMock()), \
-         patch.object(pipeline, "assemble_assertions", mocks.assemble), \
-         patch.object(pipeline, "_persist", mocks.persist), \
          patch.object(pipeline, "_prepare_fact_assembly", mocks.prepare), \
          patch.object(pipeline, "_persist_fact_cards", mocks.persist_facts), \
          patch("app.config.get_settings", return_value=settings):
@@ -314,20 +303,8 @@ class _ConnLease:
 
 
 @pytest.mark.asyncio
-async def test_process_source_flag_off_uses_legacy(tmp_path):
-    mocks, _, _ = await _run_source(tmp_path, flag=False)
-    mocks.assemble.assert_awaited_once()
-    assert mocks.assemble.await_args.kwargs["strict"] is True
-    mocks.persist.assert_awaited_once()
-    mocks.prepare.assert_not_awaited()
-    mocks.persist_facts.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_process_source_flag_on_uses_fact_path(tmp_path):
-    mocks, prepared, conn = await _run_source(tmp_path, flag=True)
-    mocks.assemble.assert_not_awaited()
-    mocks.persist.assert_not_awaited()
+async def test_process_source_uses_fact_path(tmp_path):
+    mocks, prepared, conn = await _run_source(tmp_path)
     mocks.prepare.assert_awaited_once()
     assert mocks.prepare.await_args.args[1:] == (1, 7)
     assert mocks.prepare.await_args.kwargs["strict"] is True
@@ -339,7 +316,7 @@ async def test_process_source_flag_on_uses_fact_path(tmp_path):
 
 # ── job_worker 카드 수 ──────────────────────────────────────────────────
 
-def _worker(*, linked_cards, pending, legacy_cards):
+def _worker(*, linked_cards, pending):
     conn = AsyncMock()
 
     async def fetchrow(sql, *args):
@@ -358,9 +335,6 @@ def _worker(*, linked_cards, pending, legacy_cards):
         if "disposition = 'REVIEW_PENDING'" in sql:
             assert args == (1, 3)
             return pending
-        if "from knowledge_cards" in sql:
-            assert "origin_job_id = $3" in sql and args == (1, 3, 2)
-            return legacy_cards
         raise AssertionError(sql)
 
     conn.fetchrow = AsyncMock(side_effect=fetchrow)
@@ -375,15 +349,14 @@ def _worker(*, linked_cards, pending, legacy_cards):
     return Pool(), conn
 
 
-async def _run_worker(flag, **counts):
+async def _run_worker(**counts):
     pool, conn = _worker(**counts)
     with patch.object(job_worker, "get_pool", return_value=pool), \
          patch.object(job_worker.pipeline, "process_source", AsyncMock(return_value=None)), \
          patch.object(job_worker, "_refresh_job", AsyncMock(return_value=("NO_RESULT", 0))), \
          patch.object(job_worker, "create_ingest_completed_notification",
                       AsyncMock(return_value=None)), \
-         patch("app.config.get_settings",
-               return_value=NS(w_fact_assembly_enabled=flag)):
+         patch("app.config.get_settings", return_value=NS()):
         await job_worker.process_ingest_job(1, 2)
     for c in conn.execute.await_args_list:
         if "set status = $4, card_count = $5" in c.args[0]:
@@ -392,20 +365,10 @@ async def _run_worker(flag, **counts):
 
 
 @pytest.mark.asyncio
-async def test_job_worker_card_count_flag_on():
-    row, _ = await _run_worker(True, linked_cards=0, pending=2, legacy_cards=99)
-    assert row == ("NO_RESULT", 0, "NO_RESULT", "새 카드 없이 검수할 사실이 남았습니다.")
-    row, _ = await _run_worker(True, linked_cards=0, pending=0, legacy_cards=99)
+async def test_job_worker_card_count_uses_linked_occurrences():
+    row, _ = await _run_worker(linked_cards=0, pending=2)
+    assert row == ("NO_RESULT", 0, "NO_RESULT", "카드에 반영되지 않고 검수할 사실이 남았습니다.")
+    row, _ = await _run_worker(linked_cards=0, pending=0)
     assert row == ("NO_RESULT", 0, "NO_RESULT", "추출된 업무 카드가 없습니다.")
-    row, _ = await _run_worker(True, linked_cards=2, pending=1, legacy_cards=0)
+    row, _ = await _run_worker(linked_cards=2, pending=1)
     assert row == ("SUCCEEDED", 2, None, None)
-
-
-@pytest.mark.asyncio
-async def test_job_worker_card_count_flag_off_keeps_query_and_message():
-    row, conn = await _run_worker(False, linked_cards=7, pending=5, legacy_cards=0)
-    assert row == ("NO_RESULT", 0, "NO_RESULT", "추출된 업무 카드가 없습니다.")
-    sqls = [c.args[0] for c in conn.fetchval.await_args_list]
-    assert not any("fact_occurrences" in s for s in sqls)
-    row, _ = await _run_worker(False, linked_cards=0, pending=0, legacy_cards=4)
-    assert row == ("SUCCEEDED", 4, None, None)

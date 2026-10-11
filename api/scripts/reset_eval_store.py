@@ -39,7 +39,11 @@ STEPS = [
     ("fact_conflicts",     "delete from fact_conflicts where store_id=$1"),
     ("fact_owner_answer_links", "delete from fact_owner_answer_links where store_id=$1"),
     ("source_fact_revision_links", "delete from source_fact_revision_links where store_id=$1"),
+    # 사실 카드(블록·사실 고정·카드 판 근거)는 판·occurrence 를 가리키므로 그보다 먼저 지운다
+    ("card_version_fact_provenance", "delete from card_version_fact_provenance where store_id=$1"),
+    ("card_block_facts",   "delete from card_block_facts where store_id=$1"),
     ("fact_occurrences",   "delete from fact_occurrences where store_id=$1"),
+    ("card_version_blocks", "delete from card_version_blocks where store_id=$1"),
     ("fact_revision_requires", "delete from fact_revision_requires where store_id=$1 and fact_revision_id in "
                                "(select fact_revision_id from fact_revisions where store_id=$1 and fact_id in "
                                "(select fact_id from knowledge_facts where store_id=$1))"),

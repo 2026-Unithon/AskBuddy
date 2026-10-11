@@ -13,8 +13,9 @@ import pytest
 from app.contracts.usage import UsageContext
 from app.ingest import extract, raw_responses
 from app.ingest.extract import gemini, mock
-from app.ingest.pipeline import _extract_facts_all, assemble_assertions
-from app.ingest.schemas import (Evidence, ExtractedAssertion, ExtractionResult,
+from app.ingest import pipeline
+from app.ingest.pipeline import _extract_facts_all
+from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion,
                                 FactExtractionResult)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -191,22 +192,26 @@ async def test_mark_failure_does_not_discard_parsed_result():
 
 
 @pytest.mark.asyncio
-async def test_assemble_records_stage_assemble():
+async def test_assemble_plan_records_stage_assemble():
     sink = FakeRawSink()
-    body = ExtractionResult().model_dump_json()
+    body = CardPlanBatch().model_dump_json()
     with patch.object(gemini, "get_settings", return_value=_real_settings()), \
          patch.object(gemini, "_call", AsyncMock(return_value=gemini.CallResult(body, {}, "STOP"))):
-        result = await gemini.assemble(source_id=5, facts=[{"ref": "f1"}], category_names=["기타"],
-                                       glossary=[], usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
+        result = await gemini.assemble_plan(source_id=5, entities=_PLAN_ENTITIES, category_names=["기타"],
+                                            glossary=[], usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
     assert sink.saved[0][1].stage == "ASSEMBLE"
-    assert sink.saved[0][1].schema_version == raw_responses.schema_version(ExtractionResult)
+    assert sink.saved[0][1].schema_version == raw_responses.schema_version(CardPlanBatch)
     assert result.raw_response_id == 101 and sink.marks[0][2] is True
+
+
+_PLAN_ENTITIES = [{"대상": "음료Z", "사실": [
+    {"id": "F1", "규격": "", "순서": 0, "부정": False}]}]
 
 
 def test_private_raw_id_does_not_change_response_schema():
     """모델에 보내는 response_schema 가 바뀌면 실험 기준선이 바뀐다."""
     assert "raw_response_id" not in json.dumps(FactExtractionResult.model_json_schema())
-    assert "raw_response_id" not in json.dumps(ExtractionResult.model_json_schema())
+    assert "raw_response_id" not in json.dumps(CardPlanBatch.model_json_schema())
     assert "raw_response_id" not in FactExtractionResult().model_dump()
 
 
@@ -217,8 +222,7 @@ async def test_mock_extract_and_assemble_write_same_record():
     sink = FakeRawSink()
     facts = await mock.extract_facts(source_id=5, source_type="VOICE", text="t", glossary=[],
                                      usage_context=_ctx(), raw_sink=sink)
-    cards = await mock.assemble(source_id=5, facts=[{
-        "ref": "m1", "대상": "음료Z", "속성": "물", "값": "10", "확실함": .9, "근거시각": 1}],
+    cards = await mock.assemble_plan(source_id=5, entities=_PLAN_ENTITIES,
         category_names=["기타"], glossary=[], usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
     (_, first), (_, second) = sink.saved
     assert first.mode == second.mode == "mock"
@@ -234,8 +238,8 @@ async def test_dispatcher_passes_raw_sink_to_mock():
     with patch.object(extract, "get_settings", return_value=NS(ingest_mode="mock")):
         await extract.extract_facts(source_id=5, source_type="VOICE", text="t", glossary=[],
                                     usage_context=_ctx(), raw_sink=sink)
-        await extract.assemble_cards(source_id=5, facts=[], category_names=[], glossary=[],
-                                     usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
+        await extract.assemble_card_plan(source_id=5, entities=[], category_names=[], glossary=[],
+                                         usage_context=_ctx("ASSEMBLE"), raw_sink=sink)
     assert [r.stage for _, r in sink.saved] == ["EXTRACT", "ASSEMBLE"]
 
 
@@ -247,8 +251,9 @@ async def test_pipeline_threads_raw_sink_and_collects_segment_ids():
         outcome = await _extract_facts_all(
             source_id=5, source_type="VOICE", text="", media=[], glossary=[],
             segments=[("a", []), ("b", [])], usage_base=base, raw_sink=sink)
-        await assemble_assertions(source_id=5, assertions=outcome.assertions, categories=["기타"],
-                                  glossary=[], usage_base=base, raw_sink=sink)
+        await extract.assemble_card_plan(
+            source_id=5, entities=_PLAN_ENTITIES, category_names=["기타"], glossary=[],
+            usage_context=pipeline._ctx_for(base, 5, "ASSEMBLE"), raw_sink=sink)
     assert outcome.raw_response_ids == {"seg1": 101, "seg2": 102}
     assert [c.segment_id for c, _ in sink.saved] == ["seg1", "seg2", None]
     assert [r.stage for _, r in sink.saved] == ["EXTRACT", "EXTRACT", "ASSEMBLE"]

@@ -38,27 +38,6 @@ async def extract_facts(
     )
 
 
-async def assemble_cards(
-    *, source_id: int, facts: list[dict],
-    category_names: list[str], glossary: list[dict],
-    usage_sink=None, usage_context=None, raw_sink=None,
-):
-    """reduce — real/mock 모두 사실 추출 뒤 카드로 조립한다."""
-    mode = get_settings().ingest_mode
-    if mode == "real":
-        from app.ingest.extract import gemini as impl
-    else:
-        from app.ingest.extract import mock as impl
-
-    logger.info("assemble source=%s facts=%d", source_id, len(facts))
-    return await impl.assemble(
-        source_id=source_id, facts=facts,
-        category_names=category_names, glossary=glossary,
-        usage_context=usage_context, raw_sink=raw_sink,
-        **({"usage_sink": usage_sink} if mode == "real" else {}),
-    )
-
-
 async def assemble_card_plan(
     *, source_id: int, entities: list[dict], category_names: list[str],
     glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,

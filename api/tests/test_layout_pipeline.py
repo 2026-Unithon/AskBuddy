@@ -215,7 +215,8 @@ async def test_persist_ledger_writes_layout_locator_and_version(monkeypatch):
     occ = AsyncMock()
     try:
         with patch.object(pipeline.repo, "insert_source_facts", insert), \
-             patch.object(pipeline.occurrences, "insert_occurrences", occ):
+             patch.object(pipeline.occurrences, "insert_occurrences", occ), \
+             patch("app.ingest.fact_ledger.link_source_facts", AsyncMock()):
             ids = await pipeline._persist_ledger(MagicMock(), 1, 2, "SCAN", [plain, lay])
         s = get_settings()
     finally:
@@ -266,7 +267,6 @@ async def _process(tmp_path, monkeypatch, *, source_type="SCAN", mode="LAYOUT", 
                    retry_segments=None, expected_total=None):
     from app.config import get_settings
     from app.ingest import pipeline
-    from app.ingest.schemas import ExtractedCard, ExtractionResult
     monkeypatch.setenv("INGEST_MODE", "mock")
     monkeypatch.setenv("SCAN_EXTRACT_MODE", mode)
     monkeypatch.setenv("EXTRACT_REUSE_ENABLED", "true" if reuse else "false")
@@ -286,12 +286,10 @@ async def _process(tmp_path, monkeypatch, *, source_type="SCAN", mode="LAYOUT", 
              patch.object(pipeline.storage, "workdir", return_value=tmp_path / "w"), \
              patch.object(layout, "run_layout_extraction", run_layout), \
              patch.object(pipeline, "_extract_facts_all", single), \
-             patch.object(pipeline, "assemble_assertions",
-                          AsyncMock(return_value=ExtractionResult(cards=[ExtractedCard(
-                              category_name="기타", title="합성", content="o", confidence=.9)],
-                              unresolved=[]))), \
+             patch.object(pipeline, "_prepare_fact_assembly",
+                          AsyncMock(return_value=NS(planning=NS(unresolved=[])))), \
              patch.object(pipeline, "_record_segment_failures", AsyncMock()), \
-             patch.object(pipeline, "_persist", AsyncMock(return_value=1)):
+             patch.object(pipeline, "_persist_fact_cards", AsyncMock(return_value=1)):
             returned = await pipeline.process_source(
                 1, 2, retry_segments=retry_segments, expected_segments_total=expected_total)
     finally:

@@ -185,59 +185,6 @@ async def get_version(conn: asyncpg.Connection, store_id: int, version_id: int |
     )
 
 
-async def create_draft(
-    conn: asyncpg.Connection,
-    store_id: int,
-    card_id: int,
-    *,
-    title: str,
-    content: str,
-    actor_id: int,
-    source_version_id: int,
-) -> int:
-    version_id = await conn.fetchval(
-        """
-        insert into card_versions (
-          store_id, card_id, version_no, title, content, change_source, created_by
-        )
-        select $1, $2, coalesce(max(version_no), 0) + 1,
-               $3, $4, 'OWNER_EDIT', $5
-        from card_versions where store_id = $1 and card_id = $2
-        returning version_id
-        """,
-        store_id,
-        card_id,
-        title,
-        content,
-        actor_id,
-    )
-    await conn.execute(
-        """
-        insert into card_evidence (
-          store_id, version_id, source_id, locator_type, locator, excerpt
-        )
-        select store_id, $3, source_id, locator_type, locator, excerpt
-        from card_evidence where store_id = $1 and version_id = $2
-        """,
-        store_id,
-        source_version_id,
-        version_id,
-    )
-    await conn.execute(
-        """
-        update knowledge_cards
-        set title = $3, content = $4, draft_version_id = $5
-        where store_id = $1 and card_id = $2
-        """,
-        store_id,
-        card_id,
-        title,
-        content,
-        version_id,
-    )
-    return int(version_id)
-
-
 async def add_event(
     conn: asyncpg.Connection,
     store_id: int,

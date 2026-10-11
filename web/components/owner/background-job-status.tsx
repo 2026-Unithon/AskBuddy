@@ -111,7 +111,7 @@ export function BackgroundJobStatus({
               {/* 하단 세부 액션 및 카드 링크 */}
               <div className="flex items-center justify-between pt-1 border-t border-border/50 text-xs">
                 <span className="text-xs text-muted">
-                  생성 카드: <strong className="text-brand-700">{job.card_count}개</strong>
+                  반영된 카드: <strong className="text-brand-700">{job.card_count}개</strong>
                 </span>
 
                 <div className="flex items-center gap-2">

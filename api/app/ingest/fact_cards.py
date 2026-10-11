@@ -1,9 +1,12 @@
 """사실 카드 판 쓰기·블록/근거 고정·occurrence 처분 (W3a · W3-2 고정 · W3-3).
 
 검증된 카드 계획(`card_plan.EntityPlanResult`)을 DB 에 쓴다. 카드 제목·본문은 직접 만들지 않고
-`card_plan` 의 렌더링을 쓴다. 대상의 기존 카드 상태로 NEW / REASSEMBLE / DEFER 를 가른다.
+`card_plan` 의 렌더링을 쓴다. 대상의 기존 카드 상태로 NEW / REASSEMBLE / REDRAFT / DEFER 를 가른다.
 
-- 공개된 카드·수동 배정·점주가 만든 초안·사실 블록이 없는 레거시 카드는 한 줄도 쓰지 않는다(DEFER).
+- 공개된 자동 사실 카드 한 장(REDRAFT)은 모델 재조립 없이 초안 판 사실 + 이 자료의 새 사실로
+  새 초안을 만든다. 초안은 공개판이거나 승인 전 시스템 재초안(EXTRACTION)이다. 공개판은
+  승인 전까지 그대로다(A-D4).
+- 수동 배정·점주가 고치던 초안·사실 블록이 없는 레거시 카드·공개 카드 여러 장은 한 줄도 쓰지 않는다(DEFER).
 - 카드 판·블록·블록 사실·판별 근거는 만든 뒤 고치지 않는다. 내용이 바뀌면 새 판을 만든다.
 - occurrence 는 LINKED 로 올리거나 REVIEW_PENDING 사유만 바꾼다. EXCLUDED(점주 결정)는 건드리지
   않고, LINKED 를 REVIEW_PENDING 으로 내리지 않는다.
@@ -38,6 +41,7 @@ REASON_ASSEMBLY_FAILED = "ASSEMBLY_FAILED"
 REVIEW_NO_PROVENANCE = "NO_PROVENANCE"
 REVIEW_CONFLICT = "FACT_CONFLICT_OPEN"
 REVIEW_SUPERSEDED = "REASSEMBLY_SUPERSEDED"
+REVIEW_NEW_FACTS = "NEW_FACTS"  # 공개 카드에 새 사실을 붙인 초안이 검수를 기다린다(A-D4)
 FALLBACK_PREFIX = "FALLBACK:"
 _REVIEW_REASON_MAX = 50
 
@@ -55,8 +59,9 @@ _EVIDENCE_LOCATOR_ALIAS = {"LINE": "MESSAGE", "BBOX": "PAGE"}
 @dataclass(frozen=True)
 class EntityCardState:
     entity_id: int
-    mode: str  # "NEW" | "REASSEMBLE" | "DEFER"
-    card_ids: tuple[int, ...]  # REASSEMBLE: 다시 쓸 자동 초안(card_id 오름차순) · DEFER: 관련 카드 전부
+    mode: str  # "NEW" | "REASSEMBLE" | "REDRAFT" | "DEFER"
+    # REASSEMBLE: 다시 쓸 자동 초안(card_id 오름차순) · REDRAFT: 공개 카드 한 장 · DEFER: 관련 카드 전부
+    card_ids: tuple[int, ...]
     reason: str | None  # DEFER 일 때 REASON_EXISTING_CARD
 
 
@@ -161,7 +166,8 @@ async def _card_state(conn: asyncpg.Connection, store_id: int, entity_id: int, *
         "    join merged m on e.merged_into_entity_id = m.entity_id"
         "   where e.store_id = $1"
         ") "
-        "select c.card_id, c.published_version_id, c.assignment_type, c.review_status, "
+        "select c.card_id, c.published_version_id, c.draft_version_id, c.assignment_type, "
+        "       c.review_status, "
         "       v.change_source, "
         "       exists (select 1 from card_block_facts b "
         "                where b.store_id = c.store_id "
@@ -181,6 +187,12 @@ async def _card_state(conn: asyncpg.Connection, store_id: int, entity_id: int, *
         "                    and k.entity_id = $2)) "
         "order by c.card_id" + (" for update of c" if lock else ""),
         store_id, entity_id)
+    return _classify_rows(entity_id, rows)
+
+
+def _classify_rows(entity_id: int, rows: Sequence[Mapping]) -> EntityCardState:
+    """관련 카드 행으로 판정한다. 행 없음 NEW → 전부 자동 초안 REASSEMBLE →
+    공개된 자동 사실 카드 한 장 REDRAFT → 나머지 DEFER."""
     if not rows:
         return EntityCardState(entity_id, "NEW", (), None)
     card_ids = tuple(int(r["card_id"]) for r in rows)
@@ -194,6 +206,20 @@ async def _card_state(conn: asyncpg.Connection, store_id: int, entity_id: int, *
         for r in rows)
     if replaceable:
         return EntityCardState(entity_id, "REASSEMBLE", card_ids, None)
+    if len(rows) == 1:
+        r = rows[0]
+        # 공개된 자동 사실 카드 한 장 — 초안 판에 새 사실만 붙인 새 초안(A-D4).
+        # 초안이 곧 공개판이거나, 아직 승인 전인 시스템 재초안(EXTRACTION)이면 그 초안 위에
+        # 이어 붙인다. 점주가 고치던 초안(OWNER_EDIT 등)은 덮지 않고 보류한다(DEFER).
+        system_draft = (r["draft_version_id"] == r["published_version_id"]
+                        or r["change_source"] == "EXTRACTION")
+        if (r["published_version_id"] is not None
+                and system_draft
+                and r["assignment_type"] == "AUTOMATIC"
+                and r["review_status"] == "APPROVED"
+                and r["has_block_facts"]
+                and r["in_merged"]):
+            return EntityCardState(entity_id, "REDRAFT", card_ids, None)
     return EntityCardState(entity_id, "DEFER", card_ids, REASON_EXISTING_CARD)
 
 
@@ -397,6 +423,121 @@ async def replace_legacy_facts(conn: asyncpg.Connection, store_id: int, card_id:
                                await _source_fact_ids(conn, store_id, card_fact_ids))
 
 
+@dataclass(frozen=True)
+class _RenderContext:
+    """카드 렌더링·근거 고정이 같이 쓰는 조회 결과(배치된 판 전체 기준)."""
+    provenance: dict[int, tuple[Origin, ...]]
+    source_names: dict[int, str]  # 자료 id → 근거 줄 이름
+    conflicted: frozenset[int]  # 열린 충돌에 낀 사실 id
+    fact_confidence: dict[int, float]  # 사실 id → 신뢰도(0~100)
+
+
+@dataclass(frozen=True)
+class _RenderedCard:
+    revisions: tuple[int, ...]
+    origins: tuple[Origin, ...]
+    content: str
+    reason: str | None  # card_review_reason
+    confidence: float
+
+
+async def _render_context(conn: asyncpg.Connection, store_id: int,
+                          placed_revisions: Sequence[int],
+                          placed_fact_ids: Sequence[int]) -> _RenderContext:
+    """출처·자료 이름·열린 충돌·사실 신뢰도를 한 번에 읽는다."""
+    provenance = await provenance_for(conn, store_id, placed_revisions)
+    fact_ids = sorted({int(f) for f in placed_fact_ids})
+
+    # 출처 자료 제목
+    source_ids = sorted({o.source_id for origins in provenance.values() for o in origins
+                         if o.source_id is not None})
+    source_names: dict[int, str] = {}
+    if source_ids:
+        for r in await conn.fetch(
+                "select source_id, title, source_type from sources "
+                "where store_id = $1 and source_id = any($2::bigint[])", store_id, source_ids):
+            title = (r["title"] or "").strip()
+            source_names[int(r["source_id"])] = title or f"{r['source_type']} 자료"
+
+    # 열린 충돌에 낀 사실
+    conflicted: set[int] = set()
+    for r in await conn.fetch(
+            "select fact_id_low, fact_id_high from fact_conflicts "
+            "where store_id = $1 and status = 'OPEN' "
+            "and (fact_id_low = any($2::bigint[]) or fact_id_high = any($2::bigint[]))",
+            store_id, fact_ids):
+        conflicted.update((int(r["fact_id_low"]), int(r["fact_id_high"])))
+    conflicted &= set(fact_ids)
+
+    # 사실 신뢰도(0~100) — 이어진 원장 사실 중 가장 높은 값
+    fact_confidence: dict[int, float] = {
+        int(r["fact_id"]): float(r["confidence"] or 0) for r in await conn.fetch(
+            "select l.fact_id, max(sf.confidence) as confidence "
+            "from source_fact_revision_links l "
+            "join source_facts sf on sf.store_id = l.store_id and sf.fact_id = l.source_fact_id "
+            "where l.store_id = $1 and l.fact_id = any($2::bigint[]) group by l.fact_id",
+            store_id, fact_ids)}
+    return _RenderContext(provenance=provenance, source_names=source_names,
+                          conflicted=frozenset(conflicted), fact_confidence=fact_confidence)
+
+
+def _render_one(card: ValidatedCard, facts: Mapping[int, PlanFact], ctx: _RenderContext, *,
+                model_error: str | None) -> _RenderedCard:
+    """카드 한 장의 본문·검수 표시·신뢰도. 렌더링이 사실을 빠뜨리면 저장하지 않는다."""
+    revisions = card.fact_revision_ids()
+    card_fact_ids = sorted({facts[r].fact_id for r in revisions})
+    origins = tuple(o for r in revisions for o in ctx.provenance.get(r, ()))
+    card_sources = sorted({o.source_id for o in origins if o.source_id is not None})
+    content = card_plan.render_card(
+        card, facts,
+        evidence=[ctx.source_names[s] for s in card_sources if s in ctx.source_names])
+    missing = card_plan.render_missing(card, facts, content)
+    if missing:
+        raise RuntimeError(f"렌더링이 사실을 빠뜨렸다 — 저장하지 않는다: 판 {missing[:5]}")
+    reason = card_review_reason(
+        missing_provenance=any(not ctx.provenance.get(r) for r in revisions),
+        model_error=model_error,
+        open_conflict=any(f in ctx.conflicted for f in card_fact_ids))
+    confidence = min((ctx.fact_confidence.get(f, 0.0) for f in card_fact_ids), default=0.0)
+    return _RenderedCard(revisions=revisions, origins=origins, content=content, reason=reason,
+                         confidence=confidence)
+
+
+async def _fix_version(conn: asyncpg.Connection, store_id: int, card_id: int, version_id: int,
+                       card: ValidatedCard, rendered: _RenderedCard, ctx: _RenderContext,
+                       facts: Mapping[int, PlanFact], canonical_name: str) -> None:
+    """새 판에 블록·근거를 고정하고 레거시 facts·card_facts 를 맞춘다."""
+    await pin_card_version(conn, store_id, version_id, card, ctx.provenance)
+    await write_version_evidence(conn, store_id, version_id, rendered.origins)
+    await replace_legacy_facts(conn, store_id, card_id, rendered.revisions, facts,
+                               canonical_name, ctx.fact_confidence)
+
+
+async def _link_placed(conn: asyncpg.Connection, store_id: int,
+                       placement: Mapping[int, tuple[int, str]], *,
+                       source_id: int | None = None) -> set[int]:
+    """placement = {fact_id: (card_id, block_id)}. 그 사실의 occurrence 를 LINKED 로 잇는다.
+
+    source_id 가 있으면 그 자료의 occurrence 만. EXCLUDED 는 그대로. 이은 사실 id 를 돌려준다.
+    """
+    order = sorted(placement)
+    if not order:
+        return set()
+    rows = await conn.fetch(
+        "update fact_occurrences o set disposition = 'LINKED', reason = null, "
+        "card_id = p.card_id, block_id = p.block_id, decided_by = null, decided_at = now() "
+        "from fact_revisions r, "
+        "     unnest($2::bigint[], $3::bigint[], $4::varchar[]) as p(fact_id, card_id, block_id) "
+        "where o.store_id = $1 and r.store_id = o.store_id "
+        "  and r.fact_revision_id = o.fact_revision_id "
+        "  and r.fact_id = p.fact_id and o.disposition <> 'EXCLUDED' "
+        "  and ($5::bigint is null or o.source_id = $5) "
+        "returning r.fact_id",
+        store_id, order, [placement[f][0] for f in order], [placement[f][1] for f in order],
+        source_id)
+    return {int(r["fact_id"]) for r in rows}
+
+
 async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_id: int,
                              job_id: int | None, category_version: int,
                              categories: Mapping[str, int], state: EntityCardState,
@@ -432,37 +573,7 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
         return WrittenEntity(entity_id=group.entity_id, card_ids=(), new_version_ids=(),
                              linked_fact_ids=(), deferred_reason=REASON_EXISTING_CARD)
 
-    provenance = await provenance_for(conn, store_id, placed_revisions)
-
-    # 출처 자료 제목
-    source_ids = sorted({o.source_id for origins in provenance.values() for o in origins
-                         if o.source_id is not None})
-    source_names: dict[int, str] = {}
-    if source_ids:
-        for r in await conn.fetch(
-                "select source_id, title, source_type from sources "
-                "where store_id = $1 and source_id = any($2::bigint[])", store_id, source_ids):
-            title = (r["title"] or "").strip()
-            source_names[int(r["source_id"])] = title or f"{r['source_type']} 자료"
-
-    # 열린 충돌에 낀 사실
-    conflicted: set[int] = set()
-    for r in await conn.fetch(
-            "select fact_id_low, fact_id_high from fact_conflicts "
-            "where store_id = $1 and status = 'OPEN' "
-            "and (fact_id_low = any($2::bigint[]) or fact_id_high = any($2::bigint[]))",
-            store_id, placed_fact_ids):
-        conflicted.update((int(r["fact_id_low"]), int(r["fact_id_high"])))
-    conflicted &= set(placed_fact_ids)
-
-    # 사실 신뢰도(0~100) — 이어진 원장 사실 중 가장 높은 값
-    fact_confidence: dict[int, float] = {
-        int(r["fact_id"]): float(r["confidence"] or 0) for r in await conn.fetch(
-            "select l.fact_id, max(sf.confidence) as confidence "
-            "from source_fact_revision_links l "
-            "join source_facts sf on sf.store_id = l.store_id and sf.fact_id = l.source_fact_id "
-            "where l.store_id = $1 and l.fact_id = any($2::bigint[]) group by l.fact_id",
-            store_id, placed_fact_ids)}
+    ctx = await _render_context(conn, store_id, placed_revisions, placed_fact_ids)
 
     # 카드 짝 — 남는 기존 카드는 검수 표시만 바꾸고 판은 그대로 둔다
     existing = list(state.card_ids) if state.mode == "REASSEMBLE" else []
@@ -477,23 +588,11 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
     new_versions: list[int] = []
     placement: dict[int, tuple[int, str]] = {}  # fact_id → (card_id, block_id) 첫 자리
     for index, card in enumerate(result.cards):
-        revisions = card.fact_revision_ids()
-        card_fact_ids = sorted({facts[r].fact_id for r in revisions})
-        origins = [o for r in revisions for o in provenance.get(r, ())]
-        card_sources = sorted({o.source_id for o in origins if o.source_id is not None})
-        content = card_plan.render_card(
-            card, facts, evidence=[source_names[s] for s in card_sources if s in source_names])
-        missing = card_plan.render_missing(card, facts, content)
-        if missing:
-            raise RuntimeError(f"렌더링이 사실을 빠뜨렸다 — 저장하지 않는다: 판 {missing[:5]}")
-        reason = card_review_reason(
-            missing_provenance=any(not provenance.get(r) for r in revisions),
-            model_error=result.model_error,
-            open_conflict=any(f in conflicted for f in card_fact_ids))
+        rendered = _render_one(card, facts, ctx, model_error=result.model_error)
         category_id = categories.get(card.category_name) or categories.get(_DEFAULT_CATEGORY)
         if category_id is None:
             raise RuntimeError("시스템 카테고리 '기타'가 없습니다.")
-        confidence = min((fact_confidence.get(f, 0.0) for f in card_fact_ids), default=0.0)
+        content, confidence = rendered.content, rendered.confidence
 
         if index < len(existing):
             card_id = existing[index]
@@ -528,11 +627,10 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
 
         if is_new:
             new_versions.append(version_id)
-            await pin_card_version(conn, store_id, version_id, card, provenance)
-            await write_version_evidence(conn, store_id, version_id, origins)
-            await replace_legacy_facts(conn, store_id, card_id, revisions, facts,
-                                       group.canonical_name, fact_confidence)
+            await _fix_version(conn, store_id, card_id, version_id, card, rendered, ctx, facts,
+                               group.canonical_name)
 
+        reason = rendered.reason
         await conn.execute(
             "update knowledge_cards set review_status = $3, needs_review_reason = $4 "
             "where store_id = $1 and card_id = $2 and review_status in ('PENDING','NEEDS_REVIEW')",
@@ -544,16 +642,7 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
                 placement.setdefault(facts[r].fact_id, (card_id, b.block_id))
 
     # 처분 — 배치된 사실의 모든 자료·모든 판 occurrence 를 첫 자리로 잇는다. EXCLUDED 는 그대로
-    order = sorted(placement)
-    await conn.execute(
-        "update fact_occurrences o set disposition = 'LINKED', reason = null, "
-        "card_id = p.card_id, block_id = p.block_id, decided_by = null, decided_at = now() "
-        "from fact_revisions r, "
-        "     unnest($2::bigint[], $3::bigint[], $4::varchar[]) as p(fact_id, card_id, block_id) "
-        "where o.store_id = $1 and r.store_id = o.store_id "
-        "  and r.fact_revision_id = o.fact_revision_id "
-        "  and r.fact_id = p.fact_id and o.disposition <> 'EXCLUDED'",
-        store_id, order, [placement[f][0] for f in order], [placement[f][1] for f in order])
+    await _link_placed(conn, store_id, placement)
     await repo.set_assembly_state(conn, store_id,
                                   await _source_fact_ids(conn, store_id, placed_fact_ids),
                                   "LINKED")
@@ -563,6 +652,173 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
     return WrittenEntity(entity_id=group.entity_id, card_ids=tuple(card_ids),
                          new_version_ids=tuple(new_versions),
                          linked_fact_ids=tuple(placed_fact_ids))
+
+
+# ── 공개 카드에 새 사실 붙이기 (A-D4) ─────────────────────────────────────
+
+async def new_fact_ids_for_source(conn: asyncpg.Connection, store_id: int, *, source_id: int,
+                                  entity_id: int, pinned_fact_ids: Sequence[int]) -> list[int]:
+    """이 자료의 REVIEW_PENDING occurrence 가 가리키는 이 대상의 사실 중 기준 판(초안)에 없는 것."""
+    rows = await conn.fetch(
+        "select distinct r.fact_id from fact_occurrences o "
+        "join fact_revisions r on r.store_id = o.store_id "
+        "  and r.fact_revision_id = o.fact_revision_id "
+        "join knowledge_facts k on k.store_id = r.store_id and k.fact_id = r.fact_id "
+        "where o.store_id = $1 and o.source_id = $2 and o.disposition = 'REVIEW_PENDING' "
+        "  and k.entity_id = $3 and not (r.fact_id = any($4::bigint[])) "
+        "order by r.fact_id",
+        store_id, source_id, entity_id, sorted({int(f) for f in pinned_fact_ids}))
+    return [int(r["fact_id"]) for r in rows]
+
+
+async def _source_fact_ids_of_source(conn: asyncpg.Connection, store_id: int, source_id: int,
+                                     fact_ids: Sequence[int]) -> list[int]:
+    """이 자료의 원장 사실 중 주어진 사실로 이어진 것."""
+    rows = await conn.fetch(
+        "select l.source_fact_id from source_fact_revision_links l "
+        "join source_facts sf on sf.store_id = l.store_id and sf.fact_id = l.source_fact_id "
+        "where l.store_id = $1 and sf.source_id = $2 and l.fact_id = any($3::bigint[]) "
+        "order by l.source_fact_id",
+        store_id, source_id, sorted({int(f) for f in fact_ids}))
+    return [int(r["source_fact_id"]) for r in rows]
+
+
+async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, source_id: int,
+                                 state: EntityCardState) -> WrittenEntity:
+    """공개 카드의 지금 초안 판 + 이 자료의 새 사실로 새 초안을 만든다. 모델을 부르지 않는다(A-D4).
+
+    기준 판은 카드의 초안 판이다. 초안이 곧 공개판이면 공개판이고, 승인 전 시스템 재초안이
+    있으면 그 재초안이다(앞 자료의 새 사실을 잃지 않고 이어 붙인다 — 최종 리뷰 I5).
+
+    대상의 head 사실 전부로 다시 계획하지 않는다 — 점주가 뺀 사실(head 로 남는다)이 되살아나고
+    공개 카드 배치가 흔들리기 때문이다. 호출자가 트랜잭션·매장 지식 잠금을 쥔다.
+    공개판·review_status 는 그대로 두고(승인 전까지 공개판 유지) needs_review_reason 만 단다.
+    """
+    from app.cards import fact_edit_repo  # app.cards ↔ app.ingest 순환 import 를 피한다
+    from app.ingest import fact_assembly
+
+    if state.mode != "REDRAFT" or len(state.card_ids) != 1:
+        raise ValueError(f"REDRAFT 카드 한 장만 쓴다: mode={state.mode} cards={state.card_ids}")
+    entity_id = state.entity_id
+    entity_fact_ids_all = await entity_fact_ids(conn, store_id, entity_id)
+
+    held_ids: set[int] = set()  # 조립에서 뺀 새 사실 — 더 구체적인 사유를 덮지 않는다
+
+    async def defer(reason: str) -> WrittenEntity:
+        await mark_pending(conn, store_id, source_id=source_id,
+                           fact_ids=[f for f in entity_fact_ids_all if f not in held_ids],
+                           reason=reason)
+        return WrittenEntity(entity_id=entity_id, card_ids=(), new_version_ids=(),
+                             linked_fact_ids=(), deferred_reason=reason)
+
+    # 점주 승인·편집은 카드 행 잠금만 쓴다 — 잠그고 다시 판정한다(D13)
+    locked = await _card_state(conn, store_id, entity_id, lock=True)
+    if locked.mode != "REDRAFT" or locked.card_ids != state.card_ids:
+        logger.warning("A-D4 새 초안 보류 — store=%s 대상 %s 판정 %s%s → 잠금 뒤 %s%s",
+                       store_id, entity_id, state.mode, state.card_ids, locked.mode,
+                       locked.card_ids)
+        return await defer(REASON_EXISTING_CARD)
+
+    (card_id,) = state.card_ids
+    card_row = await conn.fetchrow(
+        "select c.published_version_id, c.draft_version_id, t.category_name "
+        "from knowledge_cards c "
+        "left join task_categories t on t.store_id = c.store_id "
+        "  and t.category_id = c.category_id "
+        "where c.store_id = $1 and c.card_id = $2", store_id, card_id)
+    # 기준 판 = 지금 초안(잠금 아래 다시 판정해 공개판 또는 승인 전 시스템 재초안임을 확인했다)
+    base = await fact_edit_repo.load_card_fact_state(
+        conn, store_id, card_id, int(card_row["draft_version_id"]))
+    if base is None or base.entity_problem is not None:
+        return await defer(REASON_EXISTING_CARD)
+
+    pinned_by_rev: dict[int, PlanFact] = {}
+    for p in base.pinned:
+        pinned_by_rev.setdefault(p.fact.fact_revision_id, p.fact)
+    pinned_fact_ids = sorted({f.fact_id for f in pinned_by_rev.values()})
+    new_fids = await new_fact_ids_for_source(conn, store_id, source_id=source_id,
+                                             entity_id=entity_id,
+                                             pinned_fact_ids=pinned_fact_ids)
+
+    layout = [(kind, tuple(p.fact.fact_revision_id for p in base.pinned
+                           if p.block_id == block_id))
+              for block_id, kind, _ in base.blocks]
+
+    # 새 사실의 head 판. 조립에서 뺀 판(규격 미해결 등)은 그 사유로 검수 대기에 남긴다
+    new_facts: list[PlanFact] = []
+    if new_fids:
+        loaded = await fact_assembly.load_entity_groups(conn, store_id, [entity_id])
+        heads = {f.fact_id: f for g in loaded.groups if g.entity_id == entity_id
+                 for f in g.facts}
+        wanted = set(new_fids)
+        for h in loaded.held:
+            if h.fact_id in wanted:
+                held_ids.add(h.fact_id)
+                await mark_pending(conn, store_id, source_id=source_id, fact_ids=[h.fact_id],
+                                   reason=h.reason)
+        new_facts = [heads[f] for f in new_fids if f in heads]
+
+    if not new_facts:
+        # 붙일 새 사실이 없다 — 새 판 없이 이 자료의 occurrence 를 공개 카드 블록으로 잇는다
+        placement: dict[int, tuple[int, str]] = {}
+        for p in base.pinned:
+            placement.setdefault(p.fact.fact_id, (card_id, p.block_id))
+        linked = await _link_placed(conn, store_id, placement, source_id=source_id)
+        await repo.set_assembly_state(
+            conn, store_id,
+            await _source_fact_ids_of_source(conn, store_id, source_id, sorted(linked)), "LINKED")
+        logger.info("A-D4 새 사실 없음 store=%s 대상 %s 카드 %s · 이은 사실 %d",
+                    store_id, entity_id, card_id, len(linked))
+        return WrittenEntity(entity_id=entity_id, card_ids=(card_id,), new_version_ids=(),
+                             linked_fact_ids=tuple(sorted(linked)))
+
+    group = EntityGroup(entity_id=entity_id, canonical_name=base.entity_name,
+                        facts=tuple(sorted([*pinned_by_rev.values(), *new_facts],
+                                           key=card_plan.fact_sort_key)))
+    data_error = card_plan.check_group(group)
+    if data_error:
+        return await defer(data_error)
+    try:
+        card = card_plan.append_facts(
+            layout, group, [f.fact_revision_id for f in new_facts],
+            category_name=(card_row["category_name"] or _DEFAULT_CATEGORY))
+    except card_plan.PlanInvalid as e:
+        logger.warning("A-D4 새 사실 붙이기 실패 store=%s 대상 %s %s", store_id, entity_id, e)
+        return await defer(e.code)
+
+    facts = {f.fact_revision_id: f for f in group.facts}
+    revisions = card.fact_revision_ids()
+    placed_fact_ids = sorted({facts[r].fact_id for r in revisions})
+    ctx = await _render_context(conn, store_id, revisions, placed_fact_ids)
+    rendered = _render_one(card, facts, ctx, model_error=None)
+    version_id = await create_extraction_draft(
+        conn, store_id, card_id, title=card.title, content=rendered.content,
+        confidence=rendered.confidence, entity_id=card.entity_id)
+    await _fix_version(conn, store_id, card_id, version_id, card, rendered, ctx, facts,
+                       group.canonical_name)
+    # review_status 는 APPROVED 그대로 — 공개판은 점주가 새 초안을 승인할 때까지 유지된다.
+    # 출처 없음·열린 충돌 표시가 NEW_FACTS 보다 앞선다(card_review_reason 우선순위)
+    # 승인 전 초안에 점주 답변 검수 표시(OWNER_ANSWER_*)가 있었으면 그것을 지킨다 —
+    # 그 제안이 아직 이 초안을 기다린다
+    await conn.execute(
+        "update knowledge_cards set needs_review_reason = coalesce($3, "
+        "  case when needs_review_reason like 'OWNER_ANSWER_%' then needs_review_reason "
+        "       else $4 end) "
+        "where store_id = $1 and card_id = $2", store_id, card_id,
+        rendered.reason, REVIEW_NEW_FACTS)
+
+    placement = {}
+    for b in card.blocks:
+        for r in b.fact_revision_ids:
+            placement.setdefault(facts[r].fact_id, (card_id, b.block_id))
+    linked = await _link_placed(conn, store_id, placement, source_id=source_id)
+    await repo.set_assembly_state(
+        conn, store_id,
+        await _source_fact_ids_of_source(conn, store_id, source_id, sorted(linked)), "LINKED")
+    logger.info("A-D4 새 초안 store=%s 대상 %s 카드 %s 판 %s · 새 사실 %d",
+                store_id, entity_id, card_id, version_id, len(new_facts))
+    return WrittenEntity(entity_id=entity_id, card_ids=(card_id,), new_version_ids=(version_id,),
+                         linked_fact_ids=tuple(sorted(linked)))
 
 
 # ── occurrence 처분 ────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.ingest import raw_responses
 from app.ingest.providers.types import CallResult  # noqa: F401  (기존 import 경로 호환)
-from app.ingest.schemas import (CardPlanBatch, ExtractionResult, FactExtractionResult,
+from app.ingest.schemas import (CardPlanBatch, FactExtractionResult,
                                 LocatedFactExtractionResult)
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 # response_schema 를 쓰면 SDK 가 AFC 경고를 매 호출마다 찍는다. 우리는 함수 호출을 쓰지 않는다
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
-ASSEMBLE_PROMPT_PATH = (
-    Path(__file__).resolve().parents[3] / "prompts" / "assemble_cards.ko.txt")
 FACTS_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "extract_facts.ko.txt")
 # W3a 사실 조립 — 이름표만 고르고 배치한다
@@ -157,7 +155,7 @@ async def _call(prompt: str, media: list[Path], schema=None,
         contents=await _parts(prompt, media, client),
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=schema or ExtractionResult,
+            response_schema=schema or FactExtractionResult,
             temperature=s.extract_temperature,
             max_output_tokens=max_output_tokens,
             thinking_config=(types.ThinkingConfig(thinking_level=thinking_level)
@@ -240,42 +238,6 @@ async def extract_facts(
     return result
 
 
-async def assemble(
-    *, source_id: int, facts: list[dict], category_names: list[str],
-    glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,
-) -> ExtractionResult:
-    """reduce — 뽑아둔 사실을 모아 카드로 조립한다 (13.4 2패스).
-
-    새 사실을 만들지 않는다. 구간별 map 이 만든 사실을 대상 단위로 묶는 일만 한다.
-    구간 분할만 켜면 같은 대상이 여러 카드로 쪼개져 신입이 카드 하나로는 답을
-    못 얻는다 — 그 손실(ASSEMBLY)을 여기서 되돌린다.
-    """
-    s = get_settings()
-    if not s.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY 가 없다")
-    if not facts:
-        return ExtractionResult(cards=[], unresolved=[])
-
-    prompt = render_assemble_prompt(facts=facts, category_names=category_names,
-                                    glossary=glossary)
-
-    started = time.perf_counter()
-    reply = await _measured_call(prompt, [], usage_sink, usage_context,
-                                 prompt_hash=_hash(prompt), raw_sink=raw_sink,
-                                 max_output_tokens=getattr(s, "assemble_max_output_tokens", None))
-    usage = reply.usage
-    # 조립 출력이 잘리면 카드 일부를 잃는다. 나누지 않고 명확히 실패시킨다 —
-    # 등록 경로는 저장한 추출 결과로 조립만 다시 시도한다 (strict)
-    result = await raw_responses.parse_checked(
-        _mark_sink(raw_sink, reply), usage_context, reply.raw_response_id, reply.finish_reason,
-        lambda: ExtractionResult.model_validate_json(reply.text), what="카드 조립")
-    result._raw_response_id = reply.raw_response_id
-    logger.info("assemble source=%s 사실 %d건 → 카드 %d장 (%.1fs) usage=%s",
-                source_id, len(facts), len(result.cards),
-                time.perf_counter() - started, usage or "미보고")
-    return result
-
-
 async def assemble_plan(
     *, source_id: int, entities: list[dict], category_names: list[str],
     glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,
@@ -352,15 +314,6 @@ def render_facts_prompt(*, source_type: str, text: str, glossary,
             .replace("{transcript}", text))
 
 
-def render_assemble_prompt(*, facts: list[dict], category_names: list[str], glossary) -> str:
-    """카드 조립 프롬프트 완성본."""
-    return (ASSEMBLE_PROMPT_PATH.read_text(encoding="utf-8")
-            .replace("{categories}", _category_block(category_names))
-            .replace("{glossary}", _glossary_block(list(glossary or [])))
-            .replace("{facts_json}",
-                     json.dumps(facts, ensure_ascii=False, indent=1)))
-
-
 def render_card_plan_prompt(*, entities: list[dict], category_names: list[str],
                             glossary) -> str:
     """사실 조립 프롬프트 완성본. 같은 입력이면 같은 문자열이다(재사용 키)."""
@@ -389,7 +342,7 @@ async def _measured_call(prompt: str, media: list[Path], sink, context,
     from app.ingest.providers import measured
 
     s = get_settings()
-    schema = schema or ExtractionResult
+    schema = schema or FactExtractionResult
     return await measured.measured_call(
         settings=s, model=s.gemini_model,
         caller=lambda: _call(prompt, media, schema, max_output_tokens=max_output_tokens),

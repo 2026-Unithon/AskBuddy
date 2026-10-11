@@ -35,7 +35,6 @@ from app.cards.schemas import (
     CardSource,
     CardVersion,
     CategoryUpdateRequest,
-    DraftUpdateRequest,
 )
 from app.deps import Db, get_pool
 from app.errors import ApiClaims, ApiError
@@ -229,14 +228,8 @@ async def _detail(db: Db, store_id: int, card_id: int, role: str) -> CardDetail:
         ]
     # 직원은 초안을 보지 않으므로 사실 카드 표시·편집 가능 여부도 점주에게만 준다
     fact_card = False
-    fact_edit_enabled = False
     if role == "OWNER":
-        from app.config import get_settings
-
         fact_card = await repo.has_block_facts(db, store_id, row["draft_version_id"])
-        fact_edit_enabled = bool(
-            getattr(get_settings(), "w_fact_card_edit_enabled", False)
-        )
     return CardDetail(
         card_id=card_id,
         review_status=row["review_status"],
@@ -251,7 +244,6 @@ async def _detail(db: Db, store_id: int, card_id: int, role: str) -> CardDetail:
         events=events,
         updated_at=row["updated_at"],
         fact_card=fact_card,
-        fact_edit_enabled=fact_edit_enabled,
     )
 
 
@@ -259,52 +251,6 @@ async def _detail(db: Db, store_id: int, card_id: int, role: str) -> CardDetail:
 async def get_card(card_id: int, db: Db, claims: ApiClaims) -> CardDetail:
     _, store_id, role = _identity(claims)
     return await _detail(db, store_id, card_id, role)
-
-
-@router.patch("/{card_id}/draft", response_model=CardMutationResult)
-async def update_draft(
-    card_id: int, req: DraftUpdateRequest, db: Db, claims: OwnerClaims
-) -> CardMutationResult:
-    user_id, store_id, _ = _identity(claims, owner_only=True)
-    async with db.transaction():
-        card = await repo.get_card_for_update(db, store_id, card_id)
-        if card is None:
-            raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
-        if card["review_status"] == "EXCLUDED":
-            raise ApiError(409, "CARD_EXCLUDED", "제외된 카드를 먼저 복원해 주세요.")
-        # W3b — 사실 카드의 본문을 통째로 바꾸면 고정된 사실과 어긋난다. 사실 단위로만 고친다
-        if await repo.has_block_facts(db, store_id, card["draft_version_id"]):
-            raise ApiError(
-                409, "FACT_CARD_TEXT_EDIT_BLOCKED", "사실 카드는 사실 단위로 고쳐 주세요."
-            )
-        if card["draft_version_id"] != req.expected_version_id:
-            raise ApiError(
-                409,
-                "CARD_VERSION_CONFLICT",
-                "다른 변경 사항이 먼저 저장되었습니다. 최신 내용을 다시 확인해 주세요.",
-                details={"current_version_id": card["draft_version_id"]},
-            )
-        version_id = await repo.create_draft(
-            db,
-            store_id,
-            card_id,
-            title=req.title,
-            content=req.content,
-            actor_id=user_id,
-            source_version_id=req.expected_version_id,
-        )
-        await repo.add_event(
-            db,
-            store_id,
-            card_id,
-            user_id,
-            "EDIT_DRAFT",
-            from_status=card["review_status"],
-            to_status=card["review_status"],
-            metadata={"from_version_id": req.expected_version_id, "to_version_id": version_id},
-        )
-        row = await repo.mutation_row(db, store_id, card_id)
-    return _mutation(row)
 
 
 @router.post("/{card_id}/approve", response_model=CardMutationResult)
@@ -667,8 +613,6 @@ def build_facts_view(
     state: CardFactState,
     rows: dict[int, dict[str, Any]],
     heads: dict[int, fact_repo.HeadInfo],
-    *,
-    flag_on: bool,
 ) -> CardFactsView:
     """고정 상태 + 판별 칸 + head 분류 → 응답. 순서는 state 그대로(블록 순 → 줄 순)."""
     by_fact = {p.fact.fact_id: p.fact for p in state.pinned}
@@ -699,9 +643,7 @@ def build_facts_view(
         entity_name=state.entity_name or None,
         review_status=state.review_status,  # type: ignore[arg-type]
         published_version_id=state.published_version_id,
-        editable=bool(
-            flag_on and state.review_status != "EXCLUDED" and state.entity_problem is None
-        ),
+        editable=bool(state.review_status != "EXCLUDED" and state.entity_problem is None),
         entity_problem=state.entity_problem,  # type: ignore[arg-type]
         blocks=blocks,
     )
@@ -710,8 +652,6 @@ def build_facts_view(
 @router.get("/{card_id}/facts", response_model=CardFactsView)
 async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFactsView:
     """사실 카드의 초안 판을 사실 줄 단위로 돌려준다. 점주 전용, 트랜잭션 없이 읽는다."""
-    from app.config import get_settings
-
     _, store_id, _ = _identity(claims, owner_only=True)
     card = await repo.get_card(db, store_id, card_id)
     if card is None:
@@ -732,8 +672,7 @@ async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFacts
             db, store_id, {p.fact.fact_id: p.fact.fact_revision_id for p in state.pinned},
             state.entity_id,
         )
-    flag_on = bool(getattr(get_settings(), "w_fact_card_edit_enabled", False))
-    return build_facts_view(state, rows, heads, flag_on=flag_on)
+    return build_facts_view(state, rows, heads)
 
 
 @router.post("/{card_id}/facts/parse", response_model=FactParseResponse)
@@ -745,8 +684,6 @@ async def parse_card_facts(
 
     _, store_id, _ = _identity(claims, owner_only=True)
     settings = get_settings()
-    if not getattr(settings, "w_fact_card_edit_enabled", False):
-        raise ApiError(403, "FACT_EDIT_DISABLED", "사실 단위 고치기는 아직 열리지 않았어요.")
     max_chars = int(getattr(settings, "card_fact_parse_max_chars", 1000))
     if len(req.text) > max_chars:
         raise ApiError(
@@ -786,11 +723,7 @@ async def save_card_facts(
     card_id: int, req: FactEditRequest, db: Db, claims: OwnerClaims
 ) -> FactEditResult:
     """사실 편집 저장 → 새 초안 판. 공개판은 재승인 전까지 그대로다. 모델을 부르지 않는다."""
-    from app.config import get_settings
-
     user_id, store_id, _ = _identity(claims, owner_only=True)
-    if not getattr(get_settings(), "w_fact_card_edit_enabled", False):
-        raise ApiError(403, "FACT_EDIT_DISABLED", "사실 단위 고치기는 아직 열리지 않았어요.")
     try:
         async with db.transaction():
             return await fact_edit.save_fact_edit(

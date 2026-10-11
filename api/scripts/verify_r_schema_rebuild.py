@@ -86,6 +86,8 @@ async def main():
             await verify_legacy_publication(pool, fresh)
             from verify_checklist import verify as verify_checklist
             await verify_checklist(pool, fresh)
+            from verify_w_fact_only import verify as verify_w_fact_only
+            await verify_w_fact_only(pool, fresh)
         finally:
             await pool.close()
     finally:

@@ -75,8 +75,7 @@ def _groups() -> list[EntityGroup]:
 
 def _settings(c: int) -> Settings:
     return Settings(_env_file=None, ingest_mode="real", gemini_api_key="synthetic",
-                    assemble_batch_facts=BATCH_FACTS, assemble_concurrency=c,
-                    w_entity_revision_enabled=True, w_fact_assembly_enabled=True)
+                    assemble_batch_facts=BATCH_FACTS, assemble_concurrency=c)
 
 
 async def _run(c: int, *, delay: float, fail_names: set[str] = frozenset(), strict: bool = True):

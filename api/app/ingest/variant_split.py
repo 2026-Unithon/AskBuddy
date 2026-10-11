@@ -12,8 +12,7 @@ D19 — 사실(source_facts)은 variant 로 갈라 저장한다. 추출 모델�
   - 나눈 표시를 check_flags 에 남긴다(근거 위치 행으로 영속) — 원래 한 문장이었음을 검수에서 안다
   - 입력 객체는 바꾸지 않는다. 조립 입력과 복구 캐시가 같은 객체를 쓴다
   - 온도 외 규격(사이즈 둘 이상 등)은 나누지 않는다
-pipeline._persist_ledger 가 w_entity_revision_enabled 일 때만 부른다. 나눌 사실이 없으면 같은
-객체를 그대로 돌려주므로 원장 쓰기가 꺼짐과 같다.
+pipeline._persist_ledger 가 항상 부른다. 나눌 사실이 없으면 같은 객체를 그대로 돌려준다.
 """
 from __future__ import annotations
 

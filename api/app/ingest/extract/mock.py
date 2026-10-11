@@ -6,13 +6,11 @@ mode='mock' 으로 남아 모델 성능 집계와 섞이지 않는다 (D10).
 들어가므로 mock 응답이 실제 호출에 되쓰이는 일은 없다. mock 은 원가 원장에 쓰지 않는다.
 """
 import re
-from collections import defaultdict
 
 from app.config import get_settings
 from app.ingest import raw_responses, reuse
-from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion, ExtractedCard,
-                                ExtractedFact, ExtractionResult, FactExtractionResult,
-                                PlannedBlock, PlannedCard)
+from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion,
+                                FactExtractionResult, PlannedBlock, PlannedCard)
 
 
 # 원래 응답 행의 model 열. 실제 모델명이 아니다 — mode='mock' 과 함께 합성 응답임을 밝힌다
@@ -75,39 +73,6 @@ async def extract_facts(*, source_id, source_type, text, glossary, media=(),
                               schema,
                               raw_sink=raw_sink, usage_context=usage_context,
                               prompt=prompt, media=list(media or []))
-
-
-async def assemble(*, source_id, facts, category_names, glossary,
-                   usage_context=None, raw_sink=None):
-    from app.ingest.extract.gemini import render_assemble_prompt
-
-    prompt = (render_assemble_prompt(facts=facts, category_names=category_names,
-                                     glossary=glossary)
-              if raw_sink is not None and usage_context is not None else "")
-    return await _as_recorded(lambda: _assembled(source_id, facts, category_names),
-                              ExtractionResult, raw_sink=raw_sink,
-                              usage_context=usage_context, prompt=prompt)
-
-
-def _assembled(source_id, facts, category_names) -> ExtractionResult:
-    if not category_names:
-        return ExtractionResult(unresolved=["켜둔 업무 카테고리가 없어 카드를 만들지 못했다"])
-    groups = defaultdict(list)
-    for fact in facts:
-        groups[fact["대상"]].append(fact)
-    cards = []
-    for index, (subject, rows) in enumerate(groups.items()):
-        content = "\n".join(f"{r.get('규격') or '규격 미확정'} · {r['속성']}: {r['값']}"
-                            + (" (금지)" if r.get("부정") else "")
-                            + (f" · 조건: {r['조건']}" if r.get("조건") else "")
-                            + (f" · 예외: {r['예외']}" if r.get("예외") else "")
-                            + (f" · 순서: {r['순서']}" if r.get("순서") else "") for r in rows)
-        cards.append(ExtractedCard(category_name=category_names[index % len(category_names)],
-            title=subject, content=content, confidence=min(r["확실함"] for r in rows),
-            facts=[ExtractedFact(object_name=r["대상"], attribute=r["속성"], value=r["값"],
-                                 confidence=r["확실함"], ref=r["ref"]) for r in rows],
-            evidence=Evidence(source_id=source_id, timestamp_sec=min(r["근거시각"] for r in rows))))
-    return ExtractionResult(cards=cards)
 
 
 async def assemble_plan(*, source_id, entities, category_names, glossary,

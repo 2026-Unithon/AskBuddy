@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.ingest import extract, pipeline
-from app.ingest.schemas import ExtractionResult
 
 
 class _Tx:
@@ -82,9 +81,9 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
             await extract_hook()
         return NS(assertions=[], unresolved=[])
 
-    async def fake_assemble(**kw):
+    async def fake_assemble(*a, **kw):
         note("assemble")
-        return ExtractionResult(cards=[], unresolved=[])
+        return NS(planning=NS(unresolved=[]))
 
     async def fake_ledger(*a, **kw):
         note("checkpoint")
@@ -114,9 +113,9 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
              "room_name": None, "message_count": 1, "participants": [],
              "period_start": None, "period_end": None, "parsed_text": "대화"}), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
-         patch.object(pipeline, "assemble_assertions", fake_assemble), \
+         patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
          patch.object(pipeline, "_persist_ledger", fake_ledger), \
-         patch.object(pipeline, "_persist", persist):
+         patch.object(pipeline, "_persist_fact_cards", persist):
         await pipeline.process_source(1, 2, job_id=job_id)
     return seen, persist, set_status
 
@@ -211,7 +210,7 @@ async def _run_tracked(tmp_path, *, record_error=None):
     async def set_status(conn, store_id, source_id, status, **kw):
         note(status)
 
-    with patch.object(pipeline, "_persist", persist), \
+    with patch.object(pipeline, "_persist_fact_cards", persist), \
          patch.object(pipeline, "_record_segment_failures", record), \
          patch.object(pipeline.repo, "set_status", set_status):
         await _run_inner(pool, tmp_path, job_id=5)
@@ -228,8 +227,8 @@ async def _run_inner(pool, tmp_path, *, job_id):
     async def fake_extract_facts(**kw):
         return NS(assertions=[], unresolved=[])
 
-    async def fake_assemble(**kw):
-        return ExtractionResult(cards=[], unresolved=[])
+    async def fake_assemble(*a, **kw):
+        return NS(planning=NS(unresolved=[]))
 
     settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
                   video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID',
@@ -251,7 +250,7 @@ async def _run_inner(pool, tmp_path, *, job_id):
              "room_name": None, "message_count": 1, "participants": [],
              "period_start": None, "period_end": None, "parsed_text": "대화"}), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
-         patch.object(pipeline, "assemble_assertions", fake_assemble), \
+         patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})):
         await pipeline.process_source(1, 2, job_id=job_id)
 
