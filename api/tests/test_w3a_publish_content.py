@@ -24,6 +24,9 @@ HEX = "ab" * 32
 
 class EvidenceLocatorTest(unittest.TestCase):
     def test_evidence_locator_mapping(self):
+        self.assertEqual(_evidence_locator("MESSAGE", '{"line": 3}'),
+                         EvidenceLocator(type="LINE", line=3))
+        self.assertEqual(_evidence_locator("MESSAGE", {"line": 0}), EvidenceLocator())
         self.assertEqual(
             _evidence_locator("PAGE", {"page": 3, "region": "r1", "bbox": [0, 0, 1, 1]}),
             EvidenceLocator(type="PAGE", page=3))

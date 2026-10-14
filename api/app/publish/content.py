@@ -79,6 +79,9 @@ def _evidence_locator(locator_type: str | None, locator) -> EvidenceLocator:
     받지 않으므로 종류에 맞는 키 하나만 고른다. 값이 없거나 계약 검증에 실패하면
     자료 전체(WHOLE_SOURCE)로 낮춘다 — 위치가 틀린 근거보다 넓은 근거가 낫다.
     """
+    # MESSAGE는 원장 표현이다. 공개 계약의 LINE으로 옮겨 OWNER_TEXT/KAKAO 줄을 보존한다.
+    if locator_type == "MESSAGE":
+        locator_type = "LINE"
     field = _LOCATOR_FIELD.get(locator_type or "")
     if field is None:
         return EvidenceLocator()
