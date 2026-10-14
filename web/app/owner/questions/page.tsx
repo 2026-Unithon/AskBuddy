@@ -8,16 +8,20 @@ import { useApp } from "@/lib/store";
 import {
   ApiError,
   answerPending,
+  attachOwnerAnswerFile,
   type LearnPendingItem,
+  type IngestSourceType,
+  type IntakeHint,
   type LearnQuestionItem,
 } from "@/lib/api";
-import { pendingQuery, queryKeys, questionsQuery } from "@/lib/query";
+import { ingestCapabilitiesQuery, pendingQuery, queryKeys, questionsQuery } from "@/lib/query";
+import { registerFileSource } from "@/lib/ingest-submit";
 
 import {
   PendingQuestionCard,
   type AggregatedQuestionItem,
 } from "@/components/owner/pending-question-card";
-import { AnswerQuestionSheet } from "@/components/owner/answer-question-sheet";
+import { AnswerQuestionSheet, AttachStepError } from "@/components/owner/answer-question-sheet";
 import { EmptyState } from "@/components/owner/empty-state";
 import { InlineError } from "@/components/owner/inline-error";
 import { SkeletonList } from "@/components/owner/skeleton-list";
@@ -141,6 +145,7 @@ export default function QuestionsPage() {
 
   const questions = useQuery(questionsQuery(state.token, state.storeId));
   const pending = useQuery(pendingQuery(state.token, state.storeId));
+  const caps = useQuery(ingestCapabilitiesQuery(state.token, state.storeId));
   const historyItems = useMemo(
     () => aggregateQuestions(questions.data?.items ?? []),
     [questions.data?.items]
@@ -199,6 +204,58 @@ export default function QuestionsPage() {
       );
     },
   });
+
+  // 첨부: 업로드 → 자료 등록 → 답변에 붙이기. 작업(job) 상태는 서버가 갖고 작업 목록 화면이 보여 준다.
+  const attachMutation = useMutation({
+    mutationFn: async ({
+      questionId,
+      file,
+      sourceType,
+      hints,
+      sourceId,
+    }: {
+      questionId: number;
+      file: File;
+      sourceType: IngestSourceType;
+      hints: IntakeHint[];
+      sourceId?: number;
+    }) => {
+      // 재시도에서 이미 등록된 자료는 다시 등록하지 않고 붙이기만 한다
+      let id = sourceId;
+      let duplicate = false;
+      if (id === undefined) {
+        const registered = await registerFileSource(file, sourceType, state.token!, hints);
+        id = registered.source_id;
+        // 같은 파일을 전에 올렸다 — 이미 등록된 자료다. 붙이기만 하고 새 업로드로 다루지 않는다
+        // (다시 처리할지는 서버가 자료 상태로 정한다)
+        duplicate = registered.duplicate;
+      }
+      let jobId: number | null;
+      try {
+        jobId = (await attachOwnerAnswerFile(questionId, id, state.token!)).job_id;
+      } catch (err) {
+        throw new AttachStepError(id, err);
+      }
+      // 이미 등록된 자료에 서버가 작업을 만들지 않았으면 연결만 된 것이다
+      return { sourceId: id, duplicate: duplicate && jobId === null };
+    },
+    onSuccess: ({ duplicate }) => {
+      // 연결만 된 기존 자료는 작업 목록이 바뀌지 않는다
+      if (!duplicate) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
+      }
+    },
+  });
+
+  async function handleAttach(args: {
+    questionId: number;
+    file: File;
+    sourceType: IngestSourceType;
+    hints: IntakeHint[];
+    sourceId?: number;
+  }) {
+    return attachMutation.mutateAsync(args);
+  }
 
   async function handleAnswerSubmit(questionId: number, answerText: string) {
     setSubmitError(null);
@@ -313,6 +370,8 @@ export default function QuestionsPage() {
         item={activeQuestion}
         onClose={closeAnswerSheet}
         onSubmit={handleAnswerSubmit}
+        onAttach={handleAttach}
+        capabilities={caps.data}
         isSubmitting={answerMutation.isPending}
         error={submitError}
       />

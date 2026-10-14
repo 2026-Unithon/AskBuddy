@@ -97,18 +97,17 @@ const fs = require("node:fs");
             {
               shift_id: s.shifts[0]?.shift_id ?? null,
               name: s.shifts[0]?.name ?? "전체",
+              // 항목 = 카드 하나(B-D9). 줄은 제목 하나, line_no 1.
               cards: [
-                {
-                  card_id: 1,
-                  card_version_id: 10,
-                  title: "합성 청소",
-                  lines: ["머신 청소", "바닥 닦기"].map((text, i) => ({
-                    line_no: i + 1,
-                    text,
-                    checked: s.checked[i],
-                  })),
-                },
-              ],
+                [1, 10, "합성 청소", 7],
+                [2, 20, "합성 마감", 8],
+              ].map(([card_id, card_version_id, title, item_id], i) => ({
+                card_id,
+                card_version_id,
+                title,
+                item_id,
+                lines: [{ line_no: 1, text: title, checked: s.checked[i] }],
+              })),
             },
           ],
       my_submission: late ? null : s.submission,
@@ -122,7 +121,8 @@ const fs = require("node:fs");
         return route.fulfill({
           status: 204,
           headers: {
-            "access-control-allow-origin": "*",
+            "access-control-allow-origin": req.headers().origin ?? BASE,
+            "access-control-allow-credentials": "true",
             "access-control-allow-headers": "*",
             "access-control-allow-methods": "*",
           },
@@ -133,7 +133,10 @@ const fs = require("node:fs");
           status,
           contentType: "application/json",
           body: JSON.stringify(payload),
-          headers: { "access-control-allow-origin": "*" },
+          headers: {
+            "access-control-allow-origin": req.headers().origin ?? BASE,
+            "access-control-allow-credentials": "true",
+          },
         });
       const fail = (
         message,
@@ -146,7 +149,12 @@ const fs = require("node:fs");
           status,
         );
       let payload;
-      if (p === "/app/bootstrap")
+      if (p === "/auth/refresh")
+        payload = {
+          token: "synthetic-p5-only",
+          user: { user_id: role === "OWNER" ? 1 : 2, role, store_id: 1 },
+        };
+      else if (p === "/app/bootstrap")
         payload = {
           user: {
             user_id: role === "OWNER" ? 1 : 2,
@@ -186,7 +194,7 @@ const fs = require("node:fs");
           s.failCheck = false;
           return fail("합성 체크 실패");
         }
-        s.checked[body.line_no - 1] = body.checked;
+        s.checked[body.card_version_id === 10 ? 0 : 1] = body.checked;
         if (s.checked.every(Boolean)) s.submission = sub();
         payload = { submitted: Boolean(s.submission) };
       } else if (p === "/checklist/submissions") {
@@ -247,7 +255,7 @@ const fs = require("node:fs");
           lines: [
             {
               title: "합성 청소",
-              text: "머신 청소",
+              text: "합성 청소",
               checked_at: `${date}T09:00:00Z`,
             },
           ],
@@ -366,20 +374,20 @@ const fs = require("node:fs");
       await page
         .getByRole("heading", { name: "오늘 할 일", exact: true })
         .waitFor();
-      await page.getByRole("checkbox", { name: "머신 청소" }).waitFor();
+      await page.getByRole("checkbox", { name: "합성 청소" }).waitFor();
       s.slowToday = false;
       s.failCheck = true;
-      await page.getByRole("checkbox", { name: "머신 청소" }).click();
+      await page.getByRole("checkbox", { name: "합성 청소" }).click();
       await page
         .getByText("이 변경은 저장되지 않았어요. 다시 눌러 주세요.")
         .waitFor();
       check(
         "체크 실패 되돌림",
         (await page
-          .getByRole("checkbox", { name: "머신 청소" })
+          .getByRole("checkbox", { name: "합성 청소" })
           .getAttribute("aria-checked")) === "false",
       );
-      await page.getByRole("checkbox", { name: "머신 청소" }).click();
+      await page.getByRole("checkbox", { name: "합성 청소" }).click();
       await page.waitForFunction(
         () =>
           document
@@ -412,10 +420,10 @@ const fs = require("node:fs");
     {
       const { ctx, page, s } = await setup("STAFF", 360);
       await page.goto(`${BASE}/staff`);
-      await page.getByRole("checkbox", { name: "머신 청소" }).waitFor();
+      await page.getByRole("checkbox", { name: "합성 청소" }).waitFor();
       s.rollover = true;
       s.failLate = true;
-      await page.getByRole("checkbox", { name: "머신 청소" }).click();
+      await page.getByRole("checkbox", { name: "합성 청소" }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       check(
@@ -425,7 +433,7 @@ const fs = require("node:fs");
       check(
         "실패한 체크 어제 초안에 반영",
         (await dialog
-          .getByRole("checkbox", { name: "머신 청소" })
+          .getByRole("checkbox", { name: "합성 청소" })
           .getAttribute("aria-checked")) === "true",
       );
       check(
@@ -446,13 +454,13 @@ const fs = require("node:fs");
             .contains(document.activeElement),
         ),
       );
-      await dialog.getByRole("checkbox", { name: "바닥 닦기" }).click();
+      await dialog.getByRole("checkbox", { name: "합성 마감" }).click();
       await page.getByTestId("yesterday-save").click();
       await page.getByText("합성 어제 저장 실패").waitFor();
       check(
         "어제 저장 실패 입력 보존",
         (await dialog
-          .getByRole("checkbox", { name: "바닥 닦기" })
+          .getByRole("checkbox", { name: "합성 마감" })
           .getAttribute("aria-checked")) === "true",
       );
       await page.getByTestId("yesterday-save").click();
@@ -545,7 +553,7 @@ const fs = require("node:fs");
             .querySelector("[role=switch]")
             ?.getAttribute("aria-checked") === "true",
       );
-      await page.goto(`${BASE}/owner/members`);
+      await page.goto(`${BASE}/owner/member-shifts`);
       await page.getByRole("heading", { name: "합성 알바" }).waitFor();
       await page.getByRole("button", { name: "아침", exact: true }).click();
       await page.waitForFunction(() =>
@@ -572,7 +580,8 @@ const fs = require("node:fs");
       await page
         .getByRole("button", { name: `${s.date} 50%`, exact: true })
         .click();
-      await page.getByText("✓ 머신 청소").waitFor();
+      await page.getByText("✓ 합성 청소").waitFor();
+      check("기록 상세 카드 제목 한 번만", (await page.getByText("합성 청소").count()) === 1);
       check("개인 달력 제출 퍼센트·한 일", true);
       await page.getByRole("switch", { name: /내 기록 남기기/ }).click();
       await page.waitForFunction(
@@ -607,7 +616,7 @@ const fs = require("node:fs");
       const { ctx, page, s } = await setup();
       s.shifts = [];
       await page.goto(`${BASE}/staff`);
-      await page.getByRole("checkbox", { name: "머신 청소" }).waitFor();
+      await page.getByRole("checkbox", { name: "합성 청소" }).waitFor();
       check(
         "근무조 0개 전체 묶음",
         await page.getByText("전체", { exact: true }).isVisible(),
@@ -617,7 +626,7 @@ const fs = require("node:fs");
         (await page.getByLabel("근무조 선택").count()) === 0,
       );
       await page
-        .getByRole("checkbox", { name: "머신 청소" })
+        .getByRole("checkbox", { name: "합성 청소" })
         .evaluate((button) => {
           button.click();
           button.click();
@@ -635,7 +644,7 @@ const fs = require("node:fs");
             ?.getAttribute("aria-busy") !== "true",
       );
       check("저장 중 같은 줄 중복 클릭 방지", s.calls.length === 1);
-      await page.getByRole("checkbox", { name: "바닥 닦기" }).click();
+      await page.getByRole("checkbox", { name: "합성 마감" }).click();
       await page.getByTestId("checklist-complete").waitFor();
       check(
         "전체 체크 서버 자동 제출",
@@ -646,7 +655,7 @@ const fs = require("node:fs");
     {
       const { ctx, page, s } = await setup();
       await page.goto(`${BASE}/staff`);
-      await page.getByRole("checkbox", { name: "머신 청소" }).waitFor();
+      await page.getByRole("checkbox", { name: "합성 청소" }).waitFor();
       const old = s.date;
       s.previous = old;
       const date = new Date(`${old}T00:00:00Z`);
@@ -658,6 +667,34 @@ const fs = require("node:fs");
       );
       await page.getByText("어제 체크리스트", { exact: true }).waitFor();
       check("포커스 복귀 날짜 변경 어제 창", true);
+      await ctx.close();
+    }
+    {
+      // B-D9 카드 단위: 카드마다 한 행, 제목은 카드 상세 링크, 체크박스는 체크만
+      const { ctx, page, s, errors } = await setup();
+      await page.goto(`${BASE}/staff`);
+      await page.getByRole("checkbox", { name: "합성 청소" }).waitFor();
+      check(
+        "카드마다 한 행",
+        (await page.getByRole("checkbox").count()) === 2 &&
+          (await page.getByRole("link", { name: "합성 청소", exact: true }).count()) === 1,
+      );
+      check("카드 머리·줄 목록 없음", (await page.locator("h3").count()) === 0);
+      check(
+        "N개 남았어요 = 카드 수",
+        await page.getByText("2개 남았어요").isVisible(),
+      );
+      await page.screenshot({ path: `${artifactDir}/staff-card-unit.png` });
+      await page.getByRole("checkbox", { name: "합성 청소" }).click();
+      await page.getByText("1개 남았어요").waitFor();
+      check(
+        "체크박스는 체크만 하고 이동하지 않는다",
+        new URL(page.url()).pathname === "/staff" && s.calls.length === 1,
+      );
+      check("카드 단위 화면 런타임 오류 없음", errors.length === 0);
+      await page.getByRole("link", { name: "합성 청소", exact: true }).click();
+      await page.waitForURL("**/staff/recipes/7");
+      check("제목 누르면 카드 상세로", s.calls.length === 1);
       await ctx.close();
     }
     console.log(`PASS P5 browser assertions: ${passed}`);

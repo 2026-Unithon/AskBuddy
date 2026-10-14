@@ -13,6 +13,17 @@ from app.ingest.layout import schemas as ls
 from app.ingest.providers import budget
 
 
+def _recipe_route_stub(normalizer):
+    """Phase B 입구 분류 대역 — 자료 전체가 RECIPE 한 구간이다(분류 모델·판정 기록을 부르지 않는다)."""
+    from app.ingest.intake.decide import Ranked, SectionDecision
+    from app.ingest.intake.records import StoredRoute
+    r = (Ranked("RECIPE", 0.9),)
+
+    def d(cid):
+        return SectionDecision(cid, "RECIPE", ("RECIPE",), False, False, False, None, r, r)
+    return AsyncMock(return_value=StoredRoute(1, normalizer, [d("c1")], d("source")))
+
+
 def _settings(**over):
     base = dict(ingest_mode="mock", layout_region_model="anthropic:claude-sonnet-5-5",
                 layout_transcribe_model="gemini:gemini-3.6-flash",
@@ -289,7 +300,9 @@ async def _process(tmp_path, monkeypatch, *, source_type="SCAN", mode="LAYOUT", 
              patch.object(pipeline, "_prepare_fact_assembly",
                           AsyncMock(return_value=NS(planning=NS(unresolved=[])))), \
              patch.object(pipeline, "_record_segment_failures", AsyncMock()), \
-             patch.object(pipeline, "_persist_fact_cards", AsyncMock(return_value=1)):
+             patch.object(pipeline, "_persist_fact_cards", AsyncMock(return_value=1)), \
+             patch.object(pipeline.intake_route, "route_source", _recipe_route_stub(
+                 "VIDEO" if source_type == "VIDEO" else "DOC_IMAGE")):
             returned = await pipeline.process_source(
                 1, 2, retry_segments=retry_segments, expected_segments_total=expected_total)
     finally:

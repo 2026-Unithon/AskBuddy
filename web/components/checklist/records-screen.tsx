@@ -251,7 +251,7 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
               {detail.data.lines.map((line, i) => (
                 <li key={`${line.checked_at}-${i}`}>
                   <p className="text-[16px]">✓ {line.text}</p>
-                  <Caption>{line.title}</Caption>
+                  {line.title !== line.text && <Caption>{line.title}</Caption>}
                 </li>
               ))}
             </ul>

@@ -11,6 +11,7 @@ from app.ingest import pipeline, extract, recovery, job_repository
 from app.ingest.extract import mock
 from app.ingest.schemas import ExtractedAssertion
 from verify_w_partial_extraction import _seed, _new_source
+from _intake_stub import intake_patches
 
 
 async def verify(db, dsn):
@@ -57,6 +58,8 @@ async def verify(db, dsn):
                 (pipeline, '_preprocess', AsyncMock(side_effect=lambda *a, **kw: ('source', [], segments))),
                 (pipeline.shutil, 'rmtree', lambda *a, **kw: None),
                 (extract, 'extract_facts', extract_fake), (extract, 'assemble_card_plan', assemble_fake),
+                # 입구 분류(Phase B)는 원본을 받으므로 합성 대역. 재시도·복구는 저장된 판정을 쓴다
+                *intake_patches(counts),
             ]:
                 stack.enter_context(patch.object(obj, name, replacement))
             await run()
@@ -132,6 +135,8 @@ async def verify(db, dsn):
                 pass
             else:
                 raise AssertionError('invalid recovery accepted')
+            # 재시도·PARTIAL 재시도·복구 내내 입구 분류는 처음 1회뿐이다(Phase B)
+            assert counts['classify'] == 1, counts
         print('PASS W recovery: isolated store, single connection, layout drift, legacy guard, assembly resume, atomic rollback, replay, CAS, schema constraint')
     finally:
         await pool.close()

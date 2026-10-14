@@ -31,7 +31,7 @@
 
 2026-09-21 전체 재감사: [계획 대비 W/R 구현·연결·인수 판정](review/WR_PLAN_AUDIT_20260921.md). 최신 W 부분 실패의 상세 응답 타입 오류, 성공 오집계/재시도 누락, 추출 중 DB 연결 보유를 재현했다. 집중 회귀 80개 통과와 별개인 검증 공백이다. W2~W4 실제 생산·발행 및 owner-answer worker 연결, 실자료·운영 인수는 미완료이며 담당별 다음 순서를 감사 문서에 정리했다.
 
-2026-09-21 공유: 최신 원격 main `db40813`을 R 브랜치에 통합했다. [공유 변경·담당별 다음 순서·Railway 점검](plan/R_TEAM_NEXT_20260921.md)을 먼저 참고한다. [최신 통합 검증](review/R_SHARE_VERIFICATION_20260921.md): 913 tests/119 subtests, migration 29개 및 R DB/API 회귀 통과. 이전 검증 기록은 당시 기준이다.
+2026-09-21 공유: 최신 원격 main `db40813`을 R 브랜치에 통합했다. [공유 변경·담당별 다음 순서·운영 점검](plan/R_TEAM_NEXT_20260921.md)을 먼저 참고한다. [최신 통합 검증](review/R_SHARE_VERIFICATION_20260921.md): 913 tests/119 subtests, migration 29개 및 R DB/API 회귀 통과. 이전 검증 기록은 당시 기준이다.
 
 2026-09-19 최신 순차 작업: [R ①~⑤ 구현·W 인계·차단 원인](plan/R_SEQUENCE_HANDOFF_20260919.md), [검증 기록](review/R_SEQUENCE_REVIEW_20260919.md). PR #18 병합 main `e8186f6` 기준이다. 외부 AI 판정은 회의 안건 1번으로 대기, 운영 로그 실제 확인도 회의 안건이다. 확정된 의미 범위의 exact-reviewed 병합·대상/온도/크기 명확화와 R 색인/완료 수신을 보강했다. 실제 catalog·품질 평가·운영 활성화·W producer/worker 연결은 아직 완료가 아니다. 아래 9개 커밋 ahead 표기는 병합 전 관찰이다.
 
@@ -181,7 +181,7 @@ R 진행 기록: [C0_R_IMPLEMENTATION_20260914.md](review/C0_R_IMPLEMENTATION_20
 | 안전 조건 | `must_have` 악화 0건 · 원장 재현율 하락 없음 |
 | 일관성 | 3회 중 2회 이상 같은 방향 |
 | 원가 중립 변경 | 동일 workload/rate에서 포함 변동비 증가 없음일 때 ≥ max(5, ceil(대조군 폭)); 고정비 제외와 별개로 서버/DB 부하 회귀 검사 |
-| 원가 상한 | 매장당 월 운영 변동비 3,000원: AI 전 단계·Storage 저장/전송 포함, Railway/Vercel/DB 고정비 제외 |
+| 원가 상한 | 매장당 월 운영 변동비 3,000원: AI 전 단계·Storage 저장/전송 포함, API 서버(AWS EC2)/Vercel/DB 고정비 제외 |
 | 최초 등록비 | 별도 캠페인으로 추적. 예산환산 개월=등록비/3,000, 실제 운영비를 뺀 잔여 예산 보전 개월 별도. 지속 저장비는 월 운영비 |
 | 사용량 | LOW/BASE/HIGH 첫 달 450/960/1,500 기본 질문, 안정기 27/60/135. 미래 사용량 가정이며 실측 후 교체; 후속 턴·집중·추가 자료·저장 증가 포함 |
 | 지연 상한 | 서버 전체 질문 응답·저장 `p95` 5초, 오류율/coverage 병기 (카드 생성 상한은 보류) |
@@ -509,7 +509,7 @@ R 완료: C0/R0~R4 계약·보안·회귀와 제품 루프가 fixture에서 동�
 
 - [ ] 운영 실행 권한·대상 환경을 확인하고 코드·migration 순서를 동결한다. 계획 체크 항목만으로 운영 실행 권한을 추정하지 않는다.
 - [ ] 승인된 배포 작업에서 백업→로컬 재구축/verify→linked dry-run→운영 적용→read-only verify를 따른다. 원본·백업·비밀값은 Git에서 제외한다.
-- [ ] Railway API·worker, Vercel Web, Supabase 호환 순서와 CORS·AI·VAPID·ingest 제한을 확인한다.
+- [ ] AWS EC2 API·worker, Vercel Web, Supabase 호환 순서와 CORS·AI·VAPID·ingest 제한을 확인한다.
 - [ ] 모든 W 조합에서 운영 legacy reader는 안전 shim(충분성 검사·승인 RAW·안전한 비답변)을 먼저 적용한다. 미패치 자유 생성 reader는 격리 평가 전용이며 v1이 표현 못 하는 CLARIFY는 v2 전환 오류/안내로 처리한다.
 - [ ] 플래그·색인 전환·legacy 호환·rollback을 구분한다. 롤백해도 승인 이력·fact revision을 지우지 않는다. 알려진 취약 자유 생성 경로로 되돌리는 것을 안전한 롤백으로 부르지 않는다.
 - [ ] `/health`와 Web→API→DB smoke, 기존 사용자·카드·질문·인용·알림 보존을 확인한다.

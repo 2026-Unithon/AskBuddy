@@ -47,3 +47,6 @@ api/eval/data/*
 !api/eval/data/README.md
 추출결과/
 # 골든셋 문항(eval/*.json)과 품질 추이(eval/progress/)는 커밋한다
+api/eval/intake/private/
+
+/output

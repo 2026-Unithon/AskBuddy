@@ -18,6 +18,8 @@ PARTIAL_RETRY_UNAVAILABLE_MESSAGE = (
 PARTIAL_RETRY_FAILED_MESSAGE = "잃은 구간을 다시 읽다가 실패했습니다. 다시 시도해 주세요."
 # W3a — 반영된 카드(새 판)는 없지만 검수할 사실(REVIEW_PENDING)이 남은 자료
 NO_NEW_CARD_PENDING_MESSAGE = "카드에 반영되지 않고 검수할 사실이 남았습니다."
+# Phase B — 입구 분류가 업무 자료가 아니라고(NONE) 판정해 추출하지 않은 자료
+INTAKE_NONE_MESSAGE = "업무 자료가 아니라고 판단해 추출하지 않았어요."
 
 
 def final_job_status(*, total: int, failed: int, cards: int,
@@ -160,6 +162,12 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     result_status = 'PARTIAL' if card_count else 'FAILED'
                     error_code = 'PARTIAL_RETRY_UNAVAILABLE'
                     error_message = PARTIAL_RETRY_UNAVAILABLE_MESSAGE
+                elif outcome == pipeline.INTAKE_NONE:
+                    # 자료 상태는 무결과 그대로, 코드는 INTAKE_NONE 으로 가른다 — 화면이
+                    # 이 코드로 자료별 "그래도 추출하기"를 보인다(후속 1)
+                    result_status = "NO_RESULT"
+                    error_code = pipeline.INTAKE_NONE
+                    error_message = INTAKE_NONE_MESSAGE
                 elif card_count == 0:
                     result_status = "NO_RESULT"
                     error_code = "NO_RESULT"

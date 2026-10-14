@@ -1,0 +1,12 @@
+{
+ "logic": "RECIPE",
+ "priority": ["C2 opus", "C1 opus", "C4 sonnet", "G3 sol", "G4 sol", "C3 sonnet"],
+ "runs": [
+  {"id": "C1 opus", "label": "claude-opus-5.5 #1 (PNG 4장+basestock)", "dir": "claude 추출결과/1. opus 5.5 높음"},
+  {"id": "C2 opus", "label": "claude-opus-5.5 #2 (recipebook.pdf)", "dir": "claude 추출결과/2. opus 5.5 높음"},
+  {"id": "C3 sonnet", "label": "claude-sonnet-5.5 #3 (PNG 4장+basestock, 확대 없음)", "dir": "claude 추출결과/3. sonnet 5.5 중간"},
+  {"id": "C4 sonnet", "label": "claude-sonnet-5.5 #4 (recipebook.pdf)", "dir": "claude 추출결과/4. sonnet 5.5 중간"},
+  {"id": "G3 sol", "label": "gpt-6 sol #3 (recipebook.pdf)", "dir": "gpt 추출결과/3. 6 sol 중간/outputs"},
+  {"id": "G4 sol", "label": "gpt-6 sol #4 (PNG 4장+basestock)", "dir": "gpt 추출결과/4. 6 sol 중간/outputs"}
+ ]
+}

@@ -33,6 +33,7 @@ from app.publish.approval import CardChange, publish_cards
 from app.publish.bootstrap import READY, bootstrap_store_index, index_status
 from app.publish.content import current_manifest
 from app.reg.hybrid import hybrid_search, read_current_index
+from _intake_stub import intake_context
 from _fact_card_fixture import (
     _mock_settings, _vectors, assertion, attribute_cost, blockless_card, edit_fact_value,
     publish_card, seed_fact_card)
@@ -84,7 +85,9 @@ async def verify_owner_answer_worker(pool, admin):
 
     async def process(*assertions):
         settings = _mock_settings()
-        with patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
+        # 입구 분류(Phase B)는 합성 대역(분류 RECIPE) — 유료 호출 없음
+        with intake_context(), \
+                patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
                 patch.object(extract, "get_settings", lambda: settings), \
                 patch("app.reg.index_preparation.recorded_embeddings", _vectors):
             return await process_next_owner_event(pool, store_id=sid)
@@ -703,7 +706,8 @@ async def verify(pool, admin):
 
         async def process3(*assertions):
             settings = _mock_settings()
-            with patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
+            with intake_context(), \
+                    patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
                     patch.object(extract, "get_settings", lambda: settings):
                 return await process_next_owner_event(pool, store_id=s3["sid"])
 

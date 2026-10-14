@@ -58,6 +58,8 @@ TENANT_TABLES = {
     # P5 근무조 체크리스트 (가산)
     "store_shifts", "checklist_cards", "checklist_card_shifts", "member_shifts",
     "checklist_checks", "checklist_check_events", "checklist_submissions",
+    # Phase B 입구 분류 기록·점주 답변 첨부 (가산)
+    "intake_route_decisions", "owner_answer_attachments",
 }
 CONN_HINTS = ("asyncpg.Connection", "Connection", "Db")
 # 라우트 핸들러는 store_id 를 인자가 아니라 JWT 에서 꺼내는 것이 정답이다 (불변식 4).

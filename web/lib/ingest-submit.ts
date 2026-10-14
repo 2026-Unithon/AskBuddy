@@ -8,6 +8,7 @@ import {
   requestUploadUrl,
   type IngestCapabilities,
   type IngestSourceType,
+  type IntakeHint,
 } from "@/lib/api";
 
 // 리브랜딩 입력창(O3·O6)의 "넣기" 한 번 = 자료 여러 개 등록 + 작업 하나 접수.
@@ -45,14 +46,20 @@ export function tooLargeMessage(file: File, type: IngestSourceType, caps: Ingest
   return `'${file.name}'은(는) ${Math.floor(max / 1024 / 1024)}MB보다 커서 올릴 수 없어요.`;
 }
 
-async function registerOne(file: File, sourceType: IngestSourceType | "TEXT", token: string) {
+/** 파일 하나를 올리고 자료로 등록한다. 점주 칩(hints)은 그대로 서버에 보낸다. 답변 첨부도 쓴다. */
+export async function registerFileSource(
+  file: File,
+  sourceType: IngestSourceType | "TEXT",
+  token: string,
+  hints: IntakeHint[]
+) {
   // TEXT 는 병렬 작업의 계약이 오면 이 경로(서명 URL로 .txt 업로드)가 맞는지 다시 확인한다
   const type = sourceType as IngestSourceType;
   const { upload_url, file_url } = await requestUploadUrl(type, file.name, token);
   await putToStorage(upload_url, file);
   const contentHash = await computeContentHash(file);
   return registerSource(
-    { sourceType: type, fileUrl: file_url, title: file.name, fileSize: file.size, contentHash, meta: metaFor(sourceType, file) },
+    { sourceType: type, fileUrl: file_url, title: file.name, fileSize: file.size, contentHash, meta: metaFor(sourceType, file), ownerHints: hints },
     token
   );
 }
@@ -78,11 +85,13 @@ export async function submitIngest({
   text,
   token,
   idempotencyKey,
+  hints = [],
 }: {
   files: PickedFile[];
   text: string;
   token: string;
   idempotencyKey: string;
+  hints?: IntakeHint[];
 }): Promise<IngestSubmitResult> {
   const sourceIds: number[] = [];
   const failures: SourceFailure[] = [];
@@ -97,7 +106,7 @@ export async function submitIngest({
 
   for (const item of items) {
     try {
-      const { source_id, duplicate } = await registerOne(item.file, item.type, token);
+      const { source_id, duplicate } = await registerFileSource(item.file, item.type, token, hints);
       if (duplicate) failures.push({ name: item.name, message: "이미 올린 자료예요. 기존 결과를 확인해 주세요." });
       else sourceIds.push(source_id);
     } catch (error) {

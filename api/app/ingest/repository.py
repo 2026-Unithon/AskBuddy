@@ -7,6 +7,7 @@ get_source(store_id, source_id) 로 소유 매장을 확인한 뒤 호출한다.
 """
 import hashlib
 import json
+from collections.abc import Sequence
 
 import asyncpg
 
@@ -39,16 +40,20 @@ async def create_source(
     content_hash: str | None,
     mime_type: str | None,
     original_filename: str | None,
+    owner_hints: Sequence[str] = (),
 ) -> int:
+    # 점주 칩은 중복 없이(입력 순서 유지) 저장하고, 비어 있으면 null 이다.
+    hints = list(dict.fromkeys(owner_hints)) or None
     return await conn.fetchval(
         "insert into sources "
         "  (store_id, uploaded_by, source_type, title, file_url, file_size, content_hash, "
-        "   mime_type, original_filename, status) "
-        "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'UPLOADED') "
+        "   mime_type, original_filename, status, owner_hints) "
+        "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'UPLOADED', $10::text[]) "
         "returning source_id",
         store_id, uploaded_by, source_type,
         (title or "")[:MAX_TITLE_LEN] or None,
         file_url, file_size, content_hash, mime_type, original_filename,
+        hints,
     )
 
 
@@ -309,10 +314,10 @@ async def insert_source_facts(
               store_id, source_id, subject, variant, attribute, value,
               confidence, locator_type, locator, content_hash, extract_version,
               original_assertion, unit, polarity, conditions, exceptions,
-              step_order, requires, local_ref, segment_id, assembly_state
+              step_order, requires, local_ref, segment_id, assembly_state, ext
             )
             values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,
-                    $12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20,$21)
+                    $12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20,$21,$22::jsonb)
             on conflict (source_id, content_hash) do nothing
             returning fact_id
             """,
@@ -329,6 +334,7 @@ async def insert_source_facts(
             json.dumps(f.get("requires") or [], ensure_ascii=False),
             f.get("local_ref"), f.get("segment_id"),
             f.get("assembly_state") or "PENDING",
+            json.dumps(f["ext"], ensure_ascii=False) if f.get("ext") else None,
         )
         if fact_id is None:
             # 같은 사실이 이미 있다. 새로 만들지 않고 그 행에 잇는다 (D1 — 이 매장 행만)

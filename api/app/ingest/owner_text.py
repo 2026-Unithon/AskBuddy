@@ -12,10 +12,14 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from app.ingest import pipeline
 from app.ingest import repository as repo
 from app.ingest.schemas import ExtractedAssertion
+
+if TYPE_CHECKING:
+    from app.ingest.intake.records import StoredRoute
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +132,13 @@ async def answer_cards(conn, store_id: int, *, source_id: int) -> list[AnswerCar
 
 
 async def ingest_owner_text(pool, *, store_id: int, source_id: int, question: str, answer: str,
-                            run_tag: int) -> int:
+                            run_tag: int, route: "StoredRoute") -> int:
     """답변 글에서 사실을 뽑아 원장·카드까지 만든다. 이 자료의 원장 사실 수를 돌려준다.
 
     원장이 이미 있으면(재시도) 추출을 건너뛴다. 모델 호출 중에는 연결을 쥐지 않는다.
+    `route` 는 입구 판정(Phase B)이다. 자료 로직이 NONE 이면 추출하지 않는다(원장 0, 조립은
+    빈 채로 돌고 자료는 DONE). NOTICE 면 이 자료의 사실 전부를 공지 보류로 둔다 — 업로드의
+    자료 전체 공지(hold_all_notice)와 같은 occurrence 단위 보류다.
     """
     from app.ingest.raw_responses import DbRawResponseSink
     from app.usage import DbUsageSink
@@ -146,7 +153,10 @@ async def ingest_owner_text(pool, *, store_id: int, source_id: int, question: st
     usage_sink = DbUsageSink(pool, resilient=True)
     raw_sink = DbRawResponseSink(pool, run_tag=run_tag)
 
-    if not has_ledger:
+    logic = route.source.logic
+    if logic == "NONE":
+        logger.info("점주 답변 source=%s — 업무 내용이 아니라고 판정, 추출하지 않음", source_id)
+    if not has_ledger and logic != "NONE":
         from app.ingest.extract import extract_facts
         result = await extract_facts(
             source_id=source_id, source_type="OWNER_TEXT", text=compose_text(question, answer),
@@ -157,11 +167,23 @@ async def ingest_owner_text(pool, *, store_id: int, source_id: int, question: st
         async with pool.acquire() as conn, conn.transaction():
             await pipeline._persist_ledger(conn, store_id, source_id, "OWNER_TEXT", assertions)
 
+    hold_kw = {}
     async with pool.acquire() as conn:
         categories = await repo.enabled_categories(conn, store_id)
+        if logic == "NOTICE":
+            # 자료 전체가 공지다. 이 자료 occurrence 는 INTAKE_NOTICE 검수 대기로 두고,
+            # 다른 받침이 없는 사실만 조립 묶음에서도 뺀다(pipeline 과 같은 규칙)
+            from app.ingest import fact_cards
+            notice_only, unsupported = await pipeline._notice_holds(conn, store_id, source_id,
+                                                                    None)
+            hold_kw = {"held_fact_ids": {f: fact_cards.REASON_INTAKE_NOTICE for f in unsupported},
+                       "notice_fact_ids": notice_only}
+            logger.info("점주 답변 공지 보류 source=%s 사실 %d건 (조립 제외 %d건)",
+                        source_id, len(notice_only), len(unsupported))
     prepared = await pipeline._prepare_fact_assembly(
         pool, store_id, source_id, categories=list(categories), glossary=glossary,
-        usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True)
+        usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True,
+        **hold_kw)
 
     async with pool.acquire() as conn, conn.transaction():
         # 조립 중 설정이 바뀌었을 수 있다. 저장 직전 최신 카테고리를 쓴다

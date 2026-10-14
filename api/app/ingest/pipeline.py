@@ -11,9 +11,9 @@ import asyncio
 import logging
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import NamedTuple
+from typing import Mapping, NamedTuple, Sequence
 
 import asyncpg
 
@@ -21,6 +21,7 @@ from app.deps import get_pool
 from app.ingest import occurrences
 from app.ingest import repository as repo
 from app.ingest import recovery
+from app.ingest.intake import route as intake_route
 from app.ingest.preprocess import audio, document, kakao, storage, video
 from app.ingest.variant_split import split_hot_ice
 from app.ingest.schemas import ExtractedAssertion
@@ -32,6 +33,10 @@ MOCK_PLACEHOLDER = "(목 모드 — 전처리를 건너뛰었다)"
 # PARTIAL 재시도에서 구간 구성이 달라져 잃은 구간만 다시 읽을 수 없을 때 돌려준다.
 # 호출부(job_worker)가 이 값을 보고 자료를 PARTIAL 로 남긴다
 PARTIAL_RETRY_UNAVAILABLE = "PARTIAL_RETRY_UNAVAILABLE"
+
+# 입구 분류가 업무 자료가 아니라고(NONE) 판정해 추출하지 않았을 때 돌려준다(Phase B).
+# 호출부(job_worker)가 이 값을 보고 작업 자료를 NO_RESULT 와 안내 메시지로 적는다
+INTAKE_NONE = "INTAKE_NONE"
 
 
 from app.config import get_settings
@@ -90,13 +95,68 @@ async def process_source(
                     return
             await repo.set_status(conn, store_id, source_id, "PROCESSING")
 
-        text, media, segments = await _preprocess(
-            pool, store_id, src,
-            usage_sink=usage_sink,
-            usage_context=_usage_context(
-                store_id, source_id, job_id, "STT",
-                cost_phase, cost_purpose, extraction_run_id, run_tag=run_tag),
-        )
+        # 분류 단계를 화면에 먼저 알린다(B-D10). 작업 없는 경로는 적을 행이 없다
+        if job_id is not None:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    update ingest_job_sources
+                    set status = 'CLASSIFYING', updated_at = now()
+                    where store_id = $1 and job_id = $2 and source_id = $3
+                    """,
+                    store_id,
+                    job_id,
+                    source_id,
+                )
+                await conn.execute(
+                    """
+                    update ingest_jobs set status = 'CLASSIFYING', updated_at = now()
+                    where store_id = $1 and job_id = $2
+                    """,
+                    store_id,
+                    job_id,
+                )
+
+        usage_base = (store_id, job_id, cost_phase, cost_purpose,
+                      extraction_run_id, run_tag)
+
+        # ── 입구 분류(Phase B) ─────────────────────────────────────────
+        # 최신 판정이 있으면 재사용한다 — 재시도·복구에서 구간 구성이 지난 실행과 같다.
+        # 분류 실패(IntakeClassificationError)는 아래 except 가 FAILED 로 적는다
+        from app.ingest.intake.plan import plan_extraction
+        from app.ingest.intake.registry import SECTIONED_NORMALIZERS
+
+        stt_context = _usage_context(
+            store_id, source_id, job_id, "STT",
+            cost_phase, cost_purpose, extraction_run_id, run_tag=run_tag)
+        # 평가 실행(운영 제품 경로가 아닌 실행)은 입구 분류를 하지 않는다 — 지금까지와 같은
+        # 입력으로 재야 비교가 된다(D16). 분류 호출도 없다
+        intake_enabled = cost_purpose == "PRODUCT" and extraction_run_id is None
+        plan = None
+        if intake_enabled:
+            cache = intake_route.IntakeCache()
+            route = await intake_route.route_source(
+                pool, store_id, src, cache=cache, usage_sink=usage_sink, usage_base=usage_base)
+            if route.source.logic == "NONE" and route.normalizer not in SECTIONED_NORMALIZERS:
+                # 업무 자료가 아니다 — 전처리(전체 STT·프레임 업로드)부터 하지 않는다
+                return await _finish_intake_none(pool, store_id, source_id, job_id, started)
+
+            text, media, segments = await _preprocess(
+                pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context,
+                cache=cache)
+            plan = plan_extraction(normalizer=route.normalizer, decisions=route.decisions,
+                                   source=route.source,
+                                   sections=intake_route.full_sections(cache, route.normalizer))
+            if plan.skip:
+                return await _finish_intake_none(pool, store_id, source_id, job_id, started)
+            # 거른 것이 없으면 계획 글은 전처리 글과 같다(D16). 구간별 묶음이면 구간을 바꾼다
+            if plan.text is not None:
+                text = plan.text
+            if plan.segments is not None:
+                segments = plan.segments
+        else:
+            text, media, segments = await _preprocess(
+                pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context)
 
         from app.config import get_settings
         fingerprint = await asyncio.to_thread(recovery.layout_hash, src, text, media, segments, get_settings()) if recovery_enabled else None
@@ -124,29 +184,6 @@ async def process_source(
         async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
             glossary = await repo.glossary(conn, store_id)
-
-            if job_id is not None:
-                await conn.execute(
-                    """
-                    update ingest_job_sources
-                    set status = 'CLASSIFYING', updated_at = now()
-                    where store_id = $1 and job_id = $2 and source_id = $3
-                    """,
-                    store_id,
-                    job_id,
-                    source_id,
-                )
-                await conn.execute(
-                    """
-                    update ingest_jobs set status = 'CLASSIFYING', updated_at = now()
-                    where store_id = $1 and job_id = $2
-                    """,
-                    store_id,
-                    job_id,
-                )
-
-        usage_base = (store_id, job_id, cost_phase, cost_purpose,
-                      extraction_run_id, run_tag)
 
         # ── 입력 → 사실 → (원장) → 카드 ──────────────────────────────
         # 예전에는 입력 → 카드 → (카드에서) 원장 이었다. 그래서 조립이 버린
@@ -211,11 +248,27 @@ async def process_source(
         async with pool.acquire() as conn:
             categories = await repo.enabled_categories(conn, store_id)
 
+        # NOTICE 보류는 occurrence 단위다. 이 자료에서 공지 구간(또는 자료 전체)에만 나온
+        # 사실은 이 자료 occurrence 를 잇지 않고 INTAKE_NOTICE 검수 대기로 둔다. 그중 다른 받침이
+        # 없는 사실만 조립 묶음에서도 뺀다
+        hold_kw = {}
+        if plan is not None and (plan.hold_all_notice or plan.notice_segment_ids):
+            async with pool.acquire() as conn:
+                notice_only, unsupported = await _notice_holds(
+                    conn, store_id, source_id,
+                    None if plan.hold_all_notice else sorted(plan.notice_segment_ids))
+            from app.ingest import fact_cards
+            hold_kw = {"held_fact_ids": {f: fact_cards.REASON_INTAKE_NOTICE for f in unsupported},
+                       "notice_fact_ids": notice_only}
+            logger.info("공지 보류 source=%s 사실 %d건 (조립 제외 %d건)",
+                        source_id, len(notice_only), len(unsupported))
+
         # 대상 단위 사실 조립 — 입력은 짧은 연결로 읽고 놓은 뒤 모델을 부른다.
         # 배치 실패는 strict 라 예외(FAILED)
         prepared = await _prepare_fact_assembly(
             pool, store_id, source_id, categories=list(categories), glossary=glossary,
-            usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True)
+            usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink, strict=True,
+            **hold_kw)
         unresolved_total = len(prepared.planning.unresolved) + len(unresolved)
 
         async with pool.acquire() as conn:
@@ -326,6 +379,122 @@ def _same_layout(segments: list, retry_segments: list[str],
     return set(retry_segments) <= valid
 
 
+async def _finish_intake_none(pool, store_id: int, source_id: int, job_id: int | None,
+                              started: float) -> str:
+    """업무 자료가 아니라는 판정으로 끝낸다. 구간 기록은 0/1, 자료는 DONE."""
+    async with pool.acquire() as conn, conn.transaction():
+        await _record_segment_failures(
+            conn, store_id, job_id, source_id,
+            outcome=ExtractionOutcome([], [], 1, 0, [], {}))
+        await repo.set_status(conn, store_id, source_id, "DONE")
+    logger.info("ingest DONE(INTAKE_NONE) source=%s — 업무 자료 아님, 추출하지 않음 %.1fs",
+                source_id, time.perf_counter() - started)
+    return INTAKE_NONE
+
+
+async def _notice_holds(conn: asyncpg.Connection, store_id: int, source_id: int,
+                        segment_ids: list[str] | None
+                        ) -> tuple[frozenset[int], frozenset[int]]:
+    """공지 보류 대상 지식 사실 (이 자료에서 공지에만 나온 것, 그중 다른 받침이 없는 것).
+
+    - 공지에만 나온 사실: 이 자료의 **모든** occurrence(source_fact_occurrences)가 공지 범위다
+      (`segment_ids` 가 None 이면 자료 전체가 공지). 원장 행의 첫 구간만 보지 않는다 —
+      같은 사실이 RECIPE 구간에도 나오면 보통 사실이다.
+    - 다른 받침: 다른 자료의 원장 행이 같은 지식 사실로 이어져 있다.
+    조립·카드·검수 사유는 원장 행 ID 가 아니라 지식 사실 ID 로 일하므로 연결표로 옮긴다.
+    """
+    rows = await conn.fetch(
+        "select l.fact_id, o.segment_id, "
+        "       exists (select 1 from source_fact_revision_links l2 "
+        "               join source_facts sf2 on sf2.store_id = l2.store_id "
+        "                 and sf2.fact_id = l2.source_fact_id "
+        "               where l2.store_id = $1 and l2.fact_id = l.fact_id "
+        "                 and sf2.source_id <> $2) as other_support "
+        "from source_fact_occurrences o "
+        "join source_fact_revision_links l on l.store_id = o.store_id "
+        "  and l.source_fact_id = o.fact_id "
+        "where o.store_id = $1 and o.source_id = $2 "
+        "order by l.fact_id, o.occurrence_id",
+        store_id, source_id)
+    return notice_holds_of(rows, segment_ids)
+
+
+def notice_holds_of(rows, segment_ids: list[str] | None
+                    ) -> tuple[frozenset[int], frozenset[int]]:
+    """occurrence 행(fact_id·segment_id·other_support)에서 공지 보류 대상을 가른다. 순수 함수."""
+    scope = None if segment_ids is None else set(segment_ids)
+    all_notice: dict[int, bool] = {}
+    supported: dict[int, bool] = {}
+    for r in rows:
+        fid = int(r["fact_id"])
+        in_notice = scope is None or r["segment_id"] in scope
+        all_notice[fid] = all_notice.get(fid, True) and in_notice
+        supported[fid] = supported.get(fid, False) or bool(r["other_support"])
+    notice_only = frozenset(f for f, v in all_notice.items() if v)
+    return notice_only, frozenset(f for f in notice_only if not supported[f])
+
+
+async def _store_notice_holds(conn: asyncpg.Connection, store_id: int, source_id: int,
+                              fact_ids: Sequence[int], notice_fact_ids: frozenset[int]
+                              ) -> frozenset[int]:
+    """매장 전체 기준 공지 보류 사실 (최종 리뷰 I1).
+
+    공지 보류는 그 공지 자료의 실행에서만 걸면, 뒤에 같은 대상을 건드리는 다른 자료(레시피 업로드·
+    점주 답변)의 조립이 그 사실을 head 로 읽어 카드에 넣는다. 그래서 조립마다 매장 전체를 다시 본다.
+    다른 자료의 occurrence 와 점주 출처만 보고, 이 자료 몫은 이번 실행의 공지 범위로 가른다.
+    """
+    ids = sorted({int(f) for f in fact_ids})
+    if not ids:
+        return frozenset()
+    rows = await conn.fetch(
+        "select k.fact_id, "
+        "  exists (select 1 from fact_occurrences o "
+        "          join fact_revisions r on r.store_id = o.store_id "
+        "            and r.fact_revision_id = o.fact_revision_id "
+        "          where o.store_id = $1 and r.fact_id = k.fact_id and o.source_id <> $2 "
+        "            and o.disposition = 'REVIEW_PENDING' and o.reason = 'INTAKE_NOTICE'"
+        "  ) as notice_pending, "
+        "  exists (select 1 from fact_occurrences o "
+        "          join fact_revisions r on r.store_id = o.store_id "
+        "            and r.fact_revision_id = o.fact_revision_id "
+        "          where o.store_id = $1 and r.fact_id = k.fact_id and o.source_id <> $2 "
+        "            and (o.disposition = 'LINKED' or (o.disposition = 'REVIEW_PENDING' "
+        "                 and o.reason is distinct from 'INTAKE_NOTICE'))"
+        "  ) as other_occurrence, "
+        "  (exists (select 1 from fact_owner_answer_links a "
+        "           where a.store_id = $1 and a.fact_id = k.fact_id) "
+        "   or exists (select 1 from fact_revision_meta m "
+        "              where m.store_id = $1 and m.fact_id = k.fact_id "
+        "                and m.change_kind in ('OWNER_CORRECTION', 'OWNER_ANSWER'))"
+        "  ) as owner_support, "
+        "  exists (select 1 from source_fact_revision_links l "
+        "          join source_facts sf on sf.store_id = l.store_id "
+        "            and sf.fact_id = l.source_fact_id "
+        "          where l.store_id = $1 and l.fact_id = k.fact_id and sf.source_id = $2"
+        "  ) as in_current "
+        "from knowledge_facts k where k.store_id = $1 and k.fact_id = any($3::bigint[])",
+        store_id, source_id, ids)
+    return store_notice_holds_of(rows, notice_fact_ids)
+
+
+def store_notice_holds_of(rows, notice_fact_ids: frozenset[int]) -> frozenset[int]:
+    """매장 전체 보류 판정. 순수 함수.
+
+    보류 = 다른 자료에 INTAKE_NOTICE 검수 대기 occurrence 가 있고, 공지 아닌 받침이 하나도 없다.
+    공지 아닌 받침은 다른 자료의 LINKED·다른 사유 검수 대기 occurrence, 점주 출처(답변·정정),
+    이 자료의 공지 범위 밖 occurrence 다. 점주가 제외(EXCLUDED)한 occurrence 는 받침이 아니다.
+    """
+    held: set[int] = set()
+    for r in rows:
+        fid = int(r["fact_id"])
+        if not r["notice_pending"] or r["other_occurrence"] or r["owner_support"]:
+            continue
+        if r["in_current"] and fid not in notice_fact_ids:
+            continue  # 이 자료가 공지 밖에서 같은 사실을 말한다
+        held.add(fid)
+    return frozenset(held)
+
+
 def _ctx_for(base: tuple | None, source_id: int, stage: str,
              segment_id: str | None = None):
     """usage_base 가 없으면 계측하지 않는다 (기존 호출 경로 호환)."""
@@ -361,11 +530,15 @@ async def _mark_failed(
 
 async def _preprocess(
     pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
-, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None, cache=None
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """자료 유형별 전처리.
 
     반환값은 (추출기에 넣을 텍스트, 모델에 함께 보낼 파일들).
     두 번째 값은 영상 프레임이나 스캔 이미지처럼 텍스트로 못 담는 근거다.
+
+    `cache`(입구 분류의 IntakeCache)를 주면 훑기에서 받은 파일·읽은 결과를 다시 쓰고,
+    글만 낸 경우 구간 글(`cache.sections`)을 채운다.
     """
     from app.config import get_settings
     source_type = src["source_type"]
@@ -385,15 +558,18 @@ async def _preprocess(
 
     # 핸들러는 연결 대신 풀을 받는다. DB 호출마다 짧게 빌리고 다운로드·STT 는 연결 밖에서 한다
     return await handler(pool, store_id, src,
-                         usage_sink=usage_sink, usage_context=usage_context)
+                         usage_sink=usage_sink, usage_context=usage_context, cache=cache)
 
 
 async def _download(pool: asyncpg.Pool, store_id: int,
-                    src: asyncpg.Record) -> Path:
+                    src: asyncpg.Record, cache=None) -> Path:
     """원본을 받고, 프론트가 안 보낸 content_hash 를 채운다.
 
     내려받는 동안은 연결을 쥐지 않는다. 해시 기록만큼만 빌린다.
+    `cache.path` 가 있으면 다시 받지 않고, 받으면 거기에 둔다(입구 분류 훑기와 공유).
     """
+    if cache is not None and cache.path is not None:
+        return cache.path
     source_id = src["source_id"]
     if not src["file_url"]:
         raise RuntimeError("file_url 이 비어 있다. Storage 업로드가 끝난 뒤 호출하라")
@@ -405,12 +581,22 @@ async def _download(pool: asyncpg.Pool, store_id: int,
             updated = await repo.set_content_hash(conn, store_id, source_id, digest)
         if not updated:
             logger.warning("동일 해시의 자료가 이미 있다 source=%s", source_id)
+    if cache is not None:
+        cache.path = path
     return path
+
+
+async def _fetch(pool: asyncpg.Pool, store_id: int, src: asyncpg.Record, cache) -> Path:
+    """캐시가 있을 때만 캐시를 넘긴다(캐시 없는 기존 호출 경로·대역과 같은 호출)."""
+    if cache is None:
+        return await _download(pool, store_id, src)
+    return await _download(pool, store_id, src, cache=cache)
 
 
 async def _preprocess_video(
     pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
-, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None, cache=None
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """영상: 오디오 전사 + 프레임 추출. 프레임은 Storage 에 올리고 근거로 남긴다."""
     from app.config import get_settings
 
@@ -420,7 +606,7 @@ async def _preprocess_video(
     if row is None:
         raise RuntimeError("source_video 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(pool, store_id, src)
+    path = await _fetch(pool, store_id, src, cache)
     work = storage.workdir(source_id)
     meta = await video.probe(path)
 
@@ -473,7 +659,8 @@ async def _preprocess_video(
 
 async def _preprocess_kakao(
     pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
-, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None, cache=None
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """카톡: txt 를 파싱한다. LLM 을 쓰지 않는다."""
     source_id = src["source_id"]
     async with pool.acquire() as conn:
@@ -481,7 +668,7 @@ async def _preprocess_kakao(
     if kakao_row is None:
         raise RuntimeError("source_kakao 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(pool, store_id, src)
+    path = await _fetch(pool, store_id, src, cache)
 
     # 캡처 이미지는 파싱할 텍스트가 없다. 모델이 그림째 읽는다 (import_type SCREENSHOT)
     if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
@@ -508,12 +695,21 @@ async def _preprocess_kakao(
             period_start=parsed["period_start"], period_end=parsed["period_end"],
             parsed_text=parsed["parsed_text"],
         )
+    if cache is not None:
+        # 파싱은 모델 없는 순수 함수라 훑기와 같은 글이 나온다. 방 이름 등 메타데이터가
+        # 필요해 여기서 다시 파싱한다
+        from app.ingest.intake import grouping, registry
+        cache.chat_text = parsed["parsed_text"]
+        groups = grouping.group_chat(parsed["parsed_text"],
+                                     max_sections=get_settings().intake_max_sections)
+        cache.sections = grouping.sections_text(groups, registry.JOINER["CHAT"])
     return parsed["parsed_text"], [], []
 
 
 async def _preprocess_scan(
     pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
-, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None, cache=None
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     """문서·이미지: PDF 는 텍스트 레이어를 먼저 읽고, 없으면 모델에 그림째 넘긴다."""
     source_id = src["source_id"]
     async with pool.acquire() as conn:
@@ -521,7 +717,28 @@ async def _preprocess_scan(
     if row is None:
         raise RuntimeError("source_scan 행이 없다. /ingest/sources 로 등록했는지 확인하라")
 
-    path = await _download(pool, store_id, src)
+    path = await _fetch(pool, store_id, src, cache)
+
+    if path.suffix.lower() == ".docx":
+        from app.ingest.preprocess import docx
+        # UnsupportedDocument → process_source 가 FAILED 로 적는다
+        read = cache.docx if cache is not None and cache.docx is not None else docx.read_docx(path)
+        text = docx.to_text(read)
+        if read.skipped_images:
+            logger.info("docx 그림 %d개는 읽지 않았다 source=%s", read.skipped_images, source_id)
+        async with pool.acquire() as conn:
+            await repo.update_scan_result(conn, source_id, page_count=1,
+                                          ocr_text=text or None, ocr_engine="docx")
+        if not text:
+            raise docx.UnsupportedDocument("docx 에 읽을 글이 없다")
+        if cache is not None:
+            from app.config import get_settings as _settings
+            from app.ingest.intake import grouping, registry
+            cache.docx = read
+            groups = grouping.group_docx(read, max_sections=_settings().intake_max_sections,
+                                         min_chars=_settings().intake_min_section_chars)
+            cache.sections = grouping.sections_text(groups, registry.JOINER["DOC_TEXT"])
+        return text, [], []
 
     from app.config import get_settings as _gs
     if getattr(_gs(), "scan_extract_mode", "SINGLE") == "LAYOUT":
@@ -535,7 +752,13 @@ async def _preprocess_scan(
     if path.suffix.lower() == ".pdf":
         from app.config import get_settings
 
-        read = document.read_pdf(path)
+        if cache is not None:
+            # 입구 분류 훑기가 읽은 쪽별 결과를 다시 쓴다
+            if cache.pdf is None:
+                cache.pdf = document.pdf_pages(path)
+            read = document.pdf_read_of(cache.pdf)
+        else:
+            read = document.read_pdf(path)
         mode = getattr(get_settings(), "pdf_input_mode", "TEXT")
 
         # 글이 아예 없는 스캔본은 arm 과 무관하게 문서를 넘긴다. 안 넘기면 빈손이다
@@ -567,7 +790,12 @@ async def _preprocess_scan(
                     f"(위 글에 없는 내용이 {pages} 에 그림·표로 있다. "
                     f"첨부한 문서의 해당 쪽을 읽고 판단할 것)"), [path], []
 
-        # TEXT — 대조군. 글로 읽힌 것만 쓴다
+        # TEXT — 대조군. 글로 읽힌 것만 쓴다. 글만 냈으므로 구간 글을 남긴다
+        if cache is not None:
+            from app.ingest.intake import grouping, registry
+            groups = grouping.group_pdf_pages(
+                cache.pdf.blocks, max_sections=get_settings().intake_max_sections)
+            cache.sections = grouping.sections_text(groups, registry.JOINER["DOC_TEXT"])
         return read.text, [], []
 
     async with pool.acquire() as conn:
@@ -578,7 +806,8 @@ async def _preprocess_scan(
 
 async def _preprocess_voice(
     pool: asyncpg.Pool, store_id: int, src: asyncpg.Record
-, *, usage_sink=None, usage_context=None) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
+, *, usage_sink=None, usage_context=None, cache=None
+) -> tuple[str, list[Path], list[tuple[str, list[Path]]]]:
     from app.config import get_settings
     source_id = src["source_id"]
 
@@ -595,7 +824,7 @@ async def _preprocess_voice(
     if get_settings().ingest_mode == "mock":
         return MOCK_PLACEHOLDER, [], []
 
-    path = await _download(pool, store_id, src)
+    path = await _fetch(pool, store_id, src, cache)
     meta = await audio.probe(path)
     plain, stt_segments, model = await audio.transcribe_detailed(
         path, usage_sink=usage_sink, usage_context=usage_context)
@@ -961,6 +1190,7 @@ async def _persist_ledger(
             "locator_type": locator_type,
             "locator": locator,
             "assembly_state": "PENDING",
+            "ext": getattr(a, "ext", None),
             # 구역 사실만 사실 단위 버전을 갖는다. None 이면 자료 단위 기본값(extract_version)
             "extract_version": _layout_extract_version(s) if _is_layout_fact(a) else None,
         })
@@ -993,26 +1223,74 @@ class PreparedAssembly:
     held: tuple["HeldFact", ...]
     data_errors: dict[int, str]  # check_group 코드
     planning: "PlanningOutcome"
+    # 입구 분류가 보류한 지식 사실 — 이 자료에서 공지에만 나오고 다른 받침이 없다.
+    # 조립·재초안에 넣지 않는다
+    held_fact_ids: frozenset[int] = frozenset()
+    # 이 자료에서 공지에만 나온 지식 사실 전부(held_fact_ids 포함). 이 자료의 그 occurrence 는
+    # 어느 경로로도 LINKED 가 되지 않고 INTAKE_NOTICE 검수 대기로 남는다
+    notice_fact_ids: frozenset[int] = frozenset()
 
 
 async def _prepare_fact_assembly(pool, store_id: int, source_id: int, *, categories: list[str],
                                  glossary: list[dict], usage_sink, usage_base, raw_sink,
-                                 strict: bool) -> PreparedAssembly:
+                                 strict: bool,
+                                 held_fact_ids: Mapping[int, str] | None = None,
+                                 notice_fact_ids: frozenset[int] | None = None
+                                 ) -> PreparedAssembly:
     """조립 입력을 짧은 연결로 읽고 놓은 뒤, 연결 없이 사실 조립 모델을 부른다.
 
     DEFER 대상(수동·점주 초안·레거시 카드)과 REDRAFT 대상(공개 자동 사실 카드)은 입력을 읽지 않는다. 데이터 오류 묶음은
     모델에 보내지 않는다. 사용량 문맥은 배치마다 `plan{n}` 이다(배치가 하나여도 plan0).
+
+    `held_fact_ids`({지식 사실 ID: 사유}) 는 이 자료에서 공지에만 나오고 다른 받침이 없는
+    사실이다. 묶음에서 빼고(사실이 0개가 된 묶음은 버린다) HeldFact 로 held 에 더한다.
+    `notice_fact_ids` 는 공지에만 나온 사실 전부다(다른 받침이 있으면 묶음에 남는다). 그 사유는
+    저장 단계(_persist_fact_cards)가 대상 판정과 상관없이 단다.
+    여기에 매장 전체 기준 공지 보류(`_store_notice_holds`)를 더해 같은 방식으로 뺀다.
+    결과의 held_fact_ids 는 둘을 합친 것이라 저장 단계의 다시 읽기 비교도 같은 집합으로 거른다.
     """
     from app.ingest import card_plan, fact_assembly, fact_cards
 
+    hold = dict(held_fact_ids or {})
     async with pool.acquire() as conn:
         entity_ids = tuple(await fact_assembly.entities_for_source(conn, store_id, source_id))
         states = {e: await fact_cards.entity_card_state(conn, store_id, e) for e in entity_ids}
         # REDRAFT 는 모델 없이 공개판에 새 사실만 붙이므로(A-D4) 입력을 읽지 않는다
         loaded = await fact_assembly.load_entity_groups(
             conn, store_id, [e for e in entity_ids if states[e].mode not in ("DEFER", "REDRAFT")])
+        # 매장 전체 기준 공지 보류(최종 리뷰 I1) — 다른 자료의 공지에서만 나와 보류된 사실이
+        # 이 자료의 조립(NEW·REASSEMBLE)에 head 로 섞이지 않게 한다. REDRAFT 는 이 자료의
+        # 새 사실만 붙이므로 해당 없다
+        candidates = {f.fact_id for g in loaded.groups for f in g.facts} | {
+            h.fact_id for h in loaded.held}
+        store_held = await _store_notice_holds(
+            conn, store_id, source_id, sorted(candidates - set(hold)),
+            frozenset(notice_fact_ids or ()))
+    if store_held:
+        hold.update({f: fact_cards.REASON_INTAKE_NOTICE for f in store_held})
+        logger.info("매장 전체 공지 보류 source=%s 사실 %d건", source_id, len(store_held))
     # 여기부터 연결 없음 — 모델 호출 중 DB 연결을 쥐지 않는다
     groups = {g.entity_id: g for g in loaded.groups}
+    held = list(loaded.held)
+    if hold:
+        from app.ingest.fact_assembly import HeldFact
+
+        def as_held(rev: int, fid: int, eid: int) -> HeldFact:
+            return HeldFact(rev, fid, eid, hold[fid])
+
+        # 이미 빠진 판(규격 미해결 등)이 보류 사실이면 입구 보류 사유가 앞선다
+        held = [h if h.fact_id not in hold else as_held(h.fact_revision_id, h.fact_id, h.entity_id)
+                for h in held]
+        for e, g in list(groups.items()):
+            kept = tuple(f for f in g.facts if f.fact_id not in hold)
+            if len(kept) == len(g.facts):
+                continue
+            held.extend(as_held(f.fact_revision_id, f.fact_id, e)
+                        for f in g.facts if f.fact_id in hold)
+            if kept:
+                groups[e] = replace(g, facts=kept)
+            else:
+                del groups[e]  # 보류 사실뿐인 대상은 묶음을 버린다
     data_errors = {e: code for e, g in groups.items() if (code := card_plan.check_group(g))}
     planning = await fact_assembly.plan_entities(
         source_id=source_id,
@@ -1021,7 +1299,9 @@ async def _prepare_fact_assembly(pool, store_id: int, source_id: int, *, categor
         context_for=lambda i: _ctx_for(usage_base, source_id, "ASSEMBLE", segment_id=f"plan{i}"),
         raw_sink=raw_sink, strict=strict)
     return PreparedAssembly(entity_ids=entity_ids, states=states, groups=groups,
-                            held=tuple(loaded.held), data_errors=data_errors, planning=planning)
+                            held=tuple(held), data_errors=data_errors, planning=planning,
+                            held_fact_ids=frozenset(hold),
+                            notice_fact_ids=frozenset(notice_fact_ids or ()) | frozenset(hold))
 
 
 async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id: int,
@@ -1041,10 +1321,16 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
     planning = prepared.planning
     failed = set(planning.failed_entity_ids)
     created = 0
+    # 이 자료에서 공지에만 나온 사실 — 어느 쓰기 경로도 이 자료의 그 occurrence 를 잇지 않는다
+    notice = prepared.notice_fact_ids | prepared.held_fact_ids
     for e in prepared.entity_ids:
         now = await fact_cards.entity_card_state(conn, store_id, e)
         before = prepared.states[e]
         fact_ids = await fact_cards.entity_fact_ids(conn, store_id, e)
+        if prepared.held_fact_ids and fact_ids and set(fact_ids) <= prepared.held_fact_ids:
+            # 입구 분류가 보류한 사실만 가진 대상 — 판정과 상관없이 카드를 쓰지 않는다.
+            # 아래 보류 처리가 사유(INTAKE_NOTICE)를 단다
+            continue
 
         async def pending(reason: str) -> None:
             await fact_cards.mark_pending(conn, store_id, source_id=source_id,
@@ -1063,8 +1349,12 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
             if now.mode != before.mode:
                 await pending(fact_cards.REASON_CONCURRENT)
                 continue
+            # 보류 사실은 새 초안에 붙이지 않고, 공지 occurrence 는 공개판 고정 사실이어도
+            # 잇지 않는다. 보류가 없으면 기존 호출과 같다
+            exclude = ({"exclude_fact_ids": prepared.held_fact_ids, "notice_fact_ids": notice}
+                       if notice else {})
             written = await fact_cards.redraft_published_card(
-                conn, store_id, source_id=source_id, state=now)
+                conn, store_id, source_id=source_id, state=now, **exclude)
             if written.deferred_reason is None:
                 created += len(written.new_version_ids)
             continue
@@ -1078,8 +1368,9 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
         if group is None:
             continue  # 모든 사실이 보류 — 아래 보류 처리가 사유를 단다
         reloaded = await fact_assembly.load_entity_groups(conn, store_id, [e])
+        # 준비 때 보류 사실을 뺐으므로 다시 읽은 묶음에서도 빼고 비교한다
         current = {f.fact_revision_id for g in reloaded.groups if g.entity_id == e
-                   for f in g.facts}
+                   for f in g.facts if f.fact_id not in prepared.held_fact_ids}
         if current != {f.fact_revision_id for f in group.facts}:
             await pending(fact_cards.REASON_STALE_INPUT)
             continue
@@ -1094,7 +1385,7 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
         written = await fact_cards.write_entity_cards(
             conn, store_id, source_id=source_id, job_id=job_id,
             category_version=category_version, categories=categories, state=now,
-            group=group, result=result)
+            group=group, result=result, **({"notice_fact_ids": notice} if notice else {}))
         if written.deferred_reason:
             # 잠금 아래 다시 본 상태가 달라 쓰지 않았다(occurrence 사유는 쓰기 쪽이 달았다)
             logger.info("W3a 카드 쓰기 보류 source=%s 대상 %s %s",
@@ -1106,6 +1397,11 @@ async def _persist_fact_cards(conn: asyncpg.Connection, store_id: int, source_id
     for h in prepared.held:
         await fact_cards.mark_pending(conn, store_id, source_id=source_id,
                                       fact_ids=[h.fact_id], reason=h.reason)
+    # 공지 보류는 대상 판정(DEFER·REDRAFT 포함)과 상관없이 단다. 위 held 로 이미 단 것은 빼고
+    rest = sorted(notice - {h.fact_id for h in prepared.held})
+    if rest:
+        await fact_cards.mark_pending(conn, store_id, source_id=source_id, fact_ids=rest,
+                                      reason=fact_cards.REASON_INTAKE_NOTICE)
 
     from app.ingest import impact
     await impact.record_upload_proposals(conn, store_id, source_id, job_id=job_id)

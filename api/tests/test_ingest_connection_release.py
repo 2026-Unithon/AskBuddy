@@ -10,6 +10,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.ingest import extract, pipeline
+from app.ingest.intake import route as intake_route
+from app.ingest.intake.decide import Ranked, SectionDecision
+from app.ingest.intake.records import StoredRoute
+
+
+def _recipe_route() -> StoredRoute:
+    """Phase B 입구 분류 대역 — 카톡 글 자료 전체가 RECIPE 한 구간이다(분류 모델을 부르지 않는다)."""
+    r = (Ranked("RECIPE", 0.9),)
+    return StoredRoute(1, "CHAT", [SectionDecision("c1", "RECIPE", ("RECIPE",), False, False,
+                                                   False, None, r, r)],
+                       SectionDecision("source", "RECIPE", ("RECIPE",), False, False, False,
+                                       None, r, r))
 
 
 class _Tx:
@@ -93,7 +105,8 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
     set_status = AsyncMock()
     settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
                   video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID',
-                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1)
+                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1,
+                  intake_max_sections=12)
     get_source = get_source or AsyncMock(return_value=_row())
 
     with patch.object(pipeline, "get_pool", return_value=pool), \
@@ -115,7 +128,8 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
          patch.object(extract, "extract_facts", fake_extract_facts), \
          patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
          patch.object(pipeline, "_persist_ledger", fake_ledger), \
-         patch.object(pipeline, "_persist_fact_cards", persist):
+         patch.object(pipeline, "_persist_fact_cards", persist), \
+         patch.object(intake_route, "route_source", AsyncMock(return_value=_recipe_route())):
         await pipeline.process_source(1, 2, job_id=job_id)
     return seen, persist, set_status
 
@@ -232,7 +246,8 @@ async def _run_inner(pool, tmp_path, *, job_id):
 
     settings = NS(ingest_mode="real", video_segment_sec=60, frame_interval_sec=3,
                   video_max_frames_to_model=20, video_input_mode='frames', pdf_input_mode='HYBRID',
-                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1)
+                  extract_truncation_split_max_depth=0, extract_segment_concurrency=1,
+                  intake_max_sections=12)
 
     with patch("app.config.get_settings", return_value=settings), \
          patch.object(pipeline, "get_pool", return_value=pool), \
@@ -251,7 +266,8 @@ async def _run_inner(pool, tmp_path, *, job_id):
              "period_start": None, "period_end": None, "parsed_text": "대화"}), \
          patch.object(extract, "extract_facts", fake_extract_facts), \
          patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
-         patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})):
+         patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
+         patch.object(intake_route, "route_source", AsyncMock(return_value=_recipe_route())):
         await pipeline.process_source(1, 2, job_id=job_id)
 
 

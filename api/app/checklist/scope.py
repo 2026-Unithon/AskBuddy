@@ -19,12 +19,14 @@ class Shift:
 
 @dataclass(frozen=True)
 class ChecklistCard:
+    """체크 항목 = 카드 하나. lines 는 (제목,) 한 줄이라 line_no 는 늘 1이다 (B-D9)."""
     card_id: int
     card_version_id: int
     title: str
     lines: tuple[str, ...]
     common: bool                 # 근무조 연결이 하나도 없으면 공통 단위 (C9)
     shift_ids: frozenset[int]    # 활성 근무조만. 보관 근무조 연결은 빠져 있다
+    item_id: int | None = None   # 직원 카드 상세(/staff/recipes/{item_id}) 링크용. 로드맵에 없으면 None
 
 
 @dataclass(frozen=True)
@@ -47,7 +49,7 @@ def cards_in_scope(cards: list[ChecklistCard], scope: Scope) -> list[ChecklistCa
 
 
 def line_keys(cards: list[ChecklistCard]) -> set[tuple[int, int]]:
-    """한 카드가 여러 근무조에 있어도 줄은 한 번만 센다."""
+    """항목 = 카드당 (card_version_id, 1) 하나. 한 카드가 여러 근무조에 있어도 한 번만 센다."""
     return {(c.card_version_id, n) for c in cards for n in range(1, len(c.lines) + 1)}
 
 
@@ -56,6 +58,7 @@ def _card_view(card: ChecklistCard, checked: set[tuple[int, int]]) -> dict[str, 
         "card_id": card.card_id,
         "card_version_id": card.card_version_id,
         "title": card.title,
+        "item_id": card.item_id,
         "lines": [
             {"line_no": n, "text": text, "checked": (card.card_version_id, n) in checked}
             for n, text in enumerate(card.lines, start=1)

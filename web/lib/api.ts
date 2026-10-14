@@ -880,9 +880,21 @@ export async function deleteIngestSource(sourceId: number, token: string) {
   }>(`/ingest/sources/${sourceId}`, { method: "DELETE", headers: authHeader(token) });
 }
 
+/** 서버 ingest_job_sources.error_code — 입구 분류가 업무 자료 아님(NONE)으로 보고 추출하지 않은 자료. */
+export const INTAKE_NONE_CODE = "INTAKE_NONE";
+
 export async function retryIngestJob(jobId: number, token: string) {
   return fetchJson<{ job_id: number; status: IngestJobStatus }>(
     `/ingest/jobs/${jobId}/retry`,
+    { method: "POST", headers: authHeader(token) }
+  );
+}
+
+// 업무 자료 아님으로 끝난 자료 하나만 그래도 추출한다. 서버는 분류를 다시 부르지 않고
+// 그 자료만 다시 처리한다(같은 작업의 다른 자료는 그대로)
+export async function extractIngestSourceAnyway(jobId: number, sourceId: number, token: string) {
+  return fetchJson<{ job_id: number; status: IngestJobStatus; source_count: number }>(
+    `/ingest/jobs/${jobId}/sources/${sourceId}/extract-anyway`,
     { method: "POST", headers: authHeader(token) }
   );
 }
@@ -919,6 +931,8 @@ export async function computeContentHash(file: File): Promise<string | undefined
   }
 }
 
+export type IntakeHint = "RECIPE" | "PROCEDURE" | "POLICY" | "REFERENCE" | "NOTICE";
+
 export async function registerSource(
   params: {
     sourceType: IngestSourceType;
@@ -927,6 +941,7 @@ export async function registerSource(
     fileSize?: number;
     contentHash?: string;
     meta: Record<string, unknown>;
+    ownerHints?: IntakeHint[];
   },
   token?: string
 ) {
@@ -940,6 +955,7 @@ export async function registerSource(
       file_size: params.fileSize,
       content_hash: params.contentHash,
       meta: params.meta,
+      owner_hints: params.ownerHints ?? [],
     }),
   });
 }
@@ -1079,6 +1095,21 @@ export async function answerPending(questionId: number, answerText: string, toke
     headers: authHeader(token),
     body: JSON.stringify({ answer_text: answerText }),
     timeoutMs: CHAT_TIMEOUT_MS,
+  });
+}
+
+// 점주 답변에 파일을 붙인다. source_id 는 POST /ingest/sources 가 돌려준 값이다.
+// 이미 붙인 자료를 다시 붙이면 서버가 같은 작업을 돌려준다(created=false).
+export async function attachOwnerAnswerFile(questionId: number, sourceId: number, token: string) {
+  return fetchJson<{
+    question_id: number;
+    source_id: number;
+    job_id: number | null;
+    created: boolean;
+  }>(`/ingest/owner-answers/${questionId}/attachments`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ source_id: sourceId }),
   });
 }
 

@@ -187,6 +187,26 @@ class Settings(BaseSettings):
     # TEXT 는 그 수정 이전 동작이므로 실험에서 대조군으로만 명시 지정한다.
     pdf_input_mode: Literal["TEXT", "FILE", "BOTH", "HYBRID"] = "HYBRID"
 
+    # ── Phase B 입구 분류(B-D2·B-D3). 시작값이다 — 분류기 평가로 조정한다 ──
+    # 분류 모델. '공급자:모델' 형식(providers.parse_model_spec). 가장 싼 경량 모델로 바꾸는 것은 평가 뒤
+    intake_classifier_model: str = "gemini:gemini-3.6-flash"
+    intake_classifier_max_output_tokens: int = Field(default=2048, ge=256)
+    # 훑기 상한: 글 자료 표본 전체 글자 수, 이미지 장수·긴 변, 음성·영상 STT 창
+    intake_probe_text_chars: int = Field(default=3000, ge=200)
+    intake_probe_max_images: int = Field(default=6, ge=1)
+    intake_probe_image_px: int = Field(default=512, ge=128)
+    intake_probe_av_windows: int = Field(default=3, ge=1)
+    intake_probe_av_window_sec: int = Field(default=20, ge=5)
+    intake_probe_video_keyframes: int = Field(default=5, ge=1)
+    # 후보 구간 수 상한과 작은 구간 합치기 기준(글자)
+    intake_max_sections: int = Field(default=12, ge=1)
+    intake_min_section_chars: int = Field(default=80, ge=0)
+    # 결정 규칙(B-D3a·B-D3b·B-D6)
+    intake_owner_hint_boost: float = Field(default=0.15, ge=0, le=1)
+    intake_multi_label_min: float = Field(default=0.35, ge=0, le=1)
+    intake_ambiguous_top_min: float = Field(default=0.5, ge=0, le=1)
+    intake_ambiguous_gap_min: float = Field(default=0.15, ge=0, le=1)
+
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""

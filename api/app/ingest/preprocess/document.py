@@ -65,7 +65,16 @@ class PdfRead(NamedTuple):
     visual_pages: list[int]      # 1부터 세는 페이지 번호
 
 
-def read_pdf(path: Path) -> PdfRead:
+class PdfPages(NamedTuple):
+    """쪽별로 읽은 결과. blocks 는 글이 읽힌 쪽만 (쪽, "[N쪽]\n글") 로 담는다."""
+
+    blocks: list[tuple[int, str]]
+    page_count: int
+    visual_pages: list[int]      # 1부터 세는 페이지 번호
+    has_text: bool               # False 면 문서 전체를 그림으로 읽어야 한다
+
+
+def pdf_pages(path: Path) -> PdfPages:
     """페이지마다 따로 판단한다.
 
     예전에는 문서 전체 텍스트를 한 덩어리로 합쳐 판독률을 쟀다. 그래서 앞 몇
@@ -78,7 +87,7 @@ def read_pdf(path: Path) -> PdfRead:
     reader = pypdf.PdfReader(str(path))
     pages = list(reader.pages)
 
-    readable: list[str] = []
+    readable: list[tuple[int, str]] = []
     visual: list[int] = []
     for number, page in enumerate(pages, start=1):
         text = (page.extract_text() or "").strip()
@@ -91,16 +100,16 @@ def read_pdf(path: Path) -> PdfRead:
             visual.append(number)
             continue
         if text:
-            readable.append(f"[{number}쪽]\n{text}")
+            readable.append((number, f"[{number}쪽]\n{text}"))
 
-    body = "\n\n".join(readable).strip()
+    body = "\n\n".join(b for _, b in readable).strip()
     ratio = _readable_ratio(body) if body else 0.0
 
     # 읽힌 글이 너무 적거나 깨져 있으면 문서 전체를 그림으로 넘긴다
     if len(body) < MIN_TEXT_CHARS or ratio < MIN_READABLE_RATIO:
         logger.info("PDF 텍스트 레이어 부족 (%d자, 판독률 %.0f%%) — 전체를 이미지로 처리한다",
                     len(body), ratio * 100)
-        return PdfRead("", len(pages), list(range(1, len(pages) + 1)))
+        return PdfPages([], len(pages), list(range(1, len(pages) + 1)), False)
 
     if visual:
         logger.info("PDF 텍스트 %d자 / %d페이지 (판독률 %.0f%%), 그림으로 읽을 페이지 %s",
@@ -108,7 +117,19 @@ def read_pdf(path: Path) -> PdfRead:
     else:
         logger.info("PDF 텍스트 %d자 / %d페이지 (판독률 %.0f%%)",
                     len(body), len(pages), ratio * 100)
-    return PdfRead(body, len(pages), visual)
+    return PdfPages(readable, len(pages), visual, True)
+
+
+def read_pdf(path: Path) -> PdfRead:
+    """pdf_pages 결과를 한 덩어리 글로 합친다. 동작은 예전 read_pdf 와 같다."""
+    return pdf_read_of(pdf_pages(path))
+
+
+def pdf_read_of(pp: PdfPages) -> PdfRead:
+    """이미 읽은 쪽별 결과를 read_pdf 와 같은 한 덩어리 글로 합친다(입구 분류 캐시 재사용)."""
+    if not pp.has_text:
+        return PdfRead("", pp.page_count, pp.visual_pages)
+    return PdfRead("\n\n".join(b for _, b in pp.blocks).strip(), pp.page_count, pp.visual_pages)
 
 
 def is_image(path: Path) -> bool:

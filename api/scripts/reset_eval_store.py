@@ -75,6 +75,9 @@ STEPS = [
     ("knowledge_cards",    "delete from knowledge_cards where store_id=$1"),
     ("ingest_job_sources", "delete from ingest_job_sources where store_id=$1"),
     ("ingest_jobs",        "delete from ingest_jobs where store_id=$1"),
+    # Phase B 입구 판정·점주 답변 첨부는 자료를 가리킨다(FK). 판정은 재추출 때 다시 만든다
+    ("intake_route_decisions", "delete from intake_route_decisions where store_id=$1"),
+    ("owner_answer_attachments", "delete from owner_answer_attachments where store_id=$1"),
     ("source_video",       "delete from source_video where source_id in (select source_id from sources where store_id=$1)"),
     ("source_voice",       "delete from source_voice where source_id in (select source_id from sources where store_id=$1)"),
     ("source_kakao",       "delete from source_kakao where source_id in (select source_id from sources where store_id=$1)"),
@@ -124,7 +127,7 @@ async def main() -> int:
             # 전사문은 source_video·source_voice 에 있다. 프레임은 매 실행 다시 뽑으므로
             # 남겨두면 중복만 쌓인다
             keep = {"source_video", "source_voice", "source_kakao", "source_scan",
-                    "sources"}
+                    "owner_answer_attachments", "sources"}
             # source_facts 는 자료 소유지만 추출 산물이라 재추출 때 다시 만든다
             steps = [(n, q) for n, q in STEPS if n not in keep]
             print("  (--keep-sources: 자료·전사문 유지)")

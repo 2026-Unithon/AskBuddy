@@ -250,11 +250,12 @@ export function TodayScreen() {
                 ? data.groups
                 : data.groups.map((group) => ({ ...group, name: "전체" }))
             }
-            renderLine={(item, text) => (
+            renderLine={(item, text, href) => (
               <LiveLine
                 key={lineKey(item)}
                 item={{ ...item, business_date: data.business_date }}
                 text={text}
+                href={href}
                 disabled={submit.isPending || Boolean(yesterday)}
                 onDateError={dateError}
               />
@@ -339,29 +340,30 @@ function Groups({
   renderLine,
 }: {
   groups: ChecklistGroup[];
-  renderLine: (item: CheckItem, text: string) => React.ReactNode;
+  renderLine: (
+    item: CheckItem,
+    text: string,
+    href?: string,
+  ) => React.ReactNode;
 }) {
   return (
     <>
       {groups.map((group) => (
         <ListGroup key={group.shift_id ?? "common"} label={group.name}>
-          {group.cards.map((card) => (
-            <li key={card.card_version_id}>
-              <h3 className="mt-3 text-[16px] font-bold">{card.title}</h3>
-              <ul>
-                {card.lines.map((line) =>
-                  renderLine(
-                    {
-                      card_version_id: card.card_version_id,
-                      line_no: line.line_no,
-                      checked: line.checked,
-                    },
-                    line.text,
-                  ),
-                )}
-              </ul>
-            </li>
-          ))}
+          {group.cards.map((card) => {
+            // 항목 = 카드 하나. 줄은 늘 하나(line_no 1)이고 제목이 곧 항목 이름이다.
+            const line = card.lines[0];
+            if (!line) return null;
+            return renderLine(
+              {
+                card_version_id: card.card_version_id,
+                line_no: line.line_no,
+                checked: line.checked,
+              },
+              card.title,
+              card.item_id ? `/staff/recipes/${card.item_id}` : undefined,
+            );
+          })}
         </ListGroup>
       ))}
     </>
@@ -370,11 +372,13 @@ function Groups({
 function LiveLine({
   item,
   text,
+  href,
   disabled,
   onDateError,
 }: {
   item: CheckRequest;
   text: string;
+  href?: string;
   disabled: boolean;
   onDateError: (error: unknown, item: CheckRequest) => void;
 }) {
@@ -419,6 +423,7 @@ function LiveLine({
   return (
     <CheckRow
       label={text}
+      href={href}
       checked={item.checked}
       saving={change.isPending || disabled}
       error={

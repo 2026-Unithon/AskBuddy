@@ -10,7 +10,7 @@
 
 > 개정일: 2026-09-14 — 두 파이프라인 정반합 개정
 > 코드 대조 기준: 기존 런타임 분석 `0b8e1c4`, 추가 C0 계약·D18~D21 `65c2403`. C0 상세 결정·구현 계획과 재현 검토를 반영했으며 새 목표 런타임의 구현 완료를 뜻하지 않는다.
-> 운영 구성: Supabase + Railway API + Vercel Web
+> 운영 구성: Supabase + AWS EC2 API + Vercel Web
 > 문서 성격: 제품 결정, 데이터·API 계약, 화면 흐름, 구현 현황, 검증 및 배포 기준을 하나로 합친 최신 기준서
 
 이 문서는 과거 설계·계약·배포 문서와 현재 대화에서 확정된 결정을 합친 단일 MVP 정본이다.
@@ -80,7 +80,7 @@
 - 화면 및 Figma 설계 기준
 - API·DB 변경의 검토 기준
 - 통합·회귀·실기기 테스트 기준
-- Supabase, Railway, Vercel 운영 배포 기준
+- Supabase, AWS EC2, Vercel 운영 배포 기준
 
 ---
 
@@ -576,7 +576,7 @@ R은 원문·pending·occurrence·직원 전달을, W는 `ApplyOwnerAnswer(owner
 - iPhone/iPad는 지원 버전과 홈 화면 설치 필요성을 안내한다.
 - 만료된 구독의 Push endpoint가 404/410을 반환하면 해당 구독을 비활성화한다.
 
-VAPID private key는 Railway API 환경변수에만 둔다. 공개키는 API가 Web에 내려주므로 Vercel에 중복 저장하지 않는다.
+VAPID private key는 API 서버(EC2 env 파일)에만 둔다. 공개키는 API가 Web에 내려주므로 Vercel에 중복 저장하지 않는다.
 
 ---
 
@@ -836,7 +836,7 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 
 위 시간은 제품 목표이며 현재 충족했다고 주장하지 않는다. C0에서 입력 길이·질문 구성·측정 구간·허용 비용/지연 예산·비열등 마진을 실험 전에 기록한다. 예산이 미확정이면 구현/진단은 진행할 수 있지만 성능 승격을 승인하지 않는다.
 
-매장당 월 3,000원은 운영 변동비 상한이다. AI 전 단계·STT·임베딩·재시도와 Storage 저장/전송을 포함하며 Railway/Vercel/DB 고정비는 제외한다. 최초 등록비는 별도 캠페인으로 추적하고 예산환산 개월·운영비를 뺀 잔여 예산 보전 개월을 구분한다. 최초 등록 파일의 지속 보관/조회는 발생 월 운영비에 포함한다. 실제 사용량을 예측 확정하는 대신 첫 달/안정기 LOW/BASE/HIGH 시나리오와 메타데이터 계측으로 검증한다.
+매장당 월 3,000원은 운영 변동비 상한이다. AI 전 단계·STT·임베딩·재시도와 Storage 저장/전송을 포함하며 API 서버(AWS EC2)/Vercel/DB 고정비는 제외한다. 최초 등록비는 별도 캠페인으로 추적하고 예산환산 개월·운영비를 뺀 잔여 예산 보전 개월을 구분한다. 최초 등록 파일의 지속 보관/조회는 발생 월 운영비에 포함한다. 실제 사용량을 예측 확정하는 대신 첫 달/안정기 LOW/BASE/HIGH 시나리오와 메타데이터 계측으로 검증한다.
 
 [C0 원가 계측 계획](plan/C0_COST_MEASUREMENT_PLAN.md)의 CP-00A~C를 발행/공용 fixture 본구현보다 앞세운다. extraction_runs summary·공통 호출 원장·Storage 사용량·읽기의 누락→0 집계를 함께 보강한다. 미확정 비용은 UNKNOWN, 알려진 부분합만으로 상한 초과면 FAIL, 완전한 변동비 관측에서만 PASS다. 첫 달을 안정기 평균으로 상쇄하거나 등록 예산환산 개월을 실제 매출 회수기간으로 표시하지 않는다.
 
@@ -876,7 +876,7 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 ## 21-4. 비밀값
 
 - Supabase DB 비밀번호·service key, VAPID private key, AI key는 Git에 넣지 않는다.
-- Railway에는 API·DB·AI·VAPID 비밀값을 둔다.
+- API 서버(EC2 env 파일, Git 제외)에는 API·DB·AI·VAPID 비밀값을 둔다.
 - Vercel에는 `NEXT_PUBLIC_API_URL` 등 브라우저에 공개 가능한 값만 둔다.
 - 백업 파일은 커밋하거나 공유하지 않는다.
 

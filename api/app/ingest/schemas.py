@@ -52,6 +52,15 @@ class ExtractedAssertion(BaseModel):
     _check_flags: list[dict] = PrivateAttr(default_factory=list)
     # 서버가 채운다(LAYOUT 경로). 쪽·구역·좌표·행 — 원장 PAGE 위치로 그대로 남는다. schema 에 실리지 않는다
     _layout_locator: dict | None = PrivateAttr(default=None)
+    # 서버가 채운다(Phase B 4-3). 로직별 확장 칸 — 원장 source_facts.ext 에만. 요청 스키마에 실리지 않는다
+    _ext: dict | None = PrivateAttr(default=None)
+
+    @property
+    def ext(self) -> dict | None:
+        return self._ext
+
+    def set_ext(self, value: dict | None) -> None:
+        self._ext = value
 
     @property
     def raw_response_id(self) -> int | None:
@@ -150,7 +159,7 @@ class KakaoMeta(BaseModel):
 
 
 class ScanMeta(BaseModel):
-    doc_type: Literal["PDF", "JPG", "PNG"]
+    doc_type: Literal["PDF", "JPG", "PNG", "DOCX"]
     doc_category: Literal["MENU_BOARD", "MANUAL", "RECIPE", "ETC"] | None = None
     page_count: int = 1
 
@@ -167,6 +176,9 @@ class UploadUrlResponse(BaseModel):
     file_url: str        # 업로드 후 /ingest/sources 에 그대로 넘길 값
 
 
+HintLogic = Literal["RECIPE", "PROCEDURE", "POLICY", "REFERENCE", "NOTICE"]
+
+
 class CreateSourceRequest(BaseModel):
     """프론트가 Storage 에 올린 뒤 호출한다. 파일 바이너리를 보내지 않는다."""
     source_type: SourceType
@@ -177,6 +189,8 @@ class CreateSourceRequest(BaseModel):
     mime_type: str | None = Field(default=None, max_length=100)
     original_filename: str | None = Field(default=None, max_length=200)
     meta: VoiceMeta | VideoMeta | KakaoMeta | ScanMeta | None = None
+    # 점주가 고른 자료 종류 칩. 선택 사항이고 분류기의 참고일 뿐 강제하지 않는다.
+    owner_hints: list[HintLogic] = Field(default_factory=list, max_length=5)
 
     @field_validator("content_hash")
     @classmethod
@@ -345,3 +359,16 @@ class ReviewList(BaseModel):
     offset: int
     threshold: float           # D3 임계값을 0~100 으로 환산한 값
     cards: list[ReviewCard] = []
+
+
+class AttachOwnerAnswerRequest(BaseModel):
+    """점주 답변 화면에서 올린 자료를 질문에 붙인다."""
+
+    source_id: int
+
+
+class OwnerAnswerAttachment(BaseModel):
+    question_id: int
+    source_id: int
+    job_id: int | None = None   # 답변 처리 뒤 붙인 보충 작업. 아니면 None
+    created: bool               # False 면 이미 붙어 있던 첨부

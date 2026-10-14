@@ -36,6 +36,8 @@ REASON_EXISTING_CARD = "EXISTING_CARD"
 REASON_CONCURRENT = "CONCURRENT_ASSEMBLY"
 REASON_STALE_INPUT = "STALE_INPUT"
 REASON_ASSEMBLY_FAILED = "ASSEMBLY_FAILED"
+# 입구 분류가 공지(NOTICE)로 판정한 구간·자료의 사실 — 카드에 넣지 않고 검수 대기(Phase B)
+REASON_INTAKE_NOTICE = "INTAKE_NOTICE"
 
 # 카드 검수 표시 (knowledge_cards.needs_review_reason, varchar(50))
 REVIEW_NO_PROVENANCE = "NO_PROVENANCE"
@@ -515,10 +517,14 @@ async def _fix_version(conn: asyncpg.Connection, store_id: int, card_id: int, ve
 
 async def _link_placed(conn: asyncpg.Connection, store_id: int,
                        placement: Mapping[int, tuple[int, str]], *,
-                       source_id: int | None = None) -> set[int]:
+                       source_id: int | None = None,
+                       hold_source_id: int | None = None,
+                       hold_fact_ids: Sequence[int] = ()) -> set[int]:
     """placement = {fact_id: (card_id, block_id)}. 그 사실의 occurrence 를 LINKED 로 잇는다.
 
     source_id 가 있으면 그 자료의 occurrence 만. EXCLUDED 는 그대로. 이은 사실 id 를 돌려준다.
+    `hold_source_id`·`hold_fact_ids` 는 입구 분류 공지 보류(Phase B)다 — 그 자료의 그 사실
+    occurrence 는 잇지 않는다(다른 자료 occurrence 는 그대로 잇는다).
     """
     order = sorted(placement)
     if not order:
@@ -532,17 +538,25 @@ async def _link_placed(conn: asyncpg.Connection, store_id: int,
         "  and r.fact_revision_id = o.fact_revision_id "
         "  and r.fact_id = p.fact_id and o.disposition <> 'EXCLUDED' "
         "  and ($5::bigint is null or o.source_id = $5) "
+        "  and not ($6::bigint is not null and o.source_id = $6 "
+        "           and r.fact_id = any($7::bigint[])) "
         "returning r.fact_id",
         store_id, order, [placement[f][0] for f in order], [placement[f][1] for f in order],
-        source_id)
+        source_id, hold_source_id, sorted({int(f) for f in hold_fact_ids}))
     return {int(r["fact_id"]) for r in rows}
 
 
 async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_id: int,
                              job_id: int | None, category_version: int,
                              categories: Mapping[str, int], state: EntityCardState,
-                             group: EntityGroup, result: EntityPlanResult) -> WrittenEntity:
-    """대상 하나의 계획 카드를 쓴다. 호출자가 트랜잭션·매장 지식 잠금을 쥔다."""
+                             group: EntityGroup, result: EntityPlanResult,
+                             notice_fact_ids: frozenset[int] = frozenset()) -> WrittenEntity:
+    """대상 하나의 계획 카드를 쓴다. 호출자가 트랜잭션·매장 지식 잠금을 쥔다.
+
+    `notice_fact_ids` 는 이 자료에서 공지(NOTICE) 구간에만 나온 사실이다(Phase B). 다른 자료가
+    받치면 카드에 놓일 수 있지만, 이 자료의 그 occurrence 는 잇지 않는다 — 호출자가
+    INTAKE_NOTICE 검수 대기로 둔다.
+    """
     # DB 를 치기 전에 전제를 확인한다
     if not result.cards:
         raise ValueError("쓸 카드가 없다 — 카드 없는 계획은 검수 대기로 처리한다")
@@ -641,11 +655,17 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
             for r in b.fact_revision_ids:
                 placement.setdefault(facts[r].fact_id, (card_id, b.block_id))
 
-    # 처분 — 배치된 사실의 모든 자료·모든 판 occurrence 를 첫 자리로 잇는다. EXCLUDED 는 그대로
-    await _link_placed(conn, store_id, placement)
-    await repo.set_assembly_state(conn, store_id,
-                                  await _source_fact_ids(conn, store_id, placed_fact_ids),
-                                  "LINKED")
+    # 처분 — 배치된 사실의 모든 자료·모든 판 occurrence 를 첫 자리로 잇는다. EXCLUDED 는 그대로.
+    # 이 자료의 공지 보류 occurrence 는 잇지 않는다
+    held_here = sorted(set(notice_fact_ids) & set(placed_fact_ids))
+    await _link_placed(conn, store_id, placement,
+                       hold_source_id=source_id if held_here else None,
+                       hold_fact_ids=held_here)
+    ledger_ids = await _source_fact_ids(conn, store_id, placed_fact_ids)
+    if held_here:
+        held_ledger = set(await _source_fact_ids_of_source(conn, store_id, source_id, held_here))
+        ledger_ids = [i for i in ledger_ids if i not in held_ledger]
+    await repo.set_assembly_state(conn, store_id, ledger_ids, "LINKED")
     logger.info("W3a 카드 쓰기 store=%s 대상 %s mode=%s 카드 %d · 새 판 %d · 사실 %d",
                 store_id, group.entity_id, state.mode, len(card_ids), len(new_versions),
                 len(placed_fact_ids))
@@ -684,7 +704,9 @@ async def _source_fact_ids_of_source(conn: asyncpg.Connection, store_id: int, so
 
 
 async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, source_id: int,
-                                 state: EntityCardState) -> WrittenEntity:
+                                 state: EntityCardState,
+                                 exclude_fact_ids: frozenset[int] = frozenset(),
+                                 notice_fact_ids: frozenset[int] = frozenset()) -> WrittenEntity:
     """공개 카드의 지금 초안 판 + 이 자료의 새 사실로 새 초안을 만든다. 모델을 부르지 않는다(A-D4).
 
     기준 판은 카드의 초안 판이다. 초안이 곧 공개판이면 공개판이고, 승인 전 시스템 재초안이
@@ -693,6 +715,11 @@ async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, sou
     대상의 head 사실 전부로 다시 계획하지 않는다 — 점주가 뺀 사실(head 로 남는다)이 되살아나고
     공개 카드 배치가 흔들리기 때문이다. 호출자가 트랜잭션·매장 지식 잠금을 쥔다.
     공개판·review_status 는 그대로 두고(승인 전까지 공개판 유지) needs_review_reason 만 단다.
+
+    `exclude_fact_ids` 는 입구 분류가 보류한 사실(NOTICE 구간에만 나오고 다른 받침이 없다)이다.
+    새 사실에서 빼고, 보류 사유를 덮지 않게 defer 대상에서도 뺀다(사유는 호출자가 단다).
+    `notice_fact_ids` 는 이 자료에서 NOTICE 구간에만 나온 사실 전부다. 공개판에 이미 고정된
+    사실이어도 이 자료의 그 occurrence 는 잇지 않는다(호출자가 INTAKE_NOTICE 로 둔다).
     """
     from app.cards import fact_edit_repo  # app.cards ↔ app.ingest 순환 import 를 피한다
     from app.ingest import fact_assembly
@@ -739,6 +766,8 @@ async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, sou
     new_fids = await new_fact_ids_for_source(conn, store_id, source_id=source_id,
                                              entity_id=entity_id,
                                              pinned_fact_ids=pinned_fact_ids)
+    held_ids |= set(exclude_fact_ids)
+    new_fids = [f for f in new_fids if f not in exclude_fact_ids]
 
     layout = [(kind, tuple(p.fact.fact_revision_id for p in base.pinned
                            if p.block_id == block_id))
@@ -762,7 +791,8 @@ async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, sou
         # 붙일 새 사실이 없다 — 새 판 없이 이 자료의 occurrence 를 공개 카드 블록으로 잇는다
         placement: dict[int, tuple[int, str]] = {}
         for p in base.pinned:
-            placement.setdefault(p.fact.fact_id, (card_id, p.block_id))
+            if p.fact.fact_id not in notice_fact_ids:
+                placement.setdefault(p.fact.fact_id, (card_id, p.block_id))
         linked = await _link_placed(conn, store_id, placement, source_id=source_id)
         await repo.set_assembly_state(
             conn, store_id,
@@ -810,7 +840,8 @@ async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, sou
     placement = {}
     for b in card.blocks:
         for r in b.fact_revision_ids:
-            placement.setdefault(facts[r].fact_id, (card_id, b.block_id))
+            if facts[r].fact_id not in notice_fact_ids:  # 공지 보류 occurrence 는 잇지 않는다
+                placement.setdefault(facts[r].fact_id, (card_id, b.block_id))
     linked = await _link_placed(conn, store_id, placement, source_id=source_id)
     await repo.set_assembly_state(
         conn, store_id,

@@ -229,29 +229,84 @@ async def reset_retryable_sources(
     )
     rows = [*rows, *partial_rows]
     if rows:
-        await conn.execute(
-            """
-            update ingest_jobs
-            set status = 'QUEUED', error_code = null, error_message = null,
-                success_source_count = (
-                  select count(*) from ingest_job_sources
-                  where store_id = $1 and job_id = $2 and status = 'SUCCEEDED'
-                ),
-                failed_source_count = (
-                  select count(*) from ingest_job_sources
-                  where store_id = $1 and job_id = $2 and status = 'FAILED'
-                ),
-                card_count = (
-                  select coalesce(sum(card_count), 0) from ingest_job_sources
-                  where store_id = $1 and job_id = $2
-                ),
-                completed_at = null, updated_at = now()
-            where store_id = $1 and job_id = $2
-            """,
-            store_id,
-            job_id,
-        )
+        await _requeue_job(conn, store_id, job_id)
     return len(rows)
+
+
+async def _requeue_job(conn: asyncpg.Connection, store_id: int, job_id: int) -> None:
+    """작업을 다시 대기(QUEUED)로 두고 자료 행에서 건수를 다시 센다."""
+    await conn.execute(
+        """
+        update ingest_jobs
+        set status = 'QUEUED', error_code = null, error_message = null,
+            success_source_count = (
+              select count(*) from ingest_job_sources
+              where store_id = $1 and job_id = $2 and status = 'SUCCEEDED'
+            ),
+            failed_source_count = (
+              select count(*) from ingest_job_sources
+              where store_id = $1 and job_id = $2 and status = 'FAILED'
+            ),
+            card_count = (
+              select coalesce(sum(card_count), 0) from ingest_job_sources
+              where store_id = $1 and job_id = $2
+            ),
+            completed_at = null, updated_at = now()
+        where store_id = $1 and job_id = $2
+        """,
+        store_id,
+        job_id,
+    )
+
+
+async def lock_job_source(conn: asyncpg.Connection, store_id: int, job_id: int,
+                          source_id: int):
+    """작업과 그 작업의 자료 행 하나를 잠그고 판단에 쓸 상태를 돌려준다. 없으면 None."""
+    return await conn.fetchrow(
+        """
+        select j.status as job_status, js.status, js.error_code, s.source_availability
+        from ingest_jobs j
+        join ingest_job_sources js on js.store_id = j.store_id and js.job_id = j.job_id
+        join sources s on s.store_id = js.store_id and s.source_id = js.source_id
+        where j.store_id = $1 and j.job_id = $2 and js.source_id = $3
+        for update of j, js
+        """,
+        store_id,
+        job_id,
+        source_id,
+    )
+
+
+async def requeue_intake_none_source(conn: asyncpg.Connection, store_id: int, job_id: int,
+                                     source_id: int) -> bool:
+    """업무 자료 아님(INTAKE_NONE)으로 끝난 자료 하나만 다시 대기열에 넣는다(후속 1).
+
+    같은 작업의 다른 무결과 자료는 건드리지 않는다(유료 재추출 방지). 무결과라 조립 대기
+    복구본은 비운다 — reset_retryable_sources 의 무결과 재실행과 같다. 대상이 아니면 False.
+    """
+    got = await conn.fetchval(
+        """
+        update ingest_job_sources
+        set status = 'QUEUED', error_code = null, error_message = null,
+            card_count = 0, segments_total = null, segments_failed = null,
+            failed_segment_ids = null, recovery_state = null,
+            started_at = null, completed_at = null, updated_at = now()
+        where store_id = $1 and job_id = $2 and source_id = $3
+          and status = 'NO_RESULT' and error_code = 'INTAKE_NONE'
+          and not exists (
+            select 1 from sources s
+            where s.store_id = $1 and s.source_id = ingest_job_sources.source_id
+              and s.source_availability = 'DELETED')
+        returning source_id
+        """,
+        store_id,
+        job_id,
+        source_id,
+    )
+    if got is None:
+        return False
+    await _requeue_job(conn, store_id, job_id)
+    return True
 
 
 async def source_in_progress(conn: asyncpg.Connection, store_id: int, source_id: int) -> bool:

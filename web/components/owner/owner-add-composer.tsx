@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Caption, Composer, ComposerTool, ErrorInline, Icon } from "@/components/kit";
-import { apiErrorMessage } from "@/lib/api";
+import { IntakeHintChips } from "@/components/owner/intake-hint-chips";
+import { apiErrorMessage, type IntakeHint } from "@/lib/api";
 import {
   acceptAttribute,
   sourceTypeFor,
@@ -30,6 +31,8 @@ export function OwnerAddComposer({ placeholder = "새로 알려줄 것 넣기" }
   const [text, setText] = useState("");
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [pickErrors, setPickErrors] = useState<string[]>([]);
+  // 점주 선택 칩: 화면 입력일 뿐이라 이 컴포넌트가 들고, 제출이 성공하면 비운다.
+  const [hints, setHints] = useState<IntakeHint[]>([]);
   const [failures, setFailures] = useState<SourceFailure[]>([]);
   // 같은 입력을 다시 보내면 같은 작업으로 묶이게 한다. 입력이 바뀌면 새 키.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
@@ -38,13 +41,14 @@ export function OwnerAddComposer({ placeholder = "새로 알려줄 것 넣기" }
 
   const textEnabled = supportsText(caps.data);
   const submit = useMutation({
-    mutationFn: () => submitIngest({ files, text: textEnabled ? text : "", token: state.token!, idempotencyKey }),
+    mutationFn: () => submitIngest({ files, text: textEnabled ? text : "", token: state.token!, idempotencyKey, hints }),
     onSuccess: async (result) => {
       setFailures(result.failures);
       if (result.jobId === null) return;
       await client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
       setText("");
       setFiles([]);
+      setHints([]);
       setIdempotencyKey(crypto.randomUUID());
       router.push(`/owner/jobs/${result.jobId}`);
     },
@@ -125,6 +129,14 @@ export function OwnerAddComposer({ placeholder = "새로 알려줄 것 넣기" }
             </ul>
           ) : undefined
         }
+      />
+      <IntakeHintChips
+        value={hints}
+        onChange={(next) => {
+          setHints(next);
+          setIdempotencyKey(crypto.randomUUID());
+        }}
+        disabled={submit.isPending}
       />
       {hasText && !textEnabled && caps.isSuccess && (
         <Caption>글로 넣기는 곧 열려요. 지금은 사진이나 파일로 넣어 주세요.</Caption>

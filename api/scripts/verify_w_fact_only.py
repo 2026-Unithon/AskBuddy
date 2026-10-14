@@ -36,6 +36,7 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
+from _intake_stub import intake_context
 from _fact_card_fixture import (_mock_settings, _vectors, assertion, edit_fact_value, publish_card,
                                 seed_fact_card)
 from app.cards.owner_answer_worker import process_next_owner_event
@@ -312,7 +313,9 @@ async def _owner_answer(pool, db, w, *, key: str, question: str, answer: str) ->
 
 async def _process(pool, w, *assertions) -> str | None:
     settings = _mock_settings()
-    with patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
+    # 입구 분류(Phase B)는 합성 대역(분류 RECIPE) — 유료 호출 없음
+    with intake_context(), \
+            patch("app.ingest.extract.extract_facts", _extracting(*assertions)), \
             patch.object(extract, "get_settings", lambda: settings), \
             patch("app.reg.index_preparation.recorded_embeddings", _vectors):
         return await process_next_owner_event(pool, store_id=w.store)
@@ -632,6 +635,11 @@ async def _scenario_a(pool, db, answer_card: tuple[NS, int, int]) -> None:
     wipe_tables = _wipe_tables(sql)
     w, card_id, version_id = answer_card
     await _wipe_fixture(db, w, card_id, version_id)
+    # Phase B 표(입구 판정·답변 첨부)는 이 1회 삭제 migration 뒤에 생긴다(20261011100000). 실제
+    # 적용 순서에서는 삭제 시점에 비어 있으므로, 리허설 전에 비워 그 순서를 재현한다 — 비우지
+    # 않으면 sources 삭제가 그 표의 FK 에 걸린다
+    await db.execute("delete from owner_answer_attachments")
+    await db.execute("delete from intake_route_decisions")
 
     before_keep = await _counts(db, KEEP_TABLES)
     before_wipe = await _counts(db, wipe_tables)

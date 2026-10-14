@@ -127,12 +127,24 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             patch(f"{OT}.owner_answer_source", AsyncMock(return_value=SOURCE)),
         ]
         self.mocks = [p.start() for p in self.patches]
+        # Phase B Task 11: 입구 분류·첨부 조회는 여기서 보지 않는다. 첨부 없음·판정 대역으로 둔다
+        # (판정 자체는 test_wb_owner_answer_intake 가 본다). self.mocks 순서는 바꾸지 않는다
+        self.intake_patches = [
+            patch(f"{MOD}.intake_records.attachments_for_question", AsyncMock(return_value=[])),
+            patch(f"{MOD}.intake_route.route_owner_answer",
+                  AsyncMock(side_effect=lambda pool, store_id, **kw: {
+                      kw["answer_source_id"]: object()})),
+        ]
+        for p in self.intake_patches:
+            p.start()
+        self.patches += self.intake_patches
         (self.claim, self.heartbeat, _, self.load, self.insert, self.linked_target,
          self.set_proposal, self.flag, _, self.card_text, self.resolve, self.ensure,
          self.ingest, self.cards, _, self.source) = self.mocks
 
     def tearDown(self):
-        for p in self.patches:
+        # 역순으로 푼다 — 같은 속성을 덧씌운 하위 테스트(test_wb_owner_answer_intake)가 원래 값을 되돌리게
+        for p in reversed(self.patches):
             p.stop()
 
     async def _run(self):
@@ -663,6 +675,11 @@ class LinkedPreconditionTests(unittest.IsolatedAsyncioTestCase):
             patch(f"{OT}.ensure_owner_answer_source", AsyncMock(return_value=(SOURCE, "DONE"))),
             patch(f"{OT}.answer_cards", self.cards),
             patch(f"{OT}.answer_fact_count", AsyncMock(return_value=1)),
+            # Phase B Task 11: 첨부 없음·판정 대역(답변 자료가 DONE 이라 판정은 쓰이지 않는다)
+            patch(f"{MOD}.intake_records.attachments_for_question", AsyncMock(return_value=[])),
+            patch(f"{MOD}.intake_route.route_owner_answer",
+                  AsyncMock(side_effect=lambda pool, store_id, **kw: {
+                      kw["answer_source_id"]: object()})),
         ]
         for p in self.patches:
             p.start()

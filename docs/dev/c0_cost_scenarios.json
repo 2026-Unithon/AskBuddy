@@ -3,7 +3,7 @@
   "status": "PLANNING_ASSUMPTIONS_NOT_MEASURED_COST",
   "operating_variable_budget_krw": "3000",
   "include_costs": ["AI_ALL_STAGES_AND_RETRIES", "STORAGE_BYTES_TIME", "STORAGE_TRANSFER"],
-  "exclude_from_operating_budget": ["INITIAL_REGISTRATION_TRACKED_SEPARATELY", "RAILWAY_FIXED", "VERCEL_FIXED", "DB_FIXED", "EVALUATION_AND_DEVELOPMENT"],
+  "exclude_from_operating_budget": ["INITIAL_REGISTRATION_TRACKED_SEPARATELY", "API_SERVER_FIXED", "VERCEL_FIXED", "DB_FIXED", "EVALUATION_AND_DEVELOPMENT"],
   "source": "User supplied ranges; scenario points selected for planning, not observed customer averages",
   "calendar_days_assumption": 30,
   "scenarios": [

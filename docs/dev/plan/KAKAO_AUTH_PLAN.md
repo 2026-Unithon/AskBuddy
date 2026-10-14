@@ -91,7 +91,7 @@ Web
   - §9-1 진입 우선순위에서 역할 선택 화면(`/role`) 선행을 지우고 "로그인 → (새 계정) 역할 선택 → 역할별 첫 화면"으로
   - A03 `직원 합류 | 초대 링크 → 가입 → 점주 승인 대기 | 필수`
   - O08 `알림·직원 관리 | Push 설정, 앱 내 알림 / 초대 링크·합류 승인·직원 목록·내보내기(/owner/members) | 필수`
-- [ ] **Step 3: §21-1 운영 구조 표의 API 행을** `API | AWS EC2 + Caddy | api | https://api.askbuddy.kr`로, Web 주소를 `https://askbuddy.kr`로 고친다(현재 Railway·vercel.app으로 남아 있음).
+- [ ] **Step 3: §21-1 운영 구조 표의 API 행을** `API | AWS EC2 + Caddy | api | https://api.askbuddy.kr`로, Web 주소를 `https://askbuddy.kr`로 고친다(과거 호스팅 주소가 남아 있음).
 - [ ] **Step 4: §18-1에 새 API 목록**(설계 §4-1·§4-4·§4-5의 경로 그대로), **§19-1에** "대기자는 `store_join_requests`에만 존재, 내보낸 직원은 `get_store_id`에서 403, refresh 토큰은 SHA-256만 저장·회전·재사용 시 family 폐기" 세 줄.
 - [ ] **Step 5: §28 문구 사전에 오류 코드 문구 추가**
 

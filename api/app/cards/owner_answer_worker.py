@@ -13,6 +13,8 @@ R 이 남긴 `OWNER_ANSWER_SUBMITTED` 사건을 claim 해서 점주 답변을 �
        finish 가 실패하면 발행까지 통째로 롤백돼 R 이 모르는 공개판이 남지 않는다.
      - 이미 공개된 같은 사실에만 이어짐 → LINKED(현재 서빙 가능할 때만, 아니면 REVIEW)
   4. 실패: 별도 트랜잭션에서 FAILED 를 보고한다. 재시도 여부는 ERROR_TABLE 이 정한다.
+  Phase B Task 11: 답변 글 + 질문 첨부를 한 묶음으로 1회 분류한다(`route_owner_answer`).
+  첨부는 보통 업로드 작업으로 만들고, R 완료 보고가 끝난 뒤에만 시작한다(FAILED 면 시작 안 함).
 
 claim 뒤에는 연결을 오래 잡지 않는다. 추출·조립·색인 준비 같은 긴 단계 사이에
 heartbeat 를 부르고, lease 를 잃었으면 아무것도 보고하지 않고 멈춘다(다른 worker 몫).
@@ -33,7 +35,10 @@ from app.contracts.errors import ERROR_TABLE, ErrorDetail
 from app.contracts.publication import ApplyOwnerAnswerResult
 from app.contracts.usage import UsageContext
 from app.errors import ApiError
-from app.ingest import owner_text
+from app.ingest import job_repository, job_worker, owner_text
+from app.ingest.intake import records as intake_records
+from app.ingest.intake import route as intake_route
+from app.ingest.intake.decide import IntakeClassificationError
 from app.ingest.fact_cards import REVIEW_NEW_FACTS
 from app.ingest.owner_text import AnswerCard
 from app.learn.knowledge_apply import resolve_owner_answer_category
@@ -49,6 +54,9 @@ from app.publish.content import current_manifest
 from app.usage.gemini import UsageStartError
 
 logger = logging.getLogger(__name__)
+
+# 점주 답변 첨부 작업. 참조를 쥐어 두지 않으면 끝나기 전에 GC 될 수 있다
+_BACKGROUND: set[asyncio.Task] = set()
 
 # 한 주기에 한 매장에서 처리할 사건 상한. 한 매장이 주기를 독점하지 않게 한다
 MAX_EVENTS_PER_STORE = 50
@@ -264,6 +272,8 @@ def _error_code(exc: BaseException) -> tuple[str, str]:
         return exc.code, exc.message
     if isinstance(exc, ApiError) and exc.code in ERROR_TABLE:
         return exc.code, "지식 반영 결과를 확정하지 못했습니다."
+    if isinstance(exc, IntakeClassificationError):
+        return "MODEL_UNAVAILABLE", "자료 분류에 실패했습니다."
     if isinstance(exc, UsageStartError):
         return "USAGE_UNAVAILABLE", "사용량 기록을 시작하지 못했습니다."
     if isinstance(exc, (asyncpg.PostgresError, OSError, asyncio.TimeoutError)):
@@ -574,7 +584,83 @@ async def _publish_new(pool, *, store_id: int, event_id: int, token: str,
     raise _Failed(code, "검색 색인을 준비하지 못했습니다.")
 
 
-async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: int) -> str:
+async def _start_attachment_job(pool, *, store_id: int, owner_user_id: int, answer_id: int,
+                                source_ids: list[int]) -> int | None:
+    """점주 답변 첨부를 보통 업로드 작업으로 만든다(계획 P8). 시작은 하지 않는다.
+
+    답변당 멱등 키 하나다 — 이미 있으면 그 작업을 돌려준다. 처리 대상은 UPLOADED·FAILED
+    첨부뿐이고, 없으면 None 이다. 작업은 저장된 판정을 재사용한다(분류 재호출 없음).
+    """
+    key = f"owner-answer:{answer_id}:attachments"
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # 업로드 작업 생성과 같은 잠금 — 같은 키의 동시 생성을 하나로 줄인다
+            await conn.execute("select pg_advisory_xact_lock(hashtext($1))",
+                               f"askbuddy:ingest:{store_id}:{key}")
+            existing = await job_repository.find_by_idempotency(conn, store_id, key)
+            if existing is not None:
+                return int(existing["job_id"])
+            rows = await job_repository.source_rows(conn, store_id, list(source_ids))
+            targets = [int(r["source_id"]) for r in rows
+                       if r["status"] in ("UPLOADED", "FAILED")
+                       and r["source_availability"] != "DELETED"]
+            # 답변 처리 중 붙은 보충 첨부가 이미 작업을 받았으면 뺀다(최종 리뷰 I2 — 이중 처리 방지)
+            targets = [s for s in targets
+                       if not await job_repository.source_in_progress(conn, store_id, s)]
+            if not targets:
+                return None
+            category_version = await conn.fetchval(
+                "select category_version from stores where store_id = $1", store_id)
+            if category_version is None:
+                raise _Failed("NOT_FOUND", "매장을 찾을 수 없습니다.")
+            job = await job_repository.create_job(
+                conn, store_id, owner_user_id, title="점주 답변 첨부", source_ids=targets,
+                category_version=int(category_version), prompt_version="extract-cards-v1",
+                settings={"ingest_mode": get_settings().ingest_mode}, idempotency_key=key)
+            return int(job["job_id"])
+
+
+def _spawn_job(store_id: int, job_id: int) -> None:
+    """첨부 작업을 배경에서 돌린다. R 완료 보고 뒤에만 부른다."""
+    task = asyncio.create_task(job_worker.process_ingest_job(store_id, job_id))
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+@dataclass
+class _AttachmentFollowUp:
+    """보고 뒤 첨부 작업에 필요한 값. `_apply` 가 문맥을 읽은 뒤 채운다."""
+    owner_user_id: int | None = None
+    question_id: int | None = None
+
+
+async def _follow_up_attachments(pool, *, store_id: int, answer_id: int,
+                                 follow: _AttachmentFollowUp) -> None:
+    """R 완료 보고 뒤(FAILED 아님) 첨부 작업을 만들고 시작한다(계획 P8).
+
+    어느 결과 분기든 같다 — 앞선 시도가 만든 작업은 멱등 키로 찾아 시작한다.
+    여기서 실패해도 이미 보고한 답변 결과는 바뀌지 않는다. 경고만 남긴다.
+    """
+    if follow.owner_user_id is None or follow.question_id is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            attachments = await intake_records.attachments_for_question(
+                conn, store_id, follow.question_id)
+        if not attachments:
+            return
+        job_id = await _start_attachment_job(pool, store_id=store_id,
+                                             owner_user_id=follow.owner_user_id,
+                                             answer_id=answer_id, source_ids=list(attachments))
+        if job_id is not None:
+            _spawn_job(store_id, job_id)
+    except Exception as exc:
+        logger.warning("점주 답변 첨부 작업 시작 실패 store=%s answer=%s type=%s",
+                       store_id, answer_id, type(exc).__name__)
+
+
+async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: int,
+                 follow: _AttachmentFollowUp | None = None) -> str:
     async with pool.acquire() as conn:
         context = await _load_context(conn, store_id=store_id, owner_answer_id=answer_id)
     source, owner, proposal = context["source"], context["owner"], context["proposal"]
@@ -582,6 +668,9 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
         raise _Failed("NOT_FOUND", "점주 답변을 찾을 수 없습니다.")
     if owner is None:
         raise _Failed("NOT_FOUND", "매장 점주 멤버십을 찾을 수 없습니다.")
+    if follow is not None:
+        follow.owner_user_id = int(owner["user_id"])
+        follow.question_id = int(source["question_id"])
 
     if proposal is not None and proposal["status"] != "ANALYZED":
         # 앞선 시도가 결론까지 남겼다. 수집을 다시 하지 않고 보고만 한다
@@ -598,13 +687,26 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
                 source_id, status = await owner_text.ensure_owner_answer_source(
                     conn, store_id, owner_answer_id=answer_id,
                     actor_id=int(owner["user_id"]), question=question, answer=answer)
+        async with pool.acquire() as conn:
+            attachments = await intake_records.attachments_for_question(
+                conn, store_id, int(source["question_id"]))
+        # 답변 글 + 첨부 한 묶음 분류(B-D1). 모두 판정돼 있으면 분류 0회다
+        from app.usage import DbUsageSink
+        run_tag = int(time.time() * 1000)
+        routes = await intake_route.route_owner_answer(
+            pool, store_id, owner_answer_id=answer_id, answer_source_id=source_id,
+            question=question, answer=answer, attachment_source_ids=list(attachments),
+            usage_sink=DbUsageSink(pool, resilient=True),
+            usage_base=(store_id, None, "OPERATING", "PRODUCT", None, run_tag))
         if status != "DONE":
             # 추출·조립은 모델을 부른다. ingest_owner_text 는 연결을 짧게만 빌린다
             await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
             await owner_text.ingest_owner_text(
                 pool, store_id=store_id, source_id=source_id, question=question,
-                answer=answer, run_tag=int(time.time() * 1000))
+                answer=answer, run_tag=run_tag, route=routes[source_id])
             await _heartbeat(pool, store_id=store_id, event_id=event_id, token=token)
+        # 결과 판정은 답변 글 자료만 본다. 첨부는 보통 업로드 작업으로 넘긴다(P8) —
+        # R 완료 보고가 끝난 뒤 process_next_owner_event 가 만들고 시작한다
         async with pool.acquire() as conn:
             async with conn.transaction():
                 outcome = await _read_outcome(conn, store_id=store_id, source_id=source_id)
@@ -636,9 +738,10 @@ async def process_next_owner_event(pool, *, store_id: int) -> str | None:
     event_id = int(claim["event_id"])
     token = claim["claim_token"]
     answer_id = int(claim["owner_answer_id"])
+    follow = _AttachmentFollowUp()
     try:
-        return await _apply(pool, store_id=store_id, event_id=event_id, token=token,
-                            answer_id=answer_id)
+        status = await _apply(pool, store_id=store_id, event_id=event_id, token=token,
+                              answer_id=answer_id, follow=follow)
     except _LeaseLost:
         logger.warning("점주 답변 lease 상실 store=%s event=%s", store_id, event_id)
         return "FAILED"
@@ -648,6 +751,11 @@ async def process_next_owner_event(pool, *, store_id: int) -> str | None:
                        store_id, event_id, code, type(exc).__name__)
         return await _finish_failed(pool, store_id=store_id, event_id=event_id,
                                     token=token, code=code, message=message)
+    # R 완료 보고까지 끝났다. 이제 첨부 작업을 만들고 시작한다(FAILED 면 하지 않는다)
+    if status != "FAILED":
+        await _follow_up_attachments(pool, store_id=store_id, answer_id=answer_id,
+                                     follow=follow)
+    return status
 
 
 async def _index_ready(pool, *, store_id: int, warned: dict[int, str]) -> bool:

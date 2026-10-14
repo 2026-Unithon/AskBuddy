@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from pydantic import ValidationError
 
-from app.checklist.calendar import ShiftWindow, business_date, pick_current_shift, split_lines
+from app.checklist.calendar import ShiftWindow, business_date, pick_current_shift
 from app.checklist import repository as repo
 from app.checklist.router import Member, date_policy, month_range, records_access, require_owner_member
 from app.checklist.schemas import CardLinks, CheckItem, IdList, Settings, ShiftCreate, ShiftOrder, ShiftUpdate
@@ -28,9 +28,6 @@ class CalendarTest(unittest.TestCase):
     def test_business_date_at_day_start_is_new_day(self):
         now = datetime(2026, 10, 6, 19, 0, tzinfo=timezone.utc)  # 서울 04:00
         self.assertEqual(business_date(now, "Asia/Seoul", FOUR), date(2026, 10, 7))
-
-    def test_split_lines_drops_blank_and_trims(self):
-        self.assertEqual(split_lines(" 머신 청소 \n\n 원두 소분\n"), ["머신 청소", "원두 소분"])
 
     def test_current_shift_inside_window(self):
         shifts = [ShiftWindow(1, 0, time(7), time(11)), ShiftWindow(2, 1, time(14), time(18))]
