@@ -118,6 +118,7 @@ class ChannelSearchResult:
     alias_terms: tuple[str, ...]
     eligible_references: tuple[tuple[str, str, str], ...] | None
     universe_audit: dict | None = None
+    entity_references: tuple[tuple[str, str, str], ...] = ()
 
 
 async def search_channels(pool, *, store_id: int, question: str, query_vector: list[float],
@@ -156,6 +157,24 @@ async def search_channels(pool, *, store_id: int, question: str, query_vector: l
                 where d.store_id=$1 and d.prepared_id=$2
                 order by d.embedding <=> $3::vector,d.card_id,d.block_id limit $4
                 """,store_id,pid,vector_literal(query_vector),channel_limit)
+            # 분할 카드의 선행 사실은 상위 N개 순위 밖에 있을 수 있다. 같은
+            # 불변 공개판·현재 승인 포인터에서만 대상 전체의 후보를 보충한다.
+            # 이것은 회수일 뿐이며 대상/규격/적용성 승인은 planner가 수행한다.
+            hit_ids = {str(r['card_id']) for r in (*lexical, *vector)}
+            entities = {c.entity_id for c in snapshot.cards if c.card_id in hit_ids}
+            siblings = [int(c.card_id) for c in snapshot.cards if c.entity_id in entities]
+            related = await conn.fetch("""
+                select d.card_id,d.card_version_id,d.block_id
+                from r_index_documents d join knowledge_cards c
+                  on c.store_id=d.store_id and c.card_id=d.card_id
+                  and c.published_version_id=d.card_version_id
+                  and c.review_status='APPROVED' and c.is_verified=true
+                where d.store_id=$1 and d.prepared_id=$2 and d.card_id=any($3::bigint[])
+                order by d.card_id,d.card_version_id,d.block_id limit 101
+                """,store_id,pid,siblings) if siblings else []
+            # 한 대상을 부분 확장해 완전한 회수로 오인하지 않는다.
+            entity_refs = tuple((str(r['card_id']),str(r['card_version_id']),r['block_id'])
+                                for r in related) if len(related)<=100 else ()
             eligible = None
             audit = None
             if include_universe:
@@ -176,7 +195,18 @@ async def search_channels(pool, *, store_id: int, question: str, query_vector: l
                 current = {(str(r['card_id']),str(r['published_version_id'])) for r in approved}
                 eligible = tuple(ref for ref in refs if ref[:2] in current)
     return ChannelSearchResult(snapshot,index_revision,tuple(dict(r) for r in lexical),
-        tuple(dict(r) for r in vector),query,aliases,eligible,audit)
+        tuple(dict(r) for r in vector),query,aliases,eligible,audit,entity_refs)
+
+
+def complete_entity_candidates(result, ranked):
+    """순위에 포함된 대상만 확장한다. 허위 검색 점수를 부여하지 않는다."""
+    ids = {c.card_id for c in ranked}
+    entities = {c.entity_id for c in result.snapshot.cards if c.card_id in ids}
+    siblings = {c.card_id for c in result.snapshot.cards if c.entity_id in entities}
+    seen = {(c.card_id,c.card_version_id,c.block_id) for c in ranked}
+    extra = tuple(Candidate(*ref,None,None,0.0) for ref in result.entity_references
+                  if ref[0] in siblings and ref not in seen)
+    return (*ranked,*extra)
 
 
 async def hybrid_search(pool, *, store_id: int, question: str, query_vector: list[float],
@@ -186,5 +216,5 @@ async def hybrid_search(pool, *, store_id: int, question: str, query_vector: lis
     result = await search_channels(pool,store_id=store_id,question=question,
         query_vector=query_vector,channel_limit=channel_limit)
     return SearchResult(result.snapshot,result.index_revision,
-        fuse(result.lexical,result.vector,limit=candidate_limit),result.normalized_query,
+        complete_entity_candidates(result,fuse(result.lexical,result.vector,limit=candidate_limit)),result.normalized_query,
         alias_terms=result.alias_terms)

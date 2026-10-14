@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   BackButton,
   ButtonLink,
@@ -18,9 +18,9 @@ import {
   TextButton,
 } from "@/components/kit";
 import { ApiError, apiErrorMessage } from "@/lib/api";
-import { bootstrapQuery, rDetailQuery, rKeys } from "@/lib/query";
+import { bootstrapQuery, queryKeys, rDetailQuery, rKeys } from "@/lib/query";
 import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
-import { rOwnerAnswer, rOwnerRetry, type RPending } from "@/lib/r-v2-api";
+import { rOwnerAnswer, rOwnerRetry, type ROwnerInput, type RPending } from "@/lib/r-v2-api";
 import { useApp } from "@/lib/store";
 
 type Answer = RPending["answers"][number];
@@ -37,6 +37,7 @@ export default function OwnerAnswerPage() {
   const [editing, setEditing] = useState(false);
   // 같은 답을 다시 보내면 같은 request_id 로 보낸다(멱등). 답을 고치거나 저장에 성공하면 새로 만든다
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const submittedBody = useRef<ROwnerInput | null>(null);
 
   const latest = detail.data?.answers.at(-1);
   useRPublicationRefresh(
@@ -54,8 +55,11 @@ export default function OwnerAnswerPage() {
       setAnswer("");
       setEditing(false);
       setRequestId(crypto.randomUUID());
+      submittedBody.current = null;
       await Promise.all([
         client.invalidateQueries({ queryKey: rKeys.pending(state.storeId, state.userId) }),
+        client.invalidateQueries({ queryKey: queryKeys.questions(state.storeId) }),
+        client.invalidateQueries({ queryKey: queryKeys.pending(state.storeId) }),
         client.invalidateQueries({ queryKey: bootstrapQuery(state.token, state.userId, state.storeId).queryKey }),
       ]);
     },
@@ -91,14 +95,18 @@ export default function OwnerAnswerPage() {
 
   const data = detail.data;
   const first = data.occurrences[0];
-  const title = first?.original_question ?? "직원 질문";
+  const title = first?.original_question ?? data.question ?? "직원 질문";
   const askedCount = data.occurrences.length;
   const slots = Object.entries(first?.resolved_query.confirmed_slots ?? {});
   const showComposer = !latest || editing;
 
-  const send = () => submit.mutate({ request_id: requestId, answer, expected_revision: latest?.revision ?? 0 });
+  const send = () => {
+    if (submit.isPending || !answer.trim()) return;
+    submittedBody.current ??= { request_id: requestId, answer, expected_revision: latest?.revision ?? 0 };
+    submit.mutate(submittedBody.current);
+  };
 
-  if (latest && !editing && latest.knowledge_status === "PUBLISHED") {
+  if (latest && !editing && latest.knowledge_status === "PUBLISHED" && latest.knowledge_availability === "CURRENT") {
     return <PublishedResult question={title} answer={latest.answer} onEdit={() => setEditing(true)} />;
   }
 
@@ -114,7 +122,14 @@ export default function OwnerAnswerPage() {
                     ? "그사이 답이 바뀌었어요. 최신 답을 확인한 뒤 다시 보내 주세요. 입력 내용은 그대로 두었어요."
                     : apiErrorMessage(submit.error, "답이 전달되지 않았어요. 입력 내용은 그대로 두었어요.")
                 }
-                onRetry={() => (submit.error instanceof ApiError && submit.error.status === 409 ? void detail.refetch() : send())}
+                onRetry={() => {
+                  if (submit.error instanceof ApiError && submit.error.status === 409) {
+                    void detail.refetch().then(() => {
+                      submittedBody.current = null;
+                      setRequestId(crypto.randomUUID()); submit.reset();
+                    });
+                  } else send();
+                }}
                 retrying={submit.isPending || detail.isRefetching}
               />
             )}
@@ -123,11 +138,13 @@ export default function OwnerAnswerPage() {
               value={answer}
               onChange={(value) => {
                 setAnswer(value);
+                submittedBody.current = null;
                 setRequestId(crypto.randomUUID());
                 if (submit.isError) submit.reset();
               }}
               onSubmit={send}
               submitting={submit.isPending}
+              disabled={submit.isPending}
               submitLabel={latest ? "고쳐 보내기" : "넣기"}
               placeholder={latest ? "바뀐 내용을 적어 주세요" : "직원에게 보낼 답을 적어 주세요"}
             />
@@ -142,7 +159,7 @@ export default function OwnerAnswerPage() {
         )
       }
     >
-      <BackButton href="/owner" label="오늘 매장" />
+      <BackButton href="/owner/questions" label="직원 질문" />
       <PageHeader title={title} />
       <Caption className="-mt-2 text-[13px]">
         {askedCount > 1 ? `직원이 ${askedCount}번 물어봤어요` : "직원이 물어본 질문"}
@@ -157,6 +174,10 @@ export default function OwnerAnswerPage() {
         </div>
       )}
       {latest && <AnswerStatus answer={latest} pendingId={pendingId} onEdit={() => setEditing(true)} editing={editing} />}
+      {data.legacy_answers?.map((previous) => <Surface key={previous.owner_answer_id} className="space-y-2 p-4">
+        <Caption>이전에 전달한 답변 · 카드 반영 상태는 카드에서 확인해 주세요</Caption>
+        <p className="whitespace-pre-wrap">{previous.answer}</p>
+      </Surface>)}
     </Screen>
   );
 }
@@ -178,8 +199,14 @@ function AnswerStatus({
     LINKED: { chip: "이미 있는 카드와 같아요", tone: "brand", text: "답은 직원에게 전달했어요. 같은 내용의 카드가 있어서 새로 만들지 않았어요." },
     REVIEW: { chip: "확인이 필요해요", tone: "warn", text: "기존 카드와 다른 부분이 있어요. 공개하기 전에 카드에서 확인해 주세요." },
     FAILED: { chip: "카드 반영 실패", tone: "danger", text: "답은 직원에게 전달했어요. 카드로 정리하지는 못했어요." },
+    DISMISSED: { chip: "제안 닫힘", tone: "neutral", text: "답은 직원에게 전달했고, 이 제안은 공개하지 않고 닫았어요." },
+    CHANGED: { chip: "카드가 바뀌었어요", tone: "neutral", text: "이전에 반영한 답변이에요. 현재 카드에는 이후 변경된 내용이 있어요." },
+    UNAVAILABLE: { chip: "현재 공개된 카드가 없어요", tone: "neutral", text: "직원에게 전달한 답은 남아 있어요. 이 답의 카드 반영 상태는 카드에서 다시 확인해 주세요." },
+    PUBLISHED: { chip: "이전에 카드에 반영했어요", tone: "neutral", text: "당시 반영한 답변이에요. 현재 공개 상태를 확인해 주세요." },
   };
-  const view = status[answer.knowledge_status] ?? status.PENDING;
+  const dismissed = answer.proposal_status === "DISMISSED";
+  const unavailable = answer.knowledge_availability === "UNAVAILABLE";
+  const view = status[dismissed ? "DISMISSED" : unavailable ? "UNAVAILABLE" : answer.knowledge_availability === "CHANGED" ? "CHANGED" : answer.knowledge_status] ?? status.PENDING;
   return (
     <Surface className="flex flex-col gap-2 px-[18px] py-4">
       <div className="flex items-center justify-between gap-2">
@@ -192,7 +219,7 @@ function AnswerStatus({
       </div>
       <p className="whitespace-pre-wrap text-[15px] leading-[1.45] tracking-[-0.15px] text-ink">{answer.answer}</p>
       <Caption>{view.text}</Caption>
-      {answer.knowledge_status === "REVIEW" && <ButtonLink href="/owner/cards" variant="secondary">카드에서 확인하기</ButtonLink>}
+      {answer.knowledge_status === "REVIEW" && !dismissed && !unavailable && <ButtonLink href="/owner/cards/proposals" variant="secondary">제안 확인하기</ButtonLink>}
       {answer.knowledge_status === "FAILED" && answer.retry_available && answer.event_id && (
         <RetryKnowledge eventId={answer.event_id} pendingId={pendingId} />
       )}
@@ -235,13 +262,13 @@ function PublishedResult({ question, answer, onEdit }: { question: string; answe
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <div className="relative flex w-full flex-col gap-1.5 rounded-[20px] border-[1.5px] border-accent-500 bg-surface px-[18px] py-4 shadow-[0_16px_36px_-6px_rgba(240,122,138,0.25)]">
           <span className="absolute right-4 top-3.5 rounded-full bg-accent-500 px-2.5 py-1 text-[12px] font-bold tracking-[-0.24px] text-white">
-            새 카드
+            공개됨
           </span>
           <p className="pr-16 text-[17px] font-bold leading-[1.45] tracking-[-0.34px] text-ink [word-break:keep-all]">{question}</p>
           <p className="whitespace-pre-wrap text-[14px] leading-[1.45] tracking-[-0.14px] text-ink-muted">{answer}</p>
         </div>
         <p className="text-center text-[24px] font-black leading-[1.45] tracking-[-0.48px] text-ink">카드로 남았어요</p>
-        <p className="text-center text-[14px] leading-[1.45] tracking-[-0.14px] text-ink-muted">같은 질문은 이제 버디가 바로 답해요</p>
+        <p className="text-center text-[14px] leading-[1.45] tracking-[-0.14px] text-ink-muted">답변 내용이 공개 카드에 반영됐어요</p>
         <TextButton onClick={onEdit} className="self-center">
           답 고치기
         </TextButton>

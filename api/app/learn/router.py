@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import asyncio
 from uuid import uuid4
-from dataclasses import replace
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -30,7 +29,8 @@ from app.learn.knowledge_apply import (
     approve_owner_proposal,
 )
 from app.learn.owner_handoff import finish_owner_review
-from app.learn.knowledge_loop import build_knowledge_plan
+from app.learn.owner_delivery import submit_owner_answer
+from app.contracts.hashing import digest
 from app.learn import roadmap as roadmap_repo
 from app.notifications.service import (
     create_pending_question_notification,
@@ -549,232 +549,17 @@ async def answer_pending(
     store_id: CurrentStoreId,
     user_id: CurrentUserId,
 ):
-    """점주 원문은 즉시 전달하고 카드 반영은 관계별 안전 정책으로 분리한다."""
+    """옛 클라이언트도 같은 원문 전달/outbox를 사용한다. 지식 완료는 비동기다."""
     if claims.get("role") != "OWNER":
         raise HTTPException(403, "owner only")
-
+    member_id = await _member_id(db, store_id, user_id)
     answer = req.answer_text.strip()
-    if not answer:
-        raise HTTPException(400, "answer_text is empty")
-
-    pending = await db.fetchrow(
-        """
-        select question_id, question_text, status, category_id, member_id
-        from pending_questions
-        where question_id = $1
-          and store_id = $2
-          and contract_version = 'v1'
-        """,
-        question_id,
-        store_id,
-    )
-    if not pending:
-        raise HTTPException(404, "pending question not found")
-    if pending["status"] != "WAITING":
-        raise HTTPException(409, "already answered")
-
-    plan = await build_knowledge_plan(
-        db, store_id, pending["question_text"].strip(), answer
-    )
-    question_key = _question_key(pending["question_text"])
-
-    async with db.transaction():
-        await _lock_pending_question_key(db, store_id, question_key)
-        locked = await db.fetchrow(
-            """
-            select question_id, status
-            from pending_questions
-            where store_id = $1 and question_id = $2
-              and contract_version = 'v1'
-            for update
-            """,
-            store_id,
-            question_id,
-        )
-        if locked is None:
-            raise HTTPException(404, "pending question not found")
-        if locked["status"] != "WAITING":
-            raise HTTPException(409, "already answered")
-
-        target_is_current = True
-        if plan.target_card_id is not None:
-            target = await db.fetchrow(
-                """
-                select published_version_id, review_status, is_verified
-                from knowledge_cards
-                where store_id = $1 and card_id = $2
-                for share
-                """,
-                store_id,
-                plan.target_card_id,
-            )
-            target_is_current = bool(
-                target
-                and target["review_status"] == "APPROVED"
-                and target["is_verified"]
-                and target["published_version_id"] == plan.target_version_id
-            )
-            if not target_is_current:
-                plan = replace(
-                    plan,
-                    relation_type="CONFLICT",
-                    auto_publish=False,
-                    reason=f"{plan.reason}; 분석 이후 대상 카드 상태 또는 버전 변경",
-                )
-
-        askers = await db.fetch(
-            """
-            select distinct occurrence.member_id
-            from pending_questions q
-            join pending_question_occurrences occurrence
-              on occurrence.question_id = q.question_id
-            where q.store_id = $1 and q.status = 'WAITING'
-              and q.contract_version = 'v1'
-              and q.normalized_question = $2
-            """,
-            store_id,
-            question_key,
-        )
-        answer_id = int(
-            await db.fetchval(
-                """
-                insert into owner_answers (question_id, answered_by, answer_text)
-                values ($1, $2, $3)
-                returning answer_id
-                """,
-                question_id,
-                user_id,
-                answer,
-            )
-        )
-        if plan.relation_type == "IDENTICAL" and target_is_current:
-            proposal_status = "LINKED"
-        elif plan.relation_type == "NEW" and plan.auto_publish:
-            proposal_status = "ANALYZED"
-        else:
-            proposal_status = "PENDING_REVIEW"
-
-        proposal_id = int(
-            await db.fetchval(
-                """
-                insert into knowledge_change_proposals (
-                  store_id, answer_id, relation_type,
-                  target_card_id, target_version_id, category_id,
-                  proposed_title, proposed_content, reason, status, resolved_at
-                ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::varchar,
-                          case when $10::varchar = 'LINKED' then now() else null end)
-                returning proposal_id
-                """,
-                store_id,
-                answer_id,
-                plan.relation_type,
-                plan.target_card_id,
-                plan.target_version_id,
-                plan.category_id,
-                plan.proposed_title,
-                plan.proposed_content,
-                plan.reason,
-                proposal_status,
-            )
-        )
-        if proposal_status == "LINKED":
-            await db.execute(
-                "update owner_answers set card_id = $2 where answer_id = $1",
-                answer_id,
-                plan.target_card_id,
-            )
-        elif plan.target_card_id is not None:
-            await db.execute(
-                """
-                update knowledge_cards
-                set needs_review_reason = $3
-                where store_id = $1 and card_id = $2
-                  and review_status <> 'EXCLUDED'
-                """,
-                store_id,
-                plan.target_card_id,
-                f"OWNER_ANSWER_{plan.relation_type}",
-            )
-
-        await db.execute(
-            """
-            update pending_questions set status = 'ANSWERED'
-            where store_id = $1 and status = 'WAITING'
-              and contract_version = 'v1'
-              and normalized_question = $2
-            """,
-            store_id,
-            question_key,
-        )
-
-        buddy_content = f"사장님이 답해주셨어요.\n\n{answer}"
-        for asker in askers:
-            session_id = await _open_session(db, store_id, int(asker["member_id"]))
-            buddy_id = int(
-                await db.fetchval(
-                    """
-                    insert into chat_messages (
-                      session_id, sender_type, content, answer_type,
-                      answer_source, grounding_status, owner_answer_id
-                    ) values ($1, 'BUDDY', $2, 'ANSWERED',
-                              'OWNER_ANSWER', 'NOT_APPLICABLE', $3)
-                    returning message_id
-                    """,
-                    session_id,
-                    buddy_content,
-                    answer_id,
-                )
-            )
-            if proposal_status == "LINKED":
-                await db.execute(
-                    """
-                    insert into message_citations (
-                      message_id, card_id, version_id, relevance
-                    ) values ($1, $2, $3, 100.00)
-                    """,
-                    buddy_id,
-                    plan.target_card_id,
-                    plan.target_version_id,
-                )
-
-    card_id = plan.target_card_id if proposal_status == "LINKED" else None
-    version_id = plan.target_version_id if proposal_status == "LINKED" else None
-    knowledge_status = proposal_status
-    if proposal_status == "ANALYZED":
-        try:
-            published = await approve_knowledge_proposal(
-                proposal_id=proposal_id, db=db, claims=claims,
-                store_id=store_id, user_id=user_id)
-            card_id, version_id = published['card_id'], published['version_id']
-            knowledge_status = "PUBLISHED"
-        except Exception as exc:
-            await db.execute(
-                """
-                update knowledge_change_proposals
-                set status = 'FAILED', error = $3::jsonb
-                where store_id = $1 and proposal_id = $2 and status <> 'PUBLISHED'
-                """,
-                store_id,
-                proposal_id,
-                json.dumps({"type": type(exc).__name__}),
-            )
-            knowledge_status = "FAILED"
-
-    return {
-        "question_id": question_id,
-        "status": "ANSWERED",
-        "card_id": card_id,
-        "version_id": version_id,
-        "answer_text": answer,
-        "knowledge": {
-            "proposal_id": proposal_id,
-            "relation_type": plan.relation_type,
-            "status": knowledge_status,
-            "category_id": plan.category_id,
-            "category_name": plan.category_name,
-            "requires_review": knowledge_status in ("PENDING_REVIEW", "FAILED"),
-        },
-    }
+    result = await submit_owner_answer(get_pool(), store_id=store_id, member_id=member_id,
+        question_id=question_id, answer=answer, expected_revision=0,
+        request_id="legacy:" + digest(dict(question_id=question_id, answer=answer)))
+    return dict(result, question_id=question_id, status="ANSWERED", card_id=None, version_id=None,
+        answer_text=answer, knowledge=dict(proposal_id=None, relation_type=None, status="PENDING",
+            category_id=None, category_name=None, requires_review=False))
 
 
 @router.get("/knowledge-proposals")
@@ -792,10 +577,22 @@ async def list_knowledge_proposals(
     rows = await db.fetch(
         """
         select p.*, q.question_text, a.answer_text,
+               source.source_id as answer_source_id,
+               coalesce(cards.items,'[]'::jsonb) as affected_cards,
                current_v.title as current_title, current_v.content as current_content
         from knowledge_change_proposals p
         join owner_answers a on a.answer_id = p.answer_id
         join pending_questions q on q.question_id = a.question_id
+        left join owner_answer_sources source on source.store_id=p.store_id and source.owner_answer_id=a.answer_id
+        left join lateral (
+            select jsonb_agg(jsonb_build_object('card_id',k.card_id,'title',v.title)
+                order by k.card_id) as items
+            from knowledge_cards k join card_versions v
+              on v.store_id=k.store_id and v.version_id=k.draft_version_id
+            where k.store_id=p.store_id and k.review_status<>'EXCLUDED'
+              and exists(select 1 from fact_occurrences o where o.store_id=k.store_id
+                and o.card_id=k.card_id and o.source_id=source.source_id and o.disposition='LINKED')
+        ) cards on true
         left join card_versions current_v on current_v.version_id = p.target_version_id
         where p.store_id = $1 and p.status = $2
         order by p.created_at desc, p.proposal_id desc
@@ -824,6 +621,13 @@ async def list_knowledge_proposals(
                 "proposed_title": row["proposed_title"],
                 "proposed_content": row["proposed_content"],
                 "reason": row["reason"],
+                "can_approve": row["answer_source_id"] is not None
+                    and row["status"] in ("ANALYZED", "PENDING_REVIEW", "FAILED")
+                    and bool(json.loads(row["affected_cards"]) if isinstance(row["affected_cards"], str) else row["affected_cards"]),
+                "approval_block_reason": "LEGACY" if row["answer_source_id"] is None else (
+                    None if (json.loads(row["affected_cards"]) if isinstance(row["affected_cards"], str) else row["affected_cards"])
+                    else row["reason"] if row["reason"] in ("NO_FACTS", "FACTS_PENDING") else "NO_DRAFT"),
+                "affected_cards": json.loads(row["affected_cards"]) if isinstance(row["affected_cards"], str) else row["affected_cards"],
                 "category_id": int(row["category_id"]),
                 "created_at": _iso(row["created_at"]),
             }

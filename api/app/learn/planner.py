@@ -16,8 +16,9 @@ from app.reg.hybrid import SearchResult,normalize_query
 from app.learn.semantic_grouping import explicit_context, supported_question
 from app.learn.conditional_scope import conditional_core, prerequisite_closure, exclusive_conditions
 from app.learn.raw_quantity import raw_answer_reference
+from app.learn.entity_names import entity_names, entity_label
 
-PLANNER_VERSION="r-explicit-slots/v7"
+PLANNER_VERSION="r-explicit-slots/v8"
 PREDICATES={
     "milk_amount":("우유 양",("우유","milk")),
     "water_amount":("물 양",("물","water")),
@@ -93,15 +94,16 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     cards=[c for c in snapshot.cards if any(key[0]==c.card_id for key in candidates)]
     if not cards:
         return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
-    matches={c.entity_id for c in cards if mentioned(q,c.title)}
+    matches={c.entity_id for c in cards if any(mentioned(q,n) for n in entity_names(snapshot,c.entity_id))}
     if not matches and slots.get("entity"):
-        matches={c.entity_id for c in cards if c.title==slots["entity"]}
+        matches={c.entity_id for c in cards if slots["entity"] in entity_names(snapshot,c.entity_id)}
     if not matches:
-        alias_options=tuple(dict.fromkeys(c.title for c in cards if c.title in search.alias_terms))
+        alias_options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
+            if any(n in search.alias_terms for n in entity_names(snapshot,c.entity_id))))
         if 0<len(alias_options)<=10:
             return finish('CLARIFY',slot='entity',options=alias_options)
     if len(matches)!=1:
-        options=tuple(dict.fromkeys(c.title for c in cards))
+        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards))
         if len(options)>10 or len(options)<2:
             return finish("ESCALATE","UNRESOLVED_CONTEXT")
         return finish("CLARIFY",slot="entity",options=options)
@@ -140,9 +142,10 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
         try: validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
         except AnswerReferenceError:return finish('ESCALATE','UNVERIFIED_RAW_REFERENCE')
         return Decision(plan,resolved,slots,None)
-    if slots.get("entity") and slots["entity"] not in {c.title for c in entity_cards}:
+    names=entity_names(snapshot,entity)
+    if slots.get("entity") and slots["entity"] not in names:
         for key in ("temperature","size","predicate"):slots.pop(key,None)
-    slots["entity"]=next((c.title for c in entity_cards if mentioned(q,c.title)),slots.get("entity",entity_cards[0].title))
+    slots["entity"]=next((n for n in names if mentioned(q,n)),slots.get("entity",names[0]))
     facts=[f for f in snapshot.fact_revisions if f.entity_id==entity]
     available={f.predicate for f in facts if f.predicate}
     matched={p for p,(label,words) in PREDICATES.items() if p in available and any(mentioned(q,w) for w in words)}
@@ -153,7 +156,7 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     # Condition vocabulary (e.g. 온도) is not the requested attribute. Only a
     # full approved-condition + supported-question parse may override this guard.
     scoped_predicates={f.predicate for f in facts if conditional_core(question,snapshot=snapshot,fact=f,
-        titles=tuple(c.title for c in entity_cards),sizes=tuple(sorted({x.variant.size for x in facts if x.variant.size}))) is not None}
+        titles=names,sizes=tuple(sorted({x.variant.size for x in facts if x.variant.size}))) is not None}
     if scoped_predicates:matched=scoped_predicates
     if not matched and slots.get("predicate"):
         matched={p for p in available if slots["predicate"] in (p,PREDICATES.get(p,(p,()))[0])}
@@ -165,7 +168,7 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     predicate=next(iter(matched))
     slots["predicate"]=PREDICATES.get(predicate,(predicate,()))[0]
     facts=[f for f in facts if f.predicate==predicate]
-    titles=tuple(c.title for c in entity_cards)
+    titles=names
     declared_sizes=tuple(sorted({f.variant.size for f in facts if f.variant.size}))
     cores={f.fact_revision_id:conditional_core(question,snapshot=snapshot,fact=f,
         titles=titles,sizes=declared_sizes) for f in facts}
@@ -225,7 +228,8 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     selected=[]
     for card in entity_cards:
         for block in sorted(card.blocks,key=lambda b:b.order):
-            chosen=tuple(fid for fid in block.fact_revision_ids if fid in needed)
+            chosen=tuple(sorted((fid for fid in block.fact_revision_ids if fid in needed),
+                                key=lambda fid:snapshot.fact(fid).order or 0))
             if chosen:
                 # 후보 밖의 임의 본문은 쓰지 않는다. 선행 확장도 후보가 회수해야 한다.
                 if (card.card_id,card.card_version_id,block.block_id) not in candidates:
@@ -233,6 +237,18 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
                 selected.append(SelectedBlock(card_id=card.card_id,card_version_id=card.card_version_id,
                                                block_id=block.block_id,fact_revision_ids=chosen))
     if not selected:return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
+    # 카드 id/분할 번호는 절차 순서가 아니다. 블록 간 선행 연결을 먼저 따른다.
+    ordered=[]
+    emitted=set()
+    while selected:
+        ready=next((b for b in selected if all(
+            set(snapshot.fact(fid).requires) <= emitted | set(b.fact_revision_ids)
+            for fid in b.fact_revision_ids)),None)
+        if ready is None:return finish('ESCALATE','MISSING_DEPENDENCY_CANDIDATE')
+        ordered.append(ready)
+        emitted.update(ready.fact_revision_ids)
+        selected.remove(ready)
+    selected=ordered
     assessment=None
     if any(snapshot.fact(fid).conditions or snapshot.fact(fid).exceptions for fid in needed):
         # A follow-up is composed from multiple turns; the present assessment

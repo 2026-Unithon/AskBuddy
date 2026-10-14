@@ -323,6 +323,12 @@ R 이 할 일 12·13번을 더했다.
 
 ## R 이 할 일 (우선순위 순)
 
+> 2026-10-13 P2 구현: 10~12번의 실제 W 사실 출력 소비·분할/규격·편집 이력·OWNER_TEXT 출처 연결은 [P2 기록](../review/R_FACT_CONSUMPTION_20261013.md)과 통합 계획 G-A로 확인한다. 새 snapshot은 renderer v2, 기존 v1 읽기는 보존한다. 답변 연결은 source_id XOR 계약을 바꾸지 않고 표시 정보로 추가했다. P3 평가 입력 전환과 운영 인수는 남아 있다.
+
+> 2026-10-13 P1 구현: v1/v2 답변을 공통 원문 전달·outbox로 연결했다. v1 질문/이전 원문은 보존하고 목록은 공통 상세로 이동한다. 제품 답변 라우트의 knowledge_loop 호출을 제거했으며 제안 승인 가능 여부·영향 카드·닫힘 상태와 자료 반영 카드 수 알림을 추가했다. [구현·검증 기록](../review/R_OWNER_FLOW_20261013.md). 14·15번 연결 작업에 해당하며 OWNER_TEXT 출처 구분·G-A 전체 인수는 P2에서 계속한다.
+
+> 2026-10-12 R 재대조: 사용자 전달 이미지 R-1~R-5는 [실행 계획 §2](RW_NEXT_EXECUTION_20261012.md)에 매핑했다. 인계 10~12·14·15의 완료 기준은 같은 문서 G-A 표로 추적하며 아직 전체 완료 체크를 하지 않는다. W는 knowledge_loop 호출을 제거했지만 R v1 답변 라우터의 호출은 남아 있다. OWNER_TEXT는 점주 답변과 직접 편집을 구분해 표시해야 한다. RAW 계약 제거는 새 W 생산 경로 연결과 별도 호환 판단으로 다룬다.
+
 1. ~~`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체~~ — 완료(PR #25) (1·2번).
    중복 카드와 "승인했는데 답에 안 나옴"이 이 교체로 함께 사라진다.
 2. **`RawSpan.source_id=None` 소비 경로 보완** (`answer_storage.py:221`, `:247`, `approved_renderer.py:32-33`, `Citation.source_id`) 뒤

@@ -1,0 +1,85 @@
+{
+  "note": "Actual synthetic diagnostic outputs. Negative fixtures, not model accuracy labels.",
+  "missing_user_quote": {
+    "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+    "input_hash": "sha256:3f21bf4c0da7f09b5983ac9e10309c6a91ba6e29bbd46db0445f11d4785308eb",
+    "plan": {
+      "snapshot_id": "1",
+      "knowledge_revision": "1",
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "1",
+          "card_version_id": "1",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "1"
+        }
+      ],
+      "clarification_slot": null,
+      "allowed_options": [],
+      "escalation_reason": null
+    },
+    "slots": [
+      {
+        "slot": "entity",
+        "value": "1",
+        "question_quote": "환불"
+      },
+      {
+        "slot": "predicate",
+        "value": "approved_procedure",
+        "question_quote": "카드 취소해 달래. 영수증은 있어. 직원인 내가 바로 POS에서 취소해도 돼? 순서도 알려줘."
+      }
+    ],
+    "unresolved": [],
+    "equivalent_question_ids": [],
+    "interpretation": {
+      "entity_id": "1",
+      "predicate": "approved_procedure",
+      "variants": [],
+      "target_fact_ids": [],
+      "not_applicable_fact_ids": []
+    },
+    "obligations": []
+  },
+  "invented_raw_calculation": {
+    "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+    "input_hash": "sha256:3f21bf4c0da7f09b5983ac9e10309c6a91ba6e29bbd46db0445f11d4785308eb",
+    "plan": {
+      "snapshot_id": "1",
+      "knowledge_revision": "1",
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "1",
+          "card_version_id": "1",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "1"
+        }
+      ],
+      "clarification_slot": null,
+      "allowed_options": [],
+      "escalation_reason": null
+    },
+    "interpretation": {
+      "entity_id": "1",
+      "predicate": "approved_procedure",
+      "variants": [],
+      "target_fact_ids": [],
+      "not_applicable_fact_ids": []
+    },
+    "parts": [],
+    "calculations": [
+      {
+        "operator": "ADD",
+        "fact_ids": [
+          "1"
+        ],
+        "count": null,
+        "count_quote": null
+      }
+    ]
+  }
+}

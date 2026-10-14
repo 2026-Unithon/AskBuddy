@@ -111,14 +111,16 @@ const path = require('node:path');
     await page.getByRole('button', { name: '근거 카드 1' }).click();
     await page.getByRole('button', { name: '카드 · 합성 라테' }).waitFor();
     check('approved citation expands', true);
-    await page.getByTestId('owner-answer-citation').waitFor();
+    // 출처 표시는 공통 CitationOrigin 이 담당한다. source_kind 가 없는 응답은 owner_answer_id 로 점주 답변으로 본다
+    await page.getByTestId('citation-origin').waitFor();
     check('owner answer source is labeled without broken-file warning',
-      await page.getByTestId('owner-answer-citation').innerText() === '출처 · 사장님 답'
-      && await page.getByText('원본 자료는 지워졌어요.', { exact: false }).count() === 0);
+      await page.getByTestId('citation-origin').innerText() === '출처 · 점주 답변'
+      && await page.getByText('원본 자료를 열람할 수 없어요.', { exact: false }).count() === 0);
     await page.reload();
     await page.getByRole('button', { name: '근거 카드 1' }).click();
-    await page.getByTestId('owner-answer-citation').waitFor();
-    check('owner source survives history reload', true);
+    await page.getByTestId('citation-origin').waitFor();
+    check('owner source survives history reload',
+      await page.getByTestId('citation-origin').innerText() === '출처 · 점주 답변');
     state.failNext = true;
     await ask().fill('미확인 업무');
     await send().click();
@@ -139,7 +141,7 @@ const path = require('node:path');
     await ownerPage.goto('http://127.0.0.1:3011/owner/questions/v2?question_id=1');
     await ownerPage.waitForURL('**/owner/questions/1');
     await answerBox().waitFor();
-    check('old owner v2 deep link opens answer screen', await ownerPage.getByRole('link', { name: '오늘 매장' }).isVisible());
+    check('old owner v2 deep link opens answer screen', await ownerPage.getByRole('link', { name: '직원 질문' }).isVisible());
     await answerBox().fill('  점주 원문\n그대로  ');
     await ownerPage.getByRole('button', { name: '넣기', exact: true }).click();
     await ownerPage.getByText('카드로 정리하는 중', { exact: true }).waitFor();

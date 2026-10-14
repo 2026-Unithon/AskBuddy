@@ -5,12 +5,34 @@ from datetime import datetime, timezone
 from app.config import get_settings
 from app.contracts.hashing import digest
 from app.learn.answer_usage import observe_answer
+from app.learn.general_wire import response_schema
 from app.reg.reranker import _BoundedSink
 from app.team.evaluation_budget import BudgetDenied, provider_budget
 from app.usage.recorder import attempt, NullSink
 
 
-async def generate(prompt,*,schema,release,context,sink):
+class IncompleteModelOutput(ValueError):
+    """Usage is still recorded, but an incomplete generation is never parsed/repaired."""
+
+
+def usage_tokens(meta):
+    """Omitted zero thoughts are known only when the reported total reconciles.
+
+    Never treat a missing usage object or an unexplained total as free usage.
+    Keep the provider's raw metadata intact in the common ledger.
+    """
+    raw=meta if isinstance(meta,dict) else meta.model_dump(mode='json') if hasattr(meta,'model_dump') else vars(meta) if meta is not None else {}
+    def number(key):
+        value=raw.get(key)
+        return value if type(value)is int and value>=0 else None
+    inp=number('prompt_token_count');visible=number('candidates_token_count');thoughts=number('thoughts_token_count')
+    if (raw.get('thoughts_token_count') is None and inp is not None and visible is not None
+            and number('total_token_count')==inp+visible and raw.get('tool_use_prompt_token_count') in (None,0)):
+        thoughts=0
+    return inp,visible,thoughts
+
+
+async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=None,question_quotes=None):
     from google import genai
     from google.genai import types
     settings=get_settings()
@@ -26,8 +48,18 @@ async def generate(prompt,*,schema,release,context,sink):
         max_input=min(max_input,budget.policy.max_input_tokens)
         max_output=min(max_output,budget.policy.max_output_tokens)
         max_bytes=min(max_bytes,budget.policy.max_prompt_bytes)
-    prompt+='\nJSON schema:\n'+json.dumps(schema.model_json_schema(),ensure_ascii=False)
-    if len(prompt.encode('utf-8'))>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
+    wire_schema=response_schema(schema,calculation_fact_ids=calculation_fact_ids,question_quotes=question_quotes,
+        conclusions_enabled=release.response_style=='grounded_conclusion')
+    schema_text=json.dumps(wire_schema,ensure_ascii=False,separators=(',',':'))
+    # Developer API countTokens cannot accept generation_config. Count the
+    # prompt plus its separately supplied schema, with headroom; actual provider
+    # usage is checked again and overages halt the evaluation budget.
+    counted_prompt=prompt+'\nJSON schema:\n'+schema_text
+    if len(counted_prompt.encode('utf-8'))>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
+    config=types.GenerateContentConfig(response_mime_type='application/json',response_json_schema=wire_schema,
+        temperature=0,max_output_tokens=max_output,
+        thinking_config=types.ThinkingConfig(thinking_level=release.thinking_level),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
     key=await budget.reserve(context,release.model) if budget else None
     client=None
     input_tokens=output_tokens=None
@@ -35,22 +67,24 @@ async def generate(prompt,*,schema,release,context,sink):
         client=genai.Client(api_key=settings.gemini_api_key,
             http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
         async with attempt(_BoundedSink(sink,.2),context,model=release.model,prompt_hash=digest(prompt),
-                config_hash=digest(dict(release=release.model_dump(mode='json'),max_output=max_output,temperature=0))) as rec:
-            rec.measure_input(input_bytes=len(prompt.encode('utf-8')))
-            counted=await client.aio.models.count_tokens(model=release.model,contents=prompt)
-            if type(counted.total_tokens) is not int or not 0<=counted.total_tokens<=max_input:
+                config_hash=digest(dict(release=release.model_dump(mode='json'),generation=config.model_dump(mode='json')))) as rec:
+            rec.measure_input(input_bytes=len(counted_prompt.encode('utf-8')))
+            counted=await client.aio.models.count_tokens(model=release.model,contents=counted_prompt)
+            if (type(counted.total_tokens) is not int or counted.total_tokens<0
+                    or counted.total_tokens+max(32,(counted.total_tokens+9)//10)>max_input):
                 raise ValueError('input tokens exceed accepted limit or are unknown')
             response=await client.aio.models.generate_content(model=release.model,contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type='application/json',temperature=0,max_output_tokens=max_output))
+                config=config)
             observe_answer(rec,response)
             meta=getattr(response,'usage_metadata',None)
-            input_tokens=getattr(meta,'prompt_token_count',None)
-            visible=getattr(meta,'candidates_token_count',None)
-            thoughts=getattr(meta,'thoughts_token_count',None)
+            input_tokens,visible,thoughts=usage_tokens(meta)
             if type(visible) is int and type(thoughts) is int:output_tokens=visible+thoughts
             if (type(input_tokens) is not int or type(output_tokens) is not int
                     or not 0<=input_tokens<=max_input or not 0<=output_tokens<=max_output):
                 raise ValueError('usage unknown or exceeds accepted limit')
+            candidates=getattr(response,'candidates',None)
+            if not candidates or len(candidates)!=1 or getattr(candidates[0],'finish_reason',None)!='STOP':
+                raise IncompleteModelOutput('generation did not finish with STOP')
             return json.loads(response.text or '')
     finally:
         try:

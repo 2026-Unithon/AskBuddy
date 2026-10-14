@@ -1,6 +1,6 @@
 """Actual v1 answer/approval, empty exclusion, restoration and failed preparation.
 
-Phase A: v1 NEW 답변은 사실 초안이 없어 승인이 거절된다(FAILED, 공개판 불변).
+P1: v1 답변도 원문 전달/outbox로 접수한다(PENDING, 공개판 불변).
 제외·복원 단계의 공개 카드는 사실 카드 픽스처(seed_fact_card + publish_card)로 만든다.
 """
 from unittest.mock import AsyncMock, patch
@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 from _fact_card_fixture import assertion, publish_card, seed_fact_card
 from app.db_session import ShortSession
 from app.learn import router
-from app.learn.knowledge_loop import KnowledgePlan
 from app.cards import router as cards
 from app.reg.hybrid import read_current_index
 
@@ -25,10 +24,8 @@ async def verify(pool, db):
     async def answer(key):
         question = await db.fetchval("""insert into pending_questions(store_id,member_id,question_text,contract_version)
             values($1,$2,$3,'v1') returning question_id""", sid, mid, key)
-        plan = KnowledgePlan('NEW', None, None, category, '기타', key, '합성 점주 원문', 'synthetic', True)
-        with patch.object(router, 'build_knowledge_plan', AsyncMock(return_value=plan)):
-            return await router.answer_pending(question, router.AnswerPendingRequest(answer_text=plan.proposed_content),
-                session, claims, sid, uid)
+        return await router.answer_pending(question, router.AnswerPendingRequest(answer_text='합성 점주 원문'),
+            session, claims, sid, uid)
     async def vectors(texts, **kwargs):
         return [[1.] + [0.]*1535 for _ in texts]
     async def snapshots():
@@ -37,11 +34,12 @@ async def verify(pool, db):
             patch('app.reg.index_preparation.recorded_embeddings', vectors):
         before = await snapshots()
         result = await answer('합성 첫 답변 질문')
-        assert result['knowledge']['status'] == 'FAILED' and result['card_id'] is None, result
+        assert result['knowledge']['status'] == 'PENDING' and result['card_id'] is None, result
         assert await snapshots() == before
         assert await db.fetchval("select count(*) from knowledge_cards where store_id=$1 and published_version_id is not null", sid) == 0
-        assert await db.fetchval('select count(*) from r_owner_answer_revisions where store_id=$1', sid) == 0
-        print('PASS legacy v1 NEW without fact draft fails closed (Phase A)')
+        assert await db.fetchval('select count(*) from r_owner_answer_revisions where store_id=$1', sid) == 1
+        assert result['delivered_sessions'] == 1
+        print('PASS legacy v1 submits original and outbox without synchronous publication')
         cid, _ = await seed_fact_card(pool, store_id=sid, owner_user_id=uid,
                                       assertions=[assertion('f1', '음료Z', '물', '225', unit='ml')],
                                       title='합성 v1 매장 자료')
@@ -63,8 +61,8 @@ async def verify(pool, db):
         print('PASS legacy publication last exclusion publishes empty snapshot and restoration returns card')
         with patch('app.reg.index_preparation.recorded_embeddings', AsyncMock(side_effect=RuntimeError('synthetic outage'))):
             failed = await answer('합성 실패 답변 질문')
-        assert failed['knowledge']['status'] == 'FAILED' and failed['card_id'] is None
+        assert failed['knowledge']['status'] == 'PENDING' and failed['card_id'] is None
         current, _, _ = await read_current_index(db, store_id=sid)
         assert current.snapshot_id == restored.snapshot_id
         assert await db.fetchval("select count(*) from knowledge_cards where store_id=$1 and review_status='APPROVED'", sid) == 1
-        print('PASS legacy publication failed preparation keeps old snapshot and cannot expose new card')
+        print('PASS legacy submission does not depend on embedding availability or expose a card')

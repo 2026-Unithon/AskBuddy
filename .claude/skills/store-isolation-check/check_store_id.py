@@ -32,7 +32,7 @@ TENANT_TABLES = {
     "store_join_requests",
     "r_request_leases", "r_question_contexts", "r_index_preparations",
     "r_index_documents", "r_index_publications",
-    "r_answer_receipts", "r_answer_citations",
+    "r_answer_receipts", "r_answer_citations", "r_failed_user_turns",
     "r_owner_answer_revisions", "r_owner_answer_deliveries", "r_owner_knowledge_states",
     "r_search_lexicons", "extraction_raw_responses", "source_fact_occurrences",
     "access_logs", "card_embeddings", "card_evidence", "card_review_events",

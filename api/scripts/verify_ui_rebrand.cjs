@@ -21,7 +21,7 @@ const BASE = 'http://127.0.0.1:3011';
     job: { status: 'EXTRACTING' },
     failApprove: new Set(), failRetryJob: false, approveCalls: [],
     proposals: [{ proposal_id: 9, relation_type: 'CONFLICT', status: 'PENDING_REVIEW', question_text: '합성 시럽 몇 번?', answer_text: '3펌프',
-      target_card_id: 1, target_version_id: 1, current_title: '합성 라테', current_content: '시럽 2펌프', proposed_title: '합성 라테', proposed_content: '시럽 3펌프', reason: '펌프 수가 달라요', category_id: 10, created_at: '2026-10-06T00:00:00Z' }],
+      target_card_id: 1, target_version_id: 1, current_title: '합성 라테', current_content: '시럽 2펌프', proposed_title: '합성 라테', proposed_content: '시럽 3펌프', reason: null, can_approve: true, approval_block_reason: null, affected_cards: [{ card_id: 1, title: '합성 라테' }], category_id: 10, created_at: '2026-10-06T00:00:00Z' }],
     failProposal: true,
     roadmapEmpty: false,
     hasStore: true, guideCompleted: true, failStore: true, signupBodies: [], storeBodies: [],
@@ -171,7 +171,7 @@ const BASE = 'http://127.0.0.1:3011';
     // 지식 제안: 저장 실패는 그 자리에, 재시도 성공 후 빈 상태
     await page.getByRole('link', { name: /기존 카드와 다른 답이 있어요/ }).click();
     await page.waitForURL('**/owner/cards/proposals');
-    await page.getByRole('button', { name: '바꿀 내용으로 공개' }).click();
+    await page.getByRole('button', { name: '확인한 카드 공개' }).click();
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
     check('proposal failure shown in place', state.proposals.length === 1);
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();

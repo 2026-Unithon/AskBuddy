@@ -51,7 +51,8 @@ def explicit_context(snapshot, *, question: str, entity: str, predicate: str,
                      variants: tuple, has_context: bool) -> dict | None:
     if has_context or len(variants) != 1 or variants[0][0] not in ('HOT','ICE'):
         return None
-    titles = tuple(c.title for c in snapshot.cards if c.entity_id == entity)
+    from app.learn.entity_names import entity_names
+    titles = entity_names(snapshot, entity)
     facts = [f for f in snapshot.fact_revisions if f.entity_id == entity and f.predicate == predicate]
     if not facts:
         return None

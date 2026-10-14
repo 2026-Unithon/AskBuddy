@@ -26,7 +26,7 @@ import { useApp } from "@/lib/store";
 export default function OwnerTodayPage() {
   const { state } = useApp();
   const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
-  const pending = useInfiniteQuery(rPendingQuery(state.token, state.storeId, state.userId));
+  const pending = useInfiniteQuery(rPendingQuery(state.token, state.storeId, state.userId, "WAITING"));
   const storeName = bootstrap.data?.store?.store_name ?? "";
   const waiting = pending.data?.pages.flatMap((page) => page.questions).filter((q) => q.status === "WAITING") ?? [];
 

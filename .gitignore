@@ -47,3 +47,6 @@ api/eval/data/*
 !api/eval/data/README.md
 추출결과/
 # 골든셋 문항(eval/*.json)과 품질 추이(eval/progress/)는 커밋한다
+
+# 로컬 실행 산출물(로그·스크린샷·스크래치). 리포에 올리지 않는다
+output/

@@ -1,4 +1,5 @@
 """Server choice sets for the bounded entity/temperature/size extension."""
+from app.learn.entity_names import entity_label
 
 
 def validate_options(search, *, plan, slots, entity_id=None, predicate=None):
@@ -10,7 +11,7 @@ def validate_options(search, *, plan, slots, entity_id=None, predicate=None):
     if attr == 'entity':
         identities = {}
         for card in cards.values():
-            identities.setdefault(card.title, set()).add(card.entity_id)
+            identities.setdefault(entity_label(snap,card.entity_id), set()).add(card.entity_id)
         if any(len(ids) != 1 for ids in identities.values()):
             raise ValueError('entity titles are ambiguous')
         if len({c.entity_id for c in cards.values()}) < 2:

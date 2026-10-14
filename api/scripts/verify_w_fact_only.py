@@ -667,7 +667,22 @@ async def _scenario_a(pool, db, answer_card: tuple[NS, int, int]) -> None:
     await db.execute("delete from quality_evaluations where evaluation_id=$1", evaluation)
 
     # a-1 실제 리허설
+    from app.learn.knowledge_availability import knowledge_availability
+    from app.learn.question_contexts import create_context, load_context, accept_selection
+    from app.learn.request_limits import request_lease
+    context_session=await db.fetchval("insert into chat_sessions(store_id,member_id,contract_version) values($1,$2,'v2') returning session_id",w.store,w.member)
+    old_revision=await db.fetchval('select knowledge_revision from knowledge_publications where store_id=$1',w.store)
+    async with db.transaction():
+        old_context=await create_context(db,store_id=w.store,member_id=w.member,session_id=context_session,
+            original_question='음료Z 물 얼마나?',confirmed_slots={'entity':'음료Z'},proposed_slots={'predicate':'water_amount'},
+            knowledge_revision=old_revision,slot='temperature',options=('HOT','ICE'))
+    await db.execute("insert into r_request_leases(request_id,store_id,user_id,started_at,expires_at) values(gen_random_uuid(),$1,$2,now()-interval '2 minutes',now()-interval '1 minute')",w.store,w.user)
+    historic_states=await db.fetch("select store_id,owner_answer_id,status from r_owner_knowledge_states where status in ('PUBLISHED','LINKED','REVIEW')")
+    before_keep=await _counts(db,KEEP_TABLES)
     await _run_wipe(db, sql)
+    check('a-1 P2 완료 이력은 남고 현재 공개 상태는 UNAVAILABLE',bool(historic_states) and all([
+        (await knowledge_availability(db,store_id=r['store_id'],owner_answer_ids=[r['owner_answer_id']])).get(r['owner_answer_id'])=='UNAVAILABLE'
+        for r in historic_states]))
     check("a-1 남길 표 행 수 불변", await _counts(db, KEEP_TABLES) == before_keep)
     after_wipe = await _counts(db, wipe_tables)
     check("a-1 지울 표 전부 0행", all(n == 0 for n in after_wipe.values())
@@ -712,6 +727,23 @@ async def _scenario_a(pool, db, answer_card: tuple[NS, int, int]) -> None:
     check("a-2 근거 없음 → ESCALATE",
           found.snapshot.snapshot_id == str(snapshot_id) and not found.snapshot.cards
           and decision.plan.action == "ESCALATE")
+    async with db.transaction():
+        retained=await load_context(db,store_id=w.store,member_id=w.member,session_id=context_session,context_id=old_context.context.context_id)
+        accepted=accept_selection(retained,option='HOT',expected_state_revision=retained.state_revision,
+            knowledge_revision=int(found.snapshot.knowledge_revision),now=await db.fetchval('select clock_timestamp()'))
+    check('a-2 P2 남은 문맥은 사용자 선택만 보존하고 삭제된 지식으로 답하지 않음',
+        not accepted.context.proposed_slots and decide(found,store_id=w.store,question=question,
+            confirmed_slots=accepted.context.confirmed_slots).plan.action=='ESCALATE')
+    async with request_lease(pool,w.store,w.user):
+        check('a-2 P2 만료 lease가 재질문을 막지 않음',True)
+    fresh_answer=await _owner_answer(pool,db,w,key='p2-after-wipe',question=question,answer='음료Z HOT 물 225ml')
+    fresh_status=await _process(pool,w,_said('음료Z HOT 물 225ml','f1','water_amount','225','ml','HOT'))
+    check('a-2 P2 초기화 뒤 첫 점주 답변이 새 사실 카드로 공개됨',fresh_status=='PUBLISHED'
+        and (await knowledge_availability(db,store_id=w.store,owner_answer_ids=[fresh_answer]))[fresh_answer]=='CURRENT')
+    registered,_=await seed_fact_card(pool,store_id=w.store,owner_user_id=w.user,
+        assertions=[_said('음료Z HOT 물 225ml','f1','water_amount','225','ml','HOT')],title='초기화 뒤 재등록')
+    check('a-2 P2 같은 사실 자료 재등록은 공개 카드에 연결됨',
+        await _published_card_version(pool,w.store,registered) is not None)
 
     # a-3 지울 것이 거의 없는 DB 에서 한 번 더 — 오류 없음
     await _run_wipe(db, sql)

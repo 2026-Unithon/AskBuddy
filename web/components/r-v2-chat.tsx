@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api";
 import { rAsk, rCreateSession, type RChatInput } from "@/lib/r-v2-api";
 import { rCitationQuery, rHistoryQuery, rKeys, rSessionsQuery } from "@/lib/query";
 import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
+import { CitationOrigin } from "@/components/citation-origin";
 
 const button = "min-h-11 rounded-xl border px-4 py-2 disabled:opacity-50";
 function Citation({ receipt, order, broken }: { receipt: string; order: number; broken: boolean }) {
@@ -17,7 +18,7 @@ function Citation({ receipt, order, broken }: { receipt: string; order: number; 
   const citation = useQuery(rCitationQuery(state.token, state.storeId, state.userId, receipt, order, open));
   return <div className="mt-3"><button className={button} onClick={() => setOpen(!open)} aria-expanded={open}>근거 {order} 확인{broken && " · 인용 끊김"}</button>
     {open && <div className="space-y-2 border-l-2 pl-3">{citation.isLoading && <RLoading />}{citation.error && <RError error={citation.error} retry={() => void citation.refetch()} />}
-      {citation.data && <><p className="font-semibold">{citation.data.title}</p>{citation.data.owner_answer_id && <p data-testid="owner-answer-citation">출처: 점주 답변 · 승인된 내용</p>}<p className="whitespace-pre-wrap">{citation.data.text}</p>{citation.data.source_availability !== "AVAILABLE" && <p>원본 자료를 열람할 수 없습니다. 당시 승인된 내용은 보존되어 있습니다.</p>}</>}
+      {citation.data && <><p className="font-semibold">{citation.data.title}</p><p className="whitespace-pre-wrap">{citation.data.text}</p><CitationOrigin citation={citation.data} /></>}
     </div>}
   </div>;
 }
@@ -68,7 +69,7 @@ export default function RV2Chat() {
           <p>이 질문을 사장님께 전달할 수 있어요. 확인 요청은 안전하다는 판정을 뜻하지 않습니다.</p>
           <button className={button} data-testid="r-policy-confirm" disabled={busy} onClick={() => ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: m.original_question!, policy_receipt_id: m.receipt_id! })}>사장님께 확인 요청</button>
         </div>}
-        {m.owner_answer_id && <p className="mt-2 text-sm">답변 {m.revision} · 지식 반영: {({ PENDING: "대기", REVIEW: "검토 필요", LINKED: "기존 지식 연결", PUBLISHED: "공개 완료", FAILED: "실패" } as Record<string, string>)[m.knowledge_status ?? ""] ?? "확인 중"}</p>}
+        {m.owner_answer_id && <p className="mt-2 text-sm">답변 {m.revision} · 지식 반영: {m.knowledge_availability === "UNAVAILABLE" ? "현재 공개된 카드 없음" : m.knowledge_availability === "CHANGED" ? "이후 카드 변경됨" : ({ PENDING: "대기", REVIEW: "검토 필요", LINKED: "기존 지식 연결", PUBLISHED: "공개 이력 있음", FAILED: "실패" } as Record<string, string>)[m.knowledge_status ?? ""] ?? "확인 중"}</p>}
         {m.receipt_id && m.response?.citations.map((c, index) => <Citation key={index} receipt={m.receipt_id!} order={index+1} broken={c.source_availability !== "AVAILABLE"} />)}
         {m.response?.action === "CLARIFY" && m.message_id === last?.message_id && m.context_revision !== null && <div className="mt-3 flex flex-wrap gap-2">{m.response.allowed_options.map((option) => <button className={button} disabled={busy} key={option} onClick={() => ask.mutate({ request_id: crypto.randomUUID(), session_id: session, question: option, option, context_id: m.response!.context_id!, context_revision: m.context_revision! })}>{option}</button>)}</div>}
       </li>)}</ol>
