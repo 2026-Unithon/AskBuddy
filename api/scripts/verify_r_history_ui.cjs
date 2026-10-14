@@ -89,8 +89,10 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
       owner_answer_id: '1', revision: 1, knowledge_status: 'PENDING' });
     await page.getByText('기다리던 점주 답변', { exact: true }).waitFor({ timeout: 12000 });
     check('earlier pending reply arrives automatically after later answers', true);
-    state.messages.at(-1).knowledge_status = 'PUBLISHED'; state.pending = false;
-    await page.getByText('새 카드 · 방금 추가했어요', { exact: true }).waitFor({ timeout: 12000 });
+    // 공개 칩은 현재 공개 상태(knowledge_availability)까지 CURRENT 일 때만 단다
+    state.messages.at(-1).knowledge_status = 'PUBLISHED';
+    state.messages.at(-1).knowledge_availability = 'CURRENT'; state.pending = false;
+    await page.getByText('공개된 매장 카드에 반영됐어요', { exact: true }).waitFor({ timeout: 12000 });
     const calls = state.calls;
     await page.waitForTimeout(6200);
     check('resolved session stops polling', state.calls === calls);
