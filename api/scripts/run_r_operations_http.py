@@ -181,6 +181,23 @@ async def main(args, *, verification_hook=None):
     write_new(args.output/'frozen-challenge.json',challenge)
     source_manifest=evaluator_sources()
     write_new(args.output/'evaluator-sources.json',source_manifest)
+    if live_plan:
+        # D17·D18: 유료 실행은 사전등록한 분모·정답·채점기·반복·실패 처리 위에서만 돈다.
+        # compare_campaign 은 registration_ref 문자열만 받으므로 입력 동일성은 여기서 막는다.
+        from app.config import get_settings as _settings_for_prereg
+        from app.team.prereg import CampaignRegistration, registration_hash, verify_live_plan
+        if not getattr(args,'registration',None):
+            raise ValueError('live run requires --registration (preregistration file)')
+        registration=CampaignRegistration(**json.loads(args.registration.read_text('utf-8')))
+        turn_ids=[f"{case['case_id']}#{index}"
+                  for case in challenge['cases'] for index,_ in enumerate(case['turns'],start=1)]
+        verify_live_plan(registration,challenge_hash=challenge['content_sha256'],
+            source_manifest_hash=digest(source_manifest),
+            model=_settings_for_prereg().gemini_model,turn_ids=turn_ids,
+            max_krw=live_plan.get('max_krw'))
+        write_new(args.output/'registration.json',dict(
+            registration_ref=registration_hash(registration),
+            registration=registration.model_dump(mode='json')))
     settings=SimpleNamespace(r_v2_enabled=True,r_reranker_enabled=False,r_reviewed_semantics_enabled=False,
         r_general_semantics_enabled=False,embedding_model='synthetic-fixed-1536',
         embedding_dim=1536,chat_deadline_seconds=5,search_deadline_seconds=1,chat_save_reserve_seconds=.5,
@@ -417,4 +434,6 @@ if __name__=='__main__':
     parser.add_argument('--live-plan',type=Path)
     parser.add_argument('--plan-hash')
     parser.add_argument('--approved-by')
+    # 유료 실행(--live-plan)에만 필요하다. scripts/register_r_campaign.py 가 만든다
+    parser.add_argument('--registration',type=Path)
     asyncio.run(main(parser.parse_args()))
