@@ -84,8 +84,12 @@ async def main():
             await verify_w3_consumer(pool, fresh)
             from verify_r_legacy_publication import verify as verify_legacy_publication
             await verify_legacy_publication(pool, fresh)
+            from verify_r_legacy_owner_flow import verify as verify_legacy_owner
+            await verify_legacy_owner(pool, fresh)
             from verify_checklist import verify as verify_checklist
             await verify_checklist(pool, fresh)
+            from verify_r_fact_consumption import verify as verify_fact_consumption
+            await verify_fact_consumption(pool, fresh)
             from verify_w_fact_only import verify as verify_w_fact_only
             await verify_w_fact_only(pool, fresh)
         finally:

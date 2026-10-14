@@ -21,9 +21,10 @@ import { rCitationQuery, rHistoryQuery, rKeys, rSessionsQuery } from "@/lib/quer
 import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
 import { rAsk, rCreateSession, type RChatInput, type RMessage } from "@/lib/r-v2-api";
 import { useApp } from "@/lib/store";
+import { CitationOrigin } from "@/components/citation-origin";
 
 const KNOWLEDGE_CHIP: Record<string, string> = {
-  PUBLISHED: "새 카드 · 방금 추가했어요",
+  PUBLISHED: "공개된 매장 카드에 반영됐어요",
   LINKED: "매장 카드와 같은 내용이에요",
 };
 
@@ -191,7 +192,9 @@ function MessageView({
   const response = message.response;
   // 점주 원문 답 (A6). 카드 반영은 별도 상태라 공개·연결됐을 때만 칩을 단다
   if (message.owner_answer_id) {
-    const chip = KNOWLEDGE_CHIP[message.knowledge_status ?? ""];
+    const chip = message.knowledge_availability === "UNAVAILABLE" ? "현재 공개된 카드가 없어요"
+      : message.knowledge_availability === "CHANGED" ? "이후 카드 내용이 바뀌었어요"
+      : message.knowledge_availability === "CURRENT" ? KNOWLEDGE_CHIP[message.knowledge_status ?? ""] : undefined;
     return (
       <AnswerBubble chips={<>{<Chip tone="neutral">사장님 답</Chip>}{chip && <Chip>{chip}</Chip>}</>}>
         {message.content}
@@ -292,14 +295,7 @@ function CitationChip({ receipt, order, broken }: { receipt: string; order: numb
           {citation.data && (
             <>
               <p className="whitespace-pre-wrap">{citation.data.text}</p>
-              {citation.data.owner_answer_id && (
-                <p data-testid="owner-answer-citation" className="mt-1 text-ink-muted">
-                  출처 · 사장님 답
-                </p>
-              )}
-              {citation.data.source_availability !== "AVAILABLE" && (
-                <p className="mt-1 text-ink-muted">원본 자료는 지워졌어요. 승인된 내용은 그대로 남아 있어요.</p>
-              )}
+              <CitationOrigin citation={citation.data} />
             </>
           )}
         </div>

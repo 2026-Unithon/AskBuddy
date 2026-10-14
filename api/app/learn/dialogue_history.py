@@ -8,19 +8,30 @@ from app.learn.question_contexts import _lock_session
 class DialogueHistory:
     receipt_ids: tuple[int, ...] = ()
     user_turns: tuple[str, ...] = ()
+    failed_turn_ids: tuple[int,...] = ()
+    failed_head: int = 0
 
     @property
     def head(self) -> int:
         return self.receipt_ids[-1] if self.receipt_ids else 0
 
 
-async def load_history(conn, *, store_id: int, member_id: int, session_id: int) -> DialogueHistory:
+async def load_history(conn, *, store_id: int, member_id: int, session_id: int,
+                       include_failed:bool=False,exclude_request_id:str|None=None) -> DialogueHistory:
     # 호출자는 짧은 트랜잭션에서 읽고 모델 호출 전에 잠금을 해제한다.
     await _lock_session(conn, store_id=store_id, member_id=member_id, session_id=session_id)
-    rows = await conn.fetch("""select receipt_id, original_question from r_answer_receipts
+    rows = await conn.fetch("""select receipt_id, original_question, created_at from r_answer_receipts
         where store_id=$1 and member_id=$2 and session_id=$3
         order by receipt_id desc limit 10""", store_id, member_id, session_id)
     rows = tuple(reversed(rows))
+    if include_failed:
+        from app.learn.failed_user_turns import failed_turns
+        failures=await failed_turns(conn,store_id=store_id,member_id=member_id,session_id=session_id,exclude_request_id=exclude_request_id)
+        merged=[(r['created_at'],0,r['receipt_id'],r['original_question']) for r in rows]
+        merged.extend((r['created_at'],1,r['failed_turn_id'],r['question']) for r in failures)
+        merged=sorted(merged)[-10:]
+        return DialogueHistory(tuple(r['receipt_id'] for r in rows),tuple(r[3] for r in merged),
+            tuple(r[2] for r in merged if r[1]==1),failures[0]['failed_turn_id'] if failures else 0)
     return DialogueHistory(tuple(row['receipt_id'] for row in rows),
                            tuple(row['original_question'] for row in rows))
 

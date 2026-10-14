@@ -117,11 +117,14 @@ async def validate_policy_confirmation(conn,*,store_id:int,member_id:int,session
 
 
 async def saved_reply(pool,*,store_id:int,member_id:int,session_id:int,request_id:str,
-                      question:str,choice:ContextChoice|None=None,policy_receipt_id:str|None=None):
+                      question:str,choice:ContextChoice|None=None,policy_receipt_id:str|None=None,recover_failed:bool=False):
     """현재 회원/세션을 재확인하고 모델 호출 전에 원래 결과를 재조회한다."""
     async with pool.acquire() as conn:
         async with conn.transaction():
             await _lock_session(conn,store_id=store_id,member_id=member_id,session_id=session_id)
+            if recover_failed:
+                from app.learn.failed_user_turns import validate_failed_request
+                await validate_failed_request(conn,store_id=store_id,member_id=member_id,session_id=session_id,request_id=request_id,question=question)
             return await _receipt(conn,store_id=store_id,member_id=member_id,request_id=request_id,
                 body_hash=request_body_hash(session_id=session_id,question=question,choice=choice,policy_receipt_id=policy_receipt_id))
 
@@ -131,7 +134,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                       resolved:ResolvedSelection,confirmed_slots:dict[str,str],
                       semantic_context:dict|None=None,choice:ContextChoice|None=None,
                       execution_metadata:dict|None=None,policy_receipt_id:str|None=None,
-                      history_head:int|None=None) -> StoredReply:
+                      history_head:int|None=None,failed_history_head:int|None=None) -> StoredReply:
     if (not 8<=len(request_id)<=80 or not question.strip() or len(question)>1000
             or (choice is None and resolved.question!=question)):
         raise ApiError(422,"INVALID_CONTRACT","질문과 요청 정보를 확인해 주세요.")
@@ -152,6 +155,11 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             replay=await _receipt(conn,store_id=store_id,member_id=member_id,request_id=request_id,body_hash=body_hash)
             if replay is not None:
                 return replay
+            if failed_history_head is not None:
+                from app.learn.failed_user_turns import validate_failed_head,validate_failed_request
+                await validate_failed_request(conn,store_id=store_id,member_id=member_id,session_id=session_id,request_id=request_id,question=question)
+                await validate_failed_head(conn,store_id=store_id,member_id=member_id,session_id=session_id,
+                    request_id=request_id,expected_head=failed_history_head)
             if history_head is not None:
                 from app.learn.dialogue_history import validate_history_head
                 await validate_history_head(conn,store_id=store_id,member_id=member_id,
@@ -192,14 +200,17 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                     raise ApiError(422,'INVALID_CONTRACT','질문 묶음의 확정 근거가 일치하지 않습니다.')
             validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
             if plan.action=="CLARIFY":
+                from app.learn.case_clarification import case_context_data
+                case_data=case_context_data(plan,resolved)
                 if choice is not None:
                     if plan.context_id!=choice.context_id:
                         raise ApiError(422,"INVALID_CONTRACT","문맥 식별값이 다릅니다.")
                     context=await offer_next_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
-                        context_id=choice.context_id,slot=plan.clarification_slot,options=plan.allowed_options)
+                        context_id=choice.context_id,slot=plan.clarification_slot,options=plan.allowed_options,
+                        proposed_slots=case_data)
                 else:
                     context=await create_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
-                        original_question=question,confirmed_slots=confirmed_slots,proposed_slots={},
+                        original_question=question,confirmed_slots=confirmed_slots,proposed_slots=case_data,
                         knowledge_revision=int(snapshot.knowledge_revision),slot=plan.clarification_slot,
                         options=plan.allowed_options,issued_context_id=plan.context_id)
             # Per-store opportunistic cleanup; idle stores use the maintenance CLI.
@@ -234,8 +245,8 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",
                 session_id,response.message,"ANSWERED" if plan.action=="ANSWER" else "NO_ANSWER",
-                "CARD_ORIGINAL" if plan.action=="ANSWER" else "MISS",
-                "FALLBACK" if plan.action=="ANSWER" else "NOT_APPLICABLE")
+                ("GROUNDED_LLM" if resolved.conclusions else "CARD_ORIGINAL") if plan.action=="ANSWER" else "MISS",
+                ("VERIFIED" if resolved.conclusions else "FALLBACK") if plan.action=="ANSWER" else "NOT_APPLICABLE")
             receipt_id=await conn.fetchval("""insert into r_answer_receipts(store_id,member_id,session_id,
                 request_id,body_hash,original_question,resolved_query,context_snapshot,snapshot_id,knowledge_revision,
                 user_message_id,buddy_message_id,pending_id,response,execution_metadata)
@@ -244,6 +255,8 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 json.dumps(dict(question=resolved.question,entity=resolved.entity_id,predicate=resolved.predicate,variants=resolved.variants,
                                 confirmed_slots=confirmed_slots,semantic_context=semantic_context,
                                 calculations=[c.model_dump(mode='json') for c in resolved.calculations],
+                                conclusions=[c.model_dump(mode='json') for c in resolved.conclusions],
+                                conclusion_user_turns=resolved.conclusion_user_turns,
                                 parts=[dict(plan=p.plan.model_dump(mode='json'),entity=p.resolved.entity_id,
                                     predicate=p.resolved.predicate,variants=p.resolved.variants)
                                     for p in resolved.parts])),

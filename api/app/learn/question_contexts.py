@@ -134,6 +134,11 @@ def accept_selection(stored: StoredContext, *, option: str, expected_state_revis
     confirmed[stored.offered_slot] = option
     proposed = (dict(stored.context.proposed_slots)
                 if knowledge_revision == stored.knowledge_revision else {})
+    # User-authored case provenance survives a knowledge refresh; it is not a
+    # cached policy or inferred fact. Other model proposals still expire.
+    from app.learn.case_clarification import CONTEXT_KEY
+    if CONTEXT_KEY in stored.context.proposed_slots:
+        proposed[CONTEXT_KEY]=stored.context.proposed_slots[CONTEXT_KEY]
     proposed.pop(stored.offered_slot, None)
     values = stored.context.model_dump()
     values.update(confirmed_slots=confirmed, proposed_slots=proposed,
@@ -161,7 +166,8 @@ async def accept_context(conn, *, store_id: int, member_id: int, session_id: int
 
 
 async def offer_next_context(conn, *, store_id: int, member_id: int, session_id: int,
-                             context_id: UUID, slot: str, options: tuple[str, ...]) -> StoredContext:
+                             context_id: UUID, slot: str, options: tuple[str, ...],
+                             proposed_slots: dict[str,str] | None = None) -> StoredContext:
     _offer(slot, options)
     stored = await load_context(conn, store_id=store_id, member_id=member_id,
                                 session_id=session_id, context_id=context_id)
@@ -171,7 +177,8 @@ async def offer_next_context(conn, *, store_id: int, member_id: int, session_id:
         raise ClarificationLimit("UNRESOLVED_CONTEXT")
     row = await conn.fetchrow("""
         update r_question_contexts set offered_slot=$5, offered_options=$6::jsonb,
-          clarify_turns=clarify_turns+1, state_revision=state_revision+1
+          clarify_turns=clarify_turns+1, state_revision=state_revision+1, proposed_slots=$7::jsonb
         where store_id=$1 and member_id=$2 and chat_session_id=$3 and context_id=$4 returning *
-        """, store_id, member_id, session_id, context_id, slot, json.dumps(options))
+        """, store_id, member_id, session_id, context_id, slot, json.dumps(options),
+        json.dumps({**stored.context.proposed_slots,**(proposed_slots or {})}))
     return _decode(row)

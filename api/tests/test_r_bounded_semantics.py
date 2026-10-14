@@ -63,10 +63,10 @@ def test_entity_clarification_offers_only_unambiguous_approved_candidates():
     payload=proposal_input(search,store_id=1,question=q);baseline=decide(search,store_id=1,question=q)
     raw=dict(input_hash=payload['input_hash'],snapshot_hash=snap.snapshot_hash,interpretation=None,
         plan=dict(snapshot_id=snap.snapshot_id,knowledge_revision=snap.knowledge_revision,action='CLARIFY',
-            clarification_slot='entity',allowed_options=[card.title,second.title],context_id=str(uuid4())))
+            clarification_slot='entity',allowed_options=[card.title,second.title]))
     chosen=validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
     assert chosen.plan.action=='CLARIFY' and chosen.confirmed_slots=={}
-    assert str(chosen.plan.context_id)!=raw['plan']['context_id']
+    assert chosen.plan.context_id is not None and 'context_id' not in raw['plan']
     assert validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline,clarify_turns=2) is baseline
     with pytest.raises(ValueError):validate_interpretation(search,payload=payload,proposal=raw,
         baseline=replace(baseline,confirmed_slots={'entity':card.title}))

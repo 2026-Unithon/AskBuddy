@@ -32,9 +32,19 @@ def setup(tmp_path):
 def provider_for(search,raw,*,reject=False):
     async def call(prompt,*,schema,**kwargs):
         if schema is GeneralProposal:return raw
-        request=json.loads(prompt.split('\n',1)[1])
+        request=json.loads(prompt.rsplit('\n',1)[1])
         refs=validate_answer_references(GeneralProposal.model_validate(raw).plan,search.snapshot,store_id='1')
-        return dict(request_hash=request['request_hash'],supported=not reject,unresolved=[],checked_fact_ids=refs.fact_ids,checked_raw_blocks=refs.raw_blocks)
+        from app.learn.grounded_conclusions import atoms
+        from app.contracts.answer import SelectedBlock
+        selected=atoms(GeneralProposal.model_validate(raw).plan.selected_blocks)
+        return dict(request_hash=request['request_hash'],supported=not reject,unresolved=[],checked_fact_ids=refs.fact_ids,
+            situation_review=[dict(conclusion_unit_id=u['unit_id'],status='NO_CASE_FACTS',user_evidence=[],rationale='Synthetic structural fixture only') for u in request['conclusion_units']],
+            case_action_review=dict(scope='NOT_APPLICABLE',rationale='synthetic fixture without named case actions',cases=[]),
+            rule_coverage=[dict(rule_id=r['rule_id'],required=True,conclusion_unit_id='c0s0',
+                rationale='synthetic structural fixture only') for r in request.get('selected_rules',[])],
+            candidate_coverage=[dict(reference=b,required=bool(atoms((SelectedBlock.model_validate(b),))&selected),rationale='synthetic fixture') for b in request['candidate_reference_units']],
+            checked_conclusion_ids=list(range(len(raw.get('conclusions',[])))),
+            checked_raw_blocks=refs.raw_blocks,checked_user_turn_ids=[t['turn_id'] for t in request['dialogue_turns']])
     return AsyncMock(side_effect=call)
 
 
@@ -123,8 +133,10 @@ async def test_invalid_model_interpretation_is_error_not_answer_or_pending(tmp_p
 @pytest.mark.asyncio
 async def test_rejection_uncertainty_timeout_and_bad_verifier_are_distinct(tmp_path):
     search,raw,kw,_=setup(tmp_path)
-    decision,audit=await general_decision(search,provider=provider_for(search,raw,reject=True),**kw)
-    assert decision is kw['baseline'] and audit['status']=='VERIFIER_REJECTED'
+    with pytest.raises(ApiError) as error:
+        await general_decision(search,provider=provider_for(search,raw,reject=True),**kw)
+    assert error.value.code=='GENERAL_VERIFICATION_REJECTED'
+    assert error.value.details['reason_code']=='UNVERIFIABLE'
     raw['unresolved']=['unknown condition']
     provider=provider_for(search,raw)
     decision,audit=await general_decision(search,provider=provider,**kw)
@@ -180,13 +192,13 @@ def test_clarification_uses_snapshot_options_and_runtime_context():
     snap=search.snapshot.model_copy(update={'cards':(card,),'fact_revisions':(f,second)})
     search=replace(search,snapshot=snap.model_copy(update={'snapshot_hash':snapshot_digest(snap)}))
     q='그 음료에 들어가는 액체가 궁금해요';payload=proposal_input(search,store_id=1,question=q)
-    baseline=decide(search,store_id=1,question=q);runtime=uuid4();model_id=uuid4()
+    baseline=decide(search,store_id=1,question=q);runtime=uuid4()
     raw=dict(input_hash=payload['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
-        plan=dict(snapshot_id='1',knowledge_revision='1',action='CLARIFY',clarification_slot='temperature',allowed_options=['HOT','ICE'],context_id=str(model_id)),
+        plan=dict(snapshot_id='1',knowledge_revision='1',action='CLARIFY',clarification_slot='temperature',allowed_options=['HOT','ICE']),
         interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=[]),
         slots=[dict(slot=k,value=v,question_quote=q) for k,v in [('entity','1'),('predicate','milk_amount')]])
     result=validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline,context_id=runtime)
-    assert result.plan.context_id==runtime and result.plan.context_id!=model_id
+    assert result.plan.context_id==runtime
     assert validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline,clarify_turns=2) is baseline
     raw['plan']['allowed_options']=['HOT','INVENTED']
     with pytest.raises(ValueError):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
@@ -215,7 +227,7 @@ async def test_provider_requires_eval_budget_and_honors_token_caps(tmp_path,monk
     ctx=kwargs()['context'];budget=EvaluationBudget(None,policy())
     budget.reserve=AsyncMock(return_value='reserved');budget.finish=AsyncMock()
     sdk=NS(aio=NS(models=NS(count_tokens=AsyncMock(return_value=NS(total_tokens=10)),
-        generate_content=AsyncMock(return_value=NS(text='{}',usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),aclose=AsyncMock()))
+        generate_content=AsyncMock(return_value=NS(text='{}',candidates=[NS(finish_reason='STOP')],usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),aclose=AsyncMock()))
     monkeypatch.setattr('google.genai.Client',lambda **kw:sdk)
     monkeypatch.setattr('app.learn.general_provider.get_settings',lambda:NS(gemini_model='synthetic',gemini_api_key='synthetic'))
     sink=NS(start=AsyncMock(return_value=1),finalize=AsyncMock())

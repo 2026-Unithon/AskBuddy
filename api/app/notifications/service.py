@@ -122,8 +122,8 @@ async def create_ingest_completed_notification(
         aggregate_type="INGEST_JOB",
         aggregate_id=job_id,
         dedupe_key=f"ingest-completed:{store_id}:{job_id}",
-        title="새 카드가 준비됐어요",
-        body=f"검토할 업무 카드 {card_count}개가 준비됐습니다.",
+        title="자료 정리가 끝났어요",
+        body=f"자료가 반영된 카드 {card_count}개를 확인해 주세요. 공개 여부는 카드에서 확인할 수 있어요.",
         destination=f"/owner/cards/review?job_id={job_id}",
     )
 

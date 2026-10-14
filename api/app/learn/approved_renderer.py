@@ -1,15 +1,16 @@
 """승인 원문·조건·예외를 보존하는 v2 서버 렌더러. 의미 판정은 R 검증기가 수행한다."""
+import re
 from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse, Citation, POLICY_MESSAGES
 from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.validate import validate_answer_references
 
-RENDERER_VERSION = "r-approved/v1"
+RENDERER_VERSION = "r-approved/v2"
 
 
 def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: int,
            request_id: str, pending_id: str | None = None, availability=None, resolved=None) -> ChatResponse:
-    if snapshot.renderer_version != RENDERER_VERSION:
+    if snapshot.renderer_version not in ("r-approved/v1",RENDERER_VERSION):
         raise ValueError("unsupported approved renderer version")
     validate_answer_references(plan,snapshot,store_id=str(store_id))
     fields = dict(request_id=request_id,action=plan.action,snapshot_id=snapshot.snapshot_id,
@@ -17,11 +18,13 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
     if plan.action in POLICY_MESSAGES:
         return ChatResponse(**fields,message=POLICY_MESSAGES[plan.action])
     if plan.action=="CLARIFY":
-        return ChatResponse(**fields,message="어느 경우인지 선택해 주세요.",context_id=plan.context_id,
+        message="어느 건을 말씀하시는지 선택해 주세요." if plan.clarification_slot=='case' else "어느 경우인지 선택해 주세요."
+        return ChatResponse(**fields,message=message,context_id=plan.context_id,
                             clarification_slot=plan.clarification_slot,allowed_options=plan.allowed_options)
     if plan.action=="ESCALATE":
         return ChatResponse(**fields,message="확인된 자료만으로 답하기 어려워 사장님께 확인을 요청했어요.",pending_id=pending_id)
     lines,citations=[],[]
+    previous_heading = None
     availability=availability or {}
     for selected in plan.selected_blocks:
         card=snapshot.card(selected.card_id)
@@ -36,9 +39,19 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         else:
             for fid in selected.fact_revision_ids:
                 fact=snapshot.fact(fid)
-                heading=" / ".join(s for s in (card.title,fact.variant.temperature,fact.variant.size) if s)
+                title = fact.subject or card.title
+                parts = [title]
+                for label in (fact.variant.temperature,fact.variant.size):
+                    if label and not re.search(r'(?<!\w)'+re.escape(label)+r'(?!\w)',title,re.I):
+                        parts.append(label)
+                heading=" / ".join(parts)
+                if snapshot.renderer_version == 'r-approved/v1':
+                    heading=" / ".join(s for s in (card.title,fact.variant.temperature,fact.variant.size) if s)
                 # 승인 부정문을 휴리스틱으로 덧쓰거나 뒤집지 않는다.
-                lines.extend((heading,fact.assertion,*fact.conditions,*fact.exceptions))
+                if snapshot.renderer_version == 'r-approved/v1' or heading != previous_heading:
+                    lines.append(heading)
+                previous_heading = heading
+                lines.extend((fact.assertion,*fact.conditions,*fact.exceptions))
                 for origin in fact.provenance:
                     citation = Citation(card_id=card.card_id,card_version_id=card.card_version_id,
                         block_id=selected.block_id,fact_revision_id=fid,source_id=origin.source_id,
@@ -53,4 +66,8 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
         lines.extend(calculate(resolved.calculations,plan=plan,snapshot=snapshot,store_id=store_id,
             question=resolved.question,user_turns=resolved.calculation_user_turns))
+        if resolved.conclusions:
+            from app.learn.grounded_conclusions import conclusion_lines
+            lines=['현재 질문에 대한 안내',*conclusion_lines(resolved.conclusions,citations=citations),
+                '', '승인 근거',*lines]
     return ChatResponse(**fields,message="\n".join(lines),citations=tuple(citations))

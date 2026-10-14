@@ -69,7 +69,8 @@ async def verify(client, admin, seed, headers, foreign_headers, check):
     aid = int(first['owner_answer_id'])
     async def state(value):
         await admin.execute('update r_owner_knowledge_states set status=$3 where store_id=$1 and owner_answer_id=$2', seed['store_id'], aid, value)
-    for value, expected in [('PENDING', True), ('REVIEW', True), ('LINKED', False), ('FAILED', False)]:
+    # 제안이 없는 REVIEW는 초기화 뒤 남은 이력일 수 있다. 영구 폴링하지 않는다.
+    for value, expected in [('PENDING', True), ('REVIEW', False), ('LINKED', False), ('FAILED', False)]:
         await state(value)
         check('knowledge state '+value, await status() == expected)
     await admin.execute("""insert into outbox_leases(store_id,consumer,event_id,leased_by,leased_until,status,last_error)
