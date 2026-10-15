@@ -97,6 +97,25 @@ class RegistrationShapeTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     _registration(**over)
 
+    def test_campaign_needs_a_representative_delta(self):
+        with self.assertRaises(ValueError):
+            _registration(min_median_delta=None)
+
+    def test_diagnostic_allows_one_run_and_no_controls(self):
+        registration = _registration(run_kind="DIAGNOSTIC", repeat_count=1, control_count=0,
+                                     min_median_delta=None)
+        self.assertEqual(registration.run_kind, "DIAGNOSTIC")
+
+    def test_diagnostic_must_not_declare_a_representative_delta(self):
+        with self.assertRaises(ValueError):
+            _registration(run_kind="DIAGNOSTIC", repeat_count=1, control_count=0,
+                          min_median_delta=3)
+
+    def test_diagnostic_still_needs_budget_and_input_pinning(self):
+        with self.assertRaises(ValueError):
+            _registration(run_kind="DIAGNOSTIC", repeat_count=1, control_count=0,
+                          min_median_delta=None, budget=None)
+
     def test_must_have_must_be_inside_denominator(self):
         with self.assertRaises(ValueError):
             _registration(must_have_ids=("q9",))
@@ -286,6 +305,13 @@ class CheckCampaignTest(unittest.TestCase):
         registration = _registration()
         report = _report(registration, gate=dict(eligible=False))
         self.assertEqual(check_campaign(report, registration), [])
+        self.assertFalse(campaign_passes_prereg(report, registration))
+
+    def test_diagnostic_registration_cannot_be_graded_as_a_campaign(self):
+        registration = _registration(run_kind="DIAGNOSTIC", repeat_count=1, control_count=0,
+                                     min_median_delta=None)
+        report = _report(registration)
+        self.assertEqual(check_campaign(report, registration), ["DIAGNOSTIC_NOT_A_CAMPAIGN"])
         self.assertFalse(campaign_passes_prereg(report, registration))
 
     def test_empty_report_does_not_pass_quietly(self):

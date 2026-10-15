@@ -30,7 +30,8 @@ SCHEMA_VERSION = "r_campaign_registration/v1"
 _HASH = r"^sha256:[0-9a-f]{64}$"
 _MONEY = r"^(0|[1-9][0-9]{0,9})(\.[0-9]{1,6})?$"
 
-# D17: A/B 각 최소 3회와 A/A 대조. 3회는 통계 보장이 아니라 하한이다
+# D17: A/B 각 최소 3회와 A/A 대조. 3회는 통계 보장이 아니라 하한이다.
+# 이 하한은 **승격을 다투는 캠페인**에만 적용된다 (run_kind='CAMPAIGN').
 MIN_REPEATS = 3
 MIN_CONTROLS = 3
 
@@ -114,10 +115,15 @@ class CampaignRegistration(Contract):
     question_ids: tuple[str, ...] = Field(min_length=1)
     must_have_ids: tuple[str, ...] = ()
 
+    # 실행 종류 — 반복 하한과 채점 가능 여부를 가른다
+    #   CAMPAIGN   승격을 다투는 A/B 캠페인. D17 의 3회·대조 3회 하한을 지킨다
+    #   DIAGNOSTIC 소수 질문으로 배선·품질을 들여다보는 실행. 점수를 내지 않는다
+    run_kind: Literal["CAMPAIGN", "DIAGNOSTIC"] = "CAMPAIGN"
+
     # 반복과 판정 기준
-    repeat_count: int = Field(ge=MIN_REPEATS)
-    control_count: int = Field(ge=MIN_CONTROLS)
-    min_median_delta: int = Field(ge=1)
+    repeat_count: int = Field(ge=1)
+    control_count: int = Field(ge=0)
+    min_median_delta: int | None = Field(default=None, ge=1)
     cost_neutral: StrictBool
 
     # 실행 조건
@@ -153,6 +159,15 @@ class CampaignRegistration(Contract):
             raise ValueError("필수 질문 ID 중복")
         if not required <= ids:
             raise ValueError("분모 밖의 필수 질문 ID")
+        if self.run_kind == "CAMPAIGN":
+            if self.repeat_count < MIN_REPEATS or self.control_count < MIN_CONTROLS:
+                raise ValueError(
+                    f"캠페인은 반복 {MIN_REPEATS}회·대조 {MIN_CONTROLS}회가 하한이다 (D17)")
+            if self.min_median_delta is None:
+                raise ValueError("캠페인은 대표 개선량 최소치를 미리 고정한다 (D18)")
+        elif self.min_median_delta is not None:
+            # 진단은 개선량을 다투지 않는다. 숫자를 적어 두면 나중에 점수처럼 읽힌다
+            raise ValueError("진단 실행에는 대표 개선량을 적지 않는다")
         if self.provider_mode == "LIVE" and self.budget is None:
             # 승인 없이 유료 실행을 등록할 수 없다 (로드맵 §0-6)
             raise ValueError("유료 실행은 예산 승인이 필요하다")
@@ -250,6 +265,9 @@ def check_campaign(report: dict, registration: CampaignRegistration) -> list[str
     여기서 예외를 던지지 않는 이유는 어긋난 항목을 기록에 남겨야 하기 때문이다.
     """
     problems: list[str] = []
+    if registration.run_kind != "CAMPAIGN":
+        # 진단 실행의 출력을 캠페인 점수로 바꿔 읽지 않는다
+        return ["DIAGNOSTIC_NOT_A_CAMPAIGN"]
     expected_ref = registration_hash(registration)
     plan = report.get("plan") or {}
 

@@ -6,7 +6,7 @@ live evaluation plan is supplied. No production DB or gold-context injection.
 import argparse
 import asyncio
 from collections import Counter
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -209,6 +209,7 @@ async def main(args, *, verification_hook=None):
         settings.chat_deadline_seconds=live_plan.get('diagnostic_api_deadline_seconds',5)
         settings.llm_total_budget_seconds=live_plan.get('diagnostic_semantics_deadline_seconds',3)
     budget=None
+    evaluation_run_id=None
     provider_events=[]
     async def embed(texts,**kwargs):return [VECTOR.copy() for _ in texts]
     admin=await asyncpg.connect(DSN,timeout=5)
@@ -332,7 +333,8 @@ async def main(args, *, verification_hook=None):
                 settings.r_general_semantics_path=str((args.output/'evaluation-release.json').resolve())
                 settings.r_general_semantics_hash=digest(release)
                 stack.enter_context(patch('app.learn.general_provider.get_settings',return_value=settings))
-                stack.enter_context(evaluation_usage_scope(store_id=seeded['store_id'],evaluation_run_id=str(run_id)))
+                evaluation_run_id=str(run_id)
+                stack.enter_context(evaluation_usage_scope(store_id=seeded['store_id'],evaluation_run_id=evaluation_run_id))
                 stack.enter_context(evaluation_budget_scope(budget))
                 async def observed_generate(prompt,**kw):
                     event=dict(schema=kw['schema'].__name__,prompt=prompt,start=datetime.now(timezone.utc).isoformat())
@@ -361,10 +363,21 @@ async def main(args, *, verification_hook=None):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://synthetic-eval') as client:
                 control_token=create_token(dict(store_id=control_seed['store_id'],user_id=control_seed['user_id'],role='STAFF',
                     exp=datetime.now(timezone.utc)+timedelta(minutes=30)))
-                with patch.object(settings,'r_general_semantics_enabled',False):
-                    controls=await positive_controls(client,db,control_seed,{'Authorization':'Bearer '+control_token})
-                from scripts.r_fact_semantic_control import semantic_control
-                semantic=await semantic_control(client,db,control_seed,settings,{'Authorization':'Bearer '+control_token},args.output)
+                # 대조는 **다른 매장**에서 돈다. 유료 실행은 채점 매장으로 평가 usage 범위를
+                # 열어 두므로, 그 범위 그대로 대조를 부르면 request_usage_sink 가
+                # 'evaluation request store mismatch' 로 막고 503 MODEL_UNAVAILABLE 이 된다.
+                # 대조 동안만 같은 evaluation_run_id 로 대조 매장 범위를 덮어쓴다.
+                if evaluation_run_id is None:
+                    control_scope=nullcontext()
+                else:
+                    from app.team.evaluation_usage import evaluation_usage_scope as _control_usage_scope
+                    control_scope=_control_usage_scope(store_id=control_seed['store_id'],
+                        evaluation_run_id=evaluation_run_id)
+                with control_scope:
+                    with patch.object(settings,'r_general_semantics_enabled',False):
+                        controls=await positive_controls(client,db,control_seed,{'Authorization':'Bearer '+control_token})
+                    from scripts.r_fact_semantic_control import semantic_control
+                    semantic=await semantic_control(client,db,control_seed,settings,{'Authorization':'Bearer '+control_token},args.output)
                 controls.extend(semantic)
                 if verification_hook is not None:
                     controls.extend(await verification_hook(client=client,db=db,pool=pool,seeded=seeded,

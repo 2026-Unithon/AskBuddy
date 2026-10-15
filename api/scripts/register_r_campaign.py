@@ -120,6 +120,7 @@ def _register(args: argparse.Namespace) -> int:
         source_manifest_hash=digest(sources),
         question_ids=tuple(question_ids),
         must_have_ids=must_have,
+        run_kind=args.run_kind,
         repeat_count=args.repeats,
         control_count=args.controls,
         min_median_delta=args.min_median_delta,
@@ -142,7 +143,7 @@ def _register(args: argparse.Namespace) -> int:
                    sort_keys=True) + "\n", encoding="utf-8")
     print(f"등록 파일: {args.output}")
     print(f"registration_ref: {ref}")
-    print(f"질문 분모 {len(question_ids)}개 / 필수 {len(must_have)}개 / "
+    print(f"{args.run_kind} / 질문 분모 {len(question_ids)}개 / 필수 {len(must_have)}개 / "
           f"반복 {args.repeats}회 + 대조 {args.controls}회")
     if budget:
         print(f"예산 상한 {budget['usd_cap']} USD — 승인 {budget['approved_by']} "
@@ -183,9 +184,12 @@ def main(argv: list[str] | None = None) -> int:
                         default="SYNTHETIC")
     parser.add_argument("--truth-version")
     parser.add_argument("--evaluator", action="append")
-    parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--controls", type=int, default=3)
-    parser.add_argument("--min-median-delta", type=int, default=5)
+    # CAMPAIGN 은 승격을 다투는 A/B, DIAGNOSTIC 은 소수 질문을 들여다보는 실행이다.
+    # 진단은 반복 하한이 없고 대표 개선량을 적지 않는다(점수를 내지 않으므로).
+    parser.add_argument("--run-kind", choices=("CAMPAIGN", "DIAGNOSTIC"), default="CAMPAIGN")
+    parser.add_argument("--repeats", type=int)
+    parser.add_argument("--controls", type=int)
+    parser.add_argument("--min-median-delta", type=int)
     parser.add_argument("--cost-neutral", action="store_true")
     parser.add_argument("--provider-mode", choices=("SYNTHETIC", "LIVE"), default="SYNTHETIC")
     parser.add_argument("--model", action="append", default=[])
@@ -209,6 +213,13 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--check-report 는 --registration 과 함께 쓴다")
         return _check(args)
 
+    campaign = args.run_kind == "CAMPAIGN"
+    if args.repeats is None:
+        args.repeats = 3 if campaign else 1
+    if args.controls is None:
+        args.controls = 3 if campaign else 0
+    if campaign and args.min_median_delta is None:
+        args.min_median_delta = 5
     missing = [name for name in ("challenge", "snapshot", "sources", "output",
                                  "purpose", "registered_by")
                if getattr(args, name) in (None, "")]

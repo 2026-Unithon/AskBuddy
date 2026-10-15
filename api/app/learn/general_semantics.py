@@ -5,6 +5,7 @@ path requires a version-bound acceptance artifact before any runtime provider ca
 """
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -13,6 +14,8 @@ from uuid import uuid4
 from pydantic import Field, StrictBool
 from app.contracts.common import Contract, EntityId
 from app.contracts.hashing import digest
+
+logger=logging.getLogger(__name__)
 from app.contracts.usage import UsageContext
 from app.contracts.validate import validate_answer_references
 from app.errors import ApiError
@@ -378,5 +381,14 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     except ApiError:raise
     except UsageWriteError as exc:raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
     except TimeoutError as exc:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 초과되었습니다.',retryable=True) from exc
-    except (ValueError,KeyError,StopIteration) as exc:raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
+    except (ValueError,KeyError,StopIteration) as exc:
+        # 사유를 남기지 않으면 유료 실행에서 무엇이 막았는지 알 수 없다(2026-10-15 진단).
+        # 코드가 쓴 상수 문구만 싣는다 — 계약 위반 상세는 **위치·종류만** 남기고
+        # 사용자 글·모델 설명이 섞일 수 있는 입력값은 싣지 않는다.
+        errors=getattr(exc,'errors',None)
+        detail=('; '.join(sorted({'.'.join(str(p) for p in e.get('loc',()))+':'+e.get('type','')
+                                  for e in errors()}))[:300] if callable(errors)
+                else f'{type(exc).__name__}: {exc}'[:300])
+        logger.warning('general_proposal_rejected detail=%s',detail)
+        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
     except Exception as exc:raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True) from exc
