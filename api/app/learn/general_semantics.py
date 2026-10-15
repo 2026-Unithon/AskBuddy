@@ -89,6 +89,18 @@ class Interpretation(Contract):
             data={k:v for k,v in data.items() if k!='not_applicable_fact_ids'}
         return data
 
+    # [null,null] 은 "규격 축이 없다" 는 뜻이라 어떤 SPECIFIC 사실과도 짝지어지지 않는다.
+    # 즉 빈 목록과 의미가 같은데, 서버 검사는 둘을 다르게 본다
+    # (answer_validation.py:194 의 target_variants 비교). 2026-10-15 유료 진단에서
+    # 같은 질문에 실행마다 [] 와 [[null,null]] 이 갈려 나와 한 번은 통과하고 한 번은
+    # INVALID_REFERENCE 로 떨어졌다. 뜻이 같은 두 표기를 하나로 모은다.
+    @model_validator(mode='after')
+    def drop_variant_free_pairs(self):
+        kept=tuple(v for v in self.variants if v!=(None,None))
+        if len(kept)!=len(self.variants):
+            object.__setattr__(self,'variants',kept)
+        return self
+
 
 class Obligation(Contract):
     fact_revision_id: EntityId
