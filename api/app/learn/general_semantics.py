@@ -5,14 +5,17 @@ path requires a version-bound acceptance artifact before any runtime provider ca
 """
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Literal
 from uuid import uuid4
-from pydantic import Field, StrictBool
+from pydantic import Field, StrictBool, model_validator
 from app.contracts.common import Contract, EntityId
 from app.contracts.hashing import digest
+
+logger=logging.getLogger(__name__)
 from app.contracts.usage import UsageContext
 from app.contracts.validate import validate_answer_references
 from app.errors import ApiError
@@ -68,9 +71,35 @@ class Interpretation(Contract):
     predicate: str = Field(min_length=1,max_length=100,description='Selected typed fact predicate; RAW-only uses approved_procedure. slots.predicate.value must match.')
     variants: tuple[tuple[str|None,str|None],...] = Field(max_length=10,description='Pairs of [temperature, size], never [entity, predicate]. RAW-only uses []; do not invent variants.')
     target_fact_ids: tuple[EntityId,...] = Field(max_length=100)
-    # Null variant can mean unknown, not necessarily not-applicable. Require an
-    # explicit proposed applicability claim and the separate semantic verification.
-    not_applicable_fact_ids: tuple[EntityId,...] = Field(default=(),max_length=100)
+    # 규격이 비어 있는 사실을 서버가 NOT_APPLICABLE 로 판정하는 것은 snapshot 만 보면
+    # 되는 계산이라 서버가 직접 한다(아래 assessment 구성). 모델에게 같은 값을 복사시키던
+    # not_applicable_fact_ids 는 2026-10-15 유료 진단에서 "질문에 해당 없는 사실" 로
+    # 오해돼 정답 선택을 두 번 다 버렸다. 모델에게는 **모델만 답할 수 있는 것**만 묻는다 —
+    # 규격이 비어 있어 이 질문에 적용해도 되는지 판단할 수 없는 사실이 있는가.
+    variant_unverifiable_fact_ids: tuple[EntityId,...] = Field(default=(),max_length=100,
+        description='Selected facts whose empty [temperature,size] you CANNOT justify applying to this question. Leave empty when the approved wording makes the fact variant-independent. Any id here blocks the answer; prefer unresolved/CLARIFY when the whole question is unclear.')
+
+    # 2026-10-15 은퇴한 칸. 보존한 과거 모델 출력(tests/fixtures/*_live_*.json)이 이 키를
+    # 달고 있다. 기록을 고쳐 쓰지 않으려고 **읽을 때 떨군다.** 값은 쓰지 않는다 —
+    # 규격 무관 판정은 서버가 snapshot 으로 계산한다.
+    @model_validator(mode='before')
+    @classmethod
+    def drop_retired_not_applicable(cls,data):
+        if isinstance(data,dict) and 'not_applicable_fact_ids' in data:
+            data={k:v for k,v in data.items() if k!='not_applicable_fact_ids'}
+        return data
+
+    # [null,null] 은 "규격 축이 없다" 는 뜻이라 어떤 SPECIFIC 사실과도 짝지어지지 않는다.
+    # 즉 빈 목록과 의미가 같은데, 서버 검사는 둘을 다르게 본다
+    # (answer_validation.py:194 의 target_variants 비교). 2026-10-15 유료 진단에서
+    # 같은 질문에 실행마다 [] 와 [[null,null]] 이 갈려 나와 한 번은 통과하고 한 번은
+    # INVALID_REFERENCE 로 떨어졌다. 뜻이 같은 두 표기를 하나로 모은다.
+    @model_validator(mode='after')
+    def drop_variant_free_pairs(self):
+        kept=tuple(v for v in self.variants if v!=(None,None))
+        if len(kept)!=len(self.variants):
+            object.__setattr__(self,'variants',kept)
+        return self
 
 
 class Obligation(Contract):
@@ -221,9 +250,13 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     refs=validate_answer_references(plan,snap,store_id=payload['store_id'])
     facts=[snap.fact(fid) for fid in refs.fact_ids]
     null_variants={f.fact_revision_id for f in facts if (f.variant.temperature,f.variant.size)==(None,None)}
-    if (set(query.not_applicable_fact_ids)!=null_variants
-            or len(query.not_applicable_fact_ids)!=len(set(query.not_applicable_fact_ids))):
-        raise ValueError('null variant is not automatically not-applicable')
+    unverifiable=query.variant_unverifiable_fact_ids
+    if len(unverifiable)!=len(set(unverifiable)) or not set(unverifiable)<=null_variants:
+        # 고르지 않은 사실이나 규격이 있는 사실을 "판단 불가" 로 적을 수 없다
+        raise ValueError('variant applicability claim outside the selected null-variant facts')
+    if unverifiable:
+        # 모델이 적용성을 못 세운 사실로는 답하지 않는다. 추정으로 메우지 않는다
+        raise ValueError('variant applicability unverified for a selected fact')
     expected={(f.fact_revision_id,kind,statement) for f in facts
         for kind,statements in (('condition',f.conditions),('exception',f.exceptions)) for statement in statements}
     supplied=[(o.fact_revision_id,o.kind,o.statement) for o in proposal.obligations]
@@ -378,5 +411,14 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     except ApiError:raise
     except UsageWriteError as exc:raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
     except TimeoutError as exc:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 초과되었습니다.',retryable=True) from exc
-    except (ValueError,KeyError,StopIteration) as exc:raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
+    except (ValueError,KeyError,StopIteration) as exc:
+        # 사유를 남기지 않으면 유료 실행에서 무엇이 막았는지 알 수 없다(2026-10-15 진단).
+        # 코드가 쓴 상수 문구만 싣는다 — 계약 위반 상세는 **위치·종류만** 남기고
+        # 사용자 글·모델 설명이 섞일 수 있는 입력값은 싣지 않는다.
+        errors=getattr(exc,'errors',None)
+        detail=('; '.join(sorted({'.'.join(str(p) for p in e.get('loc',()))+':'+e.get('type','')
+                                  for e in errors()}))[:300] if callable(errors)
+                else f'{type(exc).__name__}: {exc}'[:300])
+        logger.warning('general_proposal_rejected detail=%s',detail)
+        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
     except Exception as exc:raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True) from exc
