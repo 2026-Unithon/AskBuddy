@@ -88,7 +88,8 @@ async def probe_doc_image(path: Path, workdir: Path, *, max_images: int, px: int
         dst = out / f"p{first}.jpg"
         img.save(dst, "JPEG")
         candidates.append(Candidate(g.candidate_id, g.locator, "", (dst,)))
-    return ProbeResult("DOC_IMAGE", tuple(candidates))
+    # 한 쪽짜리 자료만 훑기가 전체를 담은 것이다
+    return ProbeResult("DOC_IMAGE", tuple(candidates), complete=(page_count == 1))
 
 
 # ---------- AUDIO ----------

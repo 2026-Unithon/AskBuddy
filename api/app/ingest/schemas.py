@@ -110,6 +110,23 @@ class LocatedFactExtractionResult(FactExtractionResult):
     assertions: list[LocatedAssertion] = []
 
 
+# ── 한 호출 판 (Phase B 추가 S3) — 사실 추출 + 자료 전체의 용도 순위 ─────────
+class IntakeRank(BaseModel):
+    """한 호출 — 자료 전체의 용도 순위 한 줄."""
+    logic: Literal["RECIPE", "PROCEDURE", "POLICY", "REFERENCE", "NOTICE", "NONE"]
+    score: float = Field(ge=0, le=1)
+
+
+class IntakeFactExtractionResult(FactExtractionResult):
+    intake_ranking: list[IntakeRank] = []
+    intake_reason: str = ""
+
+
+class IntakeLocatedFactExtractionResult(LocatedFactExtractionResult):
+    intake_ranking: list[IntakeRank] = []
+    intake_reason: str = ""
+
+
 # ── 사실 조립 계획 (W3a) ──────────────────
 # 모델은 이름표(E…·F…)·카테고리·블록 종류만 낸다. 제목·문장·값 필드를 두지 않는다 —
 # 카드 제목과 본문은 서버가 사실 판에서 렌더링한다(card_plan).

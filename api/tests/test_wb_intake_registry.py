@@ -41,7 +41,7 @@ def test_probe_summary_and_hash_ignore_unsampled_text():
     a = ir.ProbeResult("DOC_TEXT", (ir.Candidate("c1", loc, "가나다"),
                                     ir.Candidate("c2", ir.Locator("PAGE", "2", "2"), "", sampled=False)))
     assert a.summary() == {"normalizer": "DOC_TEXT", "candidates": 2, "sampled": ["c1"],
-                           "chars": 3, "images": 0}
+                           "chars": 3, "images": 0, "complete": False}
     b = ir.ProbeResult("DOC_TEXT", (ir.Candidate("c1", loc, "가나다"),))
     assert len(a.sample_hash()) == 64
     assert a.sample_hash() != b.sample_hash()  # 후보 구성이 다르면 다르다

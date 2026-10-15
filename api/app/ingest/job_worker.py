@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from app.deps import get_pool
 from app.ingest import pipeline
@@ -75,9 +76,29 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
             job_id,
         )
 
+    # S1 — 판정 없는 자료가 둘 이상이면 묶어 분류 1회. PARTIAL 재시도 자료는 판정이 이미 있다.
+    # 훑기 결과(다운로드·파싱)는 caches 에 남아 process_source 가 다시 쓴다
+    caches: dict = {}
+    fresh = [int(r["source_id"]) for r in source_ids if not r["failed_segment_ids"]]
+    if len(fresh) >= 2:
+        from app.ingest.intake import route as intake_route
+        from app.usage import DbUsageSink
+        bundle_tag = int(time.time() * 1000)
+        try:
+            await intake_route.route_job_bundle(
+                pool, store_id, job_id=job_id, source_ids=fresh,
+                usage_sink=DbUsageSink(pool, resilient=True),
+                usage_base=(store_id, job_id, "REGISTRATION", "PRODUCT", None, bundle_tag),
+                caches=caches)
+        except Exception:
+            # 묶음은 비용 절감 장치다. 실패해도 자료마다 따로 판정하면 된다(Review Focus 1)
+            logger.exception("작업 묶음 분류 단계 실패 job=%s — 자료마다 처리한다", job_id)
+
     try:
         for row in source_ids:
             source_id = int(row["source_id"])
+            # 묶음이 훑은 자료만 캐시를 넘긴다 — 묶지 않은 자료는 지금과 같은 호출이다
+            cache_kw = ({"intake_cache": caches[source_id]} if source_id in caches else {})
             async with pool.acquire() as conn:
                 started_at = await conn.fetchval(
                     """
@@ -101,11 +122,11 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     store_id, source_id, job_id=job_id,
                     retry_segments=list(lost_ids),
                     expected_segments_total=row["segments_total"],
-                    run_tag=run_tag,
+                    run_tag=run_tag, **cache_kw,
                 )
             else:
                 outcome = await pipeline.process_source(
-                    store_id, source_id, job_id=job_id, run_tag=run_tag)
+                    store_id, source_id, job_id=job_id, run_tag=run_tag, **cache_kw)
 
             async with pool.acquire() as conn:
                 source = await conn.fetchrow(

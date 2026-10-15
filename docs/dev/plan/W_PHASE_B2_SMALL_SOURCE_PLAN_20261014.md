@@ -1273,9 +1273,12 @@ docker stop askbuddy-w-verify
 
 | 항목 | 값 |
 |---|---|
-| 기준선 pytest | |
-| 최종 pytest | |
-| 실제 DB 검증 | |
-| 격리 검사 | |
+| 기준선 pytest | `2387 passed, 6 skipped, 4 xfailed` (계획 시작). Task 7 직전 `2432 passed, 6 skipped, 4 xfailed` |
+| 최종 pytest | `2436 passed, 6 skipped, 4 xfailed` (Task 7 에서 `test_wb2_intake_report.py` 4건 추가 — 미관측 비용 1건 포함) |
+| 최종 검토 반영 | I-1 칩이 NONE 을 뒤집으면 한 호출 사실을 버리고 보통 추출, I-2 음성·영상은 작업 묶음에서 제외, I-3 새 설정 `intake_bundle_max_candidates`(기본 24, `ge=2`)로 묶음 후보 수 제한. 테스트 5건 추가 → `2441 passed, 6 skipped, 4 xfailed` |
+| 실제 DB 검증 | **통과 (2026-10-15).** API 키를 비우고 `verify_r_schema_rebuild.py` 실행, 종료 코드 0·FAIL 0. `PASS WB i-15`~`i-17`·보고 확인(한 호출 3·묶음 3·단독 0·작은 자료 6/6)·`PASS WB all scenarios`, 묶음 경로로 바뀐 i-14 도 통과. (10-14 에는 로컬 Docker 가 응답하지 않아 실행 못 했다) |
+| 격리 검사 | `check_store_id.py api/app/ingest api/app/cards api/app/checklist api/app/publish api/app/usage` → 기존 `repository.py` 15건만, 새 위반 0. `api/scripts/intake_cost_report.py` 위반 없음 |
 | 유료 호출 | 0 (한 호출 비교 평가는 사용자 승인 대기) |
 | 스위치 | `intake_single_call_small` 기본 꺼짐 |
+| web | 바꾸지 않아 `pnpm check` 생략 |
+| 하지 않은 것 | 실모델 비교 평가(한 호출 대 분류+추출), 스위치 켜기, 실제 DB 검증(위) |

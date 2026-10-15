@@ -34,15 +34,17 @@
 |---|---|---|---|---|
 | 0 | **Phase 0** 외부 모델 관찰 | 지시문 30개(로직 × 형식) × 4모델(Opus·Sonnet·Sol·Luna)을 실행기가 격리 환경에서 자동 실행(원본은 사용자가 넣음). A 이전에 시작, A~C 와 병행 가능 | `docs/dev/templates/extraction_observation/README.md`, 결과 폴더 `추출결과/관찰/README.md` | 준비 완료(지시문·폴더 2026-10-10). **사용자 실행 대기** |
 | 1 | **Phase A** 레거시 제거 | RAW 를 만드는 W 경로 삭제, W 플래그 제거, 점주 답변→사실, 공개 카드 대상 새 사실→새 초안, 1회 삭제 migration | `W_PHASE_A_FACT_ONLY_DESIGN_20261010.md` | 구현 완료(브랜치 `w/phase-a-fact-only`), 배포 대기. 절차서 `FACT_ONLY_ROLLOUT.md` |
-| 2 | **Phase B** 분류기·정규화기·체크리스트 | 입구 2곳(업로드·점주 답변) → 정규화기 훑기 → 분류 1회 → 본 추출. 새 확장자 avi·docx·hwp, 점주 답변 첨부, 사실 `ext`, 체크리스트 카드 단위, 분류기 테스트, 다수결 참조 일반화 | `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md`, 계획 `W_PHASE_B_PLAN_20261011.md` | 구현 완료(브랜치 `w/phase-b-intake`, 커밋 전). 새 확장자는 docx 하나(avi·hwp 는 하지 않음, 2026-10-11 확정). 단위 테스트·합성 대역 실제 DB 종단 검증 통과. **실모델 분류 평가는 사용자 승인 대기** |
+| 2 | **Phase B** 분류기·정규화기·체크리스트 | 입구 2곳(업로드·점주 답변) → 정규화기 훑기 → 분류 1회 → 본 추출. 새 확장자 avi·docx·hwp, 점주 답변 첨부, 사실 `ext`, 체크리스트 카드 단위, 분류기 테스트, 다수결 참조 일반화 | `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md`, 계획 `W_PHASE_B_PLAN_20261011.md` | 구현 완료(브랜치 `w/phase-b-intake`, 커밋 전). 새 확장자는 docx 하나(avi·hwp 는 하지 않음, 2026-10-11 확정). 단위 테스트·합성 대역 실제 DB 종단 검증 통과. **실모델 분류 평가는 사용자 승인 대기**. 추가 계획 `W_PHASE_B2_SMALL_SOURCE_PLAN_20261014.md`(작은 자료 호출 줄이기: 묶음 분류 1회·작은 자료 한 호출(스위치 기본 꺼짐)·측정 보고) 구현, 커밋 전(B2 합성 대역 실제 DB 검증 통과 2026-10-15) |
 | 3 | **Phase C** 공지·매장 지식 탭 | 공지사항(기간·회색·안 본 개수), 매장 지식 탭(맨 위 공지사항 + 카테고리 → 카드) | `W_PHASE_C_NOTICE_KNOWLEDGE_TAB_DESIGN_20261010.md` | 설계 완료(가정 2개 2026-10-10 확정) |
 | 4 | **Phase D** 로직별 전용 추출기 | `PROCEDURE`·`POLICY`·`REFERENCE` 전용 추출기와 로직별 본 추출 깊이 | 관찰 분석(`docs/dev/review/OBSERVATION_<LOGIC>_*.md`)이 근거 | 관찰 결과 대기 |
 | 5 | **Phase E** 역할별 모델 전환 | 감독·판단·일꾼 역할마다 비슷한 모델끼리 바꿔 쓰기: ① API 오류 시 다른 모델로 넘기기(장애 대비), ② 비용 효율 비교 실험(예: 일꾼 Flash ↔ Haiku 5.5, 판단 Sonnet ↔ Haiku 5.5)과 적용 | 이 문서 §2-1 | 설계 전 |
+| 6 | **Phase F** 업로드 작업 영속 worker | 서버가 재시작·배포돼도 업로드 작업이 사라지지 않고, 멈춘 작업은 lease 만료 뒤 회수·재시도된다(옛 계획의 J2 를 옮김) | 이 문서 §2-2, 옛 범위 `W_NEXT_PLAN_20260928.md` Phase J2 | 설계 전(2026-10-15 편입) |
 
 - A → B → C 는 순서대로. 각 단계는 앞 단계 위에 쌓는다.
 - **배포 순서 주의:** A 만 배포하면 체크리스트가 사실 카드 본문을 줄로 잘라 보여 준다. A 의 1회 삭제로 체크리스트 연결이 비므로, **B 를 머지한 뒤 점주가 체크리스트를 다시 연결**한다(또는 A·B 를 같이 배포). A 절차서에 적는다.
 - 관찰(0)은 사용자가 외부 앱에서 병행한다. 결과는 B 의 분류기 라벨 세트와 D 의 근거가 된다.
 - E 는 D 와 독립이라 B 이후 언제든 시작할 수 있다(이미 있는 SCAN 파이프라인부터 적용 가능).
+- F 는 C·D·E 와 독립이다. B 의 `job_worker`(묶음 분류 포함) 위에 쌓으므로 B 머지 뒤 시작한다. 자료 1건에 13~20분 걸리는 SCAN LAYOUT 을 운영에서 켜기 전에 끝내는 것을 권장한다(추천, 확정 아님).
 
 ## 2. 이번에 정해진 것 (2026-10-10 사용자 결정 요약)
 
@@ -68,6 +70,20 @@
   2. **비용 효율:** 같은 참조·같은 조건으로 역할별 후보를 비교(재현율·비용·지연, D17 반복 규칙)해 기본 모델을 정한다. 예: 일꾼 Gemini Flash ↔ Claude Haiku 5.5, 판단 Sonnet ↔ Haiku 5.5.
   - 모델명·순서는 `config.py` 역할별 목록. 유료 비교 실험은 사용자 승인 뒤.
   - 설계는 E 시작 때 쓴다(지금은 범위만).
+
+### 2-2. Phase F — 업로드 작업 영속 worker (2026-10-15 사용자 결정으로 편입)
+
+옛 계획 `W_NEXT_PLAN_20260928.md` 의 Phase J2 를 이 로드맵의 F 로 옮긴다. J2 는 W1~W3b 와 함께 끝난 것이 아니라 손대지 않은 채 남아 있었다(2026-10-15 확인: `ingest_jobs`·`job_worker` 에 lease·heartbeat 없음, 업로드·재분류는 `BackgroundTasks` 로 돈다).
+- 목표: 서버 재시작·배포·프로세스 종료에도 업로드 작업이 사라지지 않는다. 멈춘 작업은 lease 만료 뒤 다른 worker 가 이어 받는다.
+- 본보기: `api/app/cards/owner_answer_worker.py`(claim·heartbeat·finish·lease 유실).
+- 범위(J2 그대로, 설계 때 현재 코드에 맞춰 다시 확인):
+  - migration(가산형): `ingest_jobs` 에 lease 칸(`lease_token`·`lease_expires_at`·`attempt_count`·`next_attempt_at`) 또는 별도 lease 표.
+  - worker 루프: claim(`for update skip locked`) → heartbeat → finish. 만료 lease 회수, 지수 backoff 재시도와 상한, 상한 초과 시 FAILED 와 사유.
+  - `config.py` 에 `W_INGEST_WORKER_ENABLED`(기본 false)·동시 수·lease 길이·재시도 상한. `main.py` lifespan 에서 켜고 끈다. 켜면 라우트는 큐에 넣기만 하고 `BackgroundTasks` 를 쓰지 않는다. 끄면 지금과 같다.
+  - 모델 호출 중 DB 연결을 쥐지 않는다. 구간 체크포인트(`recovery_state`)·PARTIAL 재시도·입구 판정 재사용·Phase B 묶음 분류와 이어지게 한다(이미 저장된 판정·원장은 다시 만들지 않는다).
+  - 옛 호환 트리거가 만드는 `legacy-adapter` 작업을 worker 가 집어 가지 않게 한다(2026-10-15 `job_repository.py` 에 아직 있음).
+- 검증: 처리 도중 프로세스 종료 주입 → lease 만료 후 다른 worker 가 이어서 완료, 중복 카드·중복 판정·중복 원장 없음. 두 worker 경합 시 한 쪽만 처리. 합성 대역 실제 DB(`verify_r_schema_rebuild.py`)에 시나리오를 더한다.
+- 설계 문서부터 쓴다(`W_PHASE_F_INGEST_WORKER_DESIGN_<날짜>.md`).
 
 ## 3. 전 단계 공통 제약
 
@@ -110,6 +126,8 @@ python3 .claude/skills/store-isolation-check/check_store_id.py api/app/ingest ap
 | C | 직원 화면 web 파일 주 편집자 | 계획 단계에서 확인 |
 | D | 어떤 로직부터 전용 추출기를 만들지 | 관찰 분석 결과와 분류 기록(어떤 로직 자료가 많이 오는지)으로 |
 | E | 역할별 후보 모델·넘김 순서·비교 실험 예산 | E 설계 때 |
+| F | 카테고리 재분류 작업도 같은 worker 로 옮길지 | F 설계 때 묻는다(J2 에서 넘어온 질문) |
+| F | 배포판에서 `W_INGEST_WORKER_ENABLED` 를 켜는 시점 | F 검증 뒤 사용자가 정한다 |
 
 ## 5. 단계별 시작 방법
 
@@ -117,6 +135,7 @@ python3 .claude/skills/store-isolation-check/check_store_id.py api/app/ingest ap
 - **Phase B**: 설계 B 를 읽고 계획. 관찰 결과가 있으면 분류기 라벨 세트에 쓴다.
 - **Phase C**: 설계 C 를 읽고 계획(§2 가정은 확정됨).
 - **Phase E**: 이 문서 §2-1 을 읽고 E 설계 문서부터 쓴다(역할별 모델 목록·넘김 규칙·비교 실험 계획).
+- **Phase F**: 이 문서 §2-2 와 옛 J2 절을 읽고 F 설계 문서부터 쓴다. 본보기 `owner_answer_worker.py` 를 먼저 읽는다.
 - **관찰 분석**: 사용자가 "`<LOGIC>` 관찰 분석해 줘" 라고 하면 `docs/dev/templates/extraction_observation/README.md` 의 "Claude Code 세션이 하는 순서" 를 따른다.
 
 ## 6. 관련 문서

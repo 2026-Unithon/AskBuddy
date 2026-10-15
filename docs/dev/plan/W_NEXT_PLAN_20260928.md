@@ -307,6 +307,8 @@ W3a 에서 확인한 것(합성 데이터·합성 모델 대역, 실제 DB `api/
 
 ## Phase J2 — 업로드 처리 영속 worker
 
+> **2026-10-15: 이 절은 `W_FACT_ONLY_ROADMAP_20261010.md` 의 Phase F 로 옮겼다(§2-2). 여기 체크박스는 갱신하지 않는다.**
+
 **목표:** 서버가 재시작돼도 업로드 작업이 사라지지 않고, 멈춘 작업은 회수·재시도된다.
 
 TODO 근거: J2 절의 worker 항목. 본보기는 `api/app/cards/owner_answer_worker.py`(claim·heartbeat·finish·lease 유실).

@@ -90,3 +90,37 @@ def test_summary_rows_known_cost_and_failed_case_still_reports():
     rep = evaluate.score([], got)
     text = mod.render_report(rep, mode="real", model="m", case_count=1, cost=s, errors=errors)
     assert "실패 사례" in text and "지연(ms)" in text and "known_cost" in text
+
+
+def test_single_call_mock_run_uses_only_small_cases(tmp_path):
+    out = tmp_path / "eval.md"
+    res = subprocess.run([sys.executable, "scripts/run_intake_classifier_eval.py", "--single-call",
+                          "--out", str(out)], cwd=ROOT, capture_output=True, text=True,
+                         env={**os.environ, "INGEST_MODE": "mock"})
+    assert res.returncode == 0, res.stderr
+    text = out.read_text(encoding="utf-8")
+    assert "한 호출" in text and "0원" in text and "작은 사례" in text
+
+
+def test_single_call_filters_big_cases_and_gives_same_verdict_to_every_section():
+    import asyncio
+    mod = _load_script()
+    small = {"case_id": "s", "normalizer": "DOC_TEXT", "hints": ["POLICY"],
+             "candidates": [{"candidate_id": "c1", "locator": {"kind": "PAGE", "page": 1},
+                             "text": "짧은 글", "expected": "POLICY"},
+                            {"candidate_id": "c2", "locator": {"kind": "PAGE", "page": 2},
+                             "text": "또 짧은 글", "expected": "NONE"}]}
+    big = {"case_id": "b", "normalizer": "DOC_TEXT", "hints": [],
+           "candidates": [{"candidate_id": "c1", "locator": {"kind": "PAGE", "page": 1},
+                           "text": "가" * 5000, "expected": "RECIPE"}]}
+    used, skipped = mod.split_small_cases([small, big], limit=3000)
+    assert [c["case_id"] for c in used] == ["s"] and [c["case_id"] for c in skipped] == ["b"]
+    got, errors, spans, facts = asyncio.run(mod.run_single_call_cases(used))
+    assert not errors and facts["s"] >= 0
+    secs = got["s"]["sections"]
+    assert {d.logic for d in secs} == {got["s"]["source"].logic} == {"POLICY"}
+    assert [d.candidate_id for d in secs] == ["c1", "c2"]
+    rep = evaluate.score(used, got)
+    text = mod.render_report(rep, mode="mock", model="m", case_count=1, cost=None,
+                             single_call={"used": 1, "skipped": 1, "facts": facts})
+    assert "한 호출" in text and "작은 사례 1건" in text and "제외 1건" in text

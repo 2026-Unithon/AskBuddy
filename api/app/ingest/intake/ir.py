@@ -33,6 +33,8 @@ class Candidate:
 class ProbeResult:
     normalizer: str
     candidates: tuple[Candidate, ...]
+    # 표본이 자료 내용 전체를 담았는가(Phase B 추가 S2). 용량이 아니라 읽은 내용으로 정한다
+    complete: bool = False
 
     def sampled(self) -> tuple[Candidate, ...]:
         return tuple(c for c in self.candidates if c.sampled)
@@ -43,7 +45,8 @@ class ProbeResult:
         return {"normalizer": self.normalizer, "candidates": len(self.candidates),
                 "sampled": [c.candidate_id for c in sampled],
                 "chars": sum(len(c.text) for c in sampled),
-                "images": sum(len(c.images) for c in sampled)}
+                "images": sum(len(c.images) for c in sampled),
+                "complete": self.complete}
 
     def sample_hash(self) -> str:
         h = hashlib.sha256(self.normalizer.encode())

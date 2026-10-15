@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -46,12 +46,18 @@ class ClassifyOutcome:
 
 
 def render_prompt(probes: Sequence[ProbeResult], *, hints: Sequence[str],
-                  context: str | None) -> tuple[str, list[Path]]:
+                  context: str | None,
+                  candidate_hints: Mapping[str, Sequence[str]] | None = None
+                  ) -> tuple[str, list[Path]]:
+    """candidate_hints: (접두어 포함) 후보 id → 그 자료의 점주 칩. 후보 머리줄에 표시한다."""
     lines, images = [], []
     for probe in probes:
         for c in probe.sampled():
             loc = c.locator
-            lines.append(f"### {c.candidate_id} ({probe.normalizer} {loc.kind} {loc.start}~{loc.end})")
+            mark = ""
+            if candidate_hints and candidate_hints.get(c.candidate_id):
+                mark = f" [점주 선택: {', '.join(candidate_hints[c.candidate_id])}]"
+            lines.append(f"### {c.candidate_id} ({probe.normalizer} {loc.kind} {loc.start}~{loc.end}){mark}")
             for img in c.images:
                 images.append(img)
                 lines.append(f"[그림 {len(images)}]")
@@ -72,10 +78,12 @@ def mock_sections(probes: Sequence[ProbeResult], *, hints: Sequence[str]) -> dic
 
 
 async def classify(probes: Sequence[ProbeResult], *, hints: Sequence[str], context: str | None,
-                   usage_sink, usage_context) -> ClassifyOutcome:
+                   usage_sink, usage_context,
+                   candidate_hints: Mapping[str, Sequence[str]] | None = None) -> ClassifyOutcome:
     s = get_settings()
     spec = parse_model_spec(s.intake_classifier_model)
-    prompt, images = render_prompt(probes, hints=hints, context=context)
+    prompt, images = render_prompt(probes, hints=hints, context=context,
+                                  candidate_hints=candidate_hints)
     try:
         result = await measured_generate(
             spec, prompt, images, IntakeClassification, usage_sink=usage_sink,

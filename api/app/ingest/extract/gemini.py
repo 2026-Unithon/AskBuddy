@@ -211,7 +211,15 @@ async def extract_facts(
     prompt = render_facts_prompt(source_type=source_type, text=text, glossary=glossary,
                                  locator_hints=locator_hints(s))
     schema = facts_schema(s)
+    return await _extract_with(prompt, schema, source_id=source_id, media=media,
+                               usage_sink=usage_sink, usage_context=usage_context,
+                               raw_sink=raw_sink, what="사실 추출")
 
+
+async def _extract_with(prompt: str, schema, *, source_id: int, media, usage_sink,
+                        usage_context, raw_sink, what: str):
+    """사실 추출 호출 공용 본문. extract_facts 의 요청은 이 함수로 옮겨도 그대로다(D16)."""
+    s = get_settings()
     media = list(media)
     started = time.perf_counter()
     reply = await _measured_call(prompt, media, usage_sink, usage_context,
@@ -224,18 +232,49 @@ async def extract_facts(
     try:
         result = await raw_responses.parse_checked(
             _mark_sink(raw_sink, reply), usage_context, reply.raw_response_id, reply.finish_reason,
-            lambda: schema.model_validate_json(reply.text), what="사실 추출")
+            lambda: schema.model_validate_json(reply.text), what=what)
     except raw_responses.TruncatedOutputError:
         # 잘림은 파싱 실패와 다르게 다룬다 — 호출부가 입력을 나눠 다시 뽑는다
         raise
     except Exception as e:
-        raise RuntimeError(f"사실 추출 JSON 파싱 실패: {e}") from e
+        raise RuntimeError(f"{what} JSON 파싱 실패: {e}") from e
     result._raw_response_id = reply.raw_response_id
 
     logger.info("extract_facts source=%s %.1fs 사실 %d건 미해결 %d건 usage=%s",
                 source_id, elapsed, len(result.assertions),
                 len(result.unresolved), usage or "미보고")
     return result
+
+
+INTAKE_SUFFIX_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_intake_suffix.ko.txt")
+
+
+def render_facts_intake_prompt(*, source_type: str, text: str, glossary, hints,
+                               locator_hints: bool = False) -> str:
+    """한 호출 프롬프트 = 기존 사실 추출 완성본 + 용도 판정 꼬리. 기존 프롬프트는 그대로다(D16)."""
+    suffix = INTAKE_SUFFIX_PATH.read_text(encoding="utf-8").replace(
+        "{hints}", ", ".join(hints) if hints else "(고르지 않음)")
+    return (render_facts_prompt(source_type=source_type, text=text, glossary=glossary,
+                                locator_hints=locator_hints).rstrip("\n") + "\n\n" + suffix)
+
+
+async def extract_facts_with_intake(
+    *, source_id: int, source_type: str, text: str, glossary, media=(), hints=(),
+    usage_sink=None, usage_context=None, raw_sink=None,
+):
+    """사실 추출 + 자료 전체 용도 순위를 한 호출로 받는다(Phase B 추가 S3)."""
+    s = get_settings()
+    if not s.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 가 없다")
+    from app.ingest.schemas import IntakeFactExtractionResult, IntakeLocatedFactExtractionResult
+    located = locator_hints(s)
+    schema = IntakeLocatedFactExtractionResult if located else IntakeFactExtractionResult
+    prompt = render_facts_intake_prompt(source_type=source_type, text=text, glossary=glossary,
+                                        hints=tuple(hints), locator_hints=located)
+    return await _extract_with(prompt, schema, source_id=source_id, media=list(media),
+                               usage_sink=usage_sink, usage_context=usage_context,
+                               raw_sink=raw_sink, what="사실 추출+용도 판정")
 
 
 async def assemble_plan(

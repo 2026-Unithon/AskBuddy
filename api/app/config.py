@@ -207,6 +207,17 @@ class Settings(BaseSettings):
     intake_ambiguous_top_min: float = Field(default=0.5, ge=0, le=1)
     intake_ambiguous_gap_min: float = Field(default=0.15, ge=0, le=1)
 
+    # ── Phase B 추가 — 작은 자료 호출 줄이기(S1·S3) ──
+    # 한 작업의 판정 없는 자료가 둘 이상이면 묶어 분류 1회. 상한을 넘으면 묶음을 나눈다
+    intake_bundle_enabled: bool = True
+    intake_bundle_max_sources: int = Field(default=8, ge=2)
+    intake_bundle_max_chars: int = Field(default=12000, ge=1000)
+    intake_bundle_max_images: int = Field(default=12, ge=1)
+    # 묶음 분류 출력 잘림을 막는 표본 후보 수 상한(후보마다 판정 한 줄을 출력한다)
+    intake_bundle_max_candidates: int = Field(default=24, ge=2)
+    # 홀로 남은 작은 자료(훑기가 전체를 담음)는 분류+추출 한 호출. 평가 뒤 켠다(기본 꺼짐)
+    intake_single_call_small: bool = False
+
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""

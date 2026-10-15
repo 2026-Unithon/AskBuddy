@@ -38,6 +38,30 @@ async def extract_facts(
     )
 
 
+async def extract_facts_with_intake(
+    *, source_id: int, source_type: str, text: str,
+    glossary: list[dict[str, str]], media: list[Path] | None = None,
+    hints: tuple = (), usage_sink=None, usage_context=None, raw_sink=None,
+):
+    """한 호출(Phase B 추가 S3) — 사실 추출과 자료 용도 순위를 함께 받는다."""
+    mode = get_settings().ingest_mode
+    logger.info("extract_facts_with_intake mode=%s source=%s type=%s media=%d",
+                mode, source_id, source_type, len(media or []))
+    if mode == "real":
+        from app.ingest.extract import gemini as impl
+        return await impl.extract_facts_with_intake(
+            source_id=source_id, source_type=source_type, text=text,
+            glossary=glossary, media=media or [], hints=hints,
+            usage_sink=usage_sink, usage_context=usage_context, raw_sink=raw_sink,
+        )
+    from app.ingest.extract import mock as impl
+    return await impl.extract_facts_with_intake(
+        source_id=source_id, source_type=source_type, text=text,
+        glossary=glossary, media=media or [], hints=hints,
+        usage_context=usage_context, raw_sink=raw_sink,
+    )
+
+
 async def assemble_card_plan(
     *, source_id: int, entities: list[dict], category_names: list[str],
     glossary: list[dict], usage_sink=None, usage_context=None, raw_sink=None,

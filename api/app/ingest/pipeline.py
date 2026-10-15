@@ -22,6 +22,7 @@ from app.ingest import occurrences
 from app.ingest import repository as repo
 from app.ingest import recovery
 from app.ingest.intake import route as intake_route
+from app.ingest.raw_responses import TruncatedOutputError
 from app.ingest.preprocess import audio, document, kakao, storage, video
 from app.ingest.variant_split import split_hot_ice
 from app.ingest.schemas import ExtractedAssertion
@@ -51,6 +52,7 @@ async def process_source(
     retry_segments: list[str] | None = None,
     expected_segments_total: int | None = None,
     run_tag: int | None = None,
+    intake_cache: "intake_route.IntakeCache | None" = None,
 ) -> str | None:
     """자료 하나를 처리한다.
 
@@ -65,6 +67,9 @@ async def process_source(
 
     `run_tag` 는 같은 작업을 다시 돌릴 때 실행 하나를 가르는 표지다 (job_worker 가
     자료 시작 시각에서 만든다). 없으면 논리 호출 ID 가 작업 단위로만 묶인다.
+
+    `intake_cache` 를 주면 그 캐시를 쓴다 — 작업 묶음 분류가 훑으며 받은 다운로드·파싱을
+    다시 하지 않는다(S1). 없으면 새 캐시를 만든다.
     """
     from app.ingest.raw_responses import DbRawResponseSink
     from app.usage import DbUsageSink
@@ -132,18 +137,62 @@ async def process_source(
         # 평가 실행(운영 제품 경로가 아닌 실행)은 입구 분류를 하지 않는다 — 지금까지와 같은
         # 입력으로 재야 비교가 된다(D16). 분류 호출도 없다
         intake_enabled = cost_purpose == "PRODUCT" and extraction_run_id is None
+        # 함수 안에서 들여와 테스트가 바꾼 설정을 본다. 입구 블록(구역 추출 판단)보다 먼저 둔다
+        from app.config import get_settings
         plan = None
+        # 한 호출(S3)이 이미 뽑은 사실. 구간 없는 첫 추출 대신 쓴다
+        prefetched = None
         if intake_enabled:
-            cache = intake_route.IntakeCache()
+            cache = intake_cache or intake_route.IntakeCache()
             route = await intake_route.route_source(
                 pool, store_id, src, cache=cache, usage_sink=usage_sink, usage_base=usage_base)
-            if route.source.logic == "NONE" and route.normalizer not in SECTIONED_NORMALIZERS:
+            single_pending = (route if isinstance(route, intake_route.SingleCallPending)
+                              else None)
+            if (single_pending is None and route.source.logic == "NONE"
+                    and route.normalizer not in SECTIONED_NORMALIZERS):
                 # 업무 자료가 아니다 — 전처리(전체 STT·프레임 업로드)부터 하지 않는다
                 return await _finish_intake_none(pool, store_id, source_id, job_id, started)
 
             text, media, segments = await _preprocess(
                 pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context,
                 cache=cache)
+            if single_pending is not None and _layout_mode(src, get_settings()):
+                # 구역(LAYOUT) 추출로 갈 자료다 — 한 호출 결과를 쓸 수 없어 두 번 내게 된다.
+                # 한 호출 없이 분류해 저장하고 보통(구역) 추출로 간다
+                logger.warning("구역 추출 자료 — 한 호출 대신 분류한다 source=%s", source_id)
+                route = await intake_route.classify_and_save(
+                    pool, store_id, src, single_pending.probe, hints=single_pending.hints,
+                    usage_sink=usage_sink, usage_base=usage_base)
+                if route.source.logic == "NONE":
+                    return await _finish_intake_none(pool, store_id, source_id, job_id, started)
+            elif single_pending is not None:
+                # 작은 자료 — 분류와 추출을 한 호출로(S3). 잘리면 분류 후 보통 경로로 간다.
+                # 순위 없는 결과(IntakeClassificationError)는 아래 except 가 FAILED 로 적는다
+                async with pool.acquire() as conn:
+                    glossary_now = await repo.glossary(conn, store_id)
+                try:
+                    single = await intake_route.extract_with_intake(
+                        pool, store_id, src, single_pending, text=text, media=media,
+                        glossary=glossary_now, usage_sink=usage_sink, usage_base=usage_base,
+                        raw_sink=raw_sink)
+                    route, prefetched = single.route, single.result
+                except TruncatedOutputError:
+                    logger.warning("한 호출 출력 잘림 — 분류 후 보통 추출로 간다 source=%s",
+                                   source_id)
+                    route = await intake_route.classify_and_save(
+                        pool, store_id, src, single_pending.probe, hints=single_pending.hints,
+                        usage_sink=usage_sink, usage_base=usage_base)
+                if route.source.logic == "NONE":
+                    # 업무 자료가 아니다 — 뽑은 사실은 원장에 적지 않는다(Review Focus 2)
+                    return await _finish_intake_none(pool, store_id, source_id, job_id, started)
+                if (prefetched is not None and route.source.hint_changed_decision
+                        and route.source.model_ranking
+                        and route.source.model_ranking[0].logic == "NONE"):
+                    # 모델 1위는 NONE 이라 꼬리 지시대로 사실을 비웠는데 점주 칩이 결정을 바꿨다.
+                    # 빈 결과를 쓰지 않고 저장 판정으로 보통 추출 1회를 한다(최종 검토 I-1)
+                    logger.warning("한 호출 NONE 을 점주 칩이 뒤집음 — 보통 추출로 다시 뽑는다 "
+                                   "source=%s logic=%s", source_id, route.source.logic)
+                    prefetched = None
             plan = plan_extraction(normalizer=route.normalizer, decisions=route.decisions,
                                    source=route.source,
                                    sections=intake_route.full_sections(cache, route.normalizer))
@@ -158,14 +207,12 @@ async def process_source(
             text, media, segments = await _preprocess(
                 pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context)
 
-        from app.config import get_settings
         fingerprint = await asyncio.to_thread(recovery.layout_hash, src, text, media, segments, get_settings()) if recovery_enabled else None
         if previous and previous['phase'] == 'COMMITTED':
             retry_segments = previous['outcome']['failed_segment_ids']
             expected_segments_total = previous['outcome']['segments_total']
         # LAYOUT 모드의 구역 ID 는 구역 지도 응답이 재사용될 때만 같은 영역을 가리킨다(계획 편차 4)
-        layout_retry_ok = (src["source_type"] == "SCAN"
-                           and getattr(get_settings(), "scan_extract_mode", "SINGLE") == "LAYOUT"
+        layout_retry_ok = (_layout_mode(src, get_settings())
                            and bool(getattr(get_settings(), "extract_reuse_enabled", False)))
         if ((previous and previous['layout_hash'] != fingerprint)
                 or (retry_segments is not None and not layout_retry_ok and (
@@ -214,8 +261,7 @@ async def process_source(
         else:
             # SCAN·LAYOUT 은 구역 기반 다단계 추출로 간다. mock 은 원본이 없어(media 빈 목록)
             # 오케스트레이터가 빈 쪽으로 돈다. 그 밖의 경로는 이전과 같다
-            layout_mode = (src["source_type"] == "SCAN"
-                           and getattr(get_settings(), "scan_extract_mode", "SINGLE") == "LAYOUT")
+            layout_mode = _layout_mode(src, get_settings())
             if layout_mode:
                 from app.ingest.layout import run_layout_extraction
                 outcome = await run_layout_extraction(
@@ -225,11 +271,16 @@ async def process_source(
                     checkpoint=_checkpoint,
                     only_segments=set(retry_segments) if retry_segments is not None else None)
             else:
+                if prefetched is not None and segments:
+                    # 작은 자료라 생기지 않는다. 구간 글과 맞지 않으니 한 호출 결과를 버린다
+                    logger.warning("한 호출 뒤 구간 %d개 — 한 호출 결과를 버리고 다시 뽑는다 "
+                                   "source=%s", len(segments), source_id)
                 outcome = await _extract_facts_all(
                     source_id=source_id, source_type=src["source_type"], text=text, media=media,
                     glossary=glossary, segments=segments, usage_sink=usage_sink, usage_base=usage_base,
                     raw_sink=raw_sink, checkpoint=_checkpoint,
                     only_segments=set(retry_segments) if retry_segments is not None else None,
+                    prefetched=prefetched if not segments else None,
                 )
             if recovery_enabled:
                 pending = dict(version=1, phase='EXTRACTED', layout_hash=fingerprint,
@@ -329,6 +380,12 @@ async def process_source(
 
     finally:
         shutil.rmtree(storage.workdir(source_id), ignore_errors=True)
+
+
+def _layout_mode(src, settings) -> bool:
+    """이 자료가 구역(LAYOUT) 다단계 추출로 가는가. 추출 분기와 한 호출 판단이 같은 조건을 쓴다."""
+    return (src["source_type"] == "SCAN"
+            and getattr(settings, "scan_extract_mode", "SINGLE") == "LAYOUT")
 
 
 def _usage_context(store_id: int, source_id: int, job_id: int | None,
@@ -868,6 +925,7 @@ async def _extract_facts_all(
     raw_sink=None,
     checkpoint=None,
     only_segments: set[str] | None = None,
+    prefetched=None,
 ) -> ExtractionOutcome:
     """map — 구간마다 **사실**을 뽑아 모은다. 카드를 만들지 않는다.
 
@@ -885,6 +943,9 @@ async def _extract_facts_all(
     `only_segments` 를 주면 PARTIAL 재시도다. 번호(`seg1..segN`)와 전체 구간 수는
     그대로 두고 목록에 든 구간만 뽑는다. 실패 수·목록은 다시 시도한 구간만 센다.
     대상이 전부 다시 실패해도 예외를 올리지 않는다 — 이미 만든 카드가 있다.
+
+    `prefetched`(FactExtractionResult) 를 주면 구간 없는 자료의 첫 호출 대신 그 결과를 쓴다 —
+    한 호출(S3)이 이미 뽑았다. 서버 검사·원장 적기는 보통 첫 호출 결과와 같은 길로 간다.
     """
     from app.config import get_settings
     from app.ingest.extract import extract_facts
@@ -946,7 +1007,11 @@ async def _extract_facts_all(
             # 호출부가 구간 구성을 먼저 확인한다. 여기 오면 자료 전체를 다시 뽑아 카드가 겹친다
             raise RuntimeError("구간 없는 자료는 잃은 구간만 다시 뽑을 수 없다")
         # 구간 없는 자료가 끝내 잘리면 잃은 구간으로 남길 곳이 없다 — 예외로 멈춘다(FAILED)
-        parts = await _extract_part(text, media, None)
+        if prefetched is not None:
+            # 한 호출이 이미 뽑았다 — 같은 입력을 다시 부르지 않는다
+            parts = [(None, prefetched)]
+        else:
+            parts = await _extract_part(text, media, None)
         tagged, unresolved, raw_ids = _collect(parts, None, text, media)
         if checkpoint is not None:
             await checkpoint(tagged, None)

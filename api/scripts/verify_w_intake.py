@@ -22,6 +22,11 @@ verify_r_schema_rebuild 가 부른다. 시나리오마다 새 합성 매장을 �
   i-14 섞인 작업(카드 나온 파일 + 무관 파일 둘, 작업 SUCCEEDED)에서 무관 파일 하나만 그래도 추출 →
        그 파일만 다시 처리(추출 입력은 그 파일 글뿐)·다른 무관 파일은 NO_RESULT 그대로·
        덮은 로직은 NONE 다음 순위(NEXT_RANKED)·카드 나온 파일 409(후속 1)
+  i-15 작은 docx 3개 한 작업 → 묶음 분류 1회·판정 3행 logical_call_id 모두 `:bundle1`·세 자료 DONE
+  i-16 한 호출 스위치 켬 + 작은 docx 하나 → 분류 0회·한 호출 1회·판정 model_sections.single_call·카드.
+       한 호출 뒤 조립 실패로 FAILED 가 된 자료를 다시 처리 → 분류·한 호출 0회·보통 추출 1회·DONE
+  i-17 한 호출이 NONE → 원장 사실 0·작업 NO_RESULT·error_code INTAKE_NONE
+       i-15~i-17 은 한 매장에서 돌고, 끝에 입구 호출 보고(intake_cost_report)로 한 호출·묶음 수를 센다
 
 설정은 두 겹이다. app.config·pipeline·intake_route 의 설정은 ingest_mode=real(다운로드·docx
 읽기·훑기가 실제로 돈다), extract 의 설정은 mock(조립은 mock 구현)이다. 유료 호출은 0이다 —
@@ -54,13 +59,15 @@ from app.ingest.intake import route as intake_route
 from app.ingest.repository import fact_content_hash
 from app.ingest.router import (attach_owner_answer_file, extract_source_anyway,
                                retry_ingest_job)
-from app.ingest.schemas import AttachOwnerAnswerRequest, FactExtractionResult
+from app.ingest.schemas import (AttachOwnerAnswerRequest, FactExtractionResult,
+                                IntakeFactExtractionResult)
 from app.learn.owner_delivery import submit_owner_answer
 from tests.test_wb_docx import _p, _tbl, make_docx
+from intake_cost_report import summarize_store
 from verify_w_fact_only import _store
 
 FILES: dict[str, bytes] = {}
-CALLS = NS(classify=0, extract_texts=[])
+CALLS = NS(classify=0, extract_texts=[], single=0)
 
 
 def _checker(scenario: str):
@@ -97,9 +104,10 @@ def _logic_of(text: str) -> str:
 def _classifier(*, fail: Exception | None = None):
     """분류 대역 — 프롬프트의 `### <후보> (` 아래 글에서 낱말을 보고 판정한다."""
     async def fake(spec, prompt, images, schema, **kw):
+        # 실패 대역도 먼저 센다 — "분류 0회" 단언이 실제로 호출을 잡게
+        CALLS.classify += 1
         if fail is not None:
             raise fail
-        CALLS.classify += 1
         parts = re.split(r"^### (\S+) \(", prompt, flags=re.M)[1:]
         sections = [{"candidate_id": cid, "ranking": [{"logic": _logic_of(body), "score": 0.9}],
                      "reason": "합성"} for cid, body in zip(parts[0::2], parts[1::2])]
@@ -117,6 +125,9 @@ FACTS = {
     "음료X | 물 200": assertion("x1", "음료X", "물", "200", unit="ml"),
     "음료W | 얼음 3": assertion("w1", "음료W", "얼음", "3", unit="개"),
     "음료Y 할인": assertion("n3", "음료Y", "할인", "20", unit="%"),
+    "음료V | 우유 150": assertion("v1", "음료V", "우유", "150", unit="ml"),
+    "음료U | 시럽 2": assertion("u1", "음료U", "시럽", "2", unit="펌프"),
+    "음료T | 얼음 5": assertion("t1", "음료T", "얼음", "5", unit="개"),
 }
 
 
@@ -136,8 +147,14 @@ async def _no_paid_call(*a, **kw):
     raise AssertionError("유료 모델 호출 경로에 들어왔다 — 대역이 빠졌다")
 
 
-def _patches(pool, *, classify=None, extracting=None):
-    real = get_settings().model_copy(update={"ingest_mode": "real", "intake_min_section_chars": 0})
+async def _no_single_call(**kw):
+    raise AssertionError("한 호출을 부르면 안 된다 — 스위치가 꺼져 있거나 저장된 판정이 있다")
+
+
+def _patches(pool, *, classify=None, extracting=None, single=None, settings=None,
+             assembling=None):
+    real = get_settings().model_copy(update={"ingest_mode": "real", "intake_min_section_chars": 0,
+                                             **(settings or {})})
     mock = _mock_settings()
     return [
         patch("app.config.get_settings", lambda: real),
@@ -149,10 +166,12 @@ def _patches(pool, *, classify=None, extracting=None):
         patch.object(pipeline.storage, "download", _download),
         patch.object(intake_classify, "measured_generate", classify or _classifier()),
         patch("app.ingest.extract.extract_facts", extracting or _extractor()),
+        patch("app.ingest.extract.extract_facts_with_intake", single or _no_single_call),
         patch.object(gemini, "_call", _no_paid_call),
         patch("app.reg.index_preparation.recorded_embeddings", _vectors),
         patch.object(job_worker, "create_ingest_completed_notification", AsyncMock()),
         patch.object(job_worker, "deliver_notification", AsyncMock()),
+        *([patch("app.ingest.extract.assemble_card_plan", assembling)] if assembling else []),
     ]
 
 
@@ -694,6 +713,112 @@ async def _scenario_i14(pool, db) -> None:
           and len(await _decisions(db, w.store, chat2)) == 1)
 
 
+def _single_caller(*, logic: str | None = None):
+    """한 호출 대역 — 입력 글의 FACTS 열쇠로 사실을 내고, 순위는 logic(없으면 _logic_of)."""
+    async def fake(*, source_id, text, **kw):
+        CALLS.single += 1
+        found = [a.model_copy(update={"evidence": a.evidence.model_copy(
+                     update={"source_id": source_id})})
+                 for key, a in FACTS.items() if key in text]
+        return IntakeFactExtractionResult(
+            assertions=found, intake_reason="합성",
+            intake_ranking=[{"logic": logic or _logic_of(text), "score": 0.9}])
+    return fake
+
+
+async def _failing_assembly(**kw):
+    raise RuntimeError("합성 조립 실패")
+
+
+SINGLE_ON = {"intake_single_call_small": True, "scan_extract_mode": "SINGLE"}
+
+
+async def _single_call_rows(db, store, source):
+    return await db.fetch(
+        "select (model_sections->>'single_call') as single, logical_call_id, source_logic, "
+        "(sample_summary->>'complete') as complete from intake_route_decisions "
+        "where store_id=$1 and source_id=$2 order by decision_id", store, source)
+
+
+async def _scenario_i15(pool, db, w) -> None:
+    check = _checker("i-15")
+    sids = [await _docx_source(db, w, _p("레시피", "Heading1") + _tbl([[name, value]]))
+            for name, value in (("음료X", "물 200"), ("음료W", "얼음 3"), ("음료V", "우유 150"))]
+    job_id = await _job(db, w, sids)
+    CALLS.classify, CALLS.extract_texts = 0, []
+    with _Within(_patches(pool)):
+        await job_worker.process_ingest_job(w.store, job_id)
+    rows = [r for s in sids for r in await _decisions(db, w.store, s)]
+    check("분류 대역 1회", CALLS.classify == 1)
+    check("판정 3행 logical_call_id 모두 :bundle1",
+          len(rows) == 3 and all((r["logical_call_id"] or "").endswith(":bundle1") for r in rows))
+    check("세 자료 모두 DONE", all([await _status(db, w.store, s) == "DONE" for s in sids]))
+
+
+async def _scenario_i16(pool, db, w) -> None:
+    check = _checker("i-16")
+    # (가) 작은 docx 하나 — 분류 없이 한 호출로 판정과 사실을 함께 받는다
+    sid = await _docx_source(db, w, _p("레시피", "Heading1") + _tbl([["음료Z", "샷 2"]]))
+    CALLS.classify, CALLS.single, CALLS.extract_texts = 0, 0, []
+    with _Within(_patches(pool, settings=SINGLE_ON, single=_single_caller(),
+                          classify=_classifier(fail=AssertionError("분류를 부르면 안 된다")))):
+        await pipeline.process_source(w.store, sid)
+    rows = await _single_call_rows(db, w.store, sid)
+    check("분류 0회·한 호출 1회·보통 추출 0회",
+          CALLS.classify == 0 and CALLS.single == 1 and CALLS.extract_texts == [])
+    check("판정 1행 model_sections.single_call=true·complete·:extract:single",
+          len(rows) == 1 and rows[0]["single"] == "true" and rows[0]["complete"] == "true"
+          and rows[0]["source_logic"] == "RECIPE"
+          and (rows[0]["logical_call_id"] or "").endswith(":single"))
+    check("카드 생성·DONE", await _status(db, w.store, sid) == "DONE"
+          and (await _facts_by_subject(db, w.store, sid)).get("음료Z", ("",))[0] == "LINKED")
+
+    # (나) 한 호출 뒤 조립 실패로 FAILED → 재처리는 저장된 판정으로 보통 추출(Review Focus 3)
+    sid = await _docx_source(db, w, _p("레시피", "Heading1") + _tbl([["음료U", "시럽 2"]]))
+    CALLS.classify, CALLS.single, CALLS.extract_texts = 0, 0, []
+    with _Within(_patches(pool, settings=SINGLE_ON, single=_single_caller(),
+                          assembling=_failing_assembly,
+                          classify=_classifier(fail=AssertionError("분류를 부르면 안 된다")))):
+        await pipeline.process_source(w.store, sid)
+    check("한 호출 1회 뒤 조립 실패 → FAILED·판정 1행(single_call)은 남는다",
+          CALLS.single == 1 and await _status(db, w.store, sid) == "FAILED"
+          and [r["single"] for r in await _single_call_rows(db, w.store, sid)] == ["true"])
+    CALLS.classify, CALLS.single, CALLS.extract_texts = 0, 0, []
+    with _Within(_patches(pool, settings=SINGLE_ON, single=_no_single_call,
+                          classify=_classifier(fail=AssertionError("분류를 부르면 안 된다")))):
+        await pipeline.process_source(w.store, sid)
+    check("재처리: 분류·한 호출 0회·보통 추출 1회·DONE·판정 행 불변",
+          CALLS.classify == 0 and CALLS.single == 0 and len(CALLS.extract_texts) == 1
+          and await _status(db, w.store, sid) == "DONE"
+          and len(await _single_call_rows(db, w.store, sid)) == 1)
+
+
+async def _scenario_i17(pool, db, w) -> None:
+    check = _checker("i-17")
+    sid = await _docx_source(db, w, _p("메모", "Heading1") + _tbl([["음료T", "얼음 5"]]))
+    job_id = await _job(db, w, [sid])
+    CALLS.classify, CALLS.single, CALLS.extract_texts = 0, 0, []
+    with _Within(_patches(pool, settings=SINGLE_ON, single=_single_caller(logic="NONE"),
+                          classify=_classifier(fail=AssertionError("분류를 부르면 안 된다")))):
+        await job_worker.process_ingest_job(w.store, job_id)
+    row = await _job_source(db, w.store, job_id, sid)
+    facts = await db.fetchval("select count(*) from source_facts where store_id=$1 "
+                              "and source_id=$2", w.store, sid)
+    check("한 호출 1회·분류 0회", CALLS.single == 1 and CALLS.classify == 0)
+    check("NONE → 원장 사실 0·작업 NO_RESULT·INTAKE_NONE",
+          facts == 0 and row["status"] == "NO_RESULT" and row["error_code"] == "INTAKE_NONE")
+
+
+async def _scenario_report(db, w) -> None:
+    check = _checker("i-15~17 보고")
+    s = await summarize_store(db, w.store)
+    # i-15 묶음 3 · i-16 한 호출 2(가·나) · i-17 한 호출 1(NONE) — 모두 작은 자료
+    check(f"한 호출 {s['single_call']}·묶음 {s['bundled']}·단독 {s['standalone']}·"
+          f"작은 자료 {s['small']}/{s['sources']}",
+          s["single_call"] == 3 and s["bundled"] == 3 and s["standalone"] == 0
+          and s["sources"] == 6 and s["small"] == 6)
+
+
 async def verify(pool, db) -> None:
     await _scenario_i1(pool, db)
     await _scenario_i2(pool, db)
@@ -707,4 +832,9 @@ async def verify(pool, db) -> None:
     await _scenario_i12(pool, db)
     await _scenario_i13(pool, db)
     await _scenario_i14(pool, db)
+    shared = await _store(db)
+    await _scenario_i15(pool, db, shared)
+    await _scenario_i16(pool, db, shared)
+    await _scenario_i17(pool, db, shared)
+    await _scenario_report(db, shared)
     print("PASS WB all scenarios")
