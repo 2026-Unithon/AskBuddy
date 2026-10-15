@@ -17,8 +17,9 @@ p95·승격은 여기서 닫지 않는다. 이번 턴에 유료 호출·배포·
 | `[GA]` | 2026-10-13 세션의 G-A 인수 실행(합성 API·폐기용 PG17). 그 세션의 출력물이 증거 |
 | `[결정]` | R 이 이번에 내린 판단. 코드 변경이 아니라 판정 |
 
-**이번 턴에 Docker 엔진이 떠 있지 않아 DB 종단 실행을 재현하지 못했다.** `[GA]` 는
-2026-10-13 기록을 인용한 것이고 오늘 재실행한 결과가 아니다.
+처음 판정할 때는 Docker 엔진이 없어 `[GA]` 를 2026-10-13 기록 인용으로만 적었다.
+**같은 날 Docker 를 켜고 재실행했다 — 결과는 §6.** 아래 표의 `[GA]` 는 그 재실행으로
+오늘 다시 확인됐다.
 
 ## 1. 닫는 항목
 
@@ -42,7 +43,7 @@ p95·승격은 여기서 닫지 않는다. 이번 턴에 유료 호출·배포·
 | 12-g | 1회 삭제 뒤 ①빈 공개판 ②빈 상태 ③옛 채팅 ④빈 후보 | **닫힘.** `[GA-07]` 네 가지 모두 확인. ④는 `[코드]` 7 번과 같은 가드 |
 | 14-a | v1 점주 답변·제안 화면 정리 | **닫힘.** `[코드]` `web/` 에 `answerPending`(v1 `/learn/pending/{id}/answer`) 호출부가 없다 — 목록은 상세로 보내고 상세가 v2 `rOwnerAnswer` 를 쓴다. **제안 승인은 v1 URL(`/learn/knowledge-proposals/{id}/approve`)을 그대로 쓴다** — 그 라우트의 내부가 이미 `approve_owner_proposal` + `finish_owner_review` 라서, URL 모양만 보고 새 API 를 중복으로 만들지 않기로 했다(P1 결정) |
 | 14-b | 1회 삭제 뒤 `r_owner_knowledge_states` 잔여 | **닫힘.** `[코드]` `learn/knowledge_availability.py` 가 완료 이력은 보존한 채 현재 공개 여부를 `CURRENT`·`CHANGED`·`UNAVAILABLE`·`NOT_APPLICABLE` 로 따로 읽는다. 지워진 카드를 가리키는 상태 글은 `UNAVAILABLE` 로 나온다. 행을 지우는 migration 은 만들지 않는다 |
-| 14-c | W 가 고친 R 검증 3개 확인 | **닫힘(읽기 확인까지).** `[코드]` `verify_r_legacy_publication.py`·`verify_r_w3_consumer.py`·`verify_r_owner_candidates.py` 가 모두 사실 카드 픽스처로 바뀐 것을 확인했다. `verify_r_owner_candidates.py` 의 "DB 연결이 모델·추출 호출 중에 풀려 있음" 으로 바뀐 의미도 타당하다. **Docker 미가동으로 세 스크립트를 오늘 재실행하지는 못했다** |
+| 14-c | W 가 고친 R 검증 3개 확인 | **닫힘(읽기 확인까지).** `[코드]` `verify_r_legacy_publication.py`·`verify_r_w3_consumer.py`·`verify_r_owner_candidates.py` 가 모두 사실 카드 픽스처로 바뀐 것을 확인했다. `verify_r_owner_candidates.py` 의 "DB 연결이 모델·추출 호출 중에 풀려 있음" 으로 바뀐 의미도 타당하다. **세 스크립트를 2026-10-15 에 실제로 재실행해 통과를 확인했다**(§6) |
 | 15 | 작업 완료 알림 문구 | **닫힘.** `[코드]` `notifications/service.py:126` — "자료가 반영된 카드 N개를 확인해 주세요. 공개 여부는 카드에서 확인할 수 있어요." `card_count` 의 새 의미와 맞고 승인 전 상태를 과장하지 않는다 |
 
 ## 2. 남기는 항목
@@ -105,8 +106,29 @@ p95·승격은 여기서 닫지 않는다. 이번 턴에 유료 호출·배포·
 
 ## 5. 이번 턴에 한 것과 안 한 것
 
-- 한 것: 위 판정에 쓴 소스 읽기, 인계 문서의 R 할 일 체크 갱신, 결정 2건 기록
-- **안 한 것: 코드 변경 0, DB 변경 0, 유료 호출 0, 테스트 재실행 0.** Docker 엔진이 없어
-  G-A 실행과 verify 스크립트 재현은 2026-10-13 기록을 인용했다
+- 한 것: 위 판정에 쓴 소스 읽기, 인계 문서의 R 할 일 체크 갱신, 결정 2건 기록, §6 의 재실행
+- 안 한 것: 제품 코드 변경 0, 운영 DB 변경 0, 유료 호출 0
 - W 에게 전할 것: 10·11·12·14·15 가 닫혔으므로 **W3-4 를 완료로 표시할 수 있다.** 3·6 은
   W 와 함께 정할 값이 남아 있다
+
+## 6. Docker 복구 뒤 재실행 (2026-10-15)
+
+폐기용 `pgvector/pgvector:pg17` 컨테이너(55439·55440)에서 실행했다. 실행 뒤 DB·컨테이너는
+정리했다. 운영 DB 는 건드리지 않았다.
+
+| 실행 | 결과 | 이 기록의 어느 항목을 받치는가 |
+|---|---|---|
+| `verify_r_schema_rebuild.py` | **exit 0** — migration 50개, PostgreSQL 17.11, `PASS WA all scenarios`, 로그 1,242줄 | 아래 전부의 토대 |
+| ├ `verify_r_owner_candidates` | `draft-only store has no approved candidates` / `provider sees no held pool connection` / `legacy embeddings are absent` | **7 번**(빈 후보)·**14-c** |
+| ├ `verify_r_w3_consumer` | `initial empty publication → durable first pending` / `W ledger fact → search → answer → typed owner citation → history replay/detail` / `forged fact origin and referenced owner deletion blocked` | **10-c**·**14-c** |
+| ├ `verify_r_legacy_publication` | `last exclusion publishes empty snapshot and restoration returns card` 외 2건 | **12-g**·**14-c** |
+| ├ `verify_r_legacy_owner_flow` (P1) | `PASS P1` 22건 | **12-e**·**14-a** |
+| ├ `verify_r_fact_consumption` (P2) | `PASS P2` 22건 — 분할 카드 3장, 제목이 아닌 subject 로 소비, ICE 선택 시 ICE 사실만 | **10-a**·**10-c**·**11-b** |
+| ├ 1회 삭제 리허설(WA a) | 평가 기록이 있으면 migration 이 멈춤 / 완료 이력은 남고 현재 공개 상태는 `UNAVAILABLE` / 빈 공개판 생성 / 근거 없음 → ESCALATE / 초기화 뒤 첫 점주 답변이 새 사실 카드로 공개 | **12-g**·**14-b** |
+| └ 카카오 DB 통합 | 6 passed | 회귀 |
+| `verify_r_p4_case_context.py` | **exit 0**, `zero paid calls` | P4 회귀 |
+| `run_r_operations_http.py` 24턴 | **exit 0** — 시나리오 12 / 턴 24 / HTTP 200 24 / receipt 24 / 필수 사실 후보 포함 24 / CLARIFY 24 / 기대 행동 일치 1. **2026-10-13 기록과 같은 수치** | 평가 입력 회귀 |
+
+**이 재실행이 바꾸지 않는 것:** 12-a 의 "Phase A 배포 전" 순서는 여전히 지켜지지 않았고,
+실제 모델 품질·운영 p95 는 여전히 미인수다. 24턴의 `CLARIFY 24` 는 일반 모델 OFF 상태의
+배선 확인이지 품질 통과가 아니다.
