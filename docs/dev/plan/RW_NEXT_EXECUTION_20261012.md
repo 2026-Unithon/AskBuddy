@@ -115,6 +115,8 @@ P3의 사실 fixture는 P2와 함께 만들 수 있다. 유료 재평가는 P3�
 
 ## 4. G-A — Phase A의 R 인수표
 
+2026-10-15: G-A 결과를 [W 인계](W_TO_R_PUBLICATION_HANDOFF_20260927.md) 10~12·14·15 에 연결해 닫았다. 판정과 R 결정 2건(RAW 유지·entity_id 분리 안 함)은 [인계 닫기 기록](../review/R_HANDOFF_CLOSEOUT_20261015.md).
+
 2026-10-13 로컬 합성 인수 결과: P1/P2 구현, 전체 단위 2,377개, schema 50개와 W/R 전체 DB 통합, web check, 모바일 상태 검증 통과. 아래 체크는 [P1](../review/R_OWNER_FLOW_20261013.md)·[P2](../review/R_FACT_CONSUMPTION_20261013.md)의 fixture·명령·증거 범위이며 운영/실자료 모델 인수를 뜻하지 않는다.
 
 - [x] **GA-01 생산 소비:** W 사실 원장→CardPlan→공개→R 검색→답변·인용 저장. 복수 자료·대상·분할 카드 포함.
