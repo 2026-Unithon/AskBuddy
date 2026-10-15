@@ -109,8 +109,23 @@ $env:PYTHONUTF8='1'
 하지 않은 것:
 
 - **유료 모델 호출 0회.** P4 실제 품질·지연은 여전히 미인수다
-- Docker 엔진이 떠 있지 않아 **폐기용 PG17 종단 실행(`run_r_operations_http.py` 합성 경로)을 이번에 재실행하지 못했다.** 러너 변경은 compile 검사와 `--live-plan` 분기 밖(합성 경로는 `--registration` 불필요) 확인까지다. DB 종단 재실행은 Docker 복구 후 과제로 남는다
 - 운영 p95 5초 인수, 사람 검토 truth, 승격 판정
+
+### 5-1. Docker 복구 뒤 추가 실행 (2026-10-15)
+
+앞 문단에서 "못 했다" 고 적은 PG17 종단 실행을 돌렸다. 폐기용 pgvector/pgvector:pg17
+컨테이너 두 개(55439·55440), 실행 뒤 DB·컨테이너 정리.
+
+| 실행 | 결과 |
+|---|---|
+| `verify_r_schema_rebuild.py` (전체 migration + W/R 시나리오) | **exit 0**, migration 50개, PostgreSQL 17.11, `PASS WA all scenarios`. 로그 1,242줄 |
+| `verify_r_p4_case_context.py` (P4) | **exit 0**, `PASS P4 real fact HTTP case/selection/correction/recovery controls; zero paid calls`. **이 스크립트가 `run_r_operations_http.main()` 을 직접 부른다**(`:187`) — 사전등록 가드를 넣은 뒤에도 합성 경로가 그대로 돈다 |
+| `run_r_operations_http.py` 24턴 채점 경로 | **exit 0**, 시나리오 12 / 턴 24 / HTTP 200 24 / receipt 24 / `required_facts_in_candidates` 24 / CLARIFY 24 / 기대 행동 일치 1. **2026-10-13 기록과 같은 수치**다(일반 모델 OFF 배선 확인이며 품질 통과가 아니다) |
+| 새 단위 `tests/test_r_operations_runner_prereg.py` | 2 passed. `--live-plan` 에 `--registration` 이 없으면 **DB 에 붙기 전에** `ValueError` — 닫힌 포트를 DSN 으로 넣어도 같은 오류가 나는 것으로 순서를 고정했다 |
+| 전체 `pytest -q tests` | **2438 passed / 6 skipped / 4 xfailed / 198 subtests** |
+
+여전히 실행하지 않은 것: **유료 경로 자체**. `verify_live_plan` 의 유료 분기는 단위
+테스트와 러너 가드까지만 확인했고, 실제 모델 호출로 돌려 본 적은 없다.
 
 ## 6. 다음
 
