@@ -55,7 +55,8 @@ async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=Non
     # prompt plus its separately supplied schema, with headroom; actual provider
     # usage is checked again and overages halt the evaluation budget.
     counted_prompt=prompt+'\nJSON schema:\n'+schema_text
-    if len(counted_prompt.encode('utf-8'))>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
+    prompt_bytes=len(counted_prompt.encode('utf-8'))
+    if prompt_bytes>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
     config=types.GenerateContentConfig(response_mime_type='application/json',response_json_schema=wire_schema,
         temperature=0,max_output_tokens=max_output,
         thinking_config=types.ThinkingConfig(thinking_level=release.thinking_level),
@@ -68,11 +69,20 @@ async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=Non
             http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
         async with attempt(_BoundedSink(sink,.2),context,model=release.model,prompt_hash=digest(prompt),
                 config_hash=digest(dict(release=release.model_dump(mode='json'),generation=config.model_dump(mode='json')))) as rec:
-            rec.measure_input(input_bytes=len(counted_prompt.encode('utf-8')))
-            counted=await client.aio.models.count_tokens(model=release.model,contents=counted_prompt)
-            if (type(counted.total_tokens) is not int or counted.total_tokens<0
-                    or counted.total_tokens+max(32,(counted.total_tokens+9)//10)>max_input):
-                raise ValueError('input tokens exceed accepted limit or are unknown')
+            rec.measure_input(input_bytes=prompt_bytes)
+            # countTokens 는 생성과 별개의 왕복이다. 2026-10-15 유료 진단에서 단계마다
+            # 2.3~2.9초, 한 턴 16.9초 중 5.2초를 여기서 썼다.
+            #
+            # 토큰 하나는 최소 1바이트를 먹으므로 **바이트 수가 토큰 수의 상한**이다.
+            # 바이트로 센 상한이 같은 여유분까지 두고도 한도 안이면 정확한 수를 물어볼
+            # 이유가 없다 — 어떤 값이 나와도 한도를 넘을 수 없다. 한도에 가까울 때만
+            # 공급자에게 묻는다. 한도를 푸는 게 아니라 **같은 한도를 더 싸게** 지킨다.
+            # 실제 사용량은 응답을 받은 뒤 다시 검사한다.
+            if prompt_bytes+max(32,(prompt_bytes+9)//10)>max_input:
+                counted=await client.aio.models.count_tokens(model=release.model,contents=counted_prompt)
+                if (type(counted.total_tokens) is not int or counted.total_tokens<0
+                        or counted.total_tokens+max(32,(counted.total_tokens+9)//10)>max_input):
+                    raise ValueError('input tokens exceed accepted limit or are unknown')
             response=await client.aio.models.generate_content(model=release.model,contents=prompt,
                 config=config)
             observe_answer(rec,response)
