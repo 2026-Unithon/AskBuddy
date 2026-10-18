@@ -165,18 +165,32 @@ async def test_real_sdk_serializes_native_json_schema_and_low_thinking(tmp_path,
             return httpx.Response(200,json={'totalTokens':10})
         return httpx.Response(200,json={'candidates':[{'content':{'parts':[{'text':'{}'}],'role':'model'},'finishReason':'STOP'}],
             'usageMetadata':{'promptTokenCount':10,'candidatesTokenCount':3,'thoughtsTokenCount':2}})
-    client=genai.Client(api_key='synthetic',http_options=types.HttpOptions(
-        async_client_args={'transport':httpx.MockTransport(respond)},retry_options=types.HttpRetryOptions(attempts=1)))
-    monkeypatch.setattr('google.genai.Client',lambda **kw:client)
+    # generate 는 끝나면 클라이언트를 닫는다. 호출마다 새로 만든다.
+    # 원래 클래스를 미리 붙잡는다 — 패치한 이름을 부르면 자기 자신을 다시 부른다
+    real_client=genai.Client
+    def make_client(**kw):
+        return real_client(api_key='synthetic',http_options=types.HttpOptions(
+            async_client_args={'transport':httpx.MockTransport(respond)},
+            retry_options=types.HttpRetryOptions(attempts=1)))
+    monkeypatch.setattr('google.genai.Client',make_client)
     monkeypatch.setattr('app.learn.general_provider.get_settings',lambda:NS(gemini_model='synthetic',gemini_api_key='synthetic'))
     ctx=kwargs()['context'].model_copy(update={'cost_purpose':'DEVELOPMENT','evaluation_run_id':None})
     result=await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=NS(start=AsyncMock(return_value=1),finalize=AsyncMock()))
-    assert result=={} and len(observed)==2
+    # 한도가 넉넉하면 countTokens 왕복을 생략한다(바이트 수가 토큰 수의 상한이다).
+    # 생성 요청 하나만 나가야 한다.
+    assert result=={} and len(observed)==1 and observed[0][0].endswith(':generateContent')
     wire=observed[-1][1]['generationConfig']
     assert wire['responseJsonSchema']==response_schema(GeneralProposal,conclusions_enabled=style=='grounded_conclusion')
     # This SDK sends the protobuf field name inside ThinkingConfig; both the
     # original snake_case and lowerCamelCase forms are accepted by ProtoJSON.
     assert wire['thinkingConfig'].get('thinking_level',wire['thinkingConfig'].get('thinkingLevel'))=='LOW'
+
+    # 한도에 가까우면 실제 SDK 가 countTokens 를 먼저 보낸다 — 요청 모양까지 확인한다
+    tight=Release.model_validate(dict(release.model_dump(mode='json'),max_input_tokens=100))
+    observed.clear()
+    await generate('q',schema=GeneralProposal,release=tight,context=ctx,
+                   sink=NS(start=AsyncMock(return_value=1),finalize=AsyncMock()))
+    assert [path.rsplit(':',1)[-1] for path,_ in observed]==['countTokens','generateContent']
 
 
 @pytest.mark.parametrize('metadata,expected',[
