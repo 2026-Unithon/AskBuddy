@@ -323,6 +323,11 @@ R 이 할 일 12·13번을 더했다.
 
 ## R 이 할 일 (우선순위 순)
 
+> **2026-10-15 R 판정:** 2·5·7·10·11·12·14·15 를 닫았다. 근거와 증거의 종류(코드 읽기 / 2026-10-13 G-A 실행)는
+> [R 인계 닫기 기록](../review/R_HANDOFF_CLOSEOUT_20261015.md). **10 번이 닫혔으므로 W 는 W3-4 를 완료로 표시할 수 있다.**
+> R 결정 2건: RAW 공통 계약은 **유지**(지우면 모든 snapshot hash 가 바뀐다 — §3-1), `entity_id` 이름공간은 **나누지 않고 닫는다**(§3-2).
+> 남은 것은 3(옛 준비본 정리 N·M, W 와 합의)·6(`card_embeddings` 삭제, W 와 순서 합의)·13(W 구현 전, R 답은 미리 적어 둠)이다.
+
 > 2026-10-13 P2 구현: 10~12번의 실제 W 사실 출력 소비·분할/규격·편집 이력·OWNER_TEXT 출처 연결은 [P2 기록](../review/R_FACT_CONSUMPTION_20261013.md)과 통합 계획 G-A로 확인한다. 새 snapshot은 renderer v2, 기존 v1 읽기는 보존한다. 답변 연결은 source_id XOR 계약을 바꾸지 않고 표시 정보로 추가했다. P3 평가 입력 전환과 운영 인수는 남아 있다.
 
 > 2026-10-13 P1 구현: v1/v2 답변을 공통 원문 전달·outbox로 연결했다. v1 질문/이전 원문은 보존하고 목록은 공통 상세로 이동한다. 제품 답변 라우트의 knowledge_loop 호출을 제거했으며 제안 승인 가능 여부·영향 카드·닫힘 상태와 자료 반영 카드 수 알림을 추가했다. [구현·검증 기록](../review/R_OWNER_FLOW_20261013.md). 14·15번 연결 작업에 해당하며 OWNER_TEXT 출처 구분·G-A 전체 인수는 P2에서 계속한다.
@@ -331,20 +336,24 @@ R 이 할 일 12·13번을 더했다.
 
 1. ~~`finish_owner_review` 를 만들고 `/learn/knowledge-proposals/{id}/approve` 를 `approve_owner_proposal(..., notify_r=...)` 로 교체~~ — 완료(PR #25) (1·2번).
    중복 카드와 "승인했는데 답에 안 나옴"이 이 교체로 함께 사라진다.
-2. **`RawSpan.source_id=None` 소비 경로 보완** (`answer_storage.py:221`, `:247`, `approved_renderer.py:32-33`, `Citation.source_id`) 뒤
+2. ~~`RawSpan.source_id=None` 소비 경로 보완~~ — **닫힘(2026-10-15).** W 가 RAW 를 만들지 않아 요구가 사라졌다. 아래 원문은 당시 기록이다.
+   **`RawSpan.source_id=None` 소비 경로 보완** (`answer_storage.py:221`, `:247`, `approved_renderer.py:32-33`, `Citation.source_id`) 뒤
    W 에 알려 `W_OWNER_ANSWER_RAW_PUBLISH=true` 로 켠다 (3번). 이 전에는 점주 답변 NEW 카드도, 기존 자료 카드에 얹은 점주 답변 판도 공개되지 않는다.
 3. ~~준비 단계에 벡터 복사 재사용(5-1)~~ — 완료(PR #25, 현재 활성 공개판 재사용 범위). **옛 준비본 정리(5-2)는 R 후속, 구조만 만든다.** 카드 1장 승인에 전체 재임베딩이 나가는 비용을 없앤다.
    정리의 보관 개수·일수(N·M)는 W·R이 추후 함께 정하며, 그 전에는 정리를 켜지 않는다.
 4. ~~점주 답변 후보 검색을 새 색인으로 이전~~ — 완료(PR #26). W 가 `card_embeddings` 호환 쓰기를 지웠다(§6).
    `expected_card_revisions` 계약 결정은 남았다.
-5. **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). W 가 2026-10-10 Phase A 에서 옛 함수 3개(와 `create_owner_answer_card`)를 지웠다(코드 확인: R `learn/router.py` 는 import 하지 않음, R 확인 대기).
+5. ~~v1 즉시 공개를 worker·`approve_owner_proposal` 로 이전~~ — **닫힘(2026-10-15).** 옛 함수 3개·`create_owner_answer_card` 는 `api/app/` 에 없다(grep 0건). 지워도 R 이 깨지지 않는다.
+   **v1 점주 답변 경로의 `publish_new_proposal` 즉시 공개를 worker·`approve_owner_proposal` 로 옮긴다** (§6). W 가 2026-10-10 Phase A 에서 옛 함수 3개(와 `create_owner_answer_card`)를 지웠다(코드 확인: R `learn/router.py` 는 import 하지 않음, R 확인 대기).
 6. **`card_embeddings` 를 읽는 옛 경로(`/reg/retrieve`, 평가 러너) 정리 후 테이블 삭제 migration** 을 함께 정한다 (§6).
-7. **공개판이 없는 매장의 점주 답변 후보 검색은 빈 후보를 돌려준다** (§6). 새 매장의 첫 점주 답변이 막히지 않게 한다.
+7. ~~공개판 없는 매장은 빈 후보~~ — **닫힘(2026-10-15).** `reg/owner_candidates.py:19-22` 가 승인·공개 카드가 없으면 색인을 읽기 전에 `[]` 를 돌려준다.
+   **공개판이 없는 매장의 점주 답변 후보 검색은 빈 후보를 돌려준다** (§6). 새 매장의 첫 점주 답변이 막히지 않게 한다.
 8. ~~`FactProvenance.source_id` 필수 · `owner_answer_id` FK `on delete restrict` 점검~~ — **닫힘, R 이 할 일 없음.**
    (a) R 이 `4bb145c`(2026-10-05)에서 `FactProvenance` 를 `source_id XOR owner_answer_id`(파일 출처면 `occurrence_id` 필수)로 바꿨다(`api/app/contracts/snapshot.py:35-55`).
    (b) W3-0 §3-4 확인(2026-10-07, 코드 변경 없음): R 트리거 `askbuddy_owner_original_immutable`(`supabase/migrations/20260917130000_m3_owner_answer_delivery.sql:43-56`)가 R revision 이 있는 점주 답변의 삭제·원문 수정을 막고, 앱 코드(`api/app`)에는 `owner_answers`·`pending_questions`(답변으로 cascade)를 지우는 경로가 없다. 따라서 W 링크(`fact_revision_meta.owner_answer_id`·`fact_owner_answer_links`)의 `on delete restrict` 가 새로 막는 앱 삭제 경로는 없다. 매장 삭제는 기존처럼 불변 원장 때문에 막히고, 데모 매장은 보관 방식으로 처리한다(현행 유지).
 9. **새 `fact_revisions` 삽입은 W 서비스(`api/app/ingest/fact_ledger.py`·`fact_revisions.py`)를 거치기를 권한다.** W 는 revision 마다 `knowledge_facts`·`fact_revision_meta` 를 짝지어 두고 `fact_revisions.entity_id`·`fact_id` 에는 FK 가 없다. 권고일 뿐이며 임의 id 를 넣는 R 의 기존 verify 스크립트는 그대로 동작한다.
-10. **R 필수 검토 — 미완료 (W3-4).** W3a 사실 블록 공개판(§11)을 R 쪽이 받는지 확인해 결과를 이 문서나 R 기록에 남기고 W 에 알린다. 그 전에는 W 가 W3-4 를 완료로 표시하지 않는다.
+10. **R 필수 검토 (W3-4) — 닫힘 (2026-10-15).** `[x]` a~e 확인, f 는 아래 결정으로 닫는다. 판정 근거는 [R 인계 닫기 기록](../review/R_HANDOFF_CLOSEOUT_20261015.md) §1·§3-2. **W 는 W3-4 를 완료로 표시할 수 있다.** 아래 원문은 당시 요구다.
+    (옛 표기) **R 필수 검토 — 미완료 (W3-4).** W3a 사실 블록 공개판(§11)을 R 쪽이 받는지 확인해 결과를 이 문서나 R 기록에 남기고 W 에 알린다. 그 전에는 W 가 W3-4 를 완료로 표시하지 않는다.
     (a) 분할 카드(제목 ` 2/3`)는 R planner 의 카드 전체 제목 언급 매칭(`planner.decide`)에 걸리지 않는다. 카드 제목이 아니라 대상 이름·별칭으로 대상을 찾도록 해 달라.
     (b) 점주가 편집한 사실 카드 판(블록 없음)은 RAW 로 공개되고 `entity_id` 가 카드 id 로 바뀐다. 같은 카드의 `entity_id` 가 판에 따라 바뀔 때 R 의 캐시·명확화 문맥·일반 의미 승인 설정이 영향을 받는지 확인해 달라(W3b 전 알려진 한계).
         W3b 뒤 상태(2026-10-10): 점주 **자유 본문 PATCH** 로 생기는 경로는 사실 블록 카드에서 막혔다(§12). 이 상황은 **레거시 RAW 카드**와 **점주 답변 SUPPLEMENT/CONFLICT 승인 판**(`knowledge_apply`, 사실 카드에도 블록 없는 판을 올림)으로 아직 생긴다. 확인 요청은 그대로다.
@@ -352,11 +361,11 @@ R 이 할 일 12·13번을 더했다.
     (d) 카톡 자료 근거의 MESSAGE locator 키가 `line`(`{"line": N}`)이다. 근거 패널·인용 표시가 이 키를 받는지 확인해 달라.
     (e) 과거 인용 재현: 사실 블록 카드의 과거 판에 대한 인용이 이후 재공개·새 판 뒤에도 같은 근거로 재현되는지 확인해 달라.
     (f) **계약 변경 요청 — entity_id 이름공간 분리(§11).** 레거시 카드 `entity_id`(=`card_id`)와 사실 대상 `entity_id` 가 같은 숫자 공간을 쓴다. W 는 지금 충돌 시 공개를 거절한다. 계약(`contracts/*`)·검증기(`contracts/validate.py`)에서 두 이름공간을 나누는 방식을 R 이 정해 달라. 정해질 때까지 W3a 플래그를 켜지 않는다.
-11. **W3b 점주 사실 편집 확인 (§12).** `[ ]`
+11. **W3b 점주 사실 편집 확인 (§12).** `[x]` **닫힘(2026-10-15)** — a 는 `learn/citation_origin.py` 의 `source_kind`, b·c 는 GA-03. [기록](../review/R_HANDOFF_CLOSEOUT_20261015.md) §1
     (a) 인용·출처 표시에서 `source_type='OWNER_TEXT'` 를 "사장님 직접 입력" 으로 보이게 해 달라. 지금 v2 인용 상세·인용 칩 응답에는 `source_type` 이 없어 점주 직접 입력 근거가 일반 파일 자료(AVAILABLE)처럼 보이고 자료 제목 "카드 직접 입력 · …" 이 그대로 나온다. 깨지지는 않는 표시 문제이며 R 응답·화면 변경이 필요하다.
     (b) 점주 편집 판(`OWNER_CORRECTION`·`OWNER_ADD` 사실이 든 사실 블록 카드)이 실린 snapshot 을 R 렌더러·색인·인용 검증이 받는지 확인해 달라(10번 W3-4 필수 검토와 함께).
     (c) 점주 삭제로 생기는 `fact_occurrences` `EXCLUDED`(`OWNER_REMOVED`)가 R 쪽 계산에 영향이 없는지 확인해 달라.
-12. **Phase A 배포 전 확인 (§13).** `[ ]`
+12. **Phase A 배포 전 확인 (§13).** `[x]` **닫힘(2026-10-15)** — a~h 판정은 [기록](../review/R_HANDOFF_CLOSEOUT_20261015.md) §1·§3. **다만 a 의 '배포 전' 조건은 지켜지지 않았다**(배포 2026-10-11, R 검토 2026-10-13). b(RAW 계약)·h(entity_id)는 §3 의 결정으로 닫는다
     (a) **10번(W3-4 필수 검토)을 Phase A 배포 전에 끝내 달라.** 배포 뒤 모든 카드가 사실 블록 카드라 R 렌더러·색인·인용 검증이 그것을 받는지가 곧 서비스 전체 동작이다.
     (b) RAW 블록 처리(R 렌더러·색인·인용 검증, 계약 `BlockKind` 의 `RAW`)를 지울지 R 이 정한다. W 는 RAW 를 더 만들지 않는다. 계약 변경은 R 결정이다.
     (c) W 가 `knowledge_loop.build_knowledge_plan` 을 부르지 않게 된다. R 쪽에서 안 쓰이게 되는지 확인해 달라. 2번(`RawSpan.source_id=None`)·`W_OWNER_ANSWER_RAW_PUBLISH` 는 점주 답변 RAW 경로가 없어져 닫힌다.
@@ -365,14 +374,14 @@ R 이 할 일 12·13번을 더했다.
     (f) 인용 표시에서 점주 답변 근거(`OWNER_TEXT` 자료 + 점주 답변 연결)를 "점주 답변" 으로 보이게 해 달라(11-a 와 합침).
     (g) **1회 삭제 뒤**: ① 첫 직원 질문에서 `ensure_initial_publication` 이 빈 공개판을 만드는지, ② 카드 0개일 때 정상 빈 상태("아직 등록된 지식이 없어요")가 나오는지, ③ 인용이 지워진 옛 채팅 답변이 "근거 보기" 없이 깨지지 않고 보이는지, ④ 7번(공개판 없는 매장의 점주 답변 후보 검색 = 빈 후보)이 동작하는지 확인해 달라.
     (h) 10-f(entity_id 이름공간)는 레거시 카드가 없어져 데이터상 해소된다. 닫을지, 계약 분리를 그대로 할지 정해 달라.
-13. **Phase B·C 확인 (§13).** `[ ]`
+13. **Phase B·C 확인 (§13).** `[ ]` W 구현 전이라 열어 둔다. **R 답은 미리 적어 두었다** — [기록](../review/R_HANDOFF_CLOSEOUT_20261015.md) §4 (a 첨부 UI 는 R 이 붙인다, b 는 이미 `UNKNOWN` 라벨로 안 깨진다, c·d 는 지금 할 일 없음, e 는 Phase C 계획 때 확정)
     (a) 점주 답변 화면이 R 소유면 첨부 UI 를 붙여 달라: 파일 선택 → W 업로드(`POST /ingest/upload-url`) → W 첨부 API → 업로드가 끝나야 제출 버튼을 켠다. W API 를 먼저 준비한다.
     (b) 인용 표시가 모르는 자료 종류(docx·hwp·avi 등)를 만나도 깨지지 않게(기본 이름표) 해 달라.
     (c) 사실의 `ext`(공지 기간 등)는 공개 계약에 없다. R 답변에 쓰려면 그때 계약을 검토한다(지금 할 일 없음).
     (d) 공지사항(`store_notices`)은 R 답변 근거가 아니다. 공지 내용을 답변에 쓰려면 그때 계약을 검토한다.
     (e) 직원 화면(상단 공지 버튼·매장 지식 탭)이 R 소유 파일이면 알려 달라. W 가 화면 요구를 인계로 넘긴다.
-14. **v1 점주 답변·제안 화면을 v2 로 옮기거나 닫는다 (Phase A, 새 항목).** `[ ]`
+14. **v1 점주 답변·제안 화면을 v2 로 옮기거나 닫는다 (Phase A, 새 항목).** `[x]` **닫힘(2026-10-15)** — a 는 web 에 v1 답변 제출 호출부 0건(제안 승인은 v1 URL 유지, 내부가 이미 새 경로), b 는 `learn/knowledge_availability.py` 가 `UNAVAILABLE` 로 표시, c 는 세 스크립트 읽기 확인(Docker 미가동으로 재실행은 못 함). [기록](../review/R_HANDOFF_CLOSEOUT_20261015.md) §1
     (a) 웹 `/owner/questions` 목록과 `/owner/cards/proposals` 가 v1 `/learn/pending/{id}/answer`·`/learn/knowledge-proposals/{id}/approve` 를 쓴다. 사실 초안이 없는 v1 제안은 승인 때 409 가 나고 v1 `NEW` 는 `FAILED` 가 된다. 화면을 v2 로 옮기거나 v1 을 닫아 달라.
     (b) 1회 삭제 뒤 R 표 `r_owner_knowledge_states` 등이 지워진 카드에 대한 상태 글을 가질 수 있다. 정리가 필요한지 정해 달라.
     (c) `verify_r_legacy_publication.py`·`verify_r_w3_consumer.py`·`verify_r_owner_candidates.py` 의 W 수정(Phase A 절 참고)을 확인해 달라.
-15. **작업 완료 알림 문구를 바꿔 달라 (Phase A, 새 항목).** `[ ]` `notifications/service.py` 의 "새 카드가 준비됐어요 / 검토할 업무 카드 N개" 를 "카드 N장에 반영됐어요" 쪽으로. W 가 `card_count` 의미를 "이 자료가 이어진 카드 수" 로 바꿨다.
+15. **작업 완료 알림 문구를 바꿔 달라 (Phase A, 새 항목).** `[x]` **닫힘(2026-10-15)** — `notifications/service.py:126` "자료가 반영된 카드 N개를 확인해 주세요." `notifications/service.py` 의 "새 카드가 준비됐어요 / 검토할 업무 카드 N개" 를 "카드 N장에 반영됐어요" 쪽으로. W 가 `card_count` 의미를 "이 자료가 이어진 카드 수" 로 바꿨다.
