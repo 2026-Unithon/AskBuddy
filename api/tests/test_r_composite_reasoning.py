@@ -35,7 +35,7 @@ def fixture():
         parts.append(dict(plan=dict(snapshot_id='1', knowledge_revision='1', action='ANSWER',
             selected_blocks=[dict(card_id=i, card_version_id=i, block_id='b', fact_revision_ids=[i])]),
             interpretation=dict(entity_id=i, predicate='price', variants=[], target_fact_ids=[i],
-                                not_applicable_fact_ids=[i]),
+                                ),
             slots=[dict(slot=k, value=v, question_quote=q) for k,v in [('entity',i),('predicate','price')]]))
     raw = dict(input_hash=payload['input_hash'], snapshot_hash=snap.snapshot_hash,
         plan=dict(snapshot_id='1', knowledge_revision='1', action='ANSWER',

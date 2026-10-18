@@ -204,16 +204,51 @@ def test_clarification_uses_snapshot_options_and_runtime_context():
     with pytest.raises(ValueError):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
 
 
-def test_null_variant_cannot_implicitly_become_not_applicable():
+def _null_variant_case(unverifiable=None):
+    """규격이 비어 있는 사실 하나를 고른 제안. 2026-10-15 계약 전환의 회귀."""
     from tests.test_r_planner import PlannerTest
     from app.learn.planner import decide
     search=PlannerTest().search(temperature=None);q='이 음료에 들어가는 양을 설명해주세요'
     payload=proposal_input(search,store_id=1,question=q);baseline=decide(search,store_id=1,question=q)
+    interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=['1'])
+    if unverifiable is not None:interpretation['variant_unverifiable_fact_ids']=unverifiable
     raw=dict(input_hash=payload['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
         plan=dict(snapshot_id='1',knowledge_revision='1',action='ANSWER',selected_blocks=[dict(card_id='1',card_version_id='1',block_id='b',fact_revision_ids=['1'])]),
-        interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=['1']),
+        interpretation=interpretation,
         slots=[dict(slot=k,value=v,question_quote=q) for k,v in [('entity','1'),('predicate','milk_amount')]])
-    with pytest.raises(ValueError,match='null variant'):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+    return search,payload,baseline,raw
+
+
+def test_variant_applicability_is_derived_by_the_server_not_echoed_by_the_model():
+    # 모델이 아무 말을 하지 않아도 서버가 snapshot 으로 규격 무관을 판정한다.
+    # 예전에는 모델이 같은 집합을 복사해 보내야 통과했고, 2026-10-15 유료 진단에서
+    # 그 칸을 "질문에 해당 없는 사실" 로 오해해 정답 선택이 두 번 다 버려졌다.
+    search,payload,baseline,raw=_null_variant_case()
+    decision=validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+    assert decision.plan.action=='ANSWER'
+    scopes={f.fact_revision_id:f.variant_scope for f in decision.resolved.assessment.facts}
+    assert scopes['1']=='NOT_APPLICABLE'
+
+
+def test_model_may_block_an_answer_whose_variant_applicability_it_cannot_justify():
+    search,payload,baseline,raw=_null_variant_case(unverifiable=['1'])
+    with pytest.raises(ValueError,match='variant applicability unverified'):
+        validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+
+
+def test_unverifiable_claim_outside_the_selected_null_variant_facts_is_rejected():
+    for ids in (['2'],['1','1']):
+        search,payload,baseline,raw=_null_variant_case(unverifiable=ids)
+        with pytest.raises(ValueError,match='outside the selected null-variant facts'):
+            validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+
+
+def test_retired_not_applicable_key_from_preserved_outputs_is_dropped_not_fatal():
+    # tests/fixtures/*_live_*.json 은 과거 실제 모델 출력이다. 기록을 고치지 않는다.
+    from app.learn.general_semantics import Interpretation
+    parsed=Interpretation.model_validate(dict(entity_id='1',predicate='milk_amount',
+        variants=[],target_fact_ids=['1'],not_applicable_fact_ids=['1']))
+    assert parsed.variant_unverifiable_fact_ids==()
 
 
 @pytest.mark.asyncio

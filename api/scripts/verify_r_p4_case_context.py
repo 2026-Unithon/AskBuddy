@@ -79,7 +79,7 @@ async def verify(*,client,db,pool,seeded,control_seed,settings,headers,output):
                 fact=snap.fact(mapping[key]['fact_revision_id'])
                 raw['parts'].append(dict(plan=dict(**base,action='ANSWER',selected_blocks=[refs[key]]),
                     interpretation=dict(entity_id=fact.entity_id,predicate=fact.predicate,variants=[],
-                        target_fact_ids=[fact.fact_revision_id],not_applicable_fact_ids=[fact.fact_revision_id]),
+                        target_fact_ids=[fact.fact_revision_id]),
                     slots=[dict(slot=k,value=v,question_quote=p['question']) for k,v in [('entity',fact.entity_id),('predicate',fact.predicate)]]))
             return raw
         p=req['proposal'];cs=p['conclusions'];selected={f for b in p['plan']['selected_blocks'] for f in b['fact_revision_ids']}

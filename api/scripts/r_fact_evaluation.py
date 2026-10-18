@@ -141,7 +141,9 @@ async def positive_controls(client,db,seeded,headers):
         ('검증음료 우유 얼마나?','CLARIFY',[]),('ICE','ANSWER',['CONTROL_ICE'])]):
         body=dict(request_id=f'fact-control-{n}',session_id=session,question=question,**choice)
         response=await client.post('/learn/v2/chat',headers=headers,json=body)
-        response.raise_for_status()
+        if response.status_code!=200:
+            # 상태 코드만 던지면 유료 실행에서 무엇이 막았는지 알 수 없다. 서버 오류 코드를 싣는다
+            raise RuntimeError(f'control turn {n} failed: HTTP {response.status_code} {response.text[:800]}')
         data=response.json();receipt=response.headers['x-answer-receipt-id']
         saved=await db.fetchrow('select response,original_question from r_answer_receipts where store_id=$1 and receipt_id=$2',seeded['store_id'],int(receipt))
         stored=json.loads(saved['response']) if isinstance(saved['response'],str) else saved['response']
