@@ -252,6 +252,58 @@ def test_retired_not_applicable_key_from_preserved_outputs_is_dropped_not_fatal(
 
 
 @pytest.mark.asyncio
+async def test_exact_token_count_is_asked_only_near_the_limit(tmp_path,monkeypatch):
+    """countTokens 는 생성과 별개의 왕복이다(2026-10-15 유료 진단에서 한 턴 16.9초 중 5.2초).
+
+    토큰 하나는 최소 1바이트라 **바이트 수가 토큰 수의 상한**이다. 바이트 상한이
+    여유분까지 두고도 한도 안이면 물어볼 필요가 없다. 한도는 그대로다.
+    """
+    from app.learn.general_provider import generate
+    from app.learn.general_semantics import Release
+    from app.team.evaluation_budget import EvaluationBudget, evaluation_budget_scope
+    from tests.test_r_evaluation_budget import policy
+    _,_,_,release=setup(tmp_path);release=Release.model_validate(release)
+    ctx=kwargs()['context']
+
+    def harness(max_input_tokens,counted_tokens=10):
+        caps=policy()
+        caps['max_input_tokens']=max_input_tokens
+        # 한도를 올리면 최악의 호출 1회 금액도 커진다(BudgetPolicy.call_units)
+        caps['max_krw']='50'
+        budget=EvaluationBudget(None,caps)
+        budget.reserve=AsyncMock(return_value='reserved');budget.finish=AsyncMock()
+        sdk=NS(aio=NS(models=NS(count_tokens=AsyncMock(return_value=NS(total_tokens=counted_tokens)),
+            generate_content=AsyncMock(return_value=NS(text='{}',candidates=[NS(finish_reason='STOP')],
+                usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),
+            aclose=AsyncMock()))
+        monkeypatch.setattr('google.genai.Client',lambda **kw:sdk)
+        monkeypatch.setattr('app.learn.general_provider.get_settings',
+            lambda:NS(gemini_model='synthetic',gemini_api_key='synthetic'))
+        return budget,sdk,NS(start=AsyncMock(return_value=1),finalize=AsyncMock())
+
+    # 한도가 넉넉하면 묻지 않는다 — 그래도 생성은 돈다
+    budget,sdk,sink=harness(100000)
+    with evaluation_budget_scope(budget):
+        await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.count_tokens.assert_not_awaited()
+    sdk.aio.models.generate_content.assert_awaited_once()
+
+    # 한도에 가까우면 공급자에게 정확히 묻고, 그 값이 한도 안이면 통과한다
+    budget,sdk,sink=harness(100,counted_tokens=10)
+    with evaluation_budget_scope(budget):
+        await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.count_tokens.assert_awaited_once()
+    sdk.aio.models.generate_content.assert_awaited_once()
+
+    # 정확히 물어본 값이 한도를 넘으면 생성하지 않는다
+    budget,sdk,sink=harness(100,counted_tokens=99)
+    with evaluation_budget_scope(budget):
+        with pytest.raises(ValueError,match='input tokens exceed accepted limit'):
+            await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.generate_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_provider_requires_eval_budget_and_honors_token_caps(tmp_path,monkeypatch):
     from app.learn.general_provider import generate
     from app.learn.general_semantics import Release
