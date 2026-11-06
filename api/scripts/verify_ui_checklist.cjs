@@ -169,6 +169,9 @@ const fs = require("node:fs");
           badges: {},
           default_destination: role === "OWNER" ? "/owner" : "/staff",
         };
+      // main cecca61: 직원 오늘 할 일 화면이 사장님이 보낸 오늘만 할 일도 부른다
+      else if (p === "/today-tasks/mine")
+        payload = { business_date: s.date, items: [] };
       else if (p === "/learn/v2/pending")
         payload = { questions: [], next_after: null };
       else if (p === "/checklist/today") {

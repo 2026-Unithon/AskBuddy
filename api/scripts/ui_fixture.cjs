@@ -213,6 +213,9 @@ function syntheticApi(role, overrides = {}) {
       if (body) state.cardLinks[id] = body;
       payload = state.cardLinks[id] ?? { checklist: false, shift_ids: [] };
     }
+    // 사장이 보내는 오늘만 할 일(main cecca61 의 오늘 매장 섹션)
+    else if (p === '/today-tasks' && m === 'GET') payload = { business_date: '2026-10-31', items: [] };
+    else if (p === '/today-tasks/mine' && m === 'GET') payload = { business_date: '2026-10-31', items: [] };
     // 직원 관리
     else if (p === '/members') payload = { pending: [{ request_id: 9, name: '이서연', requested_at: NOW }],
       active: [{ user_id: 2, name: '박지호', role: 'STAFF', joined_at: NOW }, { user_id: 3, name: '김민준', role: 'STAFF', joined_at: NOW }] };

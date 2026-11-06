@@ -61,7 +61,7 @@ export default function ServiceGuidePage() {
         ) : undefined
       }
     >
-      <BackButton href="/owner" />
+      <BackButton parent="/owner" />
       <PageHeader
         title="응대 매뉴얼 만들기"
         description="레시피보다 오래 걸리는 건 손님과 돌발 상황 대응이에요. 상황을 하나 골라 평소처럼 답해 주세요."
