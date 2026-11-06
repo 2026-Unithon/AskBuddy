@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { useNavHistory } from "@/lib/nav-history";
 import { useRef, useState } from "react";
 import { Caption, Composer, ComposerTool, ErrorInline, Icon } from "@/components/kit";
 import { IntakeHintChips } from "@/components/owner/intake-hint-chips";
@@ -35,6 +36,7 @@ export function OwnerAddComposer({
 }) {
   const { state } = useApp();
   const router = useRouter();
+  const { markReplace } = useNavHistory();
   const client = useQueryClient();
   const caps = useQuery(ingestCapabilitiesQuery(state.token, state.storeId));
   const [text, setText] = useState(defaultText);
@@ -59,7 +61,9 @@ export function OwnerAddComposer({
       setFiles([]);
       setHints([]);
       setIdempotencyKey(crypto.randomUUID());
-      router.push(`/owner/jobs/${result.jobId}`);
+      // 넣기 화면은 끝났으니 기록에서 지운다(폰 뒤로가 넣기 전 화면으로)
+      markReplace();
+      router.replace(`/owner/jobs/${result.jobId}`);
     },
   });
 

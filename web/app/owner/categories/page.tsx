@@ -49,7 +49,7 @@ export default function CategoriesPage() {
 
   return (
     <Shell>
-      <TopBar title="카테고리 관리" backHref="/owner/cards" />
+      <TopBar title="카테고리 관리" backHref="/owner/settings" />
       <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-8">
         <p className="text-xs leading-relaxed text-muted">카테고리를 바꾸면 자동 분류 카드만 백그라운드에서 다시 분류합니다. 직접 옮긴 카드는 보호됩니다.</p>
         <form onSubmit={submit} className="flex gap-2"><Input value={name} onChange={(event) => setName(event.target.value)} maxLength={50} placeholder="새 업무 카테고리" aria-label="새 카테고리 이름" /><Button type="submit" loading={create.isPending} loadingLabel="추가 중" disabled={!name.trim()}>추가</Button></form>

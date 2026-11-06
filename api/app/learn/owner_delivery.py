@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+from app.notifications.destinations import STAFF_ASK, staff_session
 from app.contracts.hashing import digest
 from app.errors import ApiError
 from app.notifications.service import create_notification_event
@@ -75,8 +76,8 @@ async def submit_owner_answer(pool, *, store_id: int, member_id: int, question_i
                     event_type="OWNER_ANSWER", aggregate_type="OWNER_ANSWER", aggregate_id=answer_id,
                     dedupe_key=f"owner-answer:{store_id}:{answer_id}", title="사장님 답변이 도착했어요",
                     body="앱에서 질문과 답변을 확인해 주세요.",
-                    destination=(f"/staff/chat/v2?session_id={recipient['session_id']}"
-                                 if pending['contract_version'] == 'v2' else '/staff/chat'))
+                    destination=(staff_session(str(recipient['session_id']) if recipient['session_id'] is not None else None)
+                                 if pending['contract_version'] == 'v2' else STAFF_ASK))
             await conn.execute("update pending_questions set status='ANSWERED' where store_id=$1 and question_id=$2", store_id, question_id)
             event_id = await conn.fetchval("""insert into outbox_events
                 (store_id,event_type,aggregate_id,owner_answer_id) values($1,'OWNER_ANSWER_SUBMITTED',$2,$2) returning event_id""",

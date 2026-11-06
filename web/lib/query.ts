@@ -66,7 +66,6 @@ import {
   getReclassificationJob,
   isIngestJobActive,
   listCategories,
-  listChat,
   listFaqs,
   listIngestJobs,
   listKnowledgeProposals,
@@ -323,16 +322,6 @@ export function notificationSupportQuery(token: string | null, storeId: number |
     queryFn: ({ signal }) => getNotificationSupport(token!, signal),
     enabled: Boolean(token && storeId),
     staleTime: 60_000,
-  });
-}
-
-export function chatQuery(token: string | null, storeId: number | null, userId: number | null) {
-  return queryOptions({
-    queryKey: queryKeys.chat(storeId, userId),
-    queryFn: ({ signal }) => listChat(token!, signal),
-    enabled: Boolean(token && storeId && userId),
-    refetchInterval: 5_000,
-    staleTime: 3_000,
   });
 }
 

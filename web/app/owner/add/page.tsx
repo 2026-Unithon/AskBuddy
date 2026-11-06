@@ -5,7 +5,7 @@ import { OwnerAddComposer } from "@/components/owner/owner-add-composer";
 export default function OwnerAddPage() {
   return (
     <Screen footer={<OwnerAddComposer placeholder="여기에 말하거나 붙여넣기" />}>
-      <BackButton href="/owner" />
+      <BackButton parent="/owner" />
       <PageHeader
         title="알려주고 싶은 걸 아무거나 넣어주세요"
         description="레시피, 마감할 일, 공지… 찍거나 파일로 넣으면 레시피와 오늘 할 일로 알아서 나눠요"

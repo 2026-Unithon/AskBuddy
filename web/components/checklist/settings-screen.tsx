@@ -72,7 +72,7 @@ export function ShiftSettingsScreen() {
   };
   return (
     <Screen>
-      <BackButton href="/owner/settings" />
+      <BackButton parent="/owner/settings" />
       <PageHeader
         title="근무조 설정"
         description="매장에 맞게 이름과 시간을 정하고, 할 일을 담아요"
@@ -91,7 +91,7 @@ export function ShiftSettingsScreen() {
             description="나누지 않으면 전체 할 일을 함께 봐요. 카드 상세에서 공통 할 일을 담을 수 있어요."
           />
           <Button loading={preset.isPending} onClick={() => preset.mutate()}>
-            오픈·미들·마감으로 시작하기
+            오픈, 미들, 마감으로 시작하기
           </Button>
         </>
       )}
@@ -100,7 +100,7 @@ export function ShiftSettingsScreen() {
           <h2 className="text-[20px] font-bold">{shift.name}</h2>
           <Caption>
             {shift.starts_at
-              ? `${shift.starts_at} ~ ${shift.ends_at}${shift.ends_at! <= shift.starts_at ? " · 다음 날 끝" : ""}`
+              ? `${shift.starts_at} ~ ${shift.ends_at}${shift.ends_at! <= shift.starts_at ? ", 다음 날 끝" : ""}`
               : "시간을 정하지 않았어요"}
           </Caption>
           <div className="mt-3 flex gap-2">
@@ -161,7 +161,7 @@ export function ShiftSettingsScreen() {
           onRetry={() => order.variables && order.mutate(order.variables)}
         />
       )}
-      <ButtonLink href="/owner/members" variant="secondary">
+      <ButtonLink href="/owner/member-shifts" variant="secondary">
         직원 담당 근무조
       </ButtonLink>
       <ButtonLink href="/owner/cards" variant="secondary">
@@ -200,7 +200,7 @@ export function ShiftSettingsScreen() {
               />
             </label>
             <Caption>
-              매장 시간대 · {settings.data.timezone}. 이 시각에 오늘 할 일이
+              매장 시간대 {settings.data.timezone}. 이 시각에 오늘 할 일이
               새로 시작돼요.
             </Caption>
             <Button className="mt-3" type="submit" loading={setting.isPending}>
@@ -418,7 +418,7 @@ function ShiftCards({ shift, onClose }: { shift: Shift; onClose: () => void }) {
       onClose={() => {
         if (!save.isPending) onClose();
       }}
-      title={`${shift.name} · 할 일 담기`}
+      title={`${shift.name} 할 일 담기`}
       description="공개된 카드만 고를 수 있어요. 마지막 근무조에서 빼면 공통으로 바뀌지 않고 오늘 할 일에서 빠져요."
     >
       {cards.isLoading && <Skeleton className="h-48" />}

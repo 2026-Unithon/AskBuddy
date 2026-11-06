@@ -53,6 +53,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - working-directory: web
         run: pnpm check
+        env:
+          NEXT_PUBLIC_DEV_KIT: "1"
       - run: |
           npm install --prefix api/tmp/browser playwright@1.62.1
           api/tmp/browser/node_modules/.bin/playwright install --with-deps chromium
@@ -68,6 +70,7 @@ jobs:
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_r_ui.cjs
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_r_history_ui.cjs
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_rebrand.cjs
+          NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_nav.cjs
   r-required:
     if: always()
     needs: [contracts-unit, database, browser]

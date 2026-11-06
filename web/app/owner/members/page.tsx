@@ -90,7 +90,7 @@ export default function OwnerMembersPage() {
           <div role="dialog" aria-modal="true" className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-surface p-5">
               <p className="text-sm font-bold">{removing.name}님을 내보낼까요?</p>
-              <p className="mt-1 text-xs text-muted">바로 앱을 쓸 수 없게 돼요. 질문·학습 기록은 남아요. 다시 초대하면 이어서 쓸 수 있어요.</p>
+              <p className="mt-1 text-xs text-muted">바로 앱을 쓸 수 없게 돼요. 질문과 학습 기록은 남아요. 다시 초대하면 이어서 쓸 수 있어요.</p>
               {remove.error && <p role="alert" className="mt-2 text-xs text-danger-500">{apiErrorMessage(remove.error, "내보내지 못했어요.")}</p>}
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <Button onClick={() => setRemoving(null)}>취소</Button>

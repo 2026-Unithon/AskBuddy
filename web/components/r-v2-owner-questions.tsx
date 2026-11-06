@@ -76,7 +76,7 @@ export default function RV2OwnerQuestions() {
     {pending.isLoading && <RLoading />}
     {pending.error && <RError error={pending.error} retry={() => void pending.refetch()} />}
     {pending.data && !questions.length && <p>아직 확인을 요청한 질문이 없습니다.</p>}
-    <nav className="space-y-2">{questions.map((q) => <Link key={q.pending_id} className="block min-h-11 rounded-xl border p-3 break-words" href={`/owner/questions/v2?question_id=${q.pending_id}`}>{q.status === "WAITING" ? "확인 대기" : "답변 저장됨"} · {q.question}</Link>)}</nav>
+    <nav className="space-y-2">{questions.map((q) => <Link key={q.pending_id} className="block min-h-11 rounded-xl border p-3 break-words" href={`/owner/questions/v2?question_id=${q.pending_id}`}>{q.status === "WAITING" ? "확인 대기" : "답변 저장됨"}: {q.question}</Link>)}</nav>
     {pending.hasNextPage && <button className={button} disabled={pending.isFetchingNextPage} onClick={() => void pending.fetchNextPage()}>다음 질문 보기</button>}
     {id && <Question key={id} id={id} />}
   </main>;

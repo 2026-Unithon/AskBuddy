@@ -33,13 +33,13 @@ export default function RV2Notifications() {
   const notices = query.data?.pages.flatMap((page) => page.notifications) ?? [];
   return <main className="w-full space-y-4 p-4 text-base" data-testid="r-notifications">
     <h1 className="text-xl font-bold">답변 알림</h1>
-    <Link className="inline-block min-h-11 py-2 underline" href="/staff/chat/v2">대화로 돌아가기</Link>
+    <Link className="inline-block min-h-11 py-2 underline" href="/staff/ask">대화로 돌아가기</Link>
     {query.isLoading && <RLoading />}
     {query.error && <RError error={query.error} retry={() => void query.refetch()} />}
     {query.isFetching && !query.isLoading && <p role="status">알림 갱신 중…</p>}
     {query.data && notices.length === 0 && <p>아직 도착한 답변 알림이 없습니다. 사장님이 답변하면 여기에서 확인할 수 있어요.</p>}
     <ul className="space-y-3">{notices.map((notice) => <li key={notice.notification_id} className="space-y-2 rounded-2xl border bg-white p-4 break-words">
-      <p className="font-semibold">{notice.title} · {notice.read ? "읽음" : "읽지 않음"}</p>
+      <p className="font-semibold">{notice.title} ({notice.read ? "읽음" : "읽지 않음"})</p>
       <p className="whitespace-pre-wrap">{notice.body}</p>
       <button className={button} disabled={read.isPending || (!chatDestination(notice.destination) && notice.read)} onClick={() => read.mutate(notice)}>{chatDestination(notice.destination) ? "답변 확인" : "읽음으로 표시"}</button>
     </li>)}</ul>

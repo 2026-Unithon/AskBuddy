@@ -7,8 +7,10 @@ import { Suspense, useMemo, useState } from "react";
 import {
   Button,
   Chip,
+  CountBadge,
   Empty,
   ErrorInline,
+  focusRing,
   Icon,
   ListGroup,
   ListRow,
@@ -18,7 +20,6 @@ import {
   Screen,
   Skeleton,
   TabBar,
-  focusRing,
 } from "@/components/kit";
 import { apiErrorMessage, type CardFilters, type CardListItem } from "@/lib/api";
 import { cardsInfiniteQuery, proposalsQuery } from "@/lib/query";
@@ -44,7 +45,7 @@ function summary(content: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, 2)
-    .join(" · ");
+    .join(", ");
 }
 
 // O9 카드: 카테고리별 묶음 + 검색 + 상태 필터. 알림 딥링크의 status/job_id/category_id/query 를 그대로 받는다.
@@ -104,7 +105,7 @@ function CardsScreen() {
           aria-label="카드 찾기"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="메뉴·위치·할 일로 찾기"
+          placeholder="메뉴, 위치, 할 일로 찾기"
           enterKeyHint="search"
           className="min-w-0 flex-1 bg-transparent text-[15px] leading-[1.45] tracking-[-0.15px] text-ink outline-none placeholder:text-ink-muted"
         />
@@ -135,13 +136,13 @@ function CardsScreen() {
           href="/owner/cards/proposals"
           className={`flex items-center gap-2 rounded-[20px] bg-warn-50 px-[18px] py-3.5 text-[14px] font-bold text-warn-700 ${focusRing}`}
         >
-          <span className="flex-1">기존 카드와 다른 답이 있어요 · {proposalCount}</span>
+          <span className="flex-1">기존 카드와 다른 답이 있어요<CountBadge n={proposalCount} /></span>
           <Icon name="right" size={18} />
         </Link>
       )}
       {(jobId || categoryId) && (
         <button type="button" onClick={() => router.replace("/owner/cards")} className={`self-start ${focusRing}`}>
-          <Chip tone="neutral">{jobId ? "이번에 넣은 자료의 카드만" : "한 카테고리만"} · 모두 보기</Chip>
+          <Chip tone="neutral">{jobId ? "이번에 넣은 자료의 카드만" : "한 카테고리만"}, 모두 보기</Chip>
         </button>
       )}
 

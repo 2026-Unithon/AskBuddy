@@ -5,14 +5,15 @@ import {
   Button,
   Caption,
   CardLink,
+  CountBadge,
   Empty,
   ErrorInline,
+  HeaderActions,
   OWNER_TABS,
   PageHeader,
   RefreshingHint,
   Screen,
   SectionTitle,
-  SettingsButton,
   Skeleton,
   TabBar,
 } from "@/components/kit";
@@ -36,13 +37,16 @@ export default function OwnerTodayPage() {
       <PageHeader
         eyebrow={storeName || " "}
         title="오늘 매장"
-        action={<SettingsButton href="/owner/settings" initial={storeName} />}
+        action={<HeaderActions role="OWNER" />}
       />
 
       <OwnerChecklistStatus />
       <CardLink href="/owner/report" title="매장 리포트" meta="알바생 질문, AI 답변, 사장님께 넘어온 건수" />
       <TodayTasksSection />
-      <SectionTitle>확인해 주세요{waiting.length > 0 ? ` · ${waiting.length}${pending.hasNextPage ? "+" : ""}` : ""}</SectionTitle>
+      <SectionTitle>
+        확인해 주세요
+        {waiting.length > 0 && <CountBadge n={pending.hasNextPage ? 100 : waiting.length} />}
+      </SectionTitle>
       {pending.isLoading && (
         <>
           <Skeleton className="h-[76px]" />

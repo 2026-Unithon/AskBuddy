@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 // Figma 4-1 페이지에서 내려받은 아이콘(public/figma/icon-*.svg).
 // 원본 SVG는 색이 박혀 있어서 mask 로 모양만 쓰고 색은 currentColor 를 따른다.
 export type IconName =
+  | "bell"
   | "camera"
   | "check"
   | "checks"
@@ -15,7 +16,8 @@ export type IconName =
   | "mic"
   | "right"
   | "search"
-  | "up";
+  | "up"
+  | "user";
 
 export function Icon({
   name,

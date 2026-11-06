@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { focusRing } from "@/components/kit/buttons";
+import { focusRing, pressable } from "@/components/kit/buttons";
 import { Icon } from "@/components/kit/icon";
 
 /** 흰 카드 (모서리 20 · 카드 그림자). */
@@ -85,7 +85,7 @@ export function ListRow({
       {(href || onClick) && <Icon name="right" size={18} className="text-ink-muted" />}
     </>
   );
-  const rowClass = `flex w-full items-center gap-2 py-3.5 ${focusRing}`;
+  const rowClass = `flex w-full items-center gap-2 py-3.5 ${pressable} ${focusRing}`;
   return (
     <li>
       {href ? (
@@ -108,7 +108,7 @@ export function CardLink({ href, title, meta }: { href: string; title: ReactNode
   return (
     <Link
       href={href}
-      className={`flex w-full flex-col gap-1.5 rounded-[20px] bg-surface px-[18px] py-4 text-left leading-[1.45] shadow-card ${focusRing}`}
+      className={`flex w-full flex-col gap-1.5 rounded-[20px] bg-surface px-[18px] py-4 text-left leading-[1.45] shadow-card ${pressable} ${focusRing}`}
     >
       <span className="text-[15px] font-medium tracking-[-0.15px] text-ink [word-break:keep-all]">{title}</span>
       {meta && <span className="text-[12px] tracking-[-0.12px] text-ink-muted">{meta}</span>}

@@ -242,7 +242,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
               <div className="flex">
                 <Chip>{blockLabel(block.kind, block.variant)}</Chip>
               </div>
-              {block.kind === "STEPS" && <Caption className="pt-1.5">위·아래로 옮기면 일하는 순서가 바뀌어요.</Caption>}
+              {block.kind === "STEPS" && <Caption className="pt-1.5">위나 아래로 옮기면 일하는 순서가 바뀌어요.</Caption>}
               <ul className="flex flex-col">
                 {block.rows.map((row, i) => {
                   const steps = block.kind === "STEPS";

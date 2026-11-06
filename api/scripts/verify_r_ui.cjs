@@ -109,18 +109,18 @@ const path = require('node:path');
     await page.getByText('HOT 합성 라테 물 225ml', { exact: true }).waitFor();
     check('clarification survives reload', state.calls === 2);
     await page.getByRole('button', { name: '근거 카드 1' }).click();
-    await page.getByRole('button', { name: '카드 · 합성 라테' }).waitFor();
+    await page.getByRole('button', { name: '카드 합성 라테' }).waitFor();
     check('approved citation expands', true);
     // 출처 표시는 공통 CitationOrigin 이 담당한다. source_kind 가 없는 응답은 owner_answer_id 로 점주 답변으로 본다
     await page.getByTestId('citation-origin').waitFor();
     check('owner answer source is labeled without broken-file warning',
-      await page.getByTestId('citation-origin').innerText() === '출처 · 점주 답변'
+      await page.getByTestId('citation-origin').innerText() === '출처 점주 답변'
       && await page.getByText('원본 자료를 열람할 수 없어요.', { exact: false }).count() === 0);
     await page.reload();
     await page.getByRole('button', { name: '근거 카드 1' }).click();
     await page.getByTestId('citation-origin').waitFor();
     check('owner source survives history reload',
-      await page.getByTestId('citation-origin').innerText() === '출처 · 점주 답변');
+      await page.getByTestId('citation-origin').innerText() === '출처 점주 답변');
     state.failNext = true;
     await ask().fill('미확인 업무');
     await send().click();
@@ -128,7 +128,7 @@ const path = require('node:path');
     check('failed submit retains input', await ask().inputValue() === '미확인 업무');
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
     await page.getByText('사장님께 확인을 요청했어요.', { exact: true }).waitFor();
-    check('retry reaches stored escalation', await page.getByText('확인 중 · 답 오면 알려드려요', { exact: true }).isVisible());
+    check('retry reaches stored escalation', await page.getByText('확인 중이에요. 답 오면 알려드려요', { exact: true }).isVisible());
 
     const owner = await context('OWNER'), ownerPage = await owner.newPage();
     ownerPage.on('pageerror', (e) => errors.push(e.message));
@@ -141,7 +141,7 @@ const path = require('node:path');
     await ownerPage.goto('http://127.0.0.1:3011/owner/questions/v2?question_id=1');
     await ownerPage.waitForURL('**/owner/questions/1');
     await answerBox().waitFor();
-    check('old owner v2 deep link opens answer screen', await ownerPage.getByRole('link', { name: '직원 질문' }).isVisible());
+    check('old owner v2 deep link opens answer screen', await ownerPage.locator('[data-back]').first().isVisible());
     await answerBox().fill('  점주 원문\n그대로  ');
     await ownerPage.getByRole('button', { name: '넣기', exact: true }).click();
     await ownerPage.getByText('카드로 정리하는 중', { exact: true }).waitFor();
@@ -197,7 +197,7 @@ const path = require('node:path');
     check('notification fetch failure shown as error', await page.getByText('아직 도착한 답변 알림이 없습니다.', { exact: false }).count() === 0);
     state.failNotices = false;
     await page.getByRole('button', { name: '다시 확인', exact: true }).click();
-    await page.getByText('사장님 답변 도착 · 읽지 않음', { exact: true }).waitFor();
+    await page.getByText('사장님 답변 도착 (읽지 않음)', { exact: true }).waitFor();
     state.failRead = true;
     await page.getByRole('button', { name: '답변 확인', exact: true }).click();
     await page.getByText('알림 읽음 저장 실패', { exact: true }).waitFor();
@@ -206,13 +206,13 @@ const path = require('node:path');
     await page.waitForURL('**/staff/ask?session_id=1');
     check('notification read opens exact conversation', state.notices[0].read === true);
     await page.goto('http://127.0.0.1:3011/staff/notifications/v2');
-    await page.getByText('사장님 답변 도착 · 읽음', { exact: true }).waitFor();
+    await page.getByText('사장님 답변 도착 (읽음)', { exact: true }).waitFor();
     check('notification read survives reload', true);
     await page.getByRole('button', { name: '다음 알림 보기' }).click();
-    await page.getByText('합성 경로 검사 · 읽지 않음', { exact: true }).waitFor();
+    await page.getByText('합성 경로 검사 (읽지 않음)', { exact: true }).waitFor();
     check('notification cursor loads next page', true);
     await page.getByRole('button', { name: '읽음으로 표시' }).click();
-    await page.getByText('합성 경로 검사 · 읽음', { exact: true }).waitFor();
+    await page.getByText('합성 경로 검사 (읽음)', { exact: true }).waitFor();
     check('notification cannot navigate to arbitrary destination', page.url().endsWith('/staff/notifications/v2'));
     for (const width of [390, 360]) {
       await page.setViewportSize({ width, height: 844 });
@@ -237,11 +237,11 @@ const path = require('node:path');
     await page.screenshot({ path: path.join(out, 'staff.png'), fullPage: true });
     await ownerPage.screenshot({ path: path.join(out, 'owner.png'), fullPage: true });
     check('no browser runtime exceptions', errors.length === 0);
-    await page.goto('http://127.0.0.1:3011/staff/chat');
-    await page.getByText('이전 대화 이력', { exact: true }).waitFor();
-    check('legacy history has no question submit', await page.getByRole('button', { name: '질문하기', exact: true }).count() === 0);
+    // 옛 '이전 대화 이력' 화면은 버디로 넘어간다(화면 개선 NAV-12)
     state.unavailable = true;
-    await page.getByRole('link', { name: 'Buddy에서 질문하기', exact: true }).click();
+    await page.goto('http://127.0.0.1:3011/staff/chat');
+    await page.waitForURL('**/staff/ask');
+    check('legacy history address opens buddy', true);
     await page.getByText('새 답변 경로가 아직 활성화되지 않았습니다.', { exact: true }).waitFor();
     check('disabled v2 cannot start legacy generation', await ask().isDisabled());
     fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ fixture: 'synthetic API browser walkthrough', passed }, null, 2));

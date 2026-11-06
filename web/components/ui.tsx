@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useBack } from "@/lib/nav-history";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -71,6 +72,25 @@ export function WideShell({ children }: { children: ReactNode }) {
   );
 }
 
+// 옛 상단 바의 뒤로 링크. 새 BackButton 과 같은 규칙(왔던 곳, 없으면 parent)을 쓴다.
+function BackLink({ parent, className }: { parent: string; className: string }) {
+  const back = useBack(parent);
+  return (
+    <Link
+      href={parent}
+      aria-label="뒤로가기"
+      data-back=""
+      onNavigate={(event) => {
+        event.preventDefault();
+        back();
+      }}
+      className={className}
+    >
+      ←
+    </Link>
+  );
+}
+
 export function TopBar({
   title,
   onBack,
@@ -79,8 +99,7 @@ export function TopBar({
 }: {
   title?: string;
   onBack?: () => void;
-  /** 화면 흐름상 정해진 이전 화면. 직접 URL로 들어오거나 새로고침해도 항상 같은 곳으로 간다 —
-   *  router.back()은 브라우저 히스토리가 없으면 엉뚱한 곳으로 가거나 아무 반응이 없다. */
+  /** 부모 화면. 앱 안에서 이동해 왔으면 왔던 곳으로, 링크로 바로 열렸으면 여기로 간다. */
   backHref?: string;
   right?: ReactNode;
 }) {
@@ -90,9 +109,7 @@ export function TopBar({
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3 bg-background/90 backdrop-blur">
       {backHref ? (
-        <Link href={backHref} aria-label="뒤로가기" className={backButtonClass}>
-          ←
-        </Link>
+        <BackLink parent={backHref} className={backButtonClass} />
       ) : (
         <button
           type="button"

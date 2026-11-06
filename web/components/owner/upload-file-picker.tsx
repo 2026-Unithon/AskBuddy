@@ -96,7 +96,7 @@ export function UploadFilePicker({
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
-        <span>자료 파일 추가 (음성·영상·문서·카톡)</span>
+        <span>자료 파일 추가 (음성, 영상, 문서, 카톡)</span>
       </button>
       <p className="mt-1.5 text-center text-sm text-muted leading-relaxed">
         여러 개 파일을 한 번에 선택할 수 있으며 형식이 자동 판별됩니다.

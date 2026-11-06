@@ -6,7 +6,6 @@ import { BackButton, Button, ButtonLink, Caption, Chip, Empty, ErrorInline, Page
 import { apiErrorMessage } from "@/lib/api";
 import { questionsQuery, rPendingQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
-import { OwnerBottomNav } from "@/components/owner/owner-bottom-nav";
 
 export function QuestionsList() {
   const { state } = useApp();
@@ -17,8 +16,8 @@ export function QuestionsList() {
   // 서로 다른 문맥의 질문은 같은 문장이어도 합치지 않는다.
   const items = questions.filter((q) => tab === "all" || q.status === "WAITING");
   return (
-    <Screen tabBar={<OwnerBottomNav />}>
-      <BackButton href="/owner" label="오늘 매장" />
+    <Screen>
+      <BackButton parent="/owner" label="오늘 매장" />
       <PageHeader title="직원 질문" description="답을 전달한 뒤 카드 반영 상태까지 확인할 수 있어요." />
       <div className="flex gap-2">
         <Button variant={tab === "waiting" ? "primary" : "secondary"} onClick={() => setTab("waiting")}>답변 대기</Button>
@@ -33,7 +32,7 @@ export function QuestionsList() {
       {items.map((q) => <Surface key={q.pending_id} className="flex flex-col gap-3 p-4">
         <Chip tone={q.status === "WAITING" ? "warn" : "neutral"}>{q.status === "WAITING" ? "답변 대기" : "답변 전달됨"}</Chip>
         <p className="whitespace-pre-wrap text-[16px] font-bold">{q.question}</p>
-        <ButtonLink href={`/owner/questions/${q.pending_id}`} variant="secondary">{q.status === "WAITING" ? "답변하기" : "답변·카드 상태 보기"}</ButtonLink>
+        <ButtonLink href={`/owner/questions/${q.pending_id}`} variant="secondary">{q.status === "WAITING" ? "답변하기" : "답변과 카드 상태 보기"}</ButtonLink>
       </Surface>)}
       {pending.hasNextPage && <Button variant="secondary" loading={pending.isFetchingNextPage} disabled={pending.isFetchingNextPage} onClick={() => void pending.fetchNextPage()}>질문 더 보기</Button>}
       <RefreshingHint active={pending.isRefetching && !pending.isLoading} />

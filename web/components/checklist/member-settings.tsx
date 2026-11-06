@@ -28,7 +28,7 @@ export function MemberSettingsScreen() {
   const shifts = useQuery(checklistShiftsQuery(state.token, state.storeId));
   return (
     <Screen>
-      <BackButton href="/owner/settings" />
+      <BackButton parent="/owner/members" />
       <PageHeader
         title="직원 담당"
         description="여러 근무조를 고를 수 있어요. 비우면 전체 할 일을 봐요."

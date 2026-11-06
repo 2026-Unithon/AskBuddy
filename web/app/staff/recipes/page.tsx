@@ -12,7 +12,7 @@ import {
   PageHeader,
   RefreshingHint,
   Screen,
-  SettingsButton,
+  HeaderActions,
   Skeleton,
   STAFF_TABS,
   TabBar,
@@ -34,7 +34,7 @@ export default function StaffRecipesPage() {
 
   return (
     <Screen tabBar={<TabBar tabs={STAFF_TABS} />}>
-      <PageHeader title="레시피" action={<SettingsButton href="/staff/settings" initial={roadmap.data?.store.name ?? ""} />} />
+      <PageHeader title="레시피" action={<HeaderActions role="STAFF" />} />
       <label className="flex w-full items-center gap-2 rounded-full bg-surface px-4 py-3 shadow-card">
         <Icon name="search" size={16} className="text-ink-muted" />
         <input

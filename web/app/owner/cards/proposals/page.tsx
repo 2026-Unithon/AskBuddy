@@ -28,7 +28,7 @@ export default function ProposalsPage() {
 
   return (
     <Screen>
-      <BackButton href="/owner/cards" label="카드" />
+      <BackButton parent="/owner/cards" label="카드" />
       <PageHeader title="답변의 카드 반영 확인" description="직원에게 전달한 답변에서 카드로 정리한 내용을 확인해 주세요." />
       {proposals.isLoading && (
         <>
@@ -79,7 +79,7 @@ function ProposalCard({ proposal }: { proposal: KnowledgeProposal }) {
       <div className="flex items-center gap-2">
         <Chip tone={conflict || !proposal.can_approve ? "warn" : "brand"}>{blockedLabels[proposal.approval_block_reason ?? ""] ?? labels[proposal.relation_type] ?? "확인이 필요한 내용"}</Chip>
       </div>
-      <p className="text-[13px] leading-[1.45] text-ink-muted">직원 질문 · {proposal.question_text}</p>
+      <p className="text-[13px] leading-[1.45] text-ink-muted">직원 질문: {proposal.question_text}</p>
       <div className="flex flex-col gap-1 rounded-[14px] bg-background px-3.5 py-2.5">
         <p className="text-[12px] font-bold text-ink-muted">지금 카드</p>
         <p className="text-[15px] font-bold text-ink">{proposal.current_title ?? "—"}</p>

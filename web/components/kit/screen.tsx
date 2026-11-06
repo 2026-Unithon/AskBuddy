@@ -1,4 +1,8 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { usePathname } from "next/navigation";
+import { useNavHistory } from "@/lib/nav-history";
+import { useEffect, useRef, type ReactNode } from "react";
 
 // 화면 오른쪽 위의 흐린 초록 빛. Figma: 380px 원, 프레임 오른쪽 밖으로 160px, 위로 160px.
 export function Aurora() {
@@ -29,14 +33,62 @@ export function Screen({
   aurora?: boolean;
   className?: string;
 }) {
+  const main = useRef<HTMLElement>(null);
+  const { enter } = useNavHistory();
+  // 탭 화면은 스크롤 위치를 기억해 탭을 오갈 때 되살린다(NAV-3).
+  const rememberScroll = Boolean(tabBar);
+  const pathname = usePathname();
+  useEffect(() => {
+    const el = main.current;
+    if (!rememberScroll || !el) return;
+    const key = `askbuddy:scroll:${pathname}`;
+    let saved = 0;
+    try {
+      saved = Number(sessionStorage.getItem(key)) || 0;
+    } catch {
+      // 저장소를 못 쓰면 맨 위에서 시작한다
+    }
+    // 데이터가 늦게 와 높이가 모자라면 잠깐(최대 1.5초) 다시 맞춰 본다. 사용자가 손대면 바로 멈춘다(끌고 가지 않게)
+    let restoring = 0;
+    const started = performance.now();
+    const stopRestore = () => cancelAnimationFrame(restoring);
+    const userInput = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    if (saved > 0) {
+      const restore = () => {
+        el.scrollTop = saved;
+        if (Math.abs(el.scrollTop - saved) > 1 && performance.now() - started < 1500) restoring = requestAnimationFrame(restore);
+      };
+      restore();
+      userInput.forEach((type) => el.addEventListener(type, stopRestore, { passive: true }));
+    }
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        try {
+          sessionStorage.setItem(key, String(Math.round(el.scrollTop)));
+        } catch {
+          // 저장 못 해도 화면 동작에는 영향 없다
+        }
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      stopRestore();
+      userInput.forEach((type) => el.removeEventListener(type, stopRestore));
+      cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [rememberScroll, pathname]);
   const gutter = "px-5 min-[375px]:px-6";
   const bottomSpace = tabBar
     ? "pb-[calc(108px+env(safe-area-inset-bottom,0px))]"
     : "pb-[max(40px,calc(env(safe-area-inset-bottom,0px)+6px))]";
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-ink">
+    <div data-enter={enter} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-ink">
       {aurora && <Aurora />}
       <main
+        ref={main}
         className={`relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-[calc(28px+env(safe-area-inset-top,0px))] ${gutter} ${
           footer ? "pb-4" : bottomSpace
         } ${className}`}
@@ -66,7 +118,7 @@ export function PageHeader({
       {eyebrow && (
         <p className="text-[14px] font-medium leading-[1.45] tracking-[-0.14px] text-ink-muted">{eyebrow}</p>
       )}
-      <h1 className="pr-12 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
+      <h1 className={`${action ? "pr-28" : ""} text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]`}>
         {title}
       </h1>
       {description && (

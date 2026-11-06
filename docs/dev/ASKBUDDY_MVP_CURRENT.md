@@ -555,8 +555,12 @@ R은 원문·pending·occurrence·직원 전달을, W는 `ApplyOwnerAnswer(owner
 
 | 이벤트 | 생성 조건 | 목적지 |
 |---|---|---|
-| 추출 완료 | 검토할 카드가 한 건 이상 저장됨 | `/owner/cards/review?job_id={job_id}` |
-| 미답변 질문 | `WAITING` 질문 저장 성공 | `/owner/questions?question_id={question_id}` |
+| 추출 완료 | 검토할 카드가 한 건 이상 저장됨 | `/owner/cards?status=all&job_id={job_id}` |
+| 미답변 질문 | `WAITING` 질문 저장 성공 | `/owner/questions/{question_id}` |
+| 점주 답 도착(직원) | 점주 답변 전달 성공 | `/staff/ask?session_id={session_id}` (v1 대화는 `/staff/ask`) |
+| 합류 요청 / 합류 승인 | 합류 요청 저장 / 승인 | `/owner/members` / `/staff` |
+
+목적지는 `api/app/notifications/destinations.py` 한 곳에서 만든다(2026-11-06 화면 개선 NAV-9). 옛 주소(`/owner/cards/review`, `/owner/questions/v2`, `/staff/chat/v2`, `/staff/roadmap`)는 이미 저장된 알림 때문에 웹이 새 주소로 넘겨 준다.
 
 `NO_RESULT`, 전체 실패, 질문 저장 실패에는 성공 알림을 만들지 않는다.
 

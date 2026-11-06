@@ -282,17 +282,17 @@ async function handle(route) {
     await page.goto(`${BASE}/owner/cards/1`);
     await panel().waitFor();
     check("블록 머리 이름(수치·순서·목록 + 규격)",
-      await text("수치 · ICE").isVisible() && await text("순서 · 규격 표시 없음").isVisible() && await text("목록 · 규격 표시 없음").isVisible());
+      await text("수치 ICE").isVisible() && await text("순서 규격 표시 없음").isVisible() && await text("목록 규격 표시 없음").isVisible());
     check("NEGATE 칩 하지 않음", await text("하지 않음").isVisible());
-    check("조건·예외 줄", await text("조건 · 손님이 연하게 원하면 한 번만").isVisible() && await text("예외 · 손님이 따로 요청하면").isVisible());
+    check("조건·예외 줄", await text("조건: 손님이 연하게 원하면 한 번만").isVisible() && await text("예외: 손님이 따로 요청하면").isVisible());
     check("선행 라벨", await text("먼저: 1번").isVisible());
     check("근거 이름·위치",
-      await text("근거 · 합성 매뉴얼.pdf · 3쪽").isVisible() && await text("근거 · 합성 영상.mp4 · 1:15").isVisible()
-      && await text("근거 · 사장님 답변").isVisible() && await text("근거 · 사장님 직접 입력 · 10/8").isVisible());
-    check("인용 끊김 표시", await text("근거 · 지난 메모.jpg · 인용 끊김").isVisible());
+      await text("근거: 합성 매뉴얼.pdf 3쪽").isVisible() && await text("근거: 합성 영상.mp4 1:15").isVisible()
+      && await text("근거: 사장님 답변").isVisible() && await text("근거: 사장님 직접 입력 10/8").isVisible());
+    check("인용 끊김 표시", await text("근거: 지난 메모.jpg, 인용 끊김").isVisible());
     check("이전 문장", await text("이전: 음료Z ICE 시럽은 15g 넣는다.").isVisible());
     check("다른 곳에서 바뀐 줄 경고", await text("다른 곳에서 고쳐짐").isVisible());
-    check("제목 읽기 전용 안내", await text("제목은 메뉴·업무 이름이에요").isVisible());
+    check("제목 안내 문구 없음(화면 개선 o06a)", await page.getByText("제목은 메뉴").count() === 0);
     check("값·단위 칩", await text("225ml").isVisible());
     check("저장 전: 공개판과 같아 공개 전 칩 없음", await text("고친 내용 공개 전").count() === 0);
     check("보기 화면에 신뢰도·완성도 % 없음", !(await page.locator("main").innerText()).includes("%"));
@@ -307,7 +307,7 @@ async function handle(route) {
     await page.getByRole("button", { name: "고치기", exact: true }).click();
     await page.getByRole("button", { name: "고친 내용 저장" }).waitFor();
     check("편집 전에는 저장 버튼 꺼짐", await page.getByRole("button", { name: "고친 내용 저장" }).isDisabled());
-    await page.getByRole("button", { name: /^고치기 · 음료Z ICE 물은/ }).click();
+    await page.getByRole("button", { name: /^고치기: 음료Z ICE 물은/ }).click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
     check("고치기 시트가 화면 안에 뜸(스크롤과 무관)", await inViewport(dialog));
@@ -322,14 +322,14 @@ async function handle(route) {
 
     // ── 순서 블록: 선행이 걸린 이동은 막힘, 선행 없는 두 줄은 step_order 맞바꿈
     check("선행(1번)이 바로 위면 위로 막힘",
-      await page.getByRole("button", { name: "위로 · 일하는 순서가 바뀌어요 · 샷을 붓는다." }).isDisabled());
+      await page.getByRole("button", { name: "위로 (일하는 순서가 바뀌어요): 샷을 붓는다." }).isDisabled());
     check("선행이 바로 아래에 있으면 아래로 막힘",
-      await page.getByRole("button", { name: "아래로 · 일하는 순서가 바뀌어요 · 컵에 얼음을 담는다." }).isDisabled());
-    await page.getByRole("button", { name: "위로 · 일하는 순서가 바뀌어요 · 물을 붓는다." }).click();
+      await page.getByRole("button", { name: "아래로 (일하는 순서가 바뀌어요): 컵에 얼음을 담는다." }).isDisabled());
+    await page.getByRole("button", { name: "위로 (일하는 순서가 바뀌어요): 물을 붓는다." }).click();
     check("순서 이동 뒤 두 줄 고침 표시", await text("고침").count() === 3);
     check("선행 라벨은 초안 번호(2번 → 3번)", await text("먼저: 3번").isVisible() && await text("먼저: 2번").count() === 0);
     check("선행이 바로 위로 온 줄은 위로 막힘",
-      await page.getByRole("button", { name: "위로 · 일하는 순서가 바뀌어요 · 뚜껑을 닫는다." }).isDisabled());
+      await page.getByRole("button", { name: "위로 (일하는 순서가 바뀌어요): 뚜껑을 닫는다." }).isDisabled());
     for (const [w, h] of [[390, 844], [360, 800]]) {
       await page.setViewportSize({ width: w, height: h });
       check(`편집 ${w}px 가로 넘침 없음`, await noOverflow());
@@ -410,7 +410,7 @@ async function handle(route) {
 
     // ── 다시 편집 → 충돌 → 최신 내용 불러오기
     await page.getByRole("button", { name: "고치기", exact: true }).click();
-    await page.getByRole("button", { name: /^빼기 · 음료Z ICE 시럽은/ }).click();
+    await page.getByRole("button", { name: /^빼기: 음료Z ICE 시럽은/ }).click();
     check("뺀 줄이 목록에서 사라짐", await page.getByText("음료Z ICE 시럽은 10g 넣는다.", { exact: true }).count() === 0);
     state.saveQueue.push("conflict");
     await page.getByRole("button", { name: "고친 내용 저장" }).click();
@@ -437,7 +437,7 @@ async function handle(route) {
     await page.goto(`${BASE}/owner/cards/4`);
     await panel().waitFor();
     await page.getByRole("button", { name: "고치기", exact: true }).click();
-    await page.getByRole("button", { name: /^빼기 · / }).click();
+    await page.getByRole("button", { name: /^빼기: / }).click();
     const last = page.getByRole("dialog");
     await last.getByText("사실이 하나도 남지 않아요. 이 카드를 지울까요?", { exact: true }).waitFor();
     await shot("10-last-fact-390");
@@ -451,7 +451,7 @@ async function handle(route) {
     await panel().waitFor();
     await page.getByRole("button", { name: "고치기", exact: true }).click();
     await page.getByRole("button", { name: "고친 내용 저장" }).waitFor();
-    const moves = page.getByRole("button", { name: /^(위로|아래로) · / });
+    const moves = page.getByRole("button", { name: /^(위로|아래로)[ :]/ });
     const moveStates = await moves.evaluateAll((els) => els.map((e) => e.disabled));
     check("번호가 같은 단계는 위·아래 막힘", moveStates.length === 4 && moveStates.every(Boolean));
     await page.getByRole("button", { name: "그만두기", exact: true }).click();
@@ -461,7 +461,7 @@ async function handle(route) {
     await panel().waitFor();
     await page.getByRole("button", { name: "고치기", exact: true }).click();
     check("선행이 걸린 기존 두 단계(얼음→물)는 여전히 맞바꿀 수 없음",
-      await page.getByRole("button", { name: "위로 · 일하는 순서가 바뀌어요 · 합성음료A 물을 붓는다." }).isDisabled());
+      await page.getByRole("button", { name: "위로 (일하는 순서가 바뀌어요): 합성음료A 물을 붓는다." }).isDisabled());
     await page.getByRole("button", { name: "사실 추가", exact: true }).click();
     const addStep = page.getByRole("dialog");
     await addStep.waitFor();
@@ -472,7 +472,7 @@ async function handle(route) {
     await addStep.waitFor({ state: "detached" });
     const stepRows = async () => (await page.getByTestId("fact-row").allInnerTexts()).map((t) => t.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 2).join(" "));
     check("새 단계는 처음에 블록 끝(5번)", (await stepRows()).at(-1) === "5 합성음료A 시럽을 넣는다.");
-    const upAdded = page.getByRole("button", { name: "위로 · 일하는 순서가 바뀌어요 · 합성음료A 시럽을 넣는다." });
+    const upAdded = page.getByRole("button", { name: "위로 (일하는 순서가 바뀌어요): 합성음료A 시럽을 넣는다." });
     check("새 단계는 위로 옮길 수 있음", await upAdded.isEnabled());
     await upAdded.click();
     await upAdded.click();
@@ -490,7 +490,7 @@ async function handle(route) {
     // 서버가 PLAN_STEP_ORDER 로 거절하면 "새로고침" 이 아니라 자리를 옮기라는 문구
     state.saveQueue.push("stepOrder");
     await page.getByRole("button", { name: "고친 내용 저장" }).click();
-    await text("순서 단계 번호가 앞뒤 단계와 맞지 않아요. 넣은 단계를 위로·아래로 옮겨 알맞은 자리에 둔 뒤 다시 저장해 주세요.").waitFor();
+    await text("순서 단계 번호가 앞뒤 단계와 맞지 않아요. 넣은 단계를 위나 아래로 옮겨 알맞은 자리에 둔 뒤 다시 저장해 주세요.").waitFor();
     check("422 PLAN_STEP_ORDER 전용 문구(새로고침 안내 없음)·입력 유지",
       !(await page.locator("main").innerText()).includes("새로고침") && await text("새로 넣음").count() === 1);
     await shot("18-step-order-422-390");

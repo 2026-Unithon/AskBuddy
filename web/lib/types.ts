@@ -12,7 +12,7 @@ export const BUSINESS_TYPES: { key: BusinessType; label: string; emoji: string }
   { key: "CAFE", label: "카페", emoji: "☕" },
   { key: "RESTAURANT", label: "식당", emoji: "🍽️" },
   { key: "BAKERY", label: "베이커리", emoji: "🥐" },
-  { key: "BAR", label: "바·주점", emoji: "🍺" },
+  { key: "BAR", label: "바, 주점", emoji: "🍺" },
   { key: "CVS", label: "편의점", emoji: "🏪" },
   { key: "SALON", label: "미용실", emoji: "💇" },
 ];

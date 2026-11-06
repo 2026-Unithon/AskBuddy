@@ -6,6 +6,7 @@ finish 실패를 삼키면 안 된다. 같은 transaction 전체 rollback으로 
 from uuid import uuid4
 import json
 
+from app.notifications.destinations import OWNER_QUESTIONS
 from app.contracts.publication import ApplyOwnerAnswerResult
 from app.errors import ApiError
 from app.contracts.errors import ERROR_TABLE
@@ -41,7 +42,7 @@ async def _terminal(conn,*,store_id:int,event_id:int,owner_answer_id:int,reason:
             event_type='OWNER_ANSWER',aggregate_type='OWNER_ANSWER',aggregate_id=owner_answer_id,
             dedupe_key=f'r-handoff-failed:{store_id}:{event_id}:{failure_key}',title='지식 반영을 확인해 주세요',
             body='점주 답변 전달과 별개로 지식 반영이 중단됐습니다. 실패 원인을 확인한 뒤 재처리할 수 있습니다.',
-            destination='/owner/questions/v2')
+            destination=OWNER_QUESTIONS)
 
 
 async def claim_owner_event(pool, *, store_id:int) -> dict|None:

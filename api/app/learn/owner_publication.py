@@ -1,4 +1,5 @@
 """R receives W completion only after the current publication/index agree."""
+from app.notifications.destinations import STAFF_ASK, staff_session
 from app.errors import ApiError
 from app.reg.hybrid import read_current_index
 from app.notifications.service import create_notification_event
@@ -38,5 +39,5 @@ async def notify_publication(conn, *, store_id, question_id, owner_answer_id):
             event_type='OWNER_ANSWER', aggregate_type='OWNER_ANSWER', aggregate_id=owner_answer_id,
             dedupe_key=f'r-knowledge-ready:{store_id}:{owner_answer_id}:{recipient["user_id"]}',
             title='답변이 매장 지식에 반영됐어요', body='승인된 내용을 확인하고 다시 질문할 수 있어요.',
-            destination=(f'/staff/chat/v2?session_id={recipient["session_id"]}'
-                         if recipient['contract_version']=='v2' else '/staff/chat'))
+            destination=(staff_session(str(recipient["session_id"]) if recipient["session_id"] is not None else None)
+                         if recipient['contract_version']=='v2' else STAFF_ASK))

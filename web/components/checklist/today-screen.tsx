@@ -23,7 +23,7 @@ import {
   PageHeader,
   RefreshingHint,
   Screen,
-  SettingsButton,
+  HeaderActions,
   Sheet,
   Skeleton,
   STAFF_TABS,
@@ -170,12 +170,7 @@ export function TodayScreen() {
       <PageHeader
         eyebrow={bootstrap.data?.store?.store_name}
         title="오늘 할 일"
-        action={
-          <SettingsButton
-            href="/staff/settings"
-            initial={bootstrap.data?.user?.name ?? ""}
-          />
-        }
+        action={<HeaderActions role="STAFF" />}
       />
       {dayChanged && <p role="status">하루가 바뀌었어요</p>}
       <TodayOnlyTasks />
@@ -207,7 +202,7 @@ export function TodayScreen() {
               </p>
               <p className="mt-3">
                 체크 {data.my_submission.done_lines}/
-                {data.my_submission.total_lines}개 · 제출했어요
+                {data.my_submission.total_lines}개 제출했어요
               </p>
               <ButtonLink href="/staff/me" variant="secondary" className="mt-4">
                 내 기록 보기
@@ -217,7 +212,7 @@ export function TodayScreen() {
             <HeroCard>
               {current && (
                 <HeroClock pill>
-                  {data.upcoming ? "다음" : "지금"} · {current.name}
+                  {data.upcoming ? "다음" : "지금"} {current.name}
                 </HeroClock>
               )}
               <p className="my-4 pr-14 text-[28px] font-bold">
@@ -502,7 +497,7 @@ function YesterdaySheet({
       onClose={() => {}}
       dismissible={false}
       title="어제 체크리스트"
-      description={`${date} · 체크를 고친 뒤 저장해 주세요. 저장하면 어제 기록을 제출해요.`}
+      description={`${date}. 체크를 고친 뒤 저장해 주세요. 저장하면 어제 기록을 제출해요.`}
     >
       {yesterday.isLoading && <Skeleton className="h-64" />}
       {yesterday.error && (

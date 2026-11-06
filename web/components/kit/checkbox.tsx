@@ -39,7 +39,7 @@ export function CheckRow({
                 checked ? "border-primary bg-primary text-white" : "border-primary-weak"
               } ${saving ? "animate-pulse" : ""}`}
             >
-              {checked && <Icon name="check" size={14} />}
+              {checked && <Icon name="check" size={14} className="animate-[check-pop_var(--dur-base)_var(--ease-spring)]" />}
             </span>
           </button>
           <Link
@@ -71,7 +71,7 @@ export function CheckRow({
             checked ? "border-primary bg-primary text-white" : "border-primary-weak"
           } ${saving ? "animate-pulse" : ""}`}
         >
-          {checked && <Icon name="check" size={14} />}
+          {checked && <Icon name="check" size={14} className="animate-[check-pop_var(--dur-base)_var(--ease-spring)]" />}
         </span>
         <span
           className={`min-w-0 flex-1 text-[16px] leading-[1.45] tracking-[-0.16px] [word-break:keep-all] ${

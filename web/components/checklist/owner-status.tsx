@@ -39,7 +39,7 @@ export function OwnerChecklistStatus() {
         (data.scope_counts.total ? (
           <HeroCard>
             <HeroClock>
-              {current ? `지금 · ${current.name}` : "오늘 매장 진행"}
+              {current ? `지금 ${current.name}` : "오늘 매장 진행"}
             </HeroClock>
             <p className="my-4 pr-14 text-[24px] font-bold">
               체크 {data.scope_counts.done}/{data.scope_counts.total}개
@@ -58,8 +58,8 @@ export function OwnerChecklistStatus() {
             </ul>
             {last && (
               <p className="mt-4 text-sm" data-testid="last-submission">
-                {last.shift_names.join(" · ") || "오늘 할 일"} 끝났어요 ·
-                체크리스트 {last.total_lines}개 ·{" "}
+                {last.shift_names.join(", ") || "오늘 할 일"} 끝났어요.
+                체크리스트 {last.total_lines}개,{" "}
                 {last.business_date === data.business_date ? "오늘" : "어제"}{" "}
                 {new Date(last.submitted_at).toLocaleTimeString("ko-KR", {
                   timeZone: "Asia/Seoul",
@@ -73,7 +73,7 @@ export function OwnerChecklistStatus() {
           </HeroCard>
         ) : (
           <Caption>
-            오늘 할 일이 아직 없어요 ·{" "}
+            오늘 할 일이 아직 없어요.{" "}
             <a href="/owner/shifts" className="text-primary underline">
               근무조에서 할 일 담기
             </a>
@@ -81,7 +81,7 @@ export function OwnerChecklistStatus() {
         ))}
       <RefreshingHint active={status.isRefetching && !status.isLoading} />
       <ButtonLink href="/owner/me" variant="secondary">
-        내 기록 · 알바생 기록 보기
+        내 기록과 알바생 기록 보기
       </ButtonLink>
     </>
   );

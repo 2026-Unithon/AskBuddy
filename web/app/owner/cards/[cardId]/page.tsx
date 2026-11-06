@@ -80,7 +80,7 @@ export default function OwnerCardPage() {
   if (!cardId) {
     return (
       <Screen>
-        <BackButton href="/owner/cards" label="카드" />
+        <BackButton parent="/owner/cards" label="카드" />
         <Empty title="잘못된 카드 주소예요" action={<ButtonLink href="/owner/cards">카드 목록으로</ButtonLink>} />
       </Screen>
     );
@@ -88,7 +88,7 @@ export default function OwnerCardPage() {
   if (detail.isLoading) {
     return (
       <Screen>
-        <BackButton href="/owner/cards" label="카드" />
+        <BackButton parent="/owner/cards" label="카드" />
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-40" />
       </Screen>
@@ -98,7 +98,7 @@ export default function OwnerCardPage() {
     const missing = detail.error instanceof ApiError && [403, 404].includes(detail.error.status);
     return (
       <Screen>
-        <BackButton href="/owner/cards" label="카드" />
+        <BackButton parent="/owner/cards" label="카드" />
         {missing ? (
           <Empty title="이 카드를 볼 수 없어요" description="다른 매장의 카드이거나 없는 카드예요." action={<ButtonLink href="/owner/cards">카드 목록으로</ButtonLink>} />
         ) : (
@@ -157,13 +157,13 @@ export default function OwnerCardPage() {
         )
       }
     >
-      <BackButton href="/owner/cards" label="카드" />
+      <BackButton parent="/owner/cards" label="카드" />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setMoving(true)}
           disabled={excluded}
-          aria-label={`카테고리 ${card.category?.name ?? "기타"} · 옮기기`}
+          aria-label={`카테고리 ${card.category?.name ?? "기타"}, 옮기기`}
           className={`min-h-8 text-[13px] font-bold text-primary underline-offset-2 hover:underline ${focusRing}`}
         >
           {card.category?.name ?? "기타"}
@@ -172,8 +172,7 @@ export default function OwnerCardPage() {
         {unpublishedDraft && <Chip size="sm" tone="warn">고친 내용 공개 전</Chip>}
       </div>
       <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{title}</h1>
-      {card.fact_card && <Caption className="-mt-2">제목은 메뉴·업무 이름이에요</Caption>}
-      {card.review_status === "NEEDS_REVIEW" && card.needs_review_reason && (
+        {card.review_status === "NEEDS_REVIEW" && card.needs_review_reason && (
         <p className="rounded-[14px] bg-warn-50 px-3.5 py-2.5 text-[13px] leading-[1.45] text-warn-700">{card.needs_review_reason}</p>
       )}
       {card.fact_card ? (
@@ -184,15 +183,15 @@ export default function OwnerCardPage() {
         </Surface>
       )}
       {!excluded && card.review_status === "APPROVED" && card.published && <CardAssignment cardId={cardId} />}
-      {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용이 보여요 · {card.published.title}</Caption>}
+      {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용({card.published.title})이 보여요</Caption>}
       <Caption>
-        출처 · {card.source?.title ?? "알 수 없음"}
-        {card.published ? ` · ${formatDate(card.published.created_at)}` : ""}
-        {sourceDeleted ? " · 인용 끊김" : ""}
+        <span className="mr-2">출처 {card.source?.title ?? "알 수 없음"}</span>
+        {card.published && <span className="mr-2">{formatDate(card.published.created_at)}</span>}
+        {sourceDeleted && <span>인용 끊김</span>}
       </Caption>
       {card.evidence.length > 0 && (
         <TextButton onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}>
-          {showEvidence ? "근거 접기" : `근거 보기 · ${card.evidence.length}`}
+          {showEvidence ? "근거 접기" : `근거 보기 ${card.evidence.length}`}
         </TextButton>
       )}
       {showEvidence && (
@@ -202,7 +201,7 @@ export default function OwnerCardPage() {
               <p className="whitespace-pre-wrap">{item.excerpt ?? "원문 위치만 남아 있어요"}</p>
               <p className="mt-1 text-[12px] text-ink-muted">
                 {item.source.title ?? "자료"}
-                {item.source.source_availability === "DELETED" ? " · 인용 끊김 (원본이 지워졌어요)" : ""}
+                {item.source.source_availability === "DELETED" ? " (인용 끊김, 원본이 지워졌어요)" : ""}
               </p>
             </li>
           ))}

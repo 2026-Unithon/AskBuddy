@@ -131,7 +131,7 @@ export function OwnerAnswerAttachments({ questionId }: { questionId: number }) {
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-[20px] bg-surface px-[18px] py-4 shadow-card" data-testid="attach-area">
-      <Caption>사진·문서·음성을 함께 붙이면 카드로 같이 정리해요(선택)</Caption>
+      <Caption>사진, 문서, 음성을 함께 붙이면 카드로 같이 정리해요(선택)</Caption>
       <input
         ref={fileInput}
         type="file"

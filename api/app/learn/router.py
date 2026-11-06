@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.notifications.destinations import STAFF_ASK, STAFF_RECIPES
 from app.cards.router import _evidence_items
 from app.deps import Claims, CurrentStoreId, CurrentUserId, Db, get_pool, get_store_id
 from app.errors import ApiError
@@ -189,7 +190,7 @@ async def require_v2_pending(req: CreatePendingRequest, claims: Claims, user_id:
         store_id = await get_store_id(claims, db)
         await _member_id(db, store_id, user_id)
     raise ApiError(409, "V2_REQUIRED", "새 질문은 새 Buddy 화면에서 확인해 주세요.",
-                   details={"destination": "/staff/chat/v2"})
+                   details={"destination": STAFF_ASK})
 
 
 async def create_pending(
@@ -795,7 +796,7 @@ async def ask_chat(req: ChatAskRequest, claims: Claims, user_id: CurrentUserId):
         store_id = await get_store_id(claims, db)
         await _member_id(db, store_id, user_id)
     raise ApiError(409, "V2_REQUIRED", "새 질문은 새 Buddy 화면에서 확인해 주세요.",
-                   details={"destination": "/staff/chat/v2"})
+                   details={"destination": STAFF_ASK})
 
 
 async def legacy_chat_regression(req: ChatAskRequest, background: BackgroundTasks, claims: Claims, user_id: CurrentUserId):
@@ -1221,7 +1222,7 @@ async def get_roadmap_item(
             "name": row["category_name"],
         },
         evidence=await _evidence_items(db, store_id, version_id),
-        return_to={"path": "/staff/roadmap", "item_id": item_id},
+        return_to={"path": STAFF_RECIPES, "item_id": item_id},
     )
 
 

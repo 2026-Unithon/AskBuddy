@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useNavHistory } from "@/lib/nav-history";
 import { useState } from "react";
 import {
   BackButton,
@@ -11,14 +12,15 @@ import {
   ButtonLink,
   Caption,
   Chip,
+  CountBadge,
   Empty,
   ErrorInline,
+  focusRing,
   PageHeader,
   RefreshingHint,
   Screen,
   SectionTitle,
   Skeleton,
-  focusRing,
 } from "@/components/kit";
 import {
   ApiError,
@@ -59,7 +61,7 @@ export default function JobPage() {
   if (!jobId) {
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <Empty title="잘못된 작업 주소예요" action={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>} />
       </Screen>
     );
@@ -68,7 +70,7 @@ export default function JobPage() {
   if (job.isLoading) {
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <Skeleton className="h-24" />
         <Skeleton className="h-28" />
       </Screen>
@@ -79,7 +81,7 @@ export default function JobPage() {
     const missing = job.error instanceof ApiError && [403, 404].includes(job.error.status);
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         {missing ? (
           <Empty title="이 작업을 볼 수 없어요" description="다른 매장의 작업이거나 없는 작업이에요." action={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>} />
         ) : (
@@ -113,7 +115,7 @@ export default function JobPage() {
           </>
         }
       >
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <PageHeader
           title={failed ? "처리하지 못했어요" : "찾은 내용이 없어요"}
           description={
@@ -144,7 +146,7 @@ export default function JobPage() {
 function Processing({ job }: { job: IngestJobDetail }) {
   return (
     <Screen footer={<ButtonLink href="/owner" variant="secondary">오늘 매장으로</ButtonLink>}>
-      <BackButton href="/owner" label="오늘 매장" />
+      <BackButton parent="/owner" label="오늘 매장" />
       <PageHeader title="정리하고 있어요" description="자료에서 업무 내용을 정리하고 있어요. 다른 화면으로 가도 계속 처리돼요." />
       <div className="flex justify-center py-4">
         <BuddyImage size={120} className="motion-safe:animate-pulse" />
@@ -245,6 +247,7 @@ function ResultReview({
   const { state } = useApp();
   const client = useQueryClient();
   const router = useRouter();
+  const { markReplace } = useNavHistory();
   const [approve, setApprove] = useState<ApproveState>({});
   // 매장의 첫 카드 공개라면 O5 초대로, 아니면 오늘 매장으로 (Figma O4 → O5 → O6)
   const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
@@ -281,7 +284,10 @@ function ResultReview({
         client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
       ]),
     onSuccess: (failed) => {
-      if (failed === 0 && needsReview.length === 0) router.push(firstGuide ? "/owner/invite" : "/owner");
+      if (failed !== 0 || needsReview.length !== 0) return;
+      // 검수가 끝난 결과 화면으로는 돌아오지 않게 replace
+      markReplace();
+      router.replace(firstGuide ? "/owner/invite" : "/owner");
     },
   });
 
@@ -312,7 +318,7 @@ function ResultReview({
         </>
       }
     >
-      <BackButton href="/owner" label="오늘 매장" />
+      <BackButton parent="/owner" label="오늘 매장" />
       <PageHeader title="이렇게 나눴어요" description="다르면 눌러서 고치면 돼요" />
 
       {job.status === "PARTIAL" && (
@@ -330,7 +336,7 @@ function ResultReview({
 
       {needsReview.length > 0 && (
         <>
-          <SectionTitle>하나씩 봐 주세요 · {needsReview.length}</SectionTitle>
+          <SectionTitle>하나씩 봐 주세요<CountBadge n={needsReview.length} /></SectionTitle>
           {needsReview.map((card) => (
             <ResultCard key={card.card_id} card={card} label={card.needs_review_reason ?? "내용이 확실하지 않아요"} tone="warn" />
           ))}
@@ -343,7 +349,7 @@ function ResultReview({
             <ResultCard
               key={card.card_id}
               card={card}
-              label={index === 0 ? `${name} · ${list.length}` : name}
+              label={index === 0 ? `${name} ${list.length}` : name}
               state={approve[card.card_id]}
             />
           ))}
@@ -352,12 +358,12 @@ function ResultReview({
 
       {noneSources.length > 0 && (
         <section className="flex flex-col gap-3">
-          <SectionTitle>추출하지 않은 자료 · {noneSources.length}</SectionTitle>
+          <SectionTitle>추출하지 않은 자료<CountBadge n={noneSources.length} /></SectionTitle>
           <SourceList job={job} sources={noneSources} />
         </section>
       )}
 
-      {sourceNames && <Caption>출처 · {sourceNames}</Caption>}
+      {sourceNames && <Caption>출처 {sourceNames}</Caption>}
       <RefreshingHint active={approveAll.isPending} />
     </Screen>
   );

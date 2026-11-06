@@ -49,14 +49,15 @@ const BASE = 'http://127.0.0.1:3011';
       else if (p === '/app/bootstrap') payload = { user: { user_id: role === 'OWNER' ? 1 : 2, role: sessionRole, name: '합성 사용자' },
         store: state.hasStore ? { store_id: 1, store_name: '합성 매장', guide_completed: state.guideCompleted, category_version: 1 } : null,
         badges: { waiting_questions: 0, pending_cards: 1 },
-        default_destination: !sessionRole ? '/auth/role' : sessionRole === 'OWNER' ? (state.hasStore ? '/owner' : '/owner/intent') : '/staff' };
+        // 서버 규칙(bootstrap/router.py): 가이드를 안 끝낸 매장의 점주는 /owner/add
+        default_destination: !sessionRole ? '/auth/role' : sessionRole === 'OWNER' ? (state.hasStore ? (state.guideCompleted ? '/owner' : '/owner/add') : '/owner/intent') : '/staff' };
       else if (p === '/auth/login') {
         if (body.password !== 'right-pass') return fail(route, 401, '이메일 또는 비밀번호가 맞지 않습니다');
         sessionActive = true; payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: 'OWNER', store_id: state.hasStore ? 1 : null } };
       } else if (p === '/auth/signup') { state.hasStore = false; sessionActive = true; sessionRole = null; state.signupBodies.push(body); payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: null, store_id: null } }; }
       else if (p === '/auth/stores') {
         if (state.failStore) { state.failStore = false; return fail(route, 503, '합성 매장 생성 실패'); }
-        state.hasStore = true; state.storeBodies.push(body);
+        state.hasStore = true; state.guideCompleted = false; state.storeBodies.push(body);
         payload = { token: 'synthetic-ui-only', store: { store_id: 1, store_name: body.store_name } };
       } else if (p === '/members/invite-link') payload = { url: 'http://localhost:3011/join/synthetic-invite-token' };
       else if (p === '/ingest/capabilities') payload = { SCAN: { extensions: ['pdf', 'jpg', 'jpeg', 'png'], max_bytes: 20000000 } };
@@ -130,7 +131,7 @@ const BASE = 'http://127.0.0.1:3011';
     state.job.status = 'PARTIAL';
     await page.getByText('이렇게 나눴어요', { exact: true }).waitFor({ timeout: 10000 });
     check('job polling moves to result', await page.getByText('준비된 카드와 처리하지 못한 자료가 있어요.', { exact: false }).isVisible());
-    check('needs-review card separated from bulk approve', await page.getByText('하나씩 봐 주세요 · 1', { exact: true }).isVisible());
+    check('needs-review card separated from bulk approve', await page.getByRole('heading', { name: /하나씩 봐 주세요\s*1/ }).isVisible());
     check('excluded card hidden from result', await page.getByText('합성 지운 카드').count() === 0);
     state.failApprove.add(2);
     await page.getByRole('button', { name: '맞아요', exact: true }).click();
@@ -165,7 +166,7 @@ const BASE = 'http://127.0.0.1:3011';
     check('search narrows list', await page.getByRole('link', { name: /합성 라테/ }).count() === 0);
     await page.goto(`${BASE}/owner/cards/review?job_id=7`);
     await page.waitForURL('**/owner/cards?status=all&job_id=7');
-    await page.getByText('이번에 넣은 자료의 카드만 · 모두 보기', { exact: true }).waitFor();
+    await page.getByText('이번에 넣은 자료의 카드만, 모두 보기', { exact: true }).waitFor();
     check('job review deep link keeps job filter', true);
 
     // 지식 제안: 저장 실패는 그 자리에, 재시도 성공 후 빈 상태
@@ -258,10 +259,12 @@ const BASE = 'http://127.0.0.1:3011';
     check('store create failure keeps name', await jp.getByLabel('매장 이름').inputValue() === '합성 새 매장');
     await jp.getByRole('button', { name: '다시 시도', exact: true }).click();
     await jp.waitForURL('**/owner/add');
-    await jp.getByText('알려주고 싶은 걸 아무거나 넣어주세요', { exact: true }).waitFor();
+    // Next 경로 안내(__next-route-announcer__)도 같은 글을 읽어 주므로 제목 역할로 찾는다
+    await jp.getByRole('heading', { name: '알려주고 싶은 걸 아무거나 넣어주세요' }).waitFor();
     check('store created as cafe then add screen', state.storeBodies[0]?.store_name === '합성 새 매장' && state.storeBodies[0]?.business_type === 'CAFE');
     check('voice tool hidden until recording format decided', await jp.getByRole('button', { name: '말하기' }).count() === 0);
     await joiner.close();
+    state.guideCompleted = true; // 아래 로그인 흐름은 가이드를 끝낸 매장
 
     await page.goto(`${BASE}/auth/email`);
     await page.getByLabel('이메일').fill('owner@synthetic.test');
@@ -274,7 +277,7 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/complete`);
     await page.waitForURL('**/owner/invite');
     await page.getByRole('button', { name: '링크 복사', exact: true }).waitFor();
-    check('invite link actions available', await page.getByRole('link', { name: '직원 관리 · 합류 승인' }).isVisible());
+    check('invite link actions available', await page.getByRole('link', { name: '직원 관리', exact: true }).isVisible());
     state.guideCompleted = false; state.job.status = 'SUCCEEDED';
     state.cards[0].review_status = 'PENDING'; state.cards[2].review_status = 'PENDING'; state.cards[2].needs_review_reason = null;
     await page.goto(`${BASE}/owner/jobs/7`);

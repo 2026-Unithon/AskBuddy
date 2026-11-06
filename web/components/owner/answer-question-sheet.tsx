@@ -185,7 +185,7 @@ export function AnswerQuestionSheet({
               직원 질문에 답변하기
             </h2>
             <p className="text-sm text-muted mt-0.5 leading-relaxed">
-              답변하신 내용은 직원의 Buddy 채팅에 전달되고 매장의 정식 지식 카드로 검토·등록됩니다.
+              답변하신 내용은 직원의 Buddy 채팅에 전달되고 매장의 정식 지식 카드로 검토하고 등록됩니다.
             </p>
           </div>
           <button

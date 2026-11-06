@@ -78,7 +78,7 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   const days = new Date(Date.UTC(year, monthNo, 0)).getUTCDate();
   return (
     <Screen>
-      <BackButton href={`/${role.toLowerCase()}/settings`} />
+      <BackButton parent={`/${role.toLowerCase()}/settings`} />
       <PageHeader
         title="내 기록"
         description="내가 체크한 일과 제출 기록을 볼 수 있어요"
@@ -132,7 +132,7 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
           )}
           {settings.data && !settings.data.staff_records_visible && (
             <Caption>
-              알바생 기록을 꺼 두었어요 ·{" "}
+              알바생 기록을 꺼 두었어요.{" "}
               <a href="/owner/shifts" className="text-primary underline">
                 설정에서 켜기
               </a>
@@ -240,10 +240,10 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
       )}
       {detail.data?.visible && (
         <Surface className="p-4">
-          <h2 className="text-[16px] font-bold">{day} · 한 일</h2>
+          <h2 className="text-[16px] font-bold">{day}에 한 일</h2>
           <p className="my-2">
             {detail.data.submission
-              ? `제출했어요 · ${detail.data.submission.done_lines}/${detail.data.submission.total_lines}개${detail.data.submission.late ? " · 다음 날 저장" : ""}`
+              ? `제출했어요 ${detail.data.submission.done_lines}/${detail.data.submission.total_lines}개${detail.data.submission.late ? ", 다음 날 저장" : ""}`
               : "제출하지 않았어요"}
           </p>
           {detail.data.lines.length ? (

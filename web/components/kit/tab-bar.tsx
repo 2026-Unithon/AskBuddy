@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { focusRing } from "@/components/kit/buttons";
+import { focusRing, pressable } from "@/components/kit/buttons";
 import { Icon, type IconName } from "@/components/kit/icon";
+import { useNavHistory } from "@/lib/nav-history";
 
 export type Tab = {
   href: string;
@@ -27,9 +28,13 @@ function isActive(tab: Tab, pathname: string) {
   return pathname === tab.href || tab.match.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-/** Figma TabBar: 아래에서 20 띄운 68 높이 알약, 활성 탭은 연초록 배경. */
+/**
+ * Figma TabBar: 아래에서 20 띄운 68 높이 알약, 활성 탭은 연초록 배경.
+ * 탭끼리는 기록을 쌓지 않는다(폰 뒤로가 탭을 되짚지 않게). 지금 탭을 다시 누르면 맨 위로.
+ */
 export function TabBar({ tabs }: { tabs: Tab[] }) {
   const pathname = usePathname();
+  const { markReplace } = useNavHistory();
   return (
     <nav
       aria-label="주요 메뉴"
@@ -41,10 +46,19 @@ export function TabBar({ tabs }: { tabs: Tab[] }) {
           <Link
             key={tab.href}
             href={tab.href}
+            replace
+            onNavigate={(event) => {
+              if (pathname === tab.href) {
+                event.preventDefault();
+                document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
+                return;
+              }
+              markReplace();
+            }}
             aria-current={active ? "page" : undefined}
             className={`flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[20px] text-[15px] leading-[1.45] tracking-[-0.15px] ${
               active ? "bg-empty font-bold text-primary" : "font-medium text-ink-muted"
-            } ${focusRing}`}
+            } ${pressable} ${focusRing}`}
           >
             <Icon name={tab.icon} size={20} />
             {tab.label}

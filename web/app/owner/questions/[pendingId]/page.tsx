@@ -69,7 +69,7 @@ export default function OwnerAnswerPage() {
   if (detail.isLoading) {
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <Skeleton className="h-20" />
         <Skeleton className="h-8 w-1/2" />
       </Screen>
@@ -80,7 +80,7 @@ export default function OwnerAnswerPage() {
     const missing = detail.error instanceof ApiError && [403, 404].includes(detail.error.status);
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         {missing ? (
           <Empty title="이 질문을 볼 수 없어요" description="이미 정리됐거나 다른 매장의 질문이에요." action={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>} />
         ) : (
@@ -160,7 +160,7 @@ export default function OwnerAnswerPage() {
         )
       }
     >
-      <BackButton href="/owner/questions" label="직원 질문" />
+      <BackButton parent="/owner" />
       <PageHeader title={title} />
       <Caption className="-mt-2 text-[13px]">
         {askedCount > 1 ? `직원이 ${askedCount}번 물어봤어요` : "직원이 물어본 질문"}
@@ -169,7 +169,7 @@ export default function OwnerAnswerPage() {
         <div className="flex flex-wrap gap-1.5">
           {slots.map(([slot, value]) => (
             <Chip key={slot} tone="neutral">
-              {SLOT_LABEL[slot] ?? "조건"} · {value}
+              {SLOT_LABEL[slot] ?? "조건"} {value}
             </Chip>
           ))}
         </div>
@@ -177,7 +177,7 @@ export default function OwnerAnswerPage() {
       {latest && <AnswerStatus answer={latest} pendingId={pendingId} onEdit={() => setEditing(true)} editing={editing} />}
       {/^\d+$/.test(pendingId) && <OwnerAnswerAttachments questionId={Number(pendingId)} />}
       {data.legacy_answers?.map((previous) => <Surface key={previous.owner_answer_id} className="space-y-2 p-4">
-        <Caption>이전에 전달한 답변 · 카드 반영 상태는 카드에서 확인해 주세요</Caption>
+        <Caption>이전에 전달한 답변. 카드 반영 상태는 카드에서 확인해 주세요</Caption>
         <p className="whitespace-pre-wrap">{previous.answer}</p>
       </Surface>)}
     </Screen>
@@ -260,7 +260,7 @@ function RetryKnowledge({ eventId, pendingId }: { eventId: string; pendingId: st
 function PublishedResult({ question, answer, onEdit }: { question: string; answer: string; onEdit: () => void }) {
   return (
     <Screen footer={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>}>
-      <BackButton href="/owner" />
+      <BackButton parent="/owner" />
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <div className="relative flex w-full flex-col gap-1.5 rounded-[20px] border-[1.5px] border-accent-500 bg-surface px-[18px] py-4 shadow-[0_16px_36px_-6px_rgba(240,122,138,0.25)]">
           <span className="absolute right-4 top-3.5 rounded-full bg-accent-500 px-2.5 py-1 text-[12px] font-bold tracking-[-0.24px] text-white">
