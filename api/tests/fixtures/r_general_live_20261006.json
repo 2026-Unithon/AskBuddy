@@ -1,0 +1,1786 @@
+{
+  "source_run_sha256": "de5789ce834369572f15659c53b0e3b242a9dd7e89f189f4faaaeba336347e8c",
+  "model": "gemini-3.6-flash",
+  "scope": "Actual paid outputs on synthetic policy fixture; immutable negative regression inputs, not passing model answers.",
+  "snapshot": {
+    "schema_version": "published_knowledge/v1",
+    "store_id": "1",
+    "knowledge_revision": "1",
+    "snapshot_id": "1",
+    "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+    "created_at": "2026-10-06T10:04:41.484355Z",
+    "glossary_version": "glossary/v1",
+    "renderer_version": "r-approved/v1",
+    "cards": [
+      {
+        "card_id": "1",
+        "card_version_id": "1",
+        "entity_id": "1",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "환불",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "1"
+          }
+        ]
+      },
+      {
+        "card_id": "2",
+        "card_version_id": "2",
+        "entity_id": "2",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "오픈",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "2"
+          }
+        ]
+      },
+      {
+        "card_id": "3",
+        "card_version_id": "3",
+        "entity_id": "3",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "근무",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "3"
+          }
+        ]
+      },
+      {
+        "card_id": "4",
+        "card_version_id": "4",
+        "entity_id": "4",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "발주",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "4"
+          }
+        ]
+      },
+      {
+        "card_id": "5",
+        "card_version_id": "5",
+        "entity_id": "5",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "판매",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "5"
+          }
+        ]
+      },
+      {
+        "card_id": "6",
+        "card_version_id": "6",
+        "entity_id": "6",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "결제 장애",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "6"
+          }
+        ]
+      },
+      {
+        "card_id": "7",
+        "card_version_id": "7",
+        "entity_id": "7",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "마감",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "7"
+          }
+        ]
+      },
+      {
+        "card_id": "8",
+        "card_version_id": "8",
+        "entity_id": "8",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "인수인계",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "8"
+          }
+        ]
+      },
+      {
+        "card_id": "9",
+        "card_version_id": "9",
+        "entity_id": "9",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "공지 적용",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "9"
+          }
+        ]
+      }
+    ],
+    "fact_revisions": [],
+    "raw_spans": [
+      {
+        "raw_span_id": "1",
+        "source_id": "1",
+        "owner_answer_id": null,
+        "text": "배달앱 결제는 앱 주문번호로 해당 앱에서 환불한다. 매장 POS에서 별도 환불하지 않는다.\n매장 직접 결제는 원결제 수단으로 POS에서 환불한다. 당일·2만원 이하·영수증 확인·POS 마감 전이면 담당 직원이 처리할 수 있다.\n결제 경로에 관계없이 2만원 초과 또는 이전 영업일 결제의 환불은 점주 승인이 먼저 필요하다.\n이미 환불 완료된 거래는 재환불하지 않는다. 승인·접수·완료를 구분하며, 고객 주장만으로 완료 여부를 확정하지 않고 원거래 기록을 확인한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "2",
+        "source_id": "2",
+        "owner_answer_id": null,
+        "text": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다. 열쇠 소지만으로 오픈 권한이 생기지 않는다.\n예정 시각에 오픈 인증자가 없으면 영업 시작을 보류하고 당직 관리자에게 연락한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "3",
+        "source_id": "3",
+        "owner_answer_id": null,
+        "text": "영업 중에는 카운터를 볼 수 있는 직원 1명이 현장에 남아 있어야 한다. 휴게 교대 시 인수자가 현장 도착 후 인계받는다.\n출근 예정·연락 가능 상태는 현장 도착이나 업무 인수 완료를 대신하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "4",
+        "source_id": "4",
+        "owner_answer_id": null,
+        "text": "사용 가능 재고는 실물 재고에서 파손 수량과 기존 주문에 예약된 수량을 뺀 값이다. 예약 수량과 파손 수량은 서로 중복되지 않는다.\n이 평가 매장의 M컵과 M뚜껑의 목표 재고는 각각 240개다.\n추가 발주량은 max(0, 목표 재고 - 사용 가능 재고 - 확정 입고 예정량)이다. 견적·미확정 발주량은 입고 예정량에 포함하지 않는다.\n거래처 발주 접수는 평일 15시 마감이며 15시 이후 확정한 발주는 다음 영업일 접수다. 접수일만으로 배송 완료일을 확정하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "5",
+        "source_id": "5",
+        "owner_answer_id": null,
+        "text": "당장 판매 가능한 포장 수량은 현재 사용 가능한 같은 규격 컵과 뚜껑 수 중 작은 값이다. 미래 입고는 현재 판매 가능량에 넣지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "6",
+        "source_id": "6",
+        "owner_answer_id": null,
+        "text": "결제 중 연결이 끊기면 같은 거래를 재결제하기 전에 주문번호와 거래번호로 원결제 상태를 조회한다.\n원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다. 승인 실패나 결제 완료로 단정하지 않는다.\n당직 관리자가 해당 주문의 오프라인 현금 결제를 허용한 경우에만 주문번호·금액·수단을 수기 기록하고 현금을 받을 수 있다.\n연결 복구 후 수기 거래를 등록하기 전 같은 주문번호의 기존 거래가 있는지 확인한다. 연결 복구만으로 대기 거래가 실패한 것은 아니다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "7",
+        "source_id": "7",
+        "owner_answer_id": null,
+        "text": "마감 순서는 남은 환불 처리 완료 → 현금 대조 → POS 마감 → 점주 합계 보고다.\n현금 차이가 있으면 한 번 재계산한다. 재계산 후에도 차이가 남으면 점주 확인 전 POS 마감을 보류한다.\n처리 중 환불이나 미해결 현금 차이가 남으면 마감 완료로 표시하지 않는다. 근무 종료 시 미해결 건을 다음 담당자에게 인계한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "8",
+        "source_id": "8",
+        "owner_answer_id": null,
+        "text": "미해결 건 인계에는 주문번호 또는 사건번호, 현재 상태, 다음 조치, 기한, 담당자가 모두 필요하다.\n메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.\n대기 건이 둘 이상이고 지시어의 대상이 불분명하면 사건을 특정하는 질문을 먼저 한다. 한 사건의 상태를 다른 사건에 적용하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "9",
+        "source_id": "9",
+        "owner_answer_id": null,
+        "text": "상시 규칙은 회원 할인과 행사 쿠폰의 중복 적용 불가다.\n승인된 한시 예외는 2026-10-06부터 2026-10-08까지 매장 직접 결제 포장 주문에 한해 회원 할인과 재오픈 쿠폰의 중복을 허용한다.\n한시 예외는 배달앱 주문과 다른 행사 쿠폰에는 적용되지 않는다. 기간 종료 후에는 상시 규칙으로 돌아간다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "O01",
+      "turn_number": 1,
+      "question": "어제 배달앱으로 2만4천원 결제한 손님이 매장에 와서 카드 취소해 달래. 영수증은 있어. 직원인 내가 바로 POS에서 취소해도 돼? 순서도 알려줘.",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "9",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "8"
+      ],
+      "input_hash": "sha256:3f21bf4c0da7f09b5983ac9e10309c6a91ba6e29bbd46db0445f11d4785308eb",
+      "output": null,
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:3f21bf4c0da7f09b5983ac9e10309c6a91ba6e29bbd46db0445f11d4785308eb\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"1\",\n        \"card_version_id\": \"1\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"1\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"환불\",\n      \"question_quote\": \"카드 취소해 달래\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"환불\",\n      \"question_quote\": \"POS에서 취소해도 돼\"\n    }\n  ],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": {\n    \"entity_id\": \"1\",\n    \"predicate\": \"환불\",\n    \"variants\": [\n      [\n        \"1\",\n        \"환불\"\n      ]\n    ],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "O02",
+      "turn_number": 1,
+      "question": "오픈 인증자가 20분 늦고 나는 인증이 없지만 열쇠는 있어. 다른 직원은 전화로 카운터 봐줄 수 있다고 했어. 지금 혼자 열고, 그 직원 오기 전에 창고에 다녀와도 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "오픈"
+      },
+      "candidate_card_ids": [
+        "2",
+        "1",
+        "3",
+        "6",
+        "5",
+        "7",
+        "8",
+        "9",
+        "4"
+      ],
+      "input_hash": "sha256:af8b122cd2cf41b30a6dabd74b193f1babddbb8b1b318750b757df8670337a93",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:af8b122cd2cf41b30a6dabd74b193f1babddbb8b1b318750b757df8670337a93",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "2",
+              "card_version_id": "2",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "2"
+            },
+            {
+              "card_id": "3",
+              "card_version_id": "3",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "3"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": null,
+        "obligations": [],
+        "parts": [
+          {
+            "plan": {
+              "schema_version": "answer_plan/v1",
+              "snapshot_id": "1",
+              "knowledge_revision": "1",
+              "action": "ANSWER",
+              "selected_blocks": [
+                {
+                  "card_id": "2",
+                  "card_version_id": "2",
+                  "block_id": "raw1",
+                  "fact_revision_ids": [],
+                  "raw_span_id": "2"
+                }
+              ],
+              "clarification_slot": null,
+              "allowed_options": [],
+              "context_id": null,
+              "escalation_reason": null
+            },
+            "interpretation": {
+              "entity_id": "2",
+              "predicate": "오픈 권한 및 보류",
+              "variants": [
+                [
+                  "오픈",
+                  "열쇠 소지"
+                ]
+              ],
+              "target_fact_ids": [],
+              "not_applicable_fact_ids": []
+            },
+            "slots": [
+              {
+                "slot": "entity",
+                "value": "오픈",
+                "question_quote": "오픈"
+              }
+            ],
+            "obligations": []
+          },
+          {
+            "plan": {
+              "schema_version": "answer_plan/v1",
+              "snapshot_id": "1",
+              "knowledge_revision": "1",
+              "action": "ANSWER",
+              "selected_blocks": [
+                {
+                  "card_id": "3",
+                  "card_version_id": "3",
+                  "block_id": "raw1",
+                  "fact_revision_ids": [],
+                  "raw_span_id": "3"
+                }
+              ],
+              "clarification_slot": null,
+              "allowed_options": [],
+              "context_id": null,
+              "escalation_reason": null
+            },
+            "interpretation": {
+              "entity_id": "3",
+              "predicate": "카운터 상주 및 인계",
+              "variants": [
+                [
+                  "근무",
+                  "창고 이동"
+                ]
+              ],
+              "target_fact_ids": [],
+              "not_applicable_fact_ids": []
+            },
+            "slots": [
+              {
+                "slot": "entity",
+                "value": "근무",
+                "question_quote": "카운터 봐줄 수 있다고"
+              }
+            ],
+            "obligations": []
+          }
+        ],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:af8b122cd2cf41b30a6dabd74b193f1babddbb8b1b318750b757df8670337a93\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"2\",\n        \"card_version_id\": \"2\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"2\"\n      },\n      {\n        \"card_id\": \"3\",\n        \"card_version_id\": \"3\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"3\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": null,\n  \"obligations\": [],\n  \"parts\": [\n    {\n      \"plan\": {\n        \"schema_version\": \"answer_plan/v1\",\n        \"snapshot_id\": \"1\",\n        \"knowledge_revision\": \"1\",\n        \"action\": \"ANSWER\",\n        \"selected_blocks\": [\n          {\n            \"card_id\": \"2\",\n            \"card_version_id\": \"2\",\n            \"block_id\": \"raw1\",\n            \"fact_revision_ids\": [],\n            \"raw_span_id\": \"2\"\n          }\n        ],\n        \"clarification_slot\": null,\n        \"allowed_options\": [],\n        \"context_id\": null,\n        \"escalation_reason\": null\n      },\n      \"interpretation\": {\n        \"entity_id\": \"2\",\n        \"predicate\": \"오픈 권한 및 보류\",\n        \"variants\": [\n          [\"오픈\", \"열쇠 소지\"]\n        ],\n        \"target_fact_ids\": [],\n        \"not_applicable_fact_ids\": []\n      },\n      \"slots\": [\n        {\n          \"slot\": \"entity\",\n          \"value\": \"오픈\",\n          \"question_quote\": \"오픈\"\n        }\n      ],\n      \"obligations\": []\n    },\n    {\n      \"plan\": {\n        \"schema_version\": \"answer_plan/v1\",\n        \"snapshot_id\": \"1\",\n        \"knowledge_revision\": \"1\",\n        \"action\": \"ANSWER\",\n        \"selected_blocks\": [\n          {\n            \"card_id\": \"3\",\n            \"card_version_id\": \"3\",\n            \"block_id\": \"raw1\",\n            \"fact_revision_ids\": [],\n            \"raw_span_id\": \"3\"\n          }\n        ],\n        \"clarification_slot\": null,\n        \"allowed_options\": [],\n        \"context_id\": null,\n        \"escalation_reason\": null\n      },\n      \"interpretation\": {\n        \"entity_id\": \"3\",\n        \"predicate\": \"카운터 상주 및 인계\",\n        \"variants\": [\n          [\"근무\", \"창고 이동\"]\n        ],\n        \"target_fact_ids\": [],\n        \"not_applicable_fact_ids\": []\n      },\n      \"slots\": [\n        {\n          \"slot\": \"entity\",\n          \"value\": \"근무\",\n          \"question_quote\": \"카운터 봐줄 수 있다고\"\n        }\n      ],\n      \"obligations\": []\n    }\n  ],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "O03",
+      "turn_number": 1,
+      "question": "M컵 실물은 180개인데 40개는 파손, 30개는 기존 주문에 잡혀 있어. 내일 70개 입고는 확정이고 추가 50개는 견적만 받았어. M뚜껑은 사용 가능한 게 150개이고 입고 예정은 없어. 컵·뚜껑을 각각 얼마나 더 발주하고, 지금 새 주문은 몇 세트까지 받을 수 있어?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "4",
+        "2",
+        "5",
+        "6",
+        "9",
+        "1",
+        "3",
+        "7",
+        "8"
+      ],
+      "input_hash": "sha256:2dc56d914c9989745e8c1b51f2f99233a343783c02a2418a04d4e4066b57d9e1",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:2dc56d914c9989745e8c1b51f2f99233a343783c02a2418a04d4e4066b57d9e1",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "REFUSE",
+          "selected_blocks": [
+            {
+              "card_id": "4",
+              "card_version_id": "4",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "4"
+            },
+            {
+              "card_id": "5",
+              "card_version_id": "5",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "5"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [],
+        "unresolved": [
+          "RAW 숫자 추출 및 산술/조건 분기 계산 미지원"
+        ],
+        "equivalent_question_ids": [],
+        "interpretation": null,
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:2dc56d914c9989745e8c1b51f2f99233a343783c02a2418a04d4e4066b57d9e1\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"REFUSE\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"4\",\n        \"card_version_id\": \"4\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"4\"\n      },\n      {\n        \"card_id\": \"5\",\n        \"card_version_id\": \"5\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"5\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [],\n  \"unresolved\": [\n    \"RAW 숫자 추출 및 산술/조건 분기 계산 미지원\"\n  ],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": null,\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "O04",
+      "turn_number": 1,
+      "question": "카드 결제 중 통신이 끊겼는데 손님 폰에는 승인 문자가 왔어. 지금 인터넷은 돌아왔고 POS 상태는 아직 모르겠어. 한 번 더 긁고 나중에 하나 취소하면 돼? 지금 할 일을 순서대로 알려줘.",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "6",
+        "3",
+        "7",
+        "8",
+        "5",
+        "9",
+        "2",
+        "4"
+      ],
+      "input_hash": "sha256:d79f7fff2451021dcb9073c344b3f33d7f667b7c6eb1e3efb407f457ff680368",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:d79f7fff2451021dcb9073c344b3f33d7f667b7c6eb1e3efb407f457ff680368",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "6",
+              "card_version_id": "6",
+              "block_id": "raw1",
+              "raw_span_id": "6",
+              "fact_revision_ids": []
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "6",
+          "predicate": "결제 장애",
+          "variants": [
+            [
+              "결제 장애",
+              "결제 장애"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "결제 장애",
+            "question_quote": "카드 결제 중 통신이 끊겼는데"
+          },
+          {
+            "slot": "predicate",
+            "value": "결제 장애",
+            "question_quote": "지금 할 일을 순서대로 알려줘"
+          }
+        ],
+        "obligations": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:d79f7fff2451021dcb9073c344b3f33d7f667b7c6eb1e3efb407f457ff680368\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"6\",\n        \"card_version_id\": \"6\",\n        \"block_id\": \"raw1\",\n        \"raw_span_id\": \"6\",\n        \"fact_revision_ids\": []\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"interpretation\": {\n    \"entity_id\": \"6\",\n    \"predicate\": \"결제 장애\",\n    \"variants\": [\n      [\n        \"결제 장애\",\n        \"결제 장애\"\n      ]\n    ],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"결제 장애\",\n      \"question_quote\": \"카드 결제 중 통신이 끊겼는데\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"결제 장애\",\n      \"question_quote\": \"지금 할 일을 순서대로 알려줘\"\n    }\n  ],\n  \"obligations\": [],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "O05",
+      "turn_number": 1,
+      "question": "퇴근 시간인데 환불 하나가 접수 상태고 현금도 2,500원 부족해. 다시 세어도 같고 점주는 연락이 안 돼. 일단 POS 마감하고 다음 사람에게 메신저만 보내면 끝일까?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "환불"
+      },
+      "candidate_card_ids": [
+        "1",
+        "4",
+        "7",
+        "8",
+        "2",
+        "3",
+        "5",
+        "6",
+        "9"
+      ],
+      "input_hash": "sha256:c1ceaa9d8787d7253aa6159cceba05c8a033e0d75ca5c529b5e1e4f4a2574586",
+      "output": null,
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:c1ceaa9d8787d7253aa6159cceba05c8a033e0d75ca5c529b5e1e4f4a2574586\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"7\", \"card_version_id\": \"7\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"7\"}, {\"card_id\": \"8\", \"card_version_id\": \"8\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"8\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"slots\": [], \"unresolved\": [], \"equivalent_question_ids\": [], \"interpretation\": null, \"obligations\": [], \"parts\": [{\"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"7\", \"card_version_id\": \"7\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"7\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"interpretation\": {\"entity_id\": \"7\", \"predicate\": \"마감 순서는 남은 환불 처리 완료 → 현금 대조 → POS 마감 → 점주 합계 보고다.\", \"variants\": [], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"slots\": [{\"slot\": \"entity\", \"value\": \"마감\", \"question_quote\": \"POS 마감\"}, {\"slot\": \"predicate\", \"value\": \"현금 차이가 있으면 한 번 재계산한다. 재계산 후에도 차이가 남으면 점주 확인 전 POS 마감을 보류한다.\", \"question_quote\": \"일단 POS 마감하고\"}], \"obligations\": []}, {\"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"8\", \"card_version_id\": \"8\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"8\"}], \"clarification_slot\": null, \"allowed_options\": [],",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "O06",
+      "turn_number": 1,
+      "question": "오늘이 2026년 10월 6일이야. 직접 결제 포장 손님은 회원 할인과 재오픈 쿠폰을 같이 쓰고 싶대. 배달앱 손님도 똑같이 해달라고 해. 둘 다 가능한가? 10월 9일에도 같아?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "5",
+        "9",
+        "6",
+        "8",
+        "2",
+        "3",
+        "4",
+        "7"
+      ],
+      "input_hash": "sha256:adc319378d45da566cccf8a6eb996b99fb7f667dd83d310bdeebd7233b5cfab8",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:adc319378d45da566cccf8a6eb996b99fb7f667dd83d310bdeebd7233b5cfab8",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "9",
+              "card_version_id": "9",
+              "block_id": "raw1",
+              "raw_span_id": "9"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "condition",
+            "value": "2026-10-06부터 2026-10-08까지 매장 직접 결제 포장 주문에 한해 회원 할인과 재오픈 쿠폰의 중복을 허용한다.",
+            "question_quote": "직접 결제 포장 손님은 회원 할인과 재오픈 쿠폰을 같이 쓰고 싶대."
+          },
+          {
+            "slot": "exception",
+            "value": "한시 예외는 배달앱 주문과 다른 행사 쿠폰에는 적용되지 않는다. 기간 종료 후에는 상시 규칙으로 돌아간다.",
+            "question_quote": "배달앱 손님도 똑같이 해달라고 해. 둘 다 가능한가? 10월 9일에도 같아?"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "9",
+          "predicate": "상시 규칙은 회원 할인과 행사 쿠폰의 중복 적용 불가다.",
+          "variants": [
+            [
+              "2026-10-06",
+              "10월 6일"
+            ],
+            [
+              "2026-10-09",
+              "10월 9일"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:adc319378d45da566cccf8a6eb996b99fb7f667dd83d310bdeebd7233b5cfab8\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"9\", \"card_version_id\": \"9\", \"block_id\": \"raw1\", \"raw_span_id\": \"9\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"slots\": [{\"slot\": \"condition\", \"value\": \"2026-10-06부터 2026-10-08까지 매장 직접 결제 포장 주문에 한해 회원 할인과 재오픈 쿠폰의 중복을 허용한다.\", \"question_quote\": \"직접 결제 포장 손님은 회원 할인과 재오픈 쿠폰을 같이 쓰고 싶대.\"}, {\"slot\": \"exception\", \"value\": \"한시 예외는 배달앱 주문과 다른 행사 쿠폰에는 적용되지 않는다. 기간 종료 후에는 상시 규칙으로 돌아간다.\", \"question_quote\": \"배달앱 손님도 똑같이 해달라고 해. 둘 다 가능한가? 10월 9일에도 같아?\"}], \"unresolved\": [], \"equivalent_question_ids\": [], \"interpretation\": {\"entity_id\": \"9\", \"predicate\": \"상시 규칙은 회원 할인과 행사 쿠폰의 중복 적용 불가다.\", \"variants\": [[\"2026-10-06\", \"10월 6일\"], [\"2026-10-09\", \"10월 9일\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"obligations\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD01",
+      "turn_number": 1,
+      "question": "오늘 매장에서 직접 결제한 18,000원 건이고 영수증 있어. POS 마감 전이야. 직원인 내가 환불하려면?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "마감"
+      },
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "9",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "8"
+      ],
+      "input_hash": "sha256:d1916a286eb1f1c3a65e9fe94badd9fee786fd96e2699cdba0195f6420aff927",
+      "output": {
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:d1916a286eb1f1c3a65e9fe94badd9fee786fd96e2699cdba0195f6420aff927",
+        "schema_version": "r-semantic-proposal/v1",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "1",
+              "card_version_id": "1",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "1"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "1",
+          "predicate": "환불",
+          "variants": [
+            [
+              "환불",
+              "매장 직접 결제는 원결제 수단으로 POS에서 환불한다. 당일·2만원 이하·영수증 확인·POS 마감 전이면 담당 직원이 처리할 수 있다."
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "환불",
+            "question_quote": "환불하려면"
+          }
+        ],
+        "obligations": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:d1916a286eb1f1c3a65e9fe94badd9fee786fd96e2699cdba0195f6420aff927\", \"schema_version\": \"r-semantic-proposal/v1\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"1\", \"card_version_id\": \"1\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"1\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"interpretation\": {\"entity_id\": \"1\", \"predicate\": \"환불\", \"variants\": [[\"환불\", \"매장 직접 결제는 원결제 수단으로 POS에서 환불한다. 당일·2만원 이하·영수증 확인·POS 마감 전이면 담당 직원이 처리할 수 있다.\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"slots\": [{\"slot\": \"entity\", \"value\": \"환불\", \"question_quote\": \"환불하려면\"}], \"obligations\": [], \"unresolved\": [], \"equivalent_question_ids\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD01",
+      "turn_number": 2,
+      "question": "아, 직접 결제가 아니라 어제 배달앱 결제였어. 금액은 같아.",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "6",
+        "9",
+        "2",
+        "3",
+        "4",
+        "5",
+        "7",
+        "8"
+      ],
+      "input_hash": "sha256:aa6a86b744a0f57872234f3ff90fb95d7b833ef618fae3169f9eaeb670a2aea0",
+      "output": null,
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:aa6a86b744a0f57872234f3ff90fb95d7b833ef618fae3169f9eaeb670a",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "OD01",
+      "turn_number": 3,
+      "question": "점주가 승인했어. 손님은 앱에서 이미 환불됐다고 하는데 한 번 더 눌러도 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "8",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "9"
+      ],
+      "input_hash": "sha256:9cb467998cfb1eb67ccf443274abcb33566782898b4fa656c1c7c04534279f0e",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:9cb467998cfb1eb67ccf443274abcb33566782898b4fa656c1c7c04534279f0e",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "1",
+              "card_version_id": "1",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "1"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "환불",
+            "question_quote": "환불됐다고"
+          },
+          {
+            "slot": "predicate",
+            "value": "재환불",
+            "question_quote": "한 번 더 눌러도 돼"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "1",
+          "predicate": "환불",
+          "variants": [
+            [
+              "환불됐다고",
+              "이미 환불 완료된 거래는 재환불하지 않는다"
+            ],
+            [
+              "한 번 더 눌러도 돼",
+              "고객 주장만으로 완료 여부를 확정하지 않고 원거래 기록을 확인한다"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:9cb467998cfb1eb67ccf443274abcb33566782898b4fa656c1c7c04534279f0e\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"1\", \"card_version_id\": \"1\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"1\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"slots\": [{\"slot\": \"entity\", \"value\": \"환불\", \"question_quote\": \"환불됐다고\"}, {\"slot\": \"predicate\", \"value\": \"재환불\", \"question_quote\": \"한 번 더 눌러도 돼\"}], \"unresolved\": [], \"equivalent_question_ids\": [], \"interpretation\": {\"entity_id\": \"1\", \"predicate\": \"환불\", \"variants\": [[\"환불됐다고\", \"이미 환불 완료된 거래는 재환불하지 않는다\"], [\"한 번 더 눌러도 돼\", \"고객 주장만으로 완료 여부를 확정하지 않고 원거래 기록을 확인한다\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"obligations\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD02",
+      "turn_number": 1,
+      "question": "M컵 실물 180개, 파손 40개, 예약 30개이고 확정 입고 70개야. 컵을 더 몇 개 발주해?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "4",
+        "1",
+        "2",
+        "3",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:c9c61af119fc052d2d7f533bedc96e6e35124b0bb2f0dbff437a4cab0d856c4e",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:c9c61af119fc052d2d7f533bedc96e6e35124b0bb2f0dbff437a4cab0d856c4e",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "REFUSE",
+          "selected_blocks": [
+            {
+              "card_id": "4",
+              "card_version_id": "4",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "4"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [],
+        "unresolved": [
+          "RAW 숫자 추출 및 복합 수량 계산/조건 분기 미지원"
+        ],
+        "equivalent_question_ids": [],
+        "interpretation": null,
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:c9c61af119fc052d2d7f533bedc96e6e35124b0bb2f0dbff437a4cab0d856c4e\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"REFUSE\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"4\",\n        \"card_version_id\": \"4\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"4\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [],\n  \"unresolved\": [\n    \"RAW 숫자 추출 및 복합 수량 계산/조건 분기 미지원\"\n  ],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": null,\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD02",
+      "turn_number": 2,
+      "question": "파손을 잘못 셌어. 40개가 아니라 20개야. 다른 숫자는 같고 아직 발주는 안 했어.",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "발주"
+      },
+      "candidate_card_ids": [
+        "4",
+        "8",
+        "9",
+        "1",
+        "2",
+        "3",
+        "5",
+        "6",
+        "7"
+      ],
+      "input_hash": "sha256:796d5c0a0f931d68ff9534cd82852309b29fe502057b53e1bbe9730ae4814b3a",
+      "output": null,
+      "raw_text": "\"1\"\n  - `knowledge_revision`: \"1\"\n  - `action`: \"CLARIFY\"\n  - `selected_blocks`: [ ... ]\n  - `clarification_slot`: \"size\"\n  - `allowed_options`: [\"M컵\", \"M뚜껑\"]\n  - `context_id`: null\n  - `escalation_reason`: null\n- `slots`: []\n- `unresolved`: [ ... ]\n- `equivalent_question_ids`: []\n- `interpretation`: { ... }\n- `obligations`: []\n- `parts`: []\n- `calculations`: []\n\nLet's carefully verify field formats against the JSON schema:\n- `AnswerPlan`:\n  ",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "OD02",
+      "turn_number": 3,
+      "question": "방금 그 40개도 발주 확정받았어. 오늘은 평일 15시 10분이야. 이제 더 필요한 수량과 접수일, 배송일은?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "발주"
+      },
+      "candidate_card_ids": [
+        "4",
+        "3",
+        "7",
+        "1",
+        "2",
+        "5",
+        "6",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:9f93e8638d2e465f0295da971490b82c52533a5915ca9ef9da7cbb78a7f3653b",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:9f93e8638d2e465f0295da971490b82c52533a5915ca9ef9da7cbb78a7f3653b",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "REFUSE",
+          "selected_blocks": [
+            {
+              "card_id": "4",
+              "card_version_id": "4",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "4"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "4",
+          "predicate": "발주 수량 및 접수일/배송일",
+          "variants": [],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [],
+        "obligations": [],
+        "unresolved": [
+          "발주 대상 품목(M컵/M뚜껑) 미확정",
+          "현재 사용 가능 재고 수량 미확정",
+          "배송 완료일 확정 불가"
+        ],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:9f93e8638d2e465f0295da971490b82c52533a5915ca9ef9da7cbb78a7f3653b\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"REFUSE\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"4\",\n        \"card_version_id\": \"4\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"4\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"interpretation\": {\n    \"entity_id\": \"4\",\n    \"predicate\": \"발주 수량 및 접수일/배송일\",\n    \"variants\": [],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"slots\": [],\n  \"obligations\": [],\n  \"unresolved\": [\n    \"발주 대상 품목(M컵/M뚜껑) 미확정\",\n    \"현재 사용 가능 재고 수량 미확정\",\n    \"배송 완료일 확정 불가\"\n  ],\n  \"equivalent_question_ids\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD03",
+      "turn_number": 1,
+      "question": "A 주문은 카드 결제 중 끊겼고 조회해도 상태가 안 나와. 어떻게 남겨?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "6",
+        "5",
+        "7",
+        "8",
+        "9",
+        "2",
+        "3",
+        "4"
+      ],
+      "input_hash": "sha256:888ce7e34b1750acc71ca2c8d3511993ecfeee7fbf785c878dda94cd7898a5f7",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:888ce7e34b1750acc71ca2c8d3511993ecfeee7fbf785c878dda94cd7898a5f7",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "6",
+              "card_version_id": "6",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "6"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "결제 장애",
+            "question_quote": "카드 결제 중 끊겼고"
+          },
+          {
+            "slot": "predicate",
+            "value": "원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다.",
+            "question_quote": "조회해도 상태가 안 나와. 어떻게 남겨?"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "6",
+          "predicate": "원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다.",
+          "variants": [],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:888ce7e34b1750acc71ca2c8d3511993ecfeee7fbf785c878dda94cd7898a5f7\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"6\",\n        \"card_version_id\": \"6\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"6\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"결제 장애\",\n      \"question_quote\": \"카드 결제 중 끊겼고\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다.\",\n      \"question_quote\": \"조회해도 상태가 안 나와. 어떻게 남겨?\"\n    }\n  ],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": {\n    \"entity_id\": \"6\",\n    \"predicate\": \"원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다.\",\n    \"variants\": [],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD03",
+      "turn_number": 2,
+      "question": "다른 손님의 B 주문은 관리자가 오프라인 현금을 허용했어. B는 어떻게 하고 A도 현금으로 다시 받으면 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "6",
+        "7",
+        "8",
+        "9",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "input_hash": "sha256:06f3d27513f7f978c8aae1668f396e1688b898cdb268e3681dde8dd0b530fb63",
+      "output": null,
+      "raw_text": "\",\n    \"raw_span_id\": \"6\"\n  }\n]\n`interpretation`:\n- `entity_id`: \"6\"\n- `predicate`: \"오프라인 현금 결제 수기 기록\"\n- `variants`: [[\"B 주문\", \"오프라인 현금 결제\"]]\n- `target_fact_ids`: []\n- `not_applicable_fact_ids`: []\n`slots`: [\n  {\n    \"slot\": \"entity\",\n    \"value\": \"결제 장애\",\n    \"question_quote\": \"다른 손님의 B 주문은 관리자가 오프라인 현금을 허용했어.\"\n  },\n  {\n    \"slot\": \"predicate\",\n",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "OD03",
+      "turn_number": 3,
+      "question": "B 현금은 받았고 연결도 돌아왔어. 아까 첫 번째 건과 B 등록은 어떤 순서로 확인해?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "7",
+        "6",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:9a9d47a44b813794d8a97c376c9884017f3fe1049a200a2e4e867a48e423d9e6",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:9a9d47a44b813794d8a97c376c9884017f3fe1049a200a2e4e867a48e423d9e6",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "CLARIFY",
+          "selected_blocks": [
+            {
+              "card_id": "6",
+              "card_version_id": "6",
+              "block_id": "raw1",
+              "raw_span_id": "6"
+            },
+            {
+              "card_id": "8",
+              "card_version_id": "8",
+              "block_id": "raw1",
+              "raw_span_id": "8"
+            }
+          ],
+          "clarification_slot": "entity",
+          "allowed_options": [
+            "결제 장애",
+            "인수인계"
+          ]
+        },
+        "slots": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": null,
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:9a9d47a44b813794d8a97c376c9884017f3fe1049a200a2e4e867a48e423d9e6\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"CLARIFY\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"6\",\n        \"card_version_id\": \"6\",\n        \"block_id\": \"raw1\",\n        \"raw_span_id\": \"6\"\n      },\n      {\n        \"card_id\": \"8\",\n        \"card_version_id\": \"8\",\n        \"block_id\": \"raw1\",\n        \"raw_span_id\": \"8\"\n      }\n    ],\n    \"clarification_slot\": \"entity\",\n    \"allowed_options\": [\n      \"결제 장애\",\n      \"인수인계\"\n    ]\n  },\n  \"slots\": [],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": null,\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD04",
+      "turn_number": 1,
+      "question": "나는 오픈 인증이 없고 인증자는 아직 안 왔어. 예정 시각인데 열쇠는 있어. 지금 열어?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "오픈"
+      },
+      "candidate_card_ids": [
+        "2",
+        "1",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:8ca91915218a6c639b826ba12df10dce81a6d16c6774fa1fea74ec640145862f",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:8ca91915218a6c639b826ba12df10dce81a6d16c6774fa1fea74ec640145862f",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "2",
+              "card_version_id": "2",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "2"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "오픈",
+            "question_quote": "오픈"
+          },
+          {
+            "slot": "predicate",
+            "value": "영업 시작",
+            "question_quote": "지금 열어?"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "2",
+          "predicate": "영업 시작",
+          "variants": [
+            [
+              "오픈",
+              "영업 시작"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:8ca91915218a6c639b826ba12df10dce81a6d16c6774fa1fea74ec640145862f\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"2\", \"card_version_id\": \"2\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"2\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"slots\": [{\"slot\": \"entity\", \"value\": \"오픈\", \"question_quote\": \"오픈\"}, {\"slot\": \"predicate\", \"value\": \"영업 시작\", \"question_quote\": \"지금 열어?\"}], \"unresolved\": [], \"equivalent_question_ids\": [], \"interpretation\": {\"entity_id\": \"2\", \"predicate\": \"영업 시작\", \"variants\": [[\"오픈\", \"영업 시작\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"obligations\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD04",
+      "turn_number": 2,
+      "question": "방금 인증자는 왔어. 체크리스트는 아직 덜 했고. 이제 열어도 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:f35d0ad36bc8739574accdf7e4a0d2b7560640b114c7bdc51b197e9b9e34306e",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:f35d0ad36bc8739574accdf7e4a0d2b7560640b114c7bdc51b197e9b9e34306e",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "2",
+              "card_version_id": "2",
+              "block_id": "raw1",
+              "raw_span_id": "2",
+              "fact_revision_ids": []
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "2",
+          "predicate": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.",
+          "variants": [
+            [
+              "오픈",
+              "영업 시작"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "predicate",
+            "value": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.",
+            "question_quote": "이제 열어도 돼?"
+          }
+        ],
+        "obligations": [
+          {
+            "fact_revision_id": "2",
+            "kind": "condition",
+            "statement": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.",
+            "question_quote": "체크리스트는 아직 덜 했고"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:f35d0ad36bc8739574accdf7e4a0d2b7560640b114c7bdc51b197e9b9e34306e\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"2\", \"card_version_id\": \"2\", \"block_id\": \"raw1\", \"raw_span_id\": \"2\", \"fact_revision_ids\": []}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"interpretation\": {\"entity_id\": \"2\", \"predicate\": \"오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.\", \"variants\": [[\"오픈\", \"영업 시작\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"slots\": [{\"slot\": \"predicate\", \"value\": \"오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.\", \"question_quote\": \"이제 열어도 돼?\"}], \"obligations\": [{\"fact_revision_id\": \"2\", \"kind\": \"condition\", \"statement\": \"오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다.\", \"question_quote\": \"체크리스트는 아직 덜 했고\"}], \"unresolved\": [], \"equivalent_question_ids\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD04",
+      "turn_number": 3,
+      "question": "체크리스트도 다 끝냈고 영업 시작했어. 내가 혼자 카운터 보는데 교대자가 10분 뒤 온대. 먼저 휴게 가도 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "3",
+        "2",
+        "8",
+        "4",
+        "5",
+        "6",
+        "7",
+        "9"
+      ],
+      "input_hash": "sha256:a4ca2d3264084a29a9fc519cbb9f8974be10abdd1e9ab9f80177151b2c535f70",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:a4ca2d3264084a29a9fc519cbb9f8974be10abdd1e9ab9f80177151b2c535f70",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "3",
+              "card_version_id": "3",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "3"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "근무",
+            "question_quote": "휴게 가도 돼"
+          },
+          {
+            "slot": "predicate",
+            "value": "휴게 교대",
+            "question_quote": "먼저 휴게 가도 돼"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "3",
+          "predicate": "휴게 교대",
+          "variants": [],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [
+          {
+            "fact_revision_id": "3",
+            "kind": "condition",
+            "statement": "영업 중에는 카운터를 볼 수 있는 직원 1명이 현장에 남아 있어야 한다. 휴게 교대 시 인수자가 현장 도착 후 인계받는다.",
+            "question_quote": "내가 혼자 카운터 보는데 교대자가 10분 뒤 온대. 먼저 휴게 가도 돼?"
+          },
+          {
+            "fact_revision_id": "3",
+            "kind": "condition",
+            "statement": "출근 예정·연락 가능 상태는 현장 도착이나 업무 인수 완료를 대신하지 않는다.",
+            "question_quote": "교대자가 10분 뒤 온대"
+          }
+        ],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:a4ca2d3264084a29a9fc519cbb9f8974be10abdd1e9ab9f80177151b2c535f70\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"3\",\n        \"card_version_id\": \"3\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"3\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"근무\",\n      \"question_quote\": \"휴게 가도 돼\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"휴게 교대\",\n      \"question_quote\": \"먼저 휴게 가도 돼\"\n    }\n  ],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": {\n    \"entity_id\": \"3\",\n    \"predicate\": \"휴게 교대\",\n    \"variants\": [],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"obligations\": [\n    {\n      \"fact_revision_id\": \"3\",\n      \"kind\": \"condition\",\n      \"statement\": \"영업 중에는 카운터를 볼 수 있는 직원 1명이 현장에 남아 있어야 한다. 휴게 교대 시 인수자가 현장 도착 후 인계받는다.\",\n      \"question_quote\": \"내가 혼자 카운터 보는데 교대자가 10분 뒤 온대. 먼저 휴게 가도 돼?\"\n    },\n    {\n      \"fact_revision_id\": \"3\",\n      \"kind\": \"condition\",\n      \"statement\": \"출근 예정·연락 가능 상태는 현장 도착이나 업무 인수 완료를 대신하지 않는다.\",\n      \"question_quote\": \"교대자가 10분 뒤 온대\"\n    }\n  ],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD05",
+      "turn_number": 1,
+      "question": "환불 하나가 처리 중이고 현금도 2,500원 부족해. 아직 다시 안 셌어. 마감하려면?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "환불"
+      },
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:e14c867a4a6737be44dbc8474121f08371542e0a4dca4016011944142e08f246",
+      "output": null,
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:e14c867a4a6737be44dbc8474121f08371542e0a4dca401601194414",
+      "finish_reason": "MAX_TOKENS"
+    },
+    {
+      "case_id": "OD05",
+      "turn_number": 2,
+      "question": "다시 세니까 돈은 맞아. 환불은 아직 처리 중이야. 이제 POS 마감해?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "환불"
+      },
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:f3c48e1fda2cffd3d0ab2cdd4f4d7aae0487384a3f26f75d11880f49f03fe5b8",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:f3c48e1fda2cffd3d0ab2cdd4f4d7aae0487384a3f26f75d11880f49f03fe5b8",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "7",
+              "card_version_id": "7",
+              "block_id": "raw1",
+              "raw_span_id": "7",
+              "fact_revision_ids": []
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "7",
+          "predicate": "마감",
+          "variants": [
+            [
+              "POS 마감",
+              "마감"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "마감",
+            "question_quote": "POS 마감"
+          },
+          {
+            "slot": "predicate",
+            "value": "마감",
+            "question_quote": "마감해?"
+          }
+        ],
+        "obligations": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:f3c48e1fda2cffd3d0ab2cdd4f4d7aae0487384a3f26f75d11880f49f03fe5b8\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"7\",\n        \"card_version_id\": \"7\",\n        \"block_id\": \"raw1\",\n        \"raw_span_id\": \"7\",\n        \"fact_revision_ids\": []\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"interpretation\": {\n    \"entity_id\": \"7\",\n    \"predicate\": \"마감\",\n    \"variants\": [\n      [\"POS 마감\", \"마감\"]\n    ],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"마감\",\n      \"question_quote\": \"POS 마감\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"마감\",\n      \"question_quote\": \"마감해?\"\n    }\n  ],\n  \"obligations\": [],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD05",
+      "turn_number": 3,
+      "question": "환불 완료 기록도 확인했고 현금은 다시 대조해서 맞아. 이제 남은 순서는?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "환불"
+      },
+      "candidate_card_ids": [
+        "1",
+        "7",
+        "6",
+        "2",
+        "3",
+        "4",
+        "5",
+        "8",
+        "9"
+      ],
+      "input_hash": "sha256:0a319a71b7fc57a430b7094977961d5e5e790e169434ae43340a4b25b095e9fd",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:0a319a71b7fc57a430b7094977961d5e5e790e169434ae43340a4b25b095e9fd",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "7",
+              "card_version_id": "7",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "7"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "7",
+          "predicate": "마감 순서",
+          "variants": [
+            [
+              "마감",
+              "순서"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "마감",
+            "question_quote": "이제 남은 순서는?"
+          },
+          {
+            "slot": "predicate",
+            "value": "마감 순서",
+            "question_quote": "이제 남은 순서는?"
+          }
+        ],
+        "obligations": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:0a319a71b7fc57a430b7094977961d5e5e790e169434ae43340a4b25b095e9fd\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"ANSWER\",\n    \"selected_blocks\": [\n      {\n        \"card_id\": \"7\",\n        \"card_version_id\": \"7\",\n        \"block_id\": \"raw1\",\n        \"fact_revision_ids\": [],\n        \"raw_span_id\": \"7\"\n      }\n    ],\n    \"clarification_slot\": null,\n    \"allowed_options\": [],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"interpretation\": {\n    \"entity_id\": \"7\",\n    \"predicate\": \"마감 순서\",\n    \"variants\": [\n      [\"마감\", \"순서\"]\n    ],\n    \"target_fact_ids\": [],\n    \"not_applicable_fact_ids\": []\n  },\n  \"slots\": [\n    {\n      \"slot\": \"entity\",\n      \"value\": \"마감\",\n      \"question_quote\": \"이제 남은 순서는?\"\n    },\n    {\n      \"slot\": \"predicate\",\n      \"value\": \"마감 순서\",\n      \"question_quote\": \"이제 남은 순서는?\"\n    }\n  ],\n  \"obligations\": [],\n  \"unresolved\": [],\n  \"equivalent_question_ids\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD06",
+      "turn_number": 1,
+      "question": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?",
+      "previous_user_turns": [],
+      "planner_slots": {
+        "entity": "환불"
+      },
+      "candidate_card_ids": [
+        "1",
+        "6",
+        "4",
+        "7",
+        "8",
+        "9",
+        "2",
+        "3",
+        "5"
+      ],
+      "input_hash": "sha256:17ea71bad6f72f48e39b7892b4e1a288d07f9dc9d239fd7dbd6d19bd103e981a",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:17ea71bad6f72f48e39b7892b4e1a288d07f9dc9d239fd7dbd6d19bd103e981a",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "8",
+              "card_version_id": "8",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "8"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "8",
+          "predicate": "미해결 건 인계",
+          "variants": [
+            [
+              "미해결 건 인계",
+              null
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "인수인계",
+            "question_quote": "다음 담당자에게 넘길 때"
+          }
+        ],
+        "obligations": [],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:17ea71bad6f72f48e39b7892b4e1a288d07f9dc9d239fd7dbd6d19bd103e981a\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"8\", \"card_version_id\": \"8\", \"block_id\": \"raw1\", \"fact_revision_ids\": [], \"raw_span_id\": \"8\"}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"interpretation\": {\"entity_id\": \"8\", \"predicate\": \"미해결 건 인계\", \"variants\": [[\"미해결 건 인계\", null]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"slots\": [{\"slot\": \"entity\", \"value\": \"인수인계\", \"question_quote\": \"다음 담당자에게 넘길 때\"}], \"obligations\": [], \"unresolved\": [], \"equivalent_question_ids\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD06",
+      "turn_number": 2,
+      "question": "그 건은 메시지 읽었대. 인계 완료로 해도 돼?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "6",
+        "8",
+        "7",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "9"
+      ],
+      "input_hash": "sha256:d8cec6a6e5515107b8f1e9aa786a2c2a1174788be44dea1902f2a40359a2ddfa",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:d8cec6a6e5515107b8f1e9aa786a2c2a1174788be44dea1902f2a40359a2ddfa",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "8",
+              "card_version_id": "8",
+              "block_id": "raw1",
+              "raw_span_id": "8",
+              "fact_revision_ids": []
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "인수인계",
+            "question_quote": "인계"
+          },
+          {
+            "slot": "predicate",
+            "value": "메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.",
+            "question_quote": "메시지 읽었대. 인계 완료로 해도 돼?"
+          }
+        ],
+        "unresolved": [],
+        "equivalent_question_ids": [],
+        "interpretation": {
+          "entity_id": "8",
+          "predicate": "메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.",
+          "variants": [
+            [
+              "메시지 읽었대",
+              "인계 완료로 해도 돼?"
+            ]
+          ],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\"schema_version\": \"r-semantic-proposal/v1\", \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\", \"input_hash\": \"sha256:d8cec6a6e5515107b8f1e9aa786a2c2a1174788be44dea1902f2a40359a2ddfa\", \"plan\": {\"schema_version\": \"answer_plan/v1\", \"snapshot_id\": \"1\", \"knowledge_revision\": \"1\", \"action\": \"ANSWER\", \"selected_blocks\": [{\"card_id\": \"8\", \"card_version_id\": \"8\", \"block_id\": \"raw1\", \"raw_span_id\": \"8\", \"fact_revision_ids\": []}], \"clarification_slot\": null, \"allowed_options\": [], \"context_id\": null, \"escalation_reason\": null}, \"slots\": [{\"slot\": \"entity\", \"value\": \"인수인계\", \"question_quote\": \"인계\"}, {\"slot\": \"predicate\", \"value\": \"메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.\", \"question_quote\": \"메시지 읽었대. 인계 완료로 해도 돼?\"}], \"unresolved\": [], \"equivalent_question_ids\": [], \"interpretation\": {\"entity_id\": \"8\", \"predicate\": \"메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.\", \"variants\": [[\"메시지 읽었대\", \"인계 완료로 해도 돼?\"]], \"target_fact_ids\": [], \"not_applicable_fact_ids\": []}, \"obligations\": [], \"parts\": [], \"calculations\": []}",
+      "finish_reason": "STOP"
+    },
+    {
+      "case_id": "OD06",
+      "turn_number": 3,
+      "question": "A 말이야. 담당자가 맡겠다고 확인했고 기한과 다음 조치도 전달했어. A 인계와 결제 상태, B는 각각 어떻게 남겨?",
+      "previous_user_turns": [],
+      "planner_slots": {},
+      "candidate_card_ids": [
+        "1",
+        "6",
+        "4",
+        "8",
+        "7",
+        "9",
+        "2",
+        "3",
+        "5"
+      ],
+      "input_hash": "sha256:fe81b01512cbeeca9f16ba65442a3483e3fcfe4eaeebef992d1f30a8468758d5",
+      "output": {
+        "schema_version": "r-semantic-proposal/v1",
+        "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+        "input_hash": "sha256:fe81b01512cbeeca9f16ba65442a3483e3fcfe4eaeebef992d1f30a8468758d5",
+        "plan": {
+          "schema_version": "answer_plan/v1",
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "CLARIFY",
+          "selected_blocks": [],
+          "clarification_slot": "entity",
+          "allowed_options": [
+            "환불",
+            "오픈",
+            "근무",
+            "발주",
+            "판매",
+            "결제 장애",
+            "마감",
+            "인수인계",
+            "공지 적용"
+          ],
+          "context_id": null,
+          "escalation_reason": null
+        },
+        "slots": [],
+        "unresolved": [
+          "A의 대상 사건",
+          "B의 대상 사건"
+        ],
+        "equivalent_question_ids": [],
+        "interpretation": null,
+        "obligations": [],
+        "parts": [],
+        "calculations": []
+      },
+      "raw_text": "{\n  \"schema_version\": \"r-semantic-proposal/v1\",\n  \"snapshot_hash\": \"sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392\",\n  \"input_hash\": \"sha256:fe81b01512cbeeca9f16ba65442a3483e3fcfe4eaeebef992d1f30a8468758d5\",\n  \"plan\": {\n    \"schema_version\": \"answer_plan/v1\",\n    \"snapshot_id\": \"1\",\n    \"knowledge_revision\": \"1\",\n    \"action\": \"CLARIFY\",\n    \"selected_blocks\": [],\n    \"clarification_slot\": \"entity\",\n    \"allowed_options\": [\n      \"환불\",\n      \"오픈\",\n      \"근무\",\n      \"발주\",\n      \"판매\",\n      \"결제 장애\",\n      \"마감\",\n      \"인수인계\",\n      \"공지 적용\"\n    ],\n    \"context_id\": null,\n    \"escalation_reason\": null\n  },\n  \"slots\": [],\n  \"unresolved\": [\n    \"A의 대상 사건\",\n    \"B의 대상 사건\"\n  ],\n  \"equivalent_question_ids\": [],\n  \"interpretation\": null,\n  \"obligations\": [],\n  \"parts\": [],\n  \"calculations\": []\n}",
+      "finish_reason": "STOP"
+    }
+  ]
+}

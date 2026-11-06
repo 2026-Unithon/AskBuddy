@@ -32,9 +32,19 @@ def setup(tmp_path):
 def provider_for(search,raw,*,reject=False):
     async def call(prompt,*,schema,**kwargs):
         if schema is GeneralProposal:return raw
-        request=json.loads(prompt.split('\n',1)[1])
+        request=json.loads(prompt.rsplit('\n',1)[1])
         refs=validate_answer_references(GeneralProposal.model_validate(raw).plan,search.snapshot,store_id='1')
-        return dict(request_hash=request['request_hash'],supported=not reject,unresolved=[],checked_fact_ids=refs.fact_ids,checked_raw_blocks=refs.raw_blocks)
+        from app.learn.grounded_conclusions import atoms
+        from app.contracts.answer import SelectedBlock
+        selected=atoms(GeneralProposal.model_validate(raw).plan.selected_blocks)
+        return dict(request_hash=request['request_hash'],supported=not reject,unresolved=[],checked_fact_ids=refs.fact_ids,
+            situation_review=[dict(conclusion_unit_id=u['unit_id'],status='NO_CASE_FACTS',user_evidence=[],rationale='Synthetic structural fixture only') for u in request['conclusion_units']],
+            case_action_review=dict(scope='NOT_APPLICABLE',rationale='synthetic fixture without named case actions',cases=[]),
+            rule_coverage=[dict(rule_id=r['rule_id'],required=True,conclusion_unit_id='c0s0',
+                rationale='synthetic structural fixture only') for r in request.get('selected_rules',[])],
+            candidate_coverage=[dict(reference=b,required=bool(atoms((SelectedBlock.model_validate(b),))&selected),rationale='synthetic fixture') for b in request['candidate_reference_units']],
+            checked_conclusion_ids=list(range(len(raw.get('conclusions',[])))),
+            checked_raw_blocks=refs.raw_blocks,checked_user_turn_ids=[t['turn_id'] for t in request['dialogue_turns']])
     return AsyncMock(side_effect=call)
 
 
@@ -123,8 +133,10 @@ async def test_invalid_model_interpretation_is_error_not_answer_or_pending(tmp_p
 @pytest.mark.asyncio
 async def test_rejection_uncertainty_timeout_and_bad_verifier_are_distinct(tmp_path):
     search,raw,kw,_=setup(tmp_path)
-    decision,audit=await general_decision(search,provider=provider_for(search,raw,reject=True),**kw)
-    assert decision is kw['baseline'] and audit['status']=='VERIFIER_REJECTED'
+    with pytest.raises(ApiError) as error:
+        await general_decision(search,provider=provider_for(search,raw,reject=True),**kw)
+    assert error.value.code=='GENERAL_VERIFICATION_REJECTED'
+    assert error.value.details['reason_code']=='UNVERIFIABLE'
     raw['unresolved']=['unknown condition']
     provider=provider_for(search,raw)
     decision,audit=await general_decision(search,provider=provider,**kw)
@@ -180,28 +192,115 @@ def test_clarification_uses_snapshot_options_and_runtime_context():
     snap=search.snapshot.model_copy(update={'cards':(card,),'fact_revisions':(f,second)})
     search=replace(search,snapshot=snap.model_copy(update={'snapshot_hash':snapshot_digest(snap)}))
     q='그 음료에 들어가는 액체가 궁금해요';payload=proposal_input(search,store_id=1,question=q)
-    baseline=decide(search,store_id=1,question=q);runtime=uuid4();model_id=uuid4()
+    baseline=decide(search,store_id=1,question=q);runtime=uuid4()
     raw=dict(input_hash=payload['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
-        plan=dict(snapshot_id='1',knowledge_revision='1',action='CLARIFY',clarification_slot='temperature',allowed_options=['HOT','ICE'],context_id=str(model_id)),
+        plan=dict(snapshot_id='1',knowledge_revision='1',action='CLARIFY',clarification_slot='temperature',allowed_options=['HOT','ICE']),
         interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=[]),
         slots=[dict(slot=k,value=v,question_quote=q) for k,v in [('entity','1'),('predicate','milk_amount')]])
     result=validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline,context_id=runtime)
-    assert result.plan.context_id==runtime and result.plan.context_id!=model_id
+    assert result.plan.context_id==runtime
     assert validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline,clarify_turns=2) is baseline
     raw['plan']['allowed_options']=['HOT','INVENTED']
     with pytest.raises(ValueError):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
 
 
-def test_null_variant_cannot_implicitly_become_not_applicable():
+def _null_variant_case(unverifiable=None):
+    """규격이 비어 있는 사실 하나를 고른 제안. 2026-10-15 계약 전환의 회귀."""
     from tests.test_r_planner import PlannerTest
     from app.learn.planner import decide
     search=PlannerTest().search(temperature=None);q='이 음료에 들어가는 양을 설명해주세요'
     payload=proposal_input(search,store_id=1,question=q);baseline=decide(search,store_id=1,question=q)
+    interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=['1'])
+    if unverifiable is not None:interpretation['variant_unverifiable_fact_ids']=unverifiable
     raw=dict(input_hash=payload['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
         plan=dict(snapshot_id='1',knowledge_revision='1',action='ANSWER',selected_blocks=[dict(card_id='1',card_version_id='1',block_id='b',fact_revision_ids=['1'])]),
-        interpretation=dict(entity_id='1',predicate='milk_amount',variants=[],target_fact_ids=['1']),
+        interpretation=interpretation,
         slots=[dict(slot=k,value=v,question_quote=q) for k,v in [('entity','1'),('predicate','milk_amount')]])
-    with pytest.raises(ValueError,match='null variant'):validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+    return search,payload,baseline,raw
+
+
+def test_variant_applicability_is_derived_by_the_server_not_echoed_by_the_model():
+    # 모델이 아무 말을 하지 않아도 서버가 snapshot 으로 규격 무관을 판정한다.
+    # 예전에는 모델이 같은 집합을 복사해 보내야 통과했고, 2026-10-15 유료 진단에서
+    # 그 칸을 "질문에 해당 없는 사실" 로 오해해 정답 선택이 두 번 다 버려졌다.
+    search,payload,baseline,raw=_null_variant_case()
+    decision=validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+    assert decision.plan.action=='ANSWER'
+    scopes={f.fact_revision_id:f.variant_scope for f in decision.resolved.assessment.facts}
+    assert scopes['1']=='NOT_APPLICABLE'
+
+
+def test_model_may_block_an_answer_whose_variant_applicability_it_cannot_justify():
+    search,payload,baseline,raw=_null_variant_case(unverifiable=['1'])
+    with pytest.raises(ValueError,match='variant applicability unverified'):
+        validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+
+
+def test_unverifiable_claim_outside_the_selected_null_variant_facts_is_rejected():
+    for ids in (['2'],['1','1']):
+        search,payload,baseline,raw=_null_variant_case(unverifiable=ids)
+        with pytest.raises(ValueError,match='outside the selected null-variant facts'):
+            validate_interpretation(search,payload=payload,proposal=raw,baseline=baseline)
+
+
+def test_retired_not_applicable_key_from_preserved_outputs_is_dropped_not_fatal():
+    # tests/fixtures/*_live_*.json 은 과거 실제 모델 출력이다. 기록을 고치지 않는다.
+    from app.learn.general_semantics import Interpretation
+    parsed=Interpretation.model_validate(dict(entity_id='1',predicate='milk_amount',
+        variants=[],target_fact_ids=['1'],not_applicable_fact_ids=['1']))
+    assert parsed.variant_unverifiable_fact_ids==()
+
+
+@pytest.mark.asyncio
+async def test_exact_token_count_is_asked_only_near_the_limit(tmp_path,monkeypatch):
+    """countTokens 는 생성과 별개의 왕복이다(2026-10-15 유료 진단에서 한 턴 16.9초 중 5.2초).
+
+    토큰 하나는 최소 1바이트라 **바이트 수가 토큰 수의 상한**이다. 바이트 상한이
+    여유분까지 두고도 한도 안이면 물어볼 필요가 없다. 한도는 그대로다.
+    """
+    from app.learn.general_provider import generate
+    from app.learn.general_semantics import Release
+    from app.team.evaluation_budget import EvaluationBudget, evaluation_budget_scope
+    from tests.test_r_evaluation_budget import policy
+    _,_,_,release=setup(tmp_path);release=Release.model_validate(release)
+    ctx=kwargs()['context']
+
+    def harness(max_input_tokens,counted_tokens=10):
+        caps=policy()
+        caps['max_input_tokens']=max_input_tokens
+        # 한도를 올리면 최악의 호출 1회 금액도 커진다(BudgetPolicy.call_units)
+        caps['max_krw']='50'
+        budget=EvaluationBudget(None,caps)
+        budget.reserve=AsyncMock(return_value='reserved');budget.finish=AsyncMock()
+        sdk=NS(aio=NS(models=NS(count_tokens=AsyncMock(return_value=NS(total_tokens=counted_tokens)),
+            generate_content=AsyncMock(return_value=NS(text='{}',candidates=[NS(finish_reason='STOP')],
+                usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),
+            aclose=AsyncMock()))
+        monkeypatch.setattr('google.genai.Client',lambda **kw:sdk)
+        monkeypatch.setattr('app.learn.general_provider.get_settings',
+            lambda:NS(gemini_model='synthetic',gemini_api_key='synthetic'))
+        return budget,sdk,NS(start=AsyncMock(return_value=1),finalize=AsyncMock())
+
+    # 한도가 넉넉하면 묻지 않는다 — 그래도 생성은 돈다
+    budget,sdk,sink=harness(100000)
+    with evaluation_budget_scope(budget):
+        await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.count_tokens.assert_not_awaited()
+    sdk.aio.models.generate_content.assert_awaited_once()
+
+    # 한도에 가까우면 공급자에게 정확히 묻고, 그 값이 한도 안이면 통과한다
+    budget,sdk,sink=harness(100,counted_tokens=10)
+    with evaluation_budget_scope(budget):
+        await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.count_tokens.assert_awaited_once()
+    sdk.aio.models.generate_content.assert_awaited_once()
+
+    # 정확히 물어본 값이 한도를 넘으면 생성하지 않는다
+    budget,sdk,sink=harness(100,counted_tokens=99)
+    with evaluation_budget_scope(budget):
+        with pytest.raises(ValueError,match='input tokens exceed accepted limit'):
+            await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.generate_content.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -215,7 +314,7 @@ async def test_provider_requires_eval_budget_and_honors_token_caps(tmp_path,monk
     ctx=kwargs()['context'];budget=EvaluationBudget(None,policy())
     budget.reserve=AsyncMock(return_value='reserved');budget.finish=AsyncMock()
     sdk=NS(aio=NS(models=NS(count_tokens=AsyncMock(return_value=NS(total_tokens=10)),
-        generate_content=AsyncMock(return_value=NS(text='{}',usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),aclose=AsyncMock()))
+        generate_content=AsyncMock(return_value=NS(text='{}',candidates=[NS(finish_reason='STOP')],usage_metadata=NS(prompt_token_count=10,candidates_token_count=3,thoughts_token_count=2)))),aclose=AsyncMock()))
     monkeypatch.setattr('google.genai.Client',lambda **kw:sdk)
     monkeypatch.setattr('app.learn.general_provider.get_settings',lambda:NS(gemini_model='synthetic',gemini_api_key='synthetic'))
     sink=NS(start=AsyncMock(return_value=1),finalize=AsyncMock())

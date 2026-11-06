@@ -19,7 +19,9 @@ async def verify(pool,admin,seed):
         print("PASS v2 API",name)
     settings=SimpleNamespace(r_v2_enabled=True,chat_deadline_seconds=5,search_deadline_seconds=1,
         chat_save_reserve_seconds=.5,llm_total_budget_seconds=3,request_store_per_minute=1000,
-        request_member_per_minute=100,request_member_concurrency=2,request_store_concurrency=8,
+        # The expanded integration suite exceeds 100 requests in one minute.
+        # Rate limiting has separate boundary tests in test_r_request_limits.py.
+        request_member_per_minute=1000,request_member_concurrency=2,request_store_concurrency=8,
         jwt_secret="synthetic-v2-test-secret-"*3,jwt_algorithm="HS256")
     calls=[]
     async def embed(texts,**kw):

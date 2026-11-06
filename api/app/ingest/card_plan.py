@@ -168,8 +168,8 @@ def variant_label(variant: VariantKey) -> str:
 def card_title(canonical_name: str, index: int, total: int) -> str:
     """카드 제목 = 대상 이름(+ 나뉜 카드면 " i/n").
 
-    규격 꼬리표(" (ICE)")를 붙이지 않는다. R 은 질문에 언급된 카드 제목으로 대상을
-    찾으므로 제목이 대상 이름과 달라지면 사실 카드 질문이 모두 점주에게 넘어간다.
+    규격 꼬리표(" (ICE)")를 붙이지 않는다. R 은 공개 사실의 subject와 entity_id로
+    대상을 찾으므로 분할 번호는 대상 이름으로 취급하지 않는다.
     규격은 블록 머리 줄과 공개 카드의 variant 칸이 싣고, 규격이 갈리는 질문은
     R 이 CLARIFY 로 규격을 확정한 뒤 그 값만 인용한다(D19).
     """

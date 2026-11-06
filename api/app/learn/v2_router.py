@@ -9,6 +9,7 @@ import logging
 import asyncpg
 from dataclasses import replace,asdict
 from uuid import UUID,uuid4
+from typing import Literal
 
 from fastapi import APIRouter,HTTPException,Request,Query
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +33,7 @@ from app.learn.dialogue_history import load_history,retrieval_question
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
+from app.learn.citation_origin import citation_origin
 from app.reg.embeddings import recorded_embeddings
 from app.team.evaluation_budget import BudgetDenied
 from app.reg.hybrid import SearchResult,hybrid_search,read_current_index,NORMALIZATION_VERSION,RRF_VERSION,LEXICAL_QUERY_VERSION
@@ -78,12 +80,14 @@ async def citation_detail(receipt_id:EntityId,order:int,claims:Claims,user_id:Cu
     store_id,member_id=await scope(pool,claims,user_id)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row=await conn.fetchrow("""select c.*,i.content,s.source_availability
+            row=await conn.fetchrow("""select c.*,i.content,s.source_availability,s.source_type,
+                    o.owner_answer_id as linked_owner_answer_id
                 from r_answer_receipts r join store_members m on m.store_id=r.store_id and m.member_id=r.member_id
                 join r_answer_citations c on c.store_id=r.store_id and c.receipt_id=r.receipt_id
                 join r_index_publications p on p.store_id=r.store_id and p.snapshot_id=r.snapshot_id
                 join r_index_preparations i on i.store_id=p.store_id and i.prepared_id=p.prepared_id
                 left join sources s on s.store_id=c.store_id and s.source_id=c.source_id
+                left join owner_answer_sources o on o.store_id=c.store_id and o.source_id=c.source_id
                 where r.store_id=$1 and r.member_id=$2 and r.receipt_id=$3 and c.citation_order=$4
                 for share of m""",store_id,member_id,int(receipt_id),order)
             if row is None:raise ApiError(404,'NOT_FOUND','인용을 찾을 수 없습니다.')
@@ -96,6 +100,7 @@ async def citation_detail(receipt_id:EntityId,order:int,claims:Claims,user_id:Cu
                 text='\n'.join((fact.assertion,*fact.conditions,*fact.exceptions))
             await conn.execute("insert into access_logs(store_id,user_id,card_id,action_type) values($1,$2,$3,'VIEW')",store_id,user_id,row['card_id'])
             return dict(contract_version='v2',title=card.title,text=text,card_version_id=card.card_version_id,
+                        **citation_origin(content,row),
                         owner_answer_id=str(row['owner_answer_id']) if row['owner_answer_id'] is not None else None,
                         source_availability=('AVAILABLE' if row['owner_answer_id'] is not None
                                              else row['source_availability'] or 'UNAVAILABLE'))
@@ -114,7 +119,8 @@ async def sessions(claims:Claims,user_id:CurrentUserId):
 
 
 @router.get('/v2/pending')
-async def pending_list(claims:Claims,user_id:CurrentUserId,after:EntityId|None=None):
+async def pending_list(claims:Claims,user_id:CurrentUserId,after:EntityId|None=None,
+                       status:Literal['WAITING','ANSWERED']|None=None):
     enabled()
     pool=get_pool()
     store_id,member_id=await scope(pool,claims,user_id)
@@ -122,8 +128,9 @@ async def pending_list(claims:Claims,user_id:CurrentUserId,after:EntityId|None=N
         async with conn.transaction():
             await require_owner(conn,store_id=store_id,member_id=member_id)
             rows=await conn.fetch("""select question_id,question_text,status from pending_questions
-                where store_id=$1 and contract_version='v2' and question_id>$2 order by question_id limit 100""",
-                store_id,int(after) if after else 0)
+                where store_id=$1 and question_id>$2 and ($3::text is null or status=$3)
+                order by question_id limit 100""",
+                store_id,int(after) if after else 0,status)
             await conn.execute("insert into access_logs(store_id,user_id,action_type) values($1,$2,'VIEW')",store_id,user_id)
             return dict(contract_version='v2',questions=[dict(pending_id=str(r['question_id']),
                 question=r['question_text'],status=r['status']) for r in rows],
@@ -206,13 +213,30 @@ async def pending_detail(question_id:EntityId,claims:Claims,user_id:CurrentUserI
     async with pool.acquire() as conn:
         async with conn.transaction():
             await require_owner(conn,store_id=store_id,member_id=member_id)
-            pending=await conn.fetchrow("""select question_id,status from pending_questions
-                where store_id=$1 and question_id=$2 and contract_version='v2'""",store_id,int(question_id))
+            pending=await conn.fetchrow("""select question_id,question_text,status,contract_version from pending_questions
+                where store_id=$1 and question_id=$2""",store_id,int(question_id))
             if pending is None:raise ApiError(404,"NOT_FOUND","질문을 찾을 수 없습니다.")
             occurrences=await conn.fetch("""select receipt_id,original_question,resolved_query,context_snapshot
                 from r_answer_receipts where store_id=$1 and pending_id=$2 order by receipt_id""",store_id,int(question_id))
+            if pending['contract_version']=='v1':
+                occurrences=await conn.fetch("""select o.occurrence_id as receipt_id,
+                    coalesce(m.content,q.question_text) as original_question,
+                    '{}'::jsonb as resolved_query,null::jsonb as context_snapshot
+                    from pending_questions q join pending_question_occurrences o on o.question_id=q.question_id
+                    left join chat_messages m on m.message_id=o.message_id and exists(
+                        select 1 from chat_sessions s where s.session_id=m.session_id
+                            and s.store_id=q.store_id and s.member_id=o.member_id)
+                    where q.store_id=$1 and q.question_id=$2 order by o.occurrence_id""",store_id,int(question_id))
+            legacy_answers=await conn.fetch("""select a.answer_id,a.answer_text from owner_answers a
+                join pending_questions q on q.question_id=a.question_id
+                where q.store_id=$1 and q.question_id=$2 and not exists(
+                    select 1 from r_owner_answer_revisions r where r.store_id=q.store_id and r.owner_answer_id=a.answer_id)
+                order by a.answer_id""",store_id,int(question_id))
             answers=await conn.fetch("""select a.answer_id,a.answer_text,r.revision_no,k.status as knowledge_status,
-                    e.event_id,l.attempts,l.last_error
+                    e.event_id,l.attempts,l.last_error,
+                    (select p.status from knowledge_change_proposals p
+                     where p.store_id=r.store_id and p.answer_id=a.answer_id
+                     order by p.proposal_id desc limit 1) as proposal_status
                 from r_owner_answer_revisions r join owner_answers a on a.answer_id=r.owner_answer_id
                 join r_owner_knowledge_states k on k.store_id=r.store_id and k.owner_answer_id=r.owner_answer_id
                 left join outbox_events e on e.store_id=r.store_id and e.owner_answer_id=r.owner_answer_id
@@ -220,11 +244,18 @@ async def pending_detail(question_id:EntityId,claims:Claims,user_id:CurrentUserI
                 left join outbox_leases l on l.store_id=e.store_id and l.event_id=e.event_id and l.consumer='W_OWNER_ANSWER_V2'
                 where r.store_id=$1 and r.question_id=$2 order by r.revision_no""",store_id,int(question_id))
             await conn.execute("insert into access_logs(store_id,user_id,action_type) values($1,$2,'VIEW')",store_id,user_id)
+            from app.learn.knowledge_availability import knowledge_availability
+            availability = await knowledge_availability(conn,store_id=store_id,
+                owner_answer_ids=[r['answer_id'] for r in answers])
             return dict(contract_version="v2",pending_id=str(pending['question_id']),status=pending['status'],
+                question=pending['question_text'],question_contract=pending['contract_version'],
+                legacy_answers=[dict(owner_answer_id=str(r['answer_id']),answer=r['answer_text']) for r in legacy_answers],
                 occurrences=[dict(receipt_id=str(r['receipt_id']),original_question=r['original_question'],
                     resolved_query=json.loads(r['resolved_query']) if isinstance(r['resolved_query'],str) else r['resolved_query'],
                     context_snapshot=json.loads(r['context_snapshot']) if isinstance(r['context_snapshot'],str) else r['context_snapshot']) for r in occurrences],
                 answers=[dict(owner_answer_id=str(r['answer_id']),answer=r['answer_text'],revision=r['revision_no'],
+                    proposal_status=r['proposal_status'],
+                    knowledge_availability=availability.get(r['answer_id'],'NOT_APPLICABLE'),
                     knowledge_status=r['knowledge_status'],event_id=str(r['event_id']) if r['event_id'] else None,
                     attempts=r['attempts'] or 0,retry_available=(r['last_error'] or '').startswith('TERMINAL:')) for r in answers])
 
@@ -272,7 +303,9 @@ async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
                       and not exists(select 1 from r_owner_answer_revisions newer
                           where newer.store_id=rev.store_id and newer.question_id=rev.question_id
                             and newer.revision_no>rev.revision_no)
-                      and (k.status in ('PENDING','REVIEW') or (k.status='FAILED' and exists(
+                      and (k.status='PENDING' or (k.status='REVIEW' and exists(
+                          select 1 from knowledge_change_proposals p where p.store_id=k.store_id
+                              and p.answer_id=k.owner_answer_id and p.status in ('ANALYZED','PENDING_REVIEW','FAILED'))) or (k.status='FAILED' and exists(
                           select 1 from outbox_events e join outbox_leases l
                               on l.store_id=e.store_id and l.event_id=e.event_id
                           where e.store_id=d.store_id and e.owner_answer_id=d.owner_answer_id
@@ -280,6 +313,9 @@ async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
                             and l.status in ('FAILED','CLAIMED')
                             and coalesce(l.last_error,'') not like 'TERMINAL:%'))))""",
                 store_id,member_id,int(session_id))
+            from app.learn.knowledge_availability import knowledge_availability
+            availability = await knowledge_availability(conn,store_id=store_id,
+                owner_answer_ids=[r['owner_answer_id'] for r in rows if r['owner_answer_id']])
             responses={}
             for row in rows:
                 if row['response']:
@@ -292,6 +328,7 @@ async def history(session_id:EntityId,claims:Claims,user_id:CurrentUserId,
                 original_question=r['original_question'],
                 owner_answer_id=str(r['owner_answer_id']) if r['owner_answer_id'] else None,
                 revision=r['revision_no'],knowledge_status=r['knowledge_status'],
+                knowledge_availability=availability.get(r['owner_answer_id'],'NOT_APPLICABLE'),
                 context_revision=(json.loads(r['context_snapshot']) if isinstance(r['context_snapshot'],str) else r['context_snapshot'] or {}).get('state_revision'),
                 response=responses.get(r['message_id'])) for r in rows],
                 next_after=str(rows[-1]['message_id']) if has_more and not latest else None,
@@ -392,13 +429,15 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
     deadline=loop.time()+settings.chat_deadline_seconds
     stale=False
     completed=None
+    recover_question=False
     choice=ContextChoice(req.context_id,req.context_revision,req.option) if req.context_id else None
     try:
         async with asyncio.timeout_at(deadline):
             store_id,member_id=await scope(pool,claims,user_id)
             async with request_lease(pool,store_id,user_id):
                 completed=await saved_reply(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
-                    request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id)
+                    request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id,
+                    recover_failed=getattr(settings,'r_general_semantics_enabled',False))
                 if completed is None:
                     from app.publish.empty import ensure_initial_publication
                     if req.policy_receipt_id is None:
@@ -418,7 +457,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         and req.policy_receipt_id is None and choice is None
                                         and not policy_action(req.question)):
                                     history=await load_history(conn,store_id=store_id,member_id=member_id,
-                                        session_id=int(req.session_id))
+                                        session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
+                                    recover_question=True
                                 if choice:
                                     stored=await load_context(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),context_id=choice.context_id)
@@ -433,7 +473,17 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             question=context.context.original_question+" "+req.question
                         user_turns=((context.context.original_question,req.question) if context else
                                     history.user_turns if history is not None else ())
+                        if context and 'case' in slots:
+                            from app.learn.case_clarification import case_context_turns
+                            if not getattr(settings,'r_general_semantics_enabled',False):
+                                raise ApiError(503,'GENERAL_RELEASE_UNAVAILABLE','사건 선택의 대화 해석을 사용할 수 없습니다.')
+                            try:user_turns=case_context_turns(context.context)
+                            except (ValueError,KeyError,TypeError) as exc:
+                                raise ApiError(422,'INVALID_CONTRACT','사건 선택의 원문 문맥을 확인하지 못했습니다.') from exc
                         search_question=retrieval_question(question,history) if history is not None else question
+                        if context and 'case' in slots:
+                            from app.learn.dialogue_history import DialogueHistory
+                            search_question=retrieval_question(question,DialogueHistory(user_turns=user_turns))
                         if not snapshot.cards or req.policy_receipt_id is not None or policy_action(question):
                             search=SearchResult(snapshot,index_revision,(),question)
                         else:
@@ -465,13 +515,19 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             context_id=choice.context_id if choice else None,
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
+                        if context and 'case' in slots and not policy_action(question):
+                            # A rule-only planner cannot decide which user case
+                            # was chosen. Keep this path under semantic review.
+                            decision=replace(decision,plan=AnswerPlan(snapshot_id=snapshot.snapshot_id,
+                                knowledge_revision=snapshot.knowledge_revision,action='ESCALATE',
+                                escalation_reason='UNRESOLVED_CONTEXT'),semantic_context=None)
                         if req.policy_receipt_id is not None:
                             decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
                                 knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
                         from app.learn.reviewed_semantics import product_decision
                         semantic_approval=None
-                        if req.policy_receipt_id is None:
+                        if req.policy_receipt_id is None and not (context and 'case' in slots):
                             decision,semantic_approval=product_decision(search,settings=settings,
                                 store_id=store_id,question=question,baseline=decision,
                                 user_turns=(context.context.original_question,req.question) if context else (),
@@ -482,7 +538,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
                                 store_id=store_id,question=question,user_turns=user_turns,
-                                baseline=decision,context=usage.model_copy(update={'stage':'ANSWER'}),
+                                baseline=decision,confirmed_slots=slots,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
                                     settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))),
@@ -503,8 +559,10 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 semantic_context=decision.semantic_context,choice=choice,
                                 policy_receipt_id=req.policy_receipt_id,
                                 history_head=history.head if history is not None else None,
+                                failed_history_head=history.failed_head if history is not None else None,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
                                     dialogue_receipt_ids=history.receipt_ids if history is not None else (),
+                                    dialogue_failed_turn_ids=history.failed_turn_ids if history is not None else (),
                                     semantic_approval_id=semantic_approval,
                                     general_semantics=general_audit,
                                     semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,
@@ -529,6 +587,13 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
             raise ApiError(409 if stale else 504,"STALE_KNOWLEDGE" if stale else "DEADLINE_EXCEEDED",
                            "처리 시간 안에 공개 내용을 확인하지 못했습니다.",retryable=True) from exc
     except ApiError as exc:
+        from app.learn.failed_user_turns import RECOVERABLE,record_failed_turn
+        if recover_question and completed is None and exc.code in RECOVERABLE:
+            try:
+                await asyncio.wait_for(record_failed_turn(pool,store_id=store_id,member_id=member_id,
+                    session_id=int(req.session_id),request_id=req.request_id,question=req.question,error_code=exc.code),.3)
+            except Exception as recovery_error:
+                logging.getLogger(__name__).warning('failed user turn recovery unavailable type=%s',type(recovery_error).__name__)
         if stale and exc.code=="INDEX_UNAVAILABLE":
             raise ApiError(409,"STALE_KNOWLEDGE","공개 내용이 변경됐습니다.",retryable=True) from exc
         raise

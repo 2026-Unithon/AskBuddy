@@ -1,5 +1,9 @@
 # docs 구조
 
+2026-10-13 R 최신: [P4 사건별 답변·문맥 로컬 검증](review/R_P4_CASE_CONTEXT_20261013.md). 실제 모델 품질·운영 지연 인수는 별도다.
+
+2026-10-13 R 최신 검증: [P3 실제 W 사실 평가 입력 전환](review/R_FACT_EVALUATION_20261013.md). 실행 순서는 [W/R 통합 계획](plan/RW_NEXT_EXECUTION_20261012.md)의 P4로 이어진다.
+
 W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더의 정본·계획·검증 기록만 읽는다.
 `docs/release/`는 별도 릴리스 작업 영역이며, 명시적인 요청 없이 읽거나 수정하지 않는다.
 폴더 이동에 따른 경로만 보정하며 과거 review의 관찰·판정은 변경하지 않는다.
@@ -27,6 +31,8 @@ W 개발의 문서 기준은 `docs/dev/`다. 현재 작업에서는 이 폴더�
 | `c0_cost_scenarios.json` | 원가 시나리오. **코드가 읽는다** (`api/app/usage/report.py`) |
 
 ## docs/dev/plan/ — 구현 계획
+
+최신 통합 실행 순서: [RW_NEXT_EXECUTION_20261012.md](plan/RW_NEXT_EXECUTION_20261012.md) — Phase A R 전달 사항, 기존 v1 질문 처리, 사실 카드·출처 인수, 평가 전환과 W B~E·공동 검증의 의존 관계.
 
 | 파일 | 내용 |
 |---|---|

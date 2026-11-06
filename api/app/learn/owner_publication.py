@@ -26,12 +26,17 @@ async def publication_evidence(conn, *, store_id, result):
 
 
 async def notify_publication(conn, *, store_id, question_id, owner_answer_id):
-    recipients = await conn.fetch('''select m.user_id,min(r.session_id) as session_id
-        from r_answer_receipts r join store_members m on m.store_id=r.store_id and m.member_id=r.member_id
-        where r.store_id=$1 and r.pending_id=$2 group by m.user_id''', store_id, question_id)
+    recipients = await conn.fetch('''select m.user_id,min(d.session_id) as session_id,s.contract_version
+        from r_owner_answer_deliveries d
+        join r_owner_answer_revisions r on r.store_id=d.store_id and r.owner_answer_id=d.owner_answer_id
+        join store_members m on m.store_id=d.store_id and m.member_id=d.member_id and m.removed_at is null
+        join chat_sessions s on s.store_id=d.store_id and s.member_id=d.member_id and s.session_id=d.session_id
+        where d.store_id=$1 and r.question_id=$2 and d.owner_answer_id=$3
+        group by m.user_id,s.contract_version''', store_id, question_id, owner_answer_id)
     for recipient in recipients:
         await create_notification_event(conn, store_id=store_id, recipient_user_id=recipient['user_id'],
             event_type='OWNER_ANSWER', aggregate_type='OWNER_ANSWER', aggregate_id=owner_answer_id,
             dedupe_key=f'r-knowledge-ready:{store_id}:{owner_answer_id}:{recipient["user_id"]}',
             title='답변이 매장 지식에 반영됐어요', body='승인된 내용을 확인하고 다시 질문할 수 있어요.',
-            destination=f'/staff/chat/v2?session_id={recipient["session_id"]}')
+            destination=(f'/staff/chat/v2?session_id={recipient["session_id"]}'
+                         if recipient['contract_version']=='v2' else '/staff/chat'))

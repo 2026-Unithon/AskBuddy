@@ -33,6 +33,13 @@ async def retention_loop(pool):
             # Error type only: driver messages can contain query/body fragments.
             logger.error('R diagnostics retention failed type=%s', type(exc).__name__)
         try:
+            async with pool.acquire() as conn:
+                stores=await conn.fetch('select distinct store_id from r_failed_user_turns where expires_at<=clock_timestamp()')
+                for row in stores:
+                    await conn.execute('delete from r_failed_user_turns where store_id=$1 and expires_at<=clock_timestamp()',row['store_id'])
+        except Exception as exc:
+            logger.error('R failed user turn retention failed type=%s',type(exc).__name__)
+        try:
             count = await purge_expired_index_documents(pool)
             if count:
                 logger.info('R index retention sweep removed=%d', count)

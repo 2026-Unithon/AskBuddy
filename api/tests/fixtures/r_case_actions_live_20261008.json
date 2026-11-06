@@ -1,0 +1,1029 @@
+{
+  "origin": "r-semantic-recovery-20261008/gemini-live-01",
+  "source_events_sha256": "b01f299345f98629931fa94f8cb614df5add3482fffb265856eb2c0b8de77d24",
+  "snapshot": {
+    "schema_version": "published_knowledge/v1",
+    "store_id": "1",
+    "knowledge_revision": "1",
+    "snapshot_id": "1",
+    "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+    "created_at": "2026-10-07T19:46:55.819277Z",
+    "glossary_version": "glossary/v1",
+    "renderer_version": "r-approved/v1",
+    "cards": [
+      {
+        "card_id": "1",
+        "card_version_id": "1",
+        "entity_id": "1",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "환불",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "1"
+          }
+        ]
+      },
+      {
+        "card_id": "2",
+        "card_version_id": "2",
+        "entity_id": "2",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "오픈",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "2"
+          }
+        ]
+      },
+      {
+        "card_id": "3",
+        "card_version_id": "3",
+        "entity_id": "3",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "근무",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "3"
+          }
+        ]
+      },
+      {
+        "card_id": "4",
+        "card_version_id": "4",
+        "entity_id": "4",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "발주",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "4"
+          }
+        ]
+      },
+      {
+        "card_id": "5",
+        "card_version_id": "5",
+        "entity_id": "5",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "판매",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "5"
+          }
+        ]
+      },
+      {
+        "card_id": "6",
+        "card_version_id": "6",
+        "entity_id": "6",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "결제 장애",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "6"
+          }
+        ]
+      },
+      {
+        "card_id": "7",
+        "card_version_id": "7",
+        "entity_id": "7",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "마감",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "7"
+          }
+        ]
+      },
+      {
+        "card_id": "8",
+        "card_version_id": "8",
+        "entity_id": "8",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "인수인계",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "8"
+          }
+        ]
+      },
+      {
+        "card_id": "9",
+        "card_version_id": "9",
+        "entity_id": "9",
+        "variant": {
+          "temperature": null,
+          "size": null
+        },
+        "title": "공지 적용",
+        "blocks": [
+          {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "9"
+          }
+        ]
+      }
+    ],
+    "fact_revisions": [],
+    "raw_spans": [
+      {
+        "raw_span_id": "1",
+        "source_id": "1",
+        "owner_answer_id": null,
+        "text": "배달앱 결제는 앱 주문번호로 해당 앱에서 환불한다. 매장 POS에서 별도 환불하지 않는다.\n매장 직접 결제는 원결제 수단으로 POS에서 환불한다. 당일·2만원 이하·영수증 확인·POS 마감 전이면 담당 직원이 처리할 수 있다.\n결제 경로에 관계없이 2만원 초과 또는 이전 영업일 결제의 환불은 점주 승인이 먼저 필요하다.\n이미 환불 완료된 거래는 재환불하지 않는다. 승인·접수·완료를 구분하며, 고객 주장만으로 완료 여부를 확정하지 않고 원거래 기록을 확인한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "2",
+        "source_id": "2",
+        "owner_answer_id": null,
+        "text": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다. 열쇠 소지만으로 오픈 권한이 생기지 않는다.\n예정 시각에 오픈 인증자가 없으면 영업 시작을 보류하고 당직 관리자에게 연락한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "3",
+        "source_id": "3",
+        "owner_answer_id": null,
+        "text": "영업 중에는 카운터를 볼 수 있는 직원 1명이 현장에 남아 있어야 한다. 휴게 교대 시 인수자가 현장 도착 후 인계받는다.\n출근 예정·연락 가능 상태는 현장 도착이나 업무 인수 완료를 대신하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "4",
+        "source_id": "4",
+        "owner_answer_id": null,
+        "text": "사용 가능 재고는 실물 재고에서 파손 수량과 기존 주문에 예약된 수량을 뺀 값이다. 예약 수량과 파손 수량은 서로 중복되지 않는다.\n이 평가 매장의 M컵과 M뚜껑의 목표 재고는 각각 240개다.\n추가 발주량은 max(0, 목표 재고 - 사용 가능 재고 - 확정 입고 예정량)이다. 견적·미확정 발주량은 입고 예정량에 포함하지 않는다.\n거래처 발주 접수는 평일 15시 마감이며 15시 이후 확정한 발주는 다음 영업일 접수다. 접수일만으로 배송 완료일을 확정하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "5",
+        "source_id": "5",
+        "owner_answer_id": null,
+        "text": "당장 판매 가능한 포장 수량은 현재 사용 가능한 같은 규격 컵과 뚜껑 수 중 작은 값이다. 미래 입고는 현재 판매 가능량에 넣지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "6",
+        "source_id": "6",
+        "owner_answer_id": null,
+        "text": "결제 중 연결이 끊기면 같은 거래를 재결제하기 전에 주문번호와 거래번호로 원결제 상태를 조회한다.\n원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다. 승인 실패나 결제 완료로 단정하지 않는다.\n당직 관리자가 해당 주문의 오프라인 현금 결제를 허용한 경우에만 주문번호·금액·수단을 수기 기록하고 현금을 받을 수 있다.\n연결 복구 후 수기 거래를 등록하기 전 같은 주문번호의 기존 거래가 있는지 확인한다. 연결 복구만으로 대기 거래가 실패한 것은 아니다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "7",
+        "source_id": "7",
+        "owner_answer_id": null,
+        "text": "마감 순서는 남은 환불 처리 완료 → 현금 대조 → POS 마감 → 점주 합계 보고다.\n현금 차이가 있으면 한 번 재계산한다. 재계산 후에도 차이가 남으면 점주 확인 전 POS 마감을 보류한다.\n처리 중 환불이나 미해결 현금 차이가 남으면 마감 완료로 표시하지 않는다. 근무 종료 시 미해결 건을 다음 담당자에게 인계한다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "8",
+        "source_id": "8",
+        "owner_answer_id": null,
+        "text": "미해결 건 인계에는 주문번호 또는 사건번호, 현재 상태, 다음 조치, 기한, 담당자가 모두 필요하다.\n메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.\n대기 건이 둘 이상이고 지시어의 대상이 불분명하면 사건을 특정하는 질문을 먼저 한다. 한 사건의 상태를 다른 사건에 적용하지 않는다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      },
+      {
+        "raw_span_id": "9",
+        "source_id": "9",
+        "owner_answer_id": null,
+        "text": "상시 규칙은 회원 할인과 행사 쿠폰의 중복 적용 불가다.\n승인된 한시 예외는 2026-10-06부터 2026-10-08까지 매장 직접 결제 포장 주문에 한해 회원 할인과 재오픈 쿠폰의 중복을 허용한다.\n한시 예외는 배달앱 주문과 다른 행사 쿠폰에는 적용되지 않는다. 기간 종료 후에는 상시 규칙으로 돌아간다.",
+        "locator": {
+          "type": "WHOLE_SOURCE",
+          "page": null,
+          "timestamp_sec": null,
+          "line": null,
+          "bbox": null
+        }
+      }
+    ]
+  },
+  "proposal_request": {
+    "input": {
+      "version": "r-semantic-proposal/v1",
+      "store_id": "1",
+      "snapshot_id": "1",
+      "knowledge_revision": "1",
+      "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+      "question": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?",
+      "user_turns": [],
+      "candidates": [
+        {
+          "card_id": "1",
+          "card_version_id": "1",
+          "entity_id": "1",
+          "title": "환불",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "1"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "1",
+              "source_id": "1",
+              "owner_answer_id": null,
+              "text": "배달앱 결제는 앱 주문번호로 해당 앱에서 환불한다. 매장 POS에서 별도 환불하지 않는다.\n매장 직접 결제는 원결제 수단으로 POS에서 환불한다. 당일·2만원 이하·영수증 확인·POS 마감 전이면 담당 직원이 처리할 수 있다.\n결제 경로에 관계없이 2만원 초과 또는 이전 영업일 결제의 환불은 점주 승인이 먼저 필요하다.\n이미 환불 완료된 거래는 재환불하지 않는다. 승인·접수·완료를 구분하며, 고객 주장만으로 완료 여부를 확정하지 않고 원거래 기록을 확인한다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "6",
+          "card_version_id": "6",
+          "entity_id": "6",
+          "title": "결제 장애",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "6"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "6",
+              "source_id": "6",
+              "owner_answer_id": null,
+              "text": "결제 중 연결이 끊기면 같은 거래를 재결제하기 전에 주문번호와 거래번호로 원결제 상태를 조회한다.\n원결제 상태가 확인되지 않으면 대기 건으로 남기고 당직 관리자에게 확인을 요청한다. 승인 실패나 결제 완료로 단정하지 않는다.\n당직 관리자가 해당 주문의 오프라인 현금 결제를 허용한 경우에만 주문번호·금액·수단을 수기 기록하고 현금을 받을 수 있다.\n연결 복구 후 수기 거래를 등록하기 전 같은 주문번호의 기존 거래가 있는지 확인한다. 연결 복구만으로 대기 거래가 실패한 것은 아니다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "4",
+          "card_version_id": "4",
+          "entity_id": "4",
+          "title": "발주",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "4"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "4",
+              "source_id": "4",
+              "owner_answer_id": null,
+              "text": "사용 가능 재고는 실물 재고에서 파손 수량과 기존 주문에 예약된 수량을 뺀 값이다. 예약 수량과 파손 수량은 서로 중복되지 않는다.\n이 평가 매장의 M컵과 M뚜껑의 목표 재고는 각각 240개다.\n추가 발주량은 max(0, 목표 재고 - 사용 가능 재고 - 확정 입고 예정량)이다. 견적·미확정 발주량은 입고 예정량에 포함하지 않는다.\n거래처 발주 접수는 평일 15시 마감이며 15시 이후 확정한 발주는 다음 영업일 접수다. 접수일만으로 배송 완료일을 확정하지 않는다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "7",
+          "card_version_id": "7",
+          "entity_id": "7",
+          "title": "마감",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "7"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "7",
+              "source_id": "7",
+              "owner_answer_id": null,
+              "text": "마감 순서는 남은 환불 처리 완료 → 현금 대조 → POS 마감 → 점주 합계 보고다.\n현금 차이가 있으면 한 번 재계산한다. 재계산 후에도 차이가 남으면 점주 확인 전 POS 마감을 보류한다.\n처리 중 환불이나 미해결 현금 차이가 남으면 마감 완료로 표시하지 않는다. 근무 종료 시 미해결 건을 다음 담당자에게 인계한다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "8",
+          "card_version_id": "8",
+          "entity_id": "8",
+          "title": "인수인계",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "8"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "8",
+              "source_id": "8",
+              "owner_answer_id": null,
+              "text": "미해결 건 인계에는 주문번호 또는 사건번호, 현재 상태, 다음 조치, 기한, 담당자가 모두 필요하다.\n메시지 발송·읽음만으로 인계 완료가 되지 않는다. 지정 인수자가 업무 인수를 확인해야 한다.\n대기 건이 둘 이상이고 지시어의 대상이 불분명하면 사건을 특정하는 질문을 먼저 한다. 한 사건의 상태를 다른 사건에 적용하지 않는다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "9",
+          "card_version_id": "9",
+          "entity_id": "9",
+          "title": "공지 적용",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "9"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "9",
+              "source_id": "9",
+              "owner_answer_id": null,
+              "text": "상시 규칙은 회원 할인과 행사 쿠폰의 중복 적용 불가다.\n승인된 한시 예외는 2026-10-06부터 2026-10-08까지 매장 직접 결제 포장 주문에 한해 회원 할인과 재오픈 쿠폰의 중복을 허용한다.\n한시 예외는 배달앱 주문과 다른 행사 쿠폰에는 적용되지 않는다. 기간 종료 후에는 상시 규칙으로 돌아간다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "2",
+          "card_version_id": "2",
+          "entity_id": "2",
+          "title": "오픈",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "2"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "2",
+              "source_id": "2",
+              "owner_answer_id": null,
+              "text": "오픈 인증자가 현장에 있고 오픈 체크리스트가 모두 완료되어야 영업을 시작한다. 열쇠 소지만으로 오픈 권한이 생기지 않는다.\n예정 시각에 오픈 인증자가 없으면 영업 시작을 보류하고 당직 관리자에게 연락한다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "3",
+          "card_version_id": "3",
+          "entity_id": "3",
+          "title": "근무",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "3"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "3",
+              "source_id": "3",
+              "owner_answer_id": null,
+              "text": "영업 중에는 카운터를 볼 수 있는 직원 1명이 현장에 남아 있어야 한다. 휴게 교대 시 인수자가 현장 도착 후 인계받는다.\n출근 예정·연락 가능 상태는 현장 도착이나 업무 인수 완료를 대신하지 않는다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        },
+        {
+          "card_id": "5",
+          "card_version_id": "5",
+          "entity_id": "5",
+          "title": "판매",
+          "block": {
+            "block_id": "raw1",
+            "kind": "RAW",
+            "order": 1,
+            "fact_revision_ids": [],
+            "raw_span_id": "5"
+          },
+          "facts": [],
+          "raw": [
+            {
+              "raw_span_id": "5",
+              "source_id": "5",
+              "owner_answer_id": null,
+              "text": "당장 판매 가능한 포장 수량은 현재 사용 가능한 같은 규격 컵과 뚜껑 수 중 작은 값이다. 미래 입고는 현재 판매 가능량에 넣지 않는다.",
+              "locator": {
+                "type": "WHOLE_SOURCE",
+                "page": null,
+                "timestamp_sec": null,
+                "line": null,
+                "bbox": null
+              }
+            }
+          ]
+        }
+      ],
+      "comparisons": [],
+      "input_hash": "sha256:17ea71bad6f72f48e39b7892b4e1a288d07f9dc9d239fd7dbd6d19bd103e981a"
+    },
+    "confirmed_slots": {},
+    "dialogue_turns": [
+      {
+        "turn_id": 0,
+        "role": "user",
+        "current": true,
+        "text": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?"
+      }
+    ],
+    "capabilities": {
+      "calculation_fact_ids": [],
+      "slot_quote_choices": [
+        "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?"
+      ],
+      "response_style": "grounded_conclusion",
+      "max_answer_chars": 2000
+    }
+  },
+  "proposal": {
+    "snapshot_hash": "sha256:476e61b6b050a6034a91f893de50fe1429be304d11a4b40279ff158711dcc392",
+    "input_hash": "sha256:17ea71bad6f72f48e39b7892b4e1a288d07f9dc9d239fd7dbd6d19bd103e981a",
+    "plan": {
+      "snapshot_id": "1",
+      "knowledge_revision": "1",
+      "action": "ANSWER",
+      "selected_blocks": [
+        {
+          "card_id": "8",
+          "card_version_id": "8",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "8"
+        }
+      ],
+      "clarification_slot": null,
+      "allowed_options": [],
+      "escalation_reason": null
+    },
+    "slots": [],
+    "unresolved": [],
+    "equivalent_question_ids": [],
+    "interpretation": null,
+    "obligations": [],
+    "parts": [
+      {
+        "plan": {
+          "snapshot_id": "1",
+          "knowledge_revision": "1",
+          "action": "ANSWER",
+          "selected_blocks": [
+            {
+              "card_id": "8",
+              "card_version_id": "8",
+              "block_id": "raw1",
+              "fact_revision_ids": [],
+              "raw_span_id": "8"
+            }
+          ],
+          "clarification_slot": null,
+          "allowed_options": [],
+          "escalation_reason": null
+        },
+        "interpretation": {
+          "entity_id": "8",
+          "predicate": "approved_procedure",
+          "variants": [],
+          "target_fact_ids": [],
+          "not_applicable_fact_ids": []
+        },
+        "slots": [
+          {
+            "slot": "entity",
+            "value": "8",
+            "question_quote": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?"
+          },
+          {
+            "slot": "predicate",
+            "value": "approved_procedure",
+            "question_quote": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?"
+          }
+        ],
+        "obligations": []
+      }
+    ],
+    "unsupported_calculation": false,
+    "case_options": [],
+    "conclusions": [
+      {
+        "statement": "미해결 건을 다음 담당자에게 인계할 때는 주문번호 또는 사건번호, 현재 상태, 다음 조치, 기한, 담당자를 모두 기재해야 합니다.",
+        "question_quote": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?",
+        "user_evidence": [
+          {
+            "turn_id": 0,
+            "quote": "A는 결제 상태 미확인, B는 환불 승인 대기야. 둘 다 다음 담당자에게 넘길 때 뭘 적어?"
+          }
+        ],
+        "references": [
+          {
+            "card_id": "8",
+            "card_version_id": "8",
+            "block_id": "raw1",
+            "fact_revision_ids": [],
+            "raw_span_id": "8"
+          }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "request_hash": "sha256:9dc5d52066e54a1c63ceadbc920cb652f5bf75e6d6fb784c926ce0cd595cfd21",
+    "supported": true,
+    "unresolved": [],
+    "checked_fact_ids": [],
+    "checked_raw_blocks": [
+      [
+        "8",
+        "8",
+        "raw1",
+        "8"
+      ]
+    ],
+    "checked_user_turn_ids": [
+      0
+    ],
+    "reason_code": null,
+    "reason_detail": "",
+    "clarification": null,
+    "checked_conclusion_ids": [
+      0
+    ],
+    "rule_coverage": [
+      {
+        "rule_id": "r0",
+        "required": true,
+        "conclusion_id": 0,
+        "conclusion_quote": "주문번호 또는 사건번호, 현재 상태, 다음 조치, 기한, 담당자를 모두 기재해야 합니다.",
+        "rationale": "인수인계 시 필수 작성 항목에 대한 답을 제공함"
+      },
+      {
+        "rule_id": "r1",
+        "required": false,
+        "conclusion_id": null,
+        "conclusion_quote": "",
+        "rationale": "인계 확인 방식에 대한 규정으로 기재 항목 질문에 필수적이지 않음"
+      },
+      {
+        "rule_id": "r2",
+        "required": false,
+        "conclusion_id": null,
+        "conclusion_quote": "",
+        "rationale": "질문에서 A, B 두 건이 모두 특정되어 공통 인계 기재사항을 묻고 있으므로 사건 특정 질문 규칙은 적용 대상이 아님"
+      }
+    ],
+    "candidate_coverage": [
+      {
+        "reference": {
+          "card_id": "1",
+          "card_version_id": "1",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "1"
+        },
+        "required": false,
+        "rationale": "환불 일반 규칙 규정으로 인수인계 기재사항 질문에 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "6",
+          "card_version_id": "6",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "6"
+        },
+        "required": false,
+        "rationale": "결제 장애 대처 규칙으로 인수인계 기재사항 질문에 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "4",
+          "card_version_id": "4",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "4"
+        },
+        "required": false,
+        "rationale": "발주 규칙 규정으로 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "7",
+          "card_version_id": "7",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "7"
+        },
+        "required": false,
+        "rationale": "마감 순서 규정으로 미해결 건 기재 항목 자체는 인수인계 규정에 상세 기술되어 있음"
+      },
+      {
+        "reference": {
+          "card_id": "8",
+          "card_version_id": "8",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "8"
+        },
+        "required": true,
+        "rationale": "미해결 건 인계 시 필요한 항목이 명시된 필수 근거임"
+      },
+      {
+        "reference": {
+          "card_id": "9",
+          "card_version_id": "9",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "9"
+        },
+        "required": false,
+        "rationale": "공지 및 할인 규칙으로 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "2",
+          "card_version_id": "2",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "2"
+        },
+        "required": false,
+        "rationale": "오픈 업무 규칙으로 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "3",
+          "card_version_id": "3",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "3"
+        },
+        "required": false,
+        "rationale": "근무 교대 규칙으로 불필요"
+      },
+      {
+        "reference": {
+          "card_id": "5",
+          "card_version_id": "5",
+          "block_id": "raw1",
+          "fact_revision_ids": [],
+          "raw_span_id": "5"
+        },
+        "required": false,
+        "rationale": "판매 수량 계산 규칙으로 불필요"
+      }
+    ]
+  },
+  "clarification": {
+    "request": {
+      "session_id": "6",
+      "request_id": "ops-OD06-2",
+      "question": "그 건은 메시지 읽었대. 인계 완료로 해도 돼?"
+    },
+    "http_status": 200,
+    "response": {
+      "contract_version": "v2",
+      "request_id": "ops-OD06-2",
+      "action": "CLARIFY",
+      "message": "어느 건을 말씀하시는지 선택해 주세요.",
+      "snapshot_id": "1",
+      "knowledge_revision": "1",
+      "citations": [],
+      "context_id": "9ab57d31-eba7-4a5b-ae16-2ae604a7e59a",
+      "allowed_options": [
+        "A는 결제 상태 미확인",
+        "B는 환불 승인 대기"
+      ],
+      "clarification_slot": "case",
+      "pending_id": null
+    },
+    "elapsed_local_ms": 8616.941,
+    "receipt_id": "8",
+    "context_revision": 1,
+    "receipt_verified": true,
+    "execution_metadata": {
+      "candidates": [
+        {
+          "card_id": "1",
+          "block_id": "raw1",
+          "rrf_score": 0.032266458495966696,
+          "vector_score": 1.0,
+          "lexical_score": 0.4000000059604645,
+          "card_version_id": "1"
+        },
+        {
+          "card_id": "6",
+          "block_id": "raw1",
+          "rrf_score": 0.03128054740957967,
+          "vector_score": 1.0,
+          "lexical_score": 0.5,
+          "card_version_id": "6"
+        },
+        {
+          "card_id": "8",
+          "block_id": "raw1",
+          "rrf_score": 0.031099324975891997,
+          "vector_score": 1.0,
+          "lexical_score": 0.6000000238418579,
+          "card_version_id": "8"
+        },
+        {
+          "card_id": "4",
+          "block_id": "raw1",
+          "rrf_score": 0.031009615384615385,
+          "vector_score": 1.0,
+          "lexical_score": 0.10000000149011612,
+          "card_version_id": "4"
+        },
+        {
+          "card_id": "7",
+          "block_id": "raw1",
+          "rrf_score": 0.03055037313432836,
+          "vector_score": 1.0,
+          "lexical_score": 0.4000000059604645,
+          "card_version_id": "7"
+        },
+        {
+          "card_id": "9",
+          "block_id": "raw1",
+          "rrf_score": 0.02964426877470356,
+          "vector_score": 1.0,
+          "lexical_score": 0.10000000149011612,
+          "card_version_id": "9"
+        },
+        {
+          "card_id": "2",
+          "block_id": "raw1",
+          "rrf_score": 0.016129032258064516,
+          "vector_score": 1.0,
+          "lexical_score": null,
+          "card_version_id": "2"
+        },
+        {
+          "card_id": "3",
+          "block_id": "raw1",
+          "rrf_score": 0.015873015873015872,
+          "vector_score": 1.0,
+          "lexical_score": null,
+          "card_version_id": "3"
+        },
+        {
+          "card_id": "5",
+          "block_id": "raw1",
+          "rrf_score": 0.015384615384615385,
+          "vector_score": 1.0,
+          "lexical_score": null,
+          "card_version_id": "5"
+        }
+      ],
+      "rrf_version": "rrf-k60/v1",
+      "rerank_status": "NOT_CALLED",
+      "index_revision": 0,
+      "planner_version": "r-explicit-slots/v7",
+      "alias_terms_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "glossary_version": "glossary/v1",
+      "general_semantics": {
+        "status": "VERIFIER_REJECTED",
+        "version": "r-general-semantics/v8",
+        "input_hash": "sha256:5843d226c900d67a2d33800c819c38146331d985f02a25ea13c34d0c56384ecc",
+        "unresolved": [],
+        "proposal_ms": 4039.812,
+        "reason_code": "MISSING_USER_INFO",
+        "release_hash": "sha256:3cfff2feaa21b85b5ca537554513a411143a45b5f304d2be67f66ab2864edbfa",
+        "proposal_hash": "sha256:f7d3e0fabb973fa94134f2f1d8d6339be075504d3ae064dfe31842a78ccd43db",
+        "reason_detail": "사용자가 '그 건'이라고 명시했으나, 대기 건인 A(결제 상태 미확인)와 B(환불 승인 대기) 중 어느 사건을 지칭하는지 특정되지 않았습니다.",
+        "response_style": "grounded_conclusion",
+        "fallback_action": "CLARIFY",
+        "verification_ms": 4482.315,
+        "verification_hash": "sha256:fe8f526c5ee24730369177cd03bd65a1e587e8783d61bfa7ed5356884a48d641",
+        "checked_user_turn_ids": [
+          0,
+          1
+        ]
+      },
+      "usage_operation_id": "sha256:3eb06cb715f247a22a23e2c216ff6b68ad3fda2479afb08688f7981c4bd6bf79",
+      "dialogue_receipt_ids": [
+        7
+      ],
+      "semantic_approval_id": null,
+      "lexical_query_version": "r-lexical-or/v1",
+      "normalization_version": "r-query-nfkc/v1",
+      "query_logical_call_id": "v2:3eb06cb715f247a22a23e2c216ff6b68ad3fda2479afb08688f7981c4bd6bf79:q0",
+      "semantic_catalog_hash": null,
+      "elapsed_before_save_ms": 8609.0,
+      "rerank_logical_call_id": null,
+      "dialogue_failed_turn_ids": []
+    },
+    "turn_number": 2,
+    "expected": {
+      "question": "그 건은 메시지 읽었대. 인계 완료로 해도 돼?",
+      "expected_action": "CLARIFY",
+      "required_fact_ids": [
+        "H02",
+        "H03"
+      ],
+      "reference_answer": "A 결제 확인 건인지 B 환불 승인 건인지 먼저 확인합니다. 어느 건이든 읽음만으로는 인계 완료가 아닙니다.",
+      "expected_context": {
+        "order_a": "PAYMENT_UNVERIFIED",
+        "order_b": "REFUND_APPROVAL_PENDING",
+        "referent": "AMBIGUOUS"
+      },
+      "forbidden_claims": [],
+      "derivations": [],
+      "grading_checks": [
+        "대상 확인 질문과 읽음만으로 완료 아님을 함께 제시한다."
+      ]
+    },
+    "action_matches": true,
+    "semantic_correct": null,
+    "candidate_fact_ids": [
+      "C01",
+      "C02",
+      "C03",
+      "H01",
+      "H02",
+      "H03",
+      "I01",
+      "I02",
+      "I03",
+      "I04",
+      "I05",
+      "N01",
+      "N02",
+      "N03",
+      "P01",
+      "P02",
+      "P03",
+      "P04",
+      "R01",
+      "R02",
+      "R03",
+      "R04",
+      "S01",
+      "S02",
+      "S03",
+      "S04"
+    ],
+    "required_facts_in_candidates": true
+  }
+}

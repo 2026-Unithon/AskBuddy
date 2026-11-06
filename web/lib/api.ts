@@ -1114,6 +1114,9 @@ export async function attachOwnerAnswerFile(questionId: number, sourceId: number
 }
 
 export type KnowledgeProposal = {
+  can_approve: boolean;
+  approval_block_reason: string | null;
+  affected_cards: { card_id: number; title: string }[];
   proposal_id: number;
   relation_type: "IDENTICAL" | "NEW" | "SUPPLEMENT" | "CONFLICT";
   status: "ANALYZED" | "LINKED" | "PENDING_REVIEW" | "PUBLISHED" | "FAILED" | "DISMISSED";

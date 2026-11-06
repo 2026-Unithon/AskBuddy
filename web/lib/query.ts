@@ -35,9 +35,9 @@ export function rHistoryQuery(token: string | null, store: number | null, user: 
     refetchInterval: (query) => query.state.data?.pages[0]?.has_pending_updates ? 5_000 : false,
   });
 }
-export function rPendingQuery(token: string | null, store: number | null, user: number | null) {
-  return infiniteQueryOptions({ queryKey: rKeys.pending(store, user),
-    queryFn: ({ signal, pageParam }) => rPendingList(token!, pageParam, signal),
+export function rPendingQuery(token: string | null, store: number | null, user: number | null, status?: "WAITING" | "ANSWERED") {
+  return infiniteQueryOptions({ queryKey: [...rKeys.pending(store, user), "list", status ?? "all"],
+    queryFn: ({ signal, pageParam }) => rPendingList(token!, pageParam, signal, status),
     initialPageParam: null as string | null, getNextPageParam: (page) => page.next_after,
     enabled: Boolean(token && store && user),
   });
@@ -45,7 +45,10 @@ export function rPendingQuery(token: string | null, store: number | null, user: 
 export function rDetailQuery(token: string | null, store: number | null, user: number | null, id: string | null) {
   return queryOptions({ queryKey: rKeys.detail(store, user, id), queryFn: ({ signal }) => rPendingDetail(token!, id!, signal),
     enabled: Boolean(token && store && user && id),
-    refetchInterval: (query) => query.state.data?.answers.at(-1)?.knowledge_status === "PENDING" ? 5_000 : false,
+    refetchInterval: (query) => {
+      const latest = query.state.data?.answers.at(-1);
+      return latest && (latest.knowledge_status === "PENDING" || (latest.knowledge_status === "FAILED" && !latest.retry_available)) ? 5_000 : false;
+    },
   });
 }
 import {

@@ -12,6 +12,7 @@ from app.contracts.answer import AnswerPlan
 from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.hashing import verify_snapshot_hash
 from app.learn.grounded_calculations import Calculation, calculate
+from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions
 
 
 class AnswerReferenceError(ValueError):
@@ -56,6 +57,11 @@ class ResolvedSelection:
     parts: tuple[ResolvedPart, ...] = ()
     calculations: tuple[Calculation, ...] = ()
     calculation_user_turns: tuple[str, ...] = ()
+    case_options: tuple = ()
+    case_user_turns: tuple[str, ...] = ()
+    conclusions: tuple[GroundedConclusion,...] = ()
+    conclusion_user_turns: tuple[str,...] = ()
+    conclusions_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,9 +96,13 @@ def validate_answer_for_question(
         raise AnswerReferenceError(exc.code) from exc
     plan, snapshot = validated.plan, validated.snapshot
     if plan.action != "ANSWER":
+        if resolved_query.conclusions:raise AnswerReferenceError('UNVERIFIED_CONCLUSION')
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    if query.conclusions:
+        if not query.conclusions_verified:raise AnswerReferenceError('UNVERIFIED_CONCLUSION')
+        validate_conclusions(query.conclusions,plan=plan,question=query.question,user_turns=query.conclusion_user_turns)
     try:
         calculate(query.calculations, plan=plan, snapshot=snapshot, store_id=store_id,
                   question=query.question, user_turns=query.calculation_user_turns)

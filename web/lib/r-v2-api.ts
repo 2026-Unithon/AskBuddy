@@ -14,6 +14,7 @@ export type RMessage = {
   original_question: string | null;
   response: RAnswer | null; context_revision: number | null;
   owner_answer_id: string | null; revision: number | null; knowledge_status: string | null;
+  knowledge_availability?: "CURRENT" | "CHANGED" | "UNAVAILABLE" | "NOT_APPLICABLE";
 };
 export type RChatInput = {
   request_id: string; session_id: string; question: string;
@@ -25,10 +26,14 @@ export type RRetryInput = { request_id: string; reason: string };
 export type RNotification = { notification_id: string; title: string; body: string; destination: string; read: boolean };
 export type RPending = {
   pending_id: string; status: string;
+  question: string; question_contract: "v1" | "v2";
+  legacy_answers: { owner_answer_id: string; answer: string }[];
   occurrences: { receipt_id: string; original_question: string;
     resolved_query: { confirmed_slots?: Record<string, string> };
     context_snapshot: { context?: { original_question?: string } } | null }[];
   answers: { owner_answer_id: string; answer: string; revision: number; knowledge_status: string;
+    knowledge_availability?: "CURRENT" | "CHANGED" | "UNAVAILABLE" | "NOT_APPLICABLE";
+    proposal_status?: string | null;
     event_id: string | null; attempts: number; retry_available: boolean }[];
 };
 
@@ -61,16 +66,25 @@ export const rCreateSession = (token: string, request_id: string) =>
 export const rAsk = (token: string, body: RChatInput) => request<RAnswer>("/chat", token, undefined, body);
 export const rHistory = (token: string, session: string, before: string | null, signal?: AbortSignal) =>
   request<{ messages: RMessage[]; next_before: string | null; has_pending_updates: boolean }>(`/sessions/${encodeURIComponent(session)}/history?latest=true${before ? `&before=${encodeURIComponent(before)}` : ""}`, token, signal);
-export const rPendingList = (token: string, after: string | null, signal?: AbortSignal) =>
-  request<{ questions: { pending_id: string; question: string; status: string }[]; next_after: string | null }>(`/pending${after ? `?after=${after}` : ""}`, token, signal);
+export const rPendingList = (token: string, after: string | null, signal?: AbortSignal, status?: "WAITING" | "ANSWERED") =>
+  request<{ questions: { pending_id: string; question: string; status: string }[]; next_after: string | null }>(`/pending?${new URLSearchParams({ ...(after ? { after } : {}), ...(status ? { status } : {}) })}`, token, signal);
 export const rPendingDetail = (token: string, id: string, signal?: AbortSignal) =>
   request<RPending>(`/pending/${encodeURIComponent(id)}`, token, signal);
 export const rOwnerAnswer = (token: string, id: string, body: ROwnerInput) =>
   request<{ owner_answer_id: string; knowledge_status: string }>(`/pending/${encodeURIComponent(id)}/answers`, token, undefined, body);
 export const rOwnerRetry = (token: string, id: string, body: RRetryInput) =>
   request<{ event_id: string; status: string }>(`/owner-events/${encodeURIComponent(id)}/retry`, token, undefined, body);
+export type RCitation = {
+  title: string; text: string; card_version_id: string; source_availability: string;
+  owner_answer_id?: string | null; source_id: string | null; source_type: string | null;
+  source_kind: "OWNER_ANSWER" | "OWNER_TEXT" | "SOURCE" | "UNKNOWN";
+  related_owner_answer_id: string | null;
+  source_locations: { occurrence_id: string | null; locator: {
+    type: string; line?: number; page?: number; timestamp_sec?: number;
+  } }[];
+};
 export const rCitation = (token: string, receipt: string, order: number, signal?: AbortSignal) =>
-  request<{ title: string; text: string; card_version_id: string; source_availability: string; owner_answer_id?: string | null }>(`/receipts/${encodeURIComponent(receipt)}/citations/${order}`, token, signal);
+  request<RCitation>(`/receipts/${encodeURIComponent(receipt)}/citations/${order}`, token, signal);
 export const rNotifications = (token: string, after: string | null, signal?: AbortSignal) =>
   request<{ notifications: RNotification[]; next_after: string | null }>(`/notifications${after ? `?after=${after}` : ""}`, token, signal);
 export const rReadNotification = (token: string, id: string) =>
