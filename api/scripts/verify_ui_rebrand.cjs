@@ -124,20 +124,20 @@ const BASE = 'http://127.0.0.1:3011';
     const owner = await context('OWNER'), page = await owner.newPage();
     page.on('pageerror', (e) => errors.push(e.message));
 
-    // P2 작업 화면: 처리 중 → PARTIAL 결과 → "맞아요" 일부 실패 → 실패한 카드만 재시도
+    // P2 작업 화면: 처리 중 → PARTIAL 결과 → "검수 완료" 일부 실패 → 실패한 카드만 재시도(화면 개선 계획 2)
     await page.goto(`${BASE}/owner/jobs/7`);
     await page.getByText('정리하고 있어요', { exact: true }).waitFor();
     check('job processing shows server state without fake progress', await page.getByRole('progressbar').count() === 0);
     state.job.status = 'PARTIAL';
-    await page.getByText('이렇게 나눴어요', { exact: true }).waitFor({ timeout: 10000 });
-    check('job polling moves to result', await page.getByText('준비된 카드와 처리하지 못한 자료가 있어요.', { exact: false }).isVisible());
-    check('needs-review card separated from bulk approve', await page.getByRole('heading', { name: /하나씩 봐 주세요\s*1/ }).isVisible());
+    await page.getByRole('heading', { name: '카드가 준비됐어요! 검수 부탁드려요!' }).waitFor({ timeout: 10000 });
+    check('job polling moves to result', await page.getByRole('alert').getByText('처리하지 못한 자료가 있어요.', { exact: true }).isVisible());
+    check('needs-review card separated from bulk approve', await page.getByRole('region', { name: '맞는지 확인해 주세요!' }).isVisible());
     check('excluded card hidden from result', await page.getByText('합성 지운 카드').count() === 0);
     state.failApprove.add(2);
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
-    await page.getByText('를 다시 누르면 이 카드만 다시 시도해요.', { exact: false }).waitFor();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
+    await page.getByText('검수 완료를 다시 누르면 이 카드만 다시 해요.', { exact: false }).waitFor();
     check('bulk approve failure stays on failed card', state.approveCalls.join() === '2');
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
     await page.waitForURL('**/owner', { timeout: 10000 }).catch(() => {});
     check('retry approves only the failed card', state.approveCalls.join() === '2,2' && state.cards[1].review_status === 'APPROVED');
     state.job.status = 'FAILED'; state.failRetryJob = true;
@@ -281,7 +281,7 @@ const BASE = 'http://127.0.0.1:3011';
     state.guideCompleted = false; state.job.status = 'SUCCEEDED';
     state.cards[0].review_status = 'PENDING'; state.cards[2].review_status = 'PENDING'; state.cards[2].needs_review_reason = null;
     await page.goto(`${BASE}/owner/jobs/7`);
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
     await page.waitForURL('**/owner/invite');
     check('first publish continues to invite', state.cards[0].review_status === 'APPROVED' && state.cards[2].review_status === 'APPROVED');
     for (const width of [390, 360]) {

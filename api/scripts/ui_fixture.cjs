@@ -36,6 +36,11 @@ function initialState(overrides) {
     shifts: [['오픈', '08:00', '12:00'], ['미들', '12:00', '17:00'], ['마감', '17:00', '22:00']].map(([name, starts_at, ends_at], i) => ({ shift_id: i + 1, name, starts_at, ends_at, sort_order: i, card_ids: [4] })),
     sessions: [],
     messages: [],
+    job: { status: 'SUCCEEDED' },
+    jobSequence: null,
+    uploadDelayMs: 0,
+    failUpload: false,
+    failRestore: false,
     ...overrides,
   };
 }
@@ -61,6 +66,20 @@ function syntheticApi(role, overrides = {}) {
     groups: [{ shift_id: 1, name: '오픈', cards: [[4, 40, '오픈 준비', 1, true], [6, 60, '우유 재고 확인', 2, false]].map(([card_id, card_version_id, title, item_id, checked]) => ({ card_id, card_version_id, title, item_id, lines: [{ line_no: 1, text: title, checked }] })) }],
     my_submission: null,
   });
+
+  const ACTIVE = new Set(['QUEUED', 'EXTRACTING', 'CLASSIFYING']);
+  // jobSequence 가 있으면 첫 요청부터 1초마다 다음 상태로 넘어간다(마지막 값은 유지).
+  // 요청 수가 아니라 시간으로 넘겨야 작업 목록·작업 상세가 같은 순간에 같은 상태를 본다
+  let sequenceStart = null;
+  const jobStatus = () => {
+    if (state.jobSequence && state.jobSequence.length) {
+      sequenceStart ??= Date.now();
+      const index = Math.min(Math.floor((Date.now() - sequenceStart) / 1000), state.jobSequence.length - 1);
+      state.job = { ...state.job, status: state.jobSequence[index] };
+    }
+    return state.job.status;
+  };
+  const jobSources = (status) => state.job.sources ?? [{ source_id: 31, filename: '레시피 메모.jpg', status: ACTIVE.has(status) ? status : 'SUCCEEDED', card_count: ACTIVE.has(status) ? 0 : 4, error: null, source_availability: 'AVAILABLE' }];
 
   async function handler(route) {
     const req = route.request(), url = new URL(req.url()), p = url.pathname, m = req.method();
@@ -92,7 +111,9 @@ function syntheticApi(role, overrides = {}) {
     // 카드
     else if (p === '/cards' && m === 'GET') {
       const status = url.searchParams.get('review_status'), q = url.searchParams.get('query');
+      const jobId = url.searchParams.get('job_id');
       let items = state.cards;
+      if (jobId) items = items.filter((c) => (c.job_id ?? 7) === Number(jobId));
       if (status && status !== 'all') items = items.filter((c) => c.review_status === status.toUpperCase());
       if (q) items = items.filter((c) => c.title.includes(q));
       payload = { items: items.map(listItem), next_cursor: null, total: items.length };
@@ -100,6 +121,18 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
       payload = detail(c);
+    } else if (/^\/cards\/\d+\/(approve|exclude|restore)$/.test(p) && m === 'POST') {
+      const [, , id, action] = p.split('/');
+      const c = state.cards.find((x) => x.card_id === Number(id));
+      if (!c) return reply({ error: { message: '없는 카드' } }, 404);
+      if (action === 'restore' && state.failRestore) return reply({ error: { message: '되돌리기 저장 실패' } }, 503);
+      // 서버(api/app/cards/router.py)처럼 restore 는 공개 전 카드를 PENDING 으로 되돌린다
+      c.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', restore: 'PENDING' }[action];
+      payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: c.review_status === 'APPROVED' ? c.card_id * 10 : null, updated_at: NOW, undo_until: null };
+    } else if (/^\/cards\/\d+\/category$/.test(p) && m === 'PATCH') {
+      const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
+      c.category_id = body.category_id;
+      payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: null, updated_at: NOW, undo_until: null };
     } else if (/^\/cards\/\d+\/facts$/.test(p)) payload = { card_id: Number(p.split('/')[2]), blocks: [], facts: [] };
     else if (p === '/categories') payload = { version: 1, reclassification: null, items: CATEGORIES };
     else if (p === '/learn/knowledge-proposals') payload = { store_id: 1, status: 'PENDING_REVIEW', items: [] };
@@ -140,14 +173,22 @@ function syntheticApi(role, overrides = {}) {
     // 넣기
     else if (p === '/ingest/capabilities') payload = { TEXT: { extensions: ['txt'], max_bytes: null }, SCAN: { extensions: ['pdf', 'jpg', 'jpeg', 'png', 'docx'], max_bytes: null, max_pages: null }, KAKAO: { extensions: ['txt', 'jpg', 'jpeg', 'png'], max_bytes: null } };
     else if (p === '/ingest/upload-url') payload = { upload_url: 'http://localhost:8000/storage/put', file_url: '1/scan/synthetic.txt' };
-    else if (p === '/storage/put') payload = {};
+    else if (p === '/storage/put') {
+      if (state.uploadDelayMs) await new Promise((r) => setTimeout(r, state.uploadDelayMs));
+      if (state.failUpload) return reply({ error: { message: 'synthetic upload failure' } }, 500);
+      payload = {};
+    }
     else if (p === '/ingest/sources' && m === 'POST') payload = { source_id: 31, status: 'QUEUED', duplicate: false };
     else if (p === '/ingest/jobs' && m === 'POST') payload = { job_id: 7, status: 'QUEUED' };
-    else if (p === '/ingest/jobs' && m === 'GET') payload = { items: [], next_cursor: null, total: 0 };
-    else if (p === '/ingest/jobs/7') payload = { job_id: 7, title: null, status: 'SUCCEEDED', category_version: 1,
-      counts: { sources: 1, succeeded: 1, failed: 0, partial: 0, cards: 4 },
-      sources: [{ source_id: 31, filename: '레시피 메모.jpg', status: 'SUCCEEDED', card_count: 4, error: null, source_availability: 'AVAILABLE' }],
-      review_destination: '/owner/cards?status=all&job_id=7' };
+    else if (p === '/ingest/jobs' && m === 'GET') {
+      const status = jobStatus();
+      payload = { items: [{ job_id: 7, title: null, status, category_version: 1, source_count: jobSources(status).length, card_count: 4, created_at: NOW, completed_at: ACTIVE.has(status) ? null : NOW }], next_cursor: null, total: 1 };
+    } else if (p === '/ingest/jobs/7' && m === 'GET') {
+      const status = jobStatus(), sources = jobSources(status);
+      payload = { job_id: 7, title: null, status, category_version: 1,
+        counts: { sources: sources.length, succeeded: sources.filter((x) => x.status === 'SUCCEEDED').length, failed: sources.filter((x) => x.status === 'FAILED').length, partial: 0, cards: ACTIVE.has(status) ? 0 : 4 },
+        sources, review_destination: '/owner/cards?status=all&job_id=7' };
+    } else if (p === '/ingest/jobs/7/retry' && m === 'POST') { state.jobSequence = null; state.job = { ...state.job, status: 'QUEUED' }; payload = { job_id: 7, status: 'QUEUED' }; }
     else {
       misses.push(`${m} ${p}`);
       return reply({ error: { message: 'synthetic: unknown endpoint' } }, 404);

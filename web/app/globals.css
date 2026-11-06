@@ -239,6 +239,13 @@ select:disabled {
   }
 }
 
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 @keyframes check-pop {
   from {
     transform: scale(0.6);

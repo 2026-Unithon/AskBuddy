@@ -11,8 +11,9 @@ const TOAST_MS = 2000;
 const SNACKBAR_MS = 5000;
 
 type SnackbarOptions = { message: string; actionLabel: string; onAction: () => void; durationMs?: number };
-type Notice = { id: number; message: string; action?: { label: string; onClick: () => void } };
-type Feedback = { toast: (message: string) => void; snackbar: (opts: SnackbarOptions) => void; dismiss: () => void };
+type Notice = { id: number; message: string; action?: { label: string; onClick: () => void }; keepOnNavigate?: boolean };
+type ToastOptions = { keepOnNavigate?: boolean };
+type Feedback = { toast: (message: string, opts?: ToastOptions) => void; snackbar: (opts: SnackbarOptions) => void; dismiss: () => void };
 
 const FeedbackContext = createContext<Feedback>({ toast: () => {}, snackbar: () => {}, dismiss: () => {} });
 
@@ -39,12 +40,22 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     }, ms);
   }, []);
 
-  // 다른 화면으로 가면 닫는다. 되돌리기가 떠난 화면의 상태를 건드리지 않게 한다
-  useEffect(() => dismiss, [pathname, dismiss]);
+  // 다른 화면으로 가면 닫는다. 되돌리기가 떠난 화면의 상태를 건드리지 않게 한다.
+  // 이동 직전에 띄운 완료 알림(keepOnNavigate)은 다음 화면에서도 보여야 하므로 남긴다
+  const keep = useRef(false);
+  useEffect(() => {
+    keep.current = Boolean(notice?.keepOnNavigate);
+  }, [notice]);
+  useEffect(
+    () => () => {
+      if (!keep.current) dismiss();
+    },
+    [pathname, dismiss],
+  );
 
   const value = useMemo<Feedback>(
     () => ({
-      toast: (message) => show({ message }, TOAST_MS),
+      toast: (message, opts) => show({ message, keepOnNavigate: opts?.keepOnNavigate }, TOAST_MS),
       snackbar: ({ message, actionLabel, onAction, durationMs = SNACKBAR_MS }) =>
         show(
           {

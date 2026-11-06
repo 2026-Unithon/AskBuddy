@@ -1,6 +1,6 @@
 "use client";
 
-import { notFound, useSearchParams } from "next/navigation";
+import { notFound, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import {
   AnswerBubble,
@@ -31,9 +31,12 @@ import {
   Sheet,
   Skeleton,
   STAFF_TABS,
+  Stagger,
+  SwipeRow,
   TabBar,
   useFeedback,
 } from "@/components/kit";
+import { useLongPress } from "@/lib/use-long-press";
 
 // 개발 전용: 공통 컴포넌트를 Figma 화면(O6·A2·A5·O9)과 나란히 비교하는 미리보기. ?s=o6|a2|a5|o9|states
 function Preview() {
@@ -43,6 +46,7 @@ function Preview() {
   const [sheet, setSheet] = useState(false);
 
   if (screen === "feedback") return <FeedbackPreview />;
+  if (screen === "gestures") return <GesturesPreview />;
 
   if (screen === "a2") {
     return (
@@ -166,6 +170,40 @@ function Preview() {
       <CardLink href="/dev/kit?s=a5" title="디카페인 원두 어디 있어요?" meta="답하면 카드로 남아요" />
       <CardLink href="/dev/kit?s=a5" title="오트밀크 라떼도 시럽 2펌프인가요?" meta="답하면 카드로 남아요" />
       <Caption>질문이 오면 바로 알려드려요</Caption>
+    </Screen>
+  );
+}
+
+// ?s=gestures: 차례 등장·밀기·길게 누르기·이동해도 남는 토스트 (계획 2)
+function GesturesPreview() {
+  const { toast } = useFeedback();
+  const router = useRouter();
+  const [result, setResult] = useState("");
+  const longPress = useLongPress(() => setResult("길게 눌렀어요"));
+  return (
+    <Screen>
+      <PageHeader title="제스처" />
+      <Stagger>
+        <p>하나</p>
+        <p>둘</p>
+        <p>셋</p>
+      </Stagger>
+      <SwipeRow left={{ label: "빼기", tone: "danger", onAction: () => setResult("뺐어요") }}>
+        <div className="rounded-[20px] bg-surface px-4 py-5 shadow-card">밀어 보세요</div>
+      </SwipeRow>
+      <Button variant="secondary" {...longPress}>
+        꾹 눌러 보세요
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          toast("남아 있어요", { keepOnNavigate: true });
+          router.push("/dev/kit?s=o6");
+        }}
+      >
+        이동해도 남는 토스트
+      </Button>
+      {result && <p>{result}</p>}
     </Screen>
   );
 }

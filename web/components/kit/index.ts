@@ -6,6 +6,8 @@ export { AnswerBubble, QuestionBubble } from "@/components/kit/chat";
 export { CheckRow } from "@/components/kit/checkbox";
 export { AskBar, Composer, ComposerTool } from "@/components/kit/composer";
 export { Banner, ConfirmDialog, CountBadge, FeedbackProvider, useFeedback } from "@/components/kit/feedback";
+export { Stagger } from "@/components/kit/stagger";
+export { SwipeRow, type SwipeAction } from "@/components/kit/swipe-row";
 export { HeaderActions } from "@/components/kit/header-actions";
 export { HeroCard, HeroClock, HeroProgress } from "@/components/kit/hero";
 export { Icon, type IconName } from "@/components/kit/icon";

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 /** Figma A3 바텀시트: 어두운 덮개 + 아래에서 올라오는 패널. Escape·덮개로 닫는다. */
 export function Sheet({
@@ -81,7 +82,8 @@ export function Sheet({
   }, [open, onClose, dismissible]);
 
   if (!open) return null;
-  return (
+  // 앱 틀(.app-mobile-frame) 바로 아래로 띄운다. 카드나 스크롤 영역 안에서 열어도 화면 전체를 덮는다
+  return createPortal(
     <div className="absolute inset-0 z-40 flex flex-col justify-end">
       {dismissible ? (
         <button
@@ -118,6 +120,7 @@ export function Sheet({
         )}
         {children}
       </div>
-    </div>
+    </div>,
+    document.querySelector(".app-mobile-frame") ?? document.body,
   );
 }

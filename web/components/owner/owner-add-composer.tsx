@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
 import { useRef, useState } from "react";
-import { Caption, Composer, ComposerTool, ErrorInline, Icon } from "@/components/kit";
+import { Caption, Composer, ComposerTool, ErrorInline, Icon, useFeedback } from "@/components/kit";
 import { IntakeHintChips } from "@/components/owner/intake-hint-chips";
 import { apiErrorMessage, type IntakeHint } from "@/lib/api";
 import {
@@ -13,6 +13,7 @@ import {
   submitIngest,
   supportsText,
   tooLargeMessage,
+  type ItemUpdate,
   type PickedFile,
   type SourceFailure,
 } from "@/lib/ingest-submit";
@@ -28,19 +29,28 @@ export function OwnerAddComposer({
   placeholder = "새로 알려줄 것 넣기",
   defaultText = "",
   defaultHints = [],
+  text: controlledText,
+  onTextChange,
 }: {
   placeholder?: string;
   /** 응대 가이드처럼 상황 문장을 미리 넣어 둘 때. 바꾸려면 부모가 key 로 다시 그린다. */
   defaultText?: string;
   defaultHints?: IntakeHint[];
+  /** 주면 제어형(넣기 화면의 예시 칩이 글을 채운다), 안 주면 내부 상태 */
+  text?: string;
+  onTextChange?: (value: string) => void;
 }) {
   const { state } = useApp();
   const router = useRouter();
   const { markReplace } = useNavHistory();
+  const { toast } = useFeedback();
   const client = useQueryClient();
   const caps = useQuery(ingestCapabilitiesQuery(state.token, state.storeId));
-  const [text, setText] = useState(defaultText);
+  const [innerText, setInnerText] = useState(defaultText);
+  const text = controlledText ?? innerText;
   const [files, setFiles] = useState<PickedFile[]>([]);
+  // 파일마다 올리는 중·끝·실패. 화면 입력의 일부라 이 컴포넌트가 들고, 새로 넣으면 비운다.
+  const [progress, setProgress] = useState<Record<string, ItemUpdate>>({});
   const [pickErrors, setPickErrors] = useState<string[]>([]);
   // 점주 선택 칩: 화면 입력일 뿐이라 이 컴포넌트가 들고, 제출이 성공하면 비운다.
   const [hints, setHints] = useState<IntakeHint[]>(defaultHints);
@@ -50,16 +60,40 @@ export function OwnerAddComposer({
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const setText = (value: string) => {
+    if (onTextChange) onTextChange(value);
+    else setInnerText(value);
+    setIdempotencyKey(crypto.randomUUID());
+  };
+
   const textEnabled = supportsText(caps.data);
+  const maxChars = caps.data?.TEXT?.max_chars;
+  const overLimit = maxChars !== undefined && text.length > maxChars;
   const submit = useMutation({
-    mutationFn: () => submitIngest({ files, text: textEnabled ? text : "", token: state.token!, idempotencyKey, hints }),
+    mutationFn: () =>
+      submitIngest({
+        files,
+        text: textEnabled ? text : "",
+        token: state.token!,
+        idempotencyKey,
+        hints,
+        onItem: (key, update) => setProgress((prev) => ({ ...prev, [key]: update })),
+      }),
+    onMutate: () => {
+      setFailures([]);
+      setProgress({});
+    },
     onSuccess: async (result) => {
       setFailures(result.failures);
       if (result.jobId === null) return;
       await client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
+      // 일부만 실패한 채 작업으로 넘어가면 넣기 화면의 실패 줄이 사라지므로 다음 화면까지 남는 알림으로 알린다
+      const failedNames = result.failures.map((f) => f.name);
+      if (failedNames.length) toast(`${failedNames.join(", ")}은(는) 올리지 못했어요`, { keepOnNavigate: true });
       setText("");
       setFiles([]);
       setHints([]);
+      setProgress({});
       setIdempotencyKey(crypto.randomUUID());
       // 넣기 화면은 끝났으니 기록에서 지운다(폰 뒤로가 넣기 전 화면으로)
       markReplace();
@@ -89,7 +123,8 @@ export function OwnerAddComposer({
   };
 
   const hasText = text.trim().length > 0;
-  const canSubmit = files.length > 0 || (hasText && textEnabled);
+  const canSubmit = (files.length > 0 || (hasText && textEnabled)) && !overLimit;
+  const textFailure = failures.find((f) => f.key === "text");
 
   return (
     <div className="flex flex-col gap-2">
@@ -100,17 +135,12 @@ export function OwnerAddComposer({
           retrying={submit.isPending}
         />
       )}
-      {failures.length > 0 && !submit.isPending && (
-        <ErrorInline message={failures.map((f) => `${f.name}: ${f.message}`).join("\n")} />
-      )}
+      {textFailure && !submit.isPending && <ErrorInline message={textFailure.message} onRetry={() => submit.mutate()} />}
       {pickErrors.length > 0 && <ErrorInline message={pickErrors.join("\n")} />}
       <Composer
         label="새로 알려줄 것"
         value={text}
-        onChange={(value) => {
-          setText(value);
-          setIdempotencyKey(crypto.randomUUID());
-        }}
+        onChange={setText}
         onSubmit={() => submit.mutate()}
         canSubmit={canSubmit && caps.isSuccess}
         submitting={submit.isPending}
@@ -123,26 +153,27 @@ export function OwnerAddComposer({
         }
         attachments={
           files.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5">
+            <ul className="flex flex-col gap-1.5">
               {files.map((item) => (
-                <li key={item.id} className="flex max-w-full items-center gap-1 rounded-full bg-empty py-1 pl-2.5 pr-1 text-[12px] font-medium text-primary">
-                  <Icon name="clip" size={12} />
-                  <span className="truncate">{item.file.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`${item.file.name} 빼기`}
-                    disabled={submit.isPending}
-                    onClick={() => setFiles((prev) => prev.filter((f) => f.id !== item.id))}
-                    className="flex size-6 items-center justify-center rounded-full text-[14px] leading-none"
-                  >
-                    ×
-                  </button>
-                </li>
+                <FileRow
+                  key={item.id}
+                  name={item.file.name}
+                  update={progress[item.id]}
+                  failure={failures.find((f) => f.key === item.id)?.message}
+                  disabled={submit.isPending}
+                  onRemove={() => setFiles((prev) => prev.filter((f) => f.id !== item.id))}
+                  onRetry={() => submit.mutate()}
+                />
               ))}
             </ul>
           ) : undefined
         }
       />
+      {maxChars !== undefined && hasText && (
+        <p className={`text-right text-[15px] font-bold ${overLimit ? "text-danger-700" : "text-ink-muted"}`} aria-live="polite">
+          {overLimit ? `${maxChars.toLocaleString()}자까지 넣을 수 있어요` : `${(maxChars - text.length).toLocaleString()}자 남았어요`}
+        </p>
+      )}
       <IntakeHintChips
         value={hints}
         onChange={(next) => {
@@ -180,5 +211,68 @@ export function OwnerAddComposer({
         }}
       />
     </div>
+  );
+}
+
+/** 첨부 파일 한 줄: 올리는 중 막대, 끝나면 체크, 실패하면 빨간 줄과 이유와 '다시'. */
+function FileRow({
+  name,
+  update,
+  failure,
+  disabled,
+  onRemove,
+  onRetry,
+}: {
+  name: string;
+  update?: ItemUpdate;
+  failure?: string;
+  disabled: boolean;
+  onRemove: () => void;
+  onRetry: () => void;
+}) {
+  const failed = Boolean(failure) || update?.status === "FAILED";
+  const uploading = update?.status === "UPLOADING";
+  const done = update?.status === "DONE";
+  return (
+    <li
+      className={`flex flex-col gap-1 rounded-[12px] px-2.5 py-1.5 text-[12px] font-medium ${
+        failed ? "border border-danger-500 bg-danger-50 text-danger-700" : "bg-empty text-primary"
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Icon name={done ? "check" : "clip"} size={12} />
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        {failed ? (
+          <button type="button" disabled={disabled} onClick={onRetry} className="min-h-8 rounded-[8px] bg-surface px-2.5 font-bold text-danger-700">
+            다시
+          </button>
+        ) : (
+          !uploading && (
+            <button
+              type="button"
+              aria-label={`${name} 빼기`}
+              disabled={disabled}
+              onClick={onRemove}
+              className="flex size-8 items-center justify-center rounded-full text-[14px] leading-none"
+            >
+              ×
+            </button>
+          )
+        )}
+      </div>
+      {uploading && (
+        <div
+          role="progressbar"
+          aria-label={`${name} 올리는 중`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round((update.progress ?? 0) * 100)}
+          className="h-1 w-full overflow-hidden rounded-full bg-surface"
+        >
+          <div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${Math.max(4, (update.progress ?? 0) * 100)}%` }} />
+        </div>
+      )}
+      {failed && failure && <p>{failure}</p>}
+    </li>
   );
 }

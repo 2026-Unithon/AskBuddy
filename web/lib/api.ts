@@ -911,13 +911,19 @@ export async function requestUploadUrl(
   });
 }
 
-export async function putToStorage(uploadUrl: string, file: File) {
-  const res = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "content-type": file.type || "application/octet-stream" },
-    body: file,
+/** 서명 URL 로 파일을 올린다. fetch 는 올리는 진행을 알려주지 않아 XHR 을 쓴다. */
+export function putToStorage(uploadUrl: string, file: File, onProgress?: (fraction: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", uploadUrl);
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
+    };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`업로드 실패: ${xhr.status}`)));
+    xhr.onerror = () => reject(new Error("업로드 실패: 네트워크"));
+    xhr.send(file);
   });
-  if (!res.ok) throw new Error(`업로드 실패: ${res.status}`);
 }
 
 export async function computeContentHash(file: File): Promise<string | undefined> {

@@ -1,31 +1,8 @@
-// 이동·공통 키트 회귀. 합성 API(ui_fixture.cjs)만 쓴다.
-// 실행: next start -p 3011 을 띄운 뒤 NODE_PATH=<playwright> node api/scripts/verify_ui_nav.cjs
-const { chromium } = require('playwright');
+// 이동·공통 키트 회귀(화면 개선 계획 1). 합성 API(ui_fixture.cjs)만 쓴다.
+// 실행: next start -p 3011 을 띄운 뒤 NODE_PATH=<playwright> node api/scripts/verify_ui_nav.cjs [이름 앞부분]
 const assert = require('node:assert/strict');
-const { syntheticApi } = require('./ui_fixture.cjs');
-
-const BASE = process.env.UI_BASE || 'http://127.0.0.1:3011';
-const here = (page) => { const u = new URL(page.url()); return u.pathname + u.search; };
-const cases = [];
-const test = (name, fn) => cases.push([name, fn]);
-const opened = [];
-
-async function open(browser, role, url, { viewport = { width: 390, height: 844 }, overrides } = {}) {
-  const api = syntheticApi(role, overrides);
-  opened.push(api);
-  const ctx = await browser.newContext({ viewport, locale: 'ko-KR' });
-  await ctx.route('http://localhost:8000/**', api.handler);
-  const page = await ctx.newPage();
-  page.on('pageerror', (error) => api.misses.push(`pageerror ${error.message}`));
-  await page.goto(BASE + url);
-  await page.waitForLoadState('networkidle');
-  return { ctx, page, api };
-}
-// 앱 뒤로 버튼. 화면마다 글자(카드·직원 질문·뒤로)가 달라 표시 속성으로 찾는다.
-const back = (page) => page.locator('[data-back]').first();
-async function to(page, path) { await page.waitForURL((u) => u.pathname + u.search === path, { timeout: 5000 }); }
-// 폰 뒤로가기. 앱 밖(첫 화면 이전)으로 나가면 about:blank 가 된다.
-async function phoneBack(page) { await page.goBack({ waitUntil: 'networkidle' }).catch(() => null); return page.url().startsWith('about:') ? 'about:blank' : here(page); }
+const { createSuite, open, back, to, phoneBack, here, BASE } = require('./ui_harness.cjs');
+const { test, run } = createSuite('ui-nav');
 
 test('NAV-1 질문 상세의 앱 뒤로는 왔던 오늘 매장, 폰 뒤로로 상세에 돌아가지 않는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner');
@@ -296,17 +273,4 @@ test('NAV-3 새로고침으로 캐시가 비어도(늦게 그려져도) 탭 스�
   await ctx.close();
 });
 
-(async () => {
-  const only = process.argv[2];
-  const browser = await chromium.launch({ headless: true });
-  let passed = 0;
-  for (const [name, fn] of cases) {
-    if (only && !name.startsWith(only)) continue;
-    await fn(browser);
-    // fixture 가 모르는 API 를 부른 화면은 실패로 본다(합성 데이터가 화면을 다 덮는지)
-    for (const api of opened.splice(0)) assert.deepEqual(api.misses, [], `${name} 모르는 API: ${api.misses.join(', ')}`);
-    passed++; console.log('PASS ui-nav', name);
-  }
-  await browser.close();
-  console.log(`ui-nav ${passed} passed`);
-})().catch((error) => { console.error(error); process.exit(1); });
+run();

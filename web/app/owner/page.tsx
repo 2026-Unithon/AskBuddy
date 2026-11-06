@@ -18,6 +18,7 @@ import {
   TabBar,
 } from "@/components/kit";
 import { OwnerChecklistStatus } from "@/components/checklist/owner-status";
+import { FinishedJobBanner } from "@/components/owner/finished-job-banner";
 import { OwnerAddComposer } from "@/components/owner/owner-add-composer";
 import { TodayTasksSection } from "@/components/owner/today-tasks-section";
 import { apiErrorMessage } from "@/lib/api";
@@ -39,6 +40,7 @@ export default function OwnerTodayPage() {
         title="오늘 매장"
         action={<HeaderActions role="OWNER" />}
       />
+      <FinishedJobBanner />
 
       <OwnerChecklistStatus />
       <CardLink href="/owner/report" title="매장 리포트" meta="알바생 질문, AI 답변, 사장님께 넘어온 건수" />

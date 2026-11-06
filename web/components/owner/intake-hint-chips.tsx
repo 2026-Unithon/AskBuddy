@@ -1,5 +1,6 @@
 "use client";
 
+import { focusRing } from "@/components/kit/buttons";
 import type { IntakeHint } from "@/lib/api";
 
 export const INTAKE_HINT_LABELS: Record<IntakeHint, string> = {
@@ -31,7 +32,8 @@ export function IntakeHintChips({
   return (
     <div className="flex flex-col gap-1.5" role="group" aria-label="자료 종류">
       <p className="text-[12px] font-medium text-ink-muted">이건 어떤 자료인가요? (선택, 여러 개 가능)</p>
-      <div className="flex flex-wrap gap-1.5">
+      {/* 한 줄로 두고 넘치면 옆으로 민다. 칩은 작게, 누르는 자리는 위아래 6px 넓혀 44px 를 지킨다 */}
+      <div className="-mx-1 flex flex-nowrap gap-1.5 overflow-x-auto px-1 py-1.5">
         {ORDER.map((hint) => {
           const on = value.includes(hint);
           return (
@@ -41,7 +43,7 @@ export function IntakeHintChips({
               aria-pressed={on}
               disabled={disabled}
               onClick={() => toggle(hint)}
-              className={`min-h-11 rounded-full border px-4 text-[13px] font-medium disabled:opacity-50 ${on ? "border-primary bg-primary text-white" : "border-transparent bg-empty text-ink"}`}
+              className={`relative h-8 shrink-0 rounded-[8px] px-3 text-[12px] font-medium transition-colors duration-150 before:absolute before:inset-x-0 before:-inset-y-1.5 disabled:opacity-50 ${focusRing} ${on ? "bg-primary text-white" : "bg-empty text-ink"}`}
             >
               {INTAKE_HINT_LABELS[hint]}
             </button>
