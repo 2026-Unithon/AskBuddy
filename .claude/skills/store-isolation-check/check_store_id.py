@@ -58,6 +58,8 @@ TENANT_TABLES = {
     # P5 근무조 체크리스트 (가산)
     "store_shifts", "checklist_cards", "checklist_card_shifts", "member_shifts",
     "checklist_checks", "checklist_check_events", "checklist_submissions",
+    # 사장 운영: 오늘만 할 일 (가산)
+    "today_tasks", "today_task_targets",
     # Phase B 입구 분류 기록·점주 답변 첨부 (가산)
     "intake_route_decisions", "owner_answer_attachments",
 }

@@ -163,6 +163,10 @@ DEFAULT_CATEGORIES: dict[str, list[tuple[str, bool, int]]] = {
         ("음료제작", True, 3),
         ("마감업무", True, 4),
         ("베이킹", False, 5),
+        # 레시피보다 오래 걸리는 응대·돌발 대응 매뉴얼 (사장 응대 가이드 화면과 같은 이름)
+        ("손님응대", True, 6),
+        ("배달대응", True, 7),
+        ("돌발상황", True, 8),
     ],
 }
 

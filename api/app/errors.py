@@ -86,6 +86,8 @@ def install_error_handlers(app: FastAPI) -> None:
                     "/notifications",
                     "/team",
                     "/checklist",
+                    "/today-tasks",
+                    "/report",
                 )
             )
             or request.url.path.startswith("/learn/items/")
