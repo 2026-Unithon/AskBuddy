@@ -29,6 +29,7 @@ import {
   STAFF_TABS,
   TabBar,
 } from "@/components/kit";
+import { TodayOnlyTasks } from "@/components/checklist/today-only-tasks";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import {
   checklistApi,
@@ -41,6 +42,7 @@ import {
   bootstrapQuery,
   checklistKeys,
   checklistTodayQuery,
+  myTodayTasksQuery,
 } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
@@ -112,6 +114,9 @@ export function TodayScreen() {
   const bootstrap = useQuery(
     bootstrapQuery(state.token, state.userId, state.storeId),
   );
+  // 같은 캐시를 TodayOnlyTasks 와 나눠 쓴다. 사장 지시가 있으면 '할 일 없음' 안내를 띄우지 않는다
+  const todayOnly = useQuery(myTodayTasksQuery(state.token, state.storeId, state.userId));
+  const hasTodayOnly = (todayOnly.data?.items.length ?? 0) > 0;
   const data = today.data;
   // 날짜만 화면 상태로 보관한다. 서버 응답과 체크 상태는 Query 캐시가 정본이다.
   if (data && displayDate !== data.business_date) {
@@ -173,6 +178,7 @@ export function TodayScreen() {
         }
       />
       {dayChanged && <p role="status">하루가 바뀌었어요</p>}
+      <TodayOnlyTasks />
       {today.isLoading && (
         <>
           <Skeleton className="h-40" />
@@ -222,7 +228,7 @@ export function TodayScreen() {
                 {data.scope_counts.done}/{data.scope_counts.total}개
               </p>
             </HeroCard>
-          ) : (
+          ) : hasTodayOnly ? null : (
             <Empty
               title="아직 오늘 할 일이 없어요"
               description="사장님이 정해 주면 여기에 생겨요"

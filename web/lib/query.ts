@@ -1,4 +1,5 @@
 import { checklistApi } from "./checklist-api";
+import { ownerOpsKeys, reportApi, todayTasksApi } from "./owner-ops";
 import { refreshSession, getProviders, getInvitePreview, getJoinStatus, getInviteLink, listMembers } from "./api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { withOpsSession } from "@/lib/ops-session";
@@ -415,4 +416,34 @@ export function membersQuery(token: string | null, storeId: number | null) {
 
 export function approvedSessionQuery(userId: number | null, enabled: boolean) {
  return queryOptions({queryKey: ["approved-session", userId], queryFn: refreshSession, enabled, retry: false, staleTime: Infinity, gcTime: 0});
+}
+
+// ---- 사장 운영: 오늘만 할 일·리포트 (lib/owner-ops.ts) ----
+export function ownerTodayTasksQuery(token: string | null, store: number | null) {
+  return queryOptions({
+    queryKey: ownerOpsKeys.todayTasks(store),
+    queryFn: ({ signal }) => todayTasksApi.list(token!, signal),
+    enabled: Boolean(token && store),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function myTodayTasksQuery(token: string | null, store: number | null, user: number | null) {
+  return queryOptions({
+    queryKey: ownerOpsKeys.myTodayTasks(store, user),
+    queryFn: ({ signal }) => todayTasksApi.mine(token!, signal),
+    enabled: Boolean(token && store && user),
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function reportQuery(token: string | null, store: number | null, days: 7 | 30) {
+  return queryOptions({
+    queryKey: ownerOpsKeys.report(store, days),
+    queryFn: ({ signal }) => reportApi.summary(token!, days, signal),
+    enabled: Boolean(token && store),
+    staleTime: 60_000,
+  });
 }

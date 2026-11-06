@@ -128,6 +128,28 @@ async def create_ingest_completed_notification(
     )
 
 
+async def create_today_task_notification(
+    db: asyncpg.Connection,
+    store_id: int,
+    task_id: int,
+    recipient_user_id: int,
+    body: str,
+) -> int | None:
+    """사장이 보낸 오늘만 할 일. 대상 알바생마다 앱 알림을 무조건 만든다(Push 는 추가 전달)."""
+    return await create_notification_event(
+        db,
+        store_id=store_id,
+        recipient_user_id=recipient_user_id,
+        event_type="TODAY_TASK",
+        aggregate_type="TODAY_TASK",
+        aggregate_id=task_id,
+        dedupe_key=f"today-task:{store_id}:{task_id}:{recipient_user_id}",
+        title="사장님이 오늘 할 일을 보냈어요",
+        body=body,
+        destination=f"/staff?task_id={task_id}",
+    )
+
+
 def _failure_status(exc: Exception) -> int | None:
     response = getattr(exc, "response", None)
     if response is None:

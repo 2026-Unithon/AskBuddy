@@ -23,16 +23,25 @@ import { useApp } from "@/lib/store";
  * 말하기는 녹음 형식 결정 전까지 숨긴다(U6-2).
  * 접수(202)되면 작업 화면으로 넘긴다 — 추출 진행은 이 컴포넌트가 들고 있지 않는다.
  */
-export function OwnerAddComposer({ placeholder = "새로 알려줄 것 넣기" }: { placeholder?: string }) {
+export function OwnerAddComposer({
+  placeholder = "새로 알려줄 것 넣기",
+  defaultText = "",
+  defaultHints = [],
+}: {
+  placeholder?: string;
+  /** 응대 가이드처럼 상황 문장을 미리 넣어 둘 때. 바꾸려면 부모가 key 로 다시 그린다. */
+  defaultText?: string;
+  defaultHints?: IntakeHint[];
+}) {
   const { state } = useApp();
   const router = useRouter();
   const client = useQueryClient();
   const caps = useQuery(ingestCapabilitiesQuery(state.token, state.storeId));
-  const [text, setText] = useState("");
+  const [text, setText] = useState(defaultText);
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [pickErrors, setPickErrors] = useState<string[]>([]);
   // 점주 선택 칩: 화면 입력일 뿐이라 이 컴포넌트가 들고, 제출이 성공하면 비운다.
-  const [hints, setHints] = useState<IntakeHint[]>([]);
+  const [hints, setHints] = useState<IntakeHint[]>(defaultHints);
   const [failures, setFailures] = useState<SourceFailure[]>([]);
   // 같은 입력을 다시 보내면 같은 작업으로 묶이게 한다. 입력이 바뀌면 새 키.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());

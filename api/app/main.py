@@ -32,6 +32,8 @@ from app.preflight import router as preflight_router
 from app.reg.router import router as reg_router
 from app.team.router import router as team_router
 from app.checklist.router import router as checklist_router
+from app.report.router import router as report_router
+from app.today_tasks.router import router as today_tasks_router
 
 settings = get_settings()
 
@@ -104,6 +106,8 @@ app.include_router(notifications_router, prefix="/notifications", tags=["notific
 # 내부 전용 평가 하네스. JWT scope="team" 없이는 전부 403 이다
 app.include_router(team_router, prefix="/team", tags=["team"])
 app.include_router(checklist_router, prefix="/checklist", tags=["checklist"])
+app.include_router(today_tasks_router, prefix="/today-tasks", tags=["today-tasks"])
+app.include_router(report_router, prefix="/report", tags=["report"])
 
 
 @app.get("/health")

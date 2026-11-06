@@ -18,6 +18,7 @@ import {
 } from "@/components/kit";
 import { OwnerChecklistStatus } from "@/components/checklist/owner-status";
 import { OwnerAddComposer } from "@/components/owner/owner-add-composer";
+import { TodayTasksSection } from "@/components/owner/today-tasks-section";
 import { apiErrorMessage } from "@/lib/api";
 import { bootstrapQuery, rPendingQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
@@ -39,6 +40,8 @@ export default function OwnerTodayPage() {
       />
 
       <OwnerChecklistStatus />
+      <CardLink href="/owner/report" title="매장 리포트" meta="알바생 질문, AI 답변, 사장님께 넘어온 건수" />
+      <TodayTasksSection />
       <SectionTitle>확인해 주세요{waiting.length > 0 ? ` · ${waiting.length}${pending.hasNextPage ? "+" : ""}` : ""}</SectionTitle>
       {pending.isLoading && (
         <>
@@ -71,6 +74,7 @@ export default function OwnerTodayPage() {
       )}
       <RefreshingHint active={pending.isRefetching && !pending.isLoading} />
       {waiting.length > 0 && <Caption>새 질문이 오면 바로 알려드려요</Caption>}
+      <CardLink href="/owner/guide/service" title="응대 매뉴얼 만들기" meta="손님, 배달, 돌발 상황 대응을 미리 알려 두기" />
     </Screen>
   );
 }

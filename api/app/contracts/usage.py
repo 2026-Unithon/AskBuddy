@@ -32,6 +32,8 @@ CostPurpose = Literal["PRODUCT", "EVALUATION", "DEVELOPMENT"]
 UsageStage = Literal[
     "STT", "EXTRACT", "ASSEMBLE", "CLASSIFY", "RELATION",
     "EMBED", "QUERY", "RERANK", "ANSWER", "VALIDATE",
+    # 점주 오늘만 할 일 문장 다듬기 (migration 20261106120000)
+    "POLISH",
 ]
 
 AttemptStatus = Literal["STARTED", "SUCCEEDED", "FAILED", "UNKNOWN"]

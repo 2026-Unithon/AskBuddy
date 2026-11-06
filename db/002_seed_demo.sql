@@ -50,7 +50,10 @@ join (values ('오픈업무', true, 1),
              ('재고정리', true, 2),
              ('음료제작', true, 3),
              ('마감업무', true, 4),
-             ('베이킹',  false, 5)) as v(nm, en, ord) on true
+             ('베이킹',  false, 5),
+             ('손님응대', true, 6),
+             ('배달대응', true, 7),
+             ('돌발상황', true, 8)) as v(nm, en, ord) on true
 where s.store_slug = 'demo-cafe';
 
 -- 6. 로드맵 5단계 -----------------------------------------------------
