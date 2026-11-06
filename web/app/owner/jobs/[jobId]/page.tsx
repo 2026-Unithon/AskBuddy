@@ -26,6 +26,8 @@ import {
   isIngestJobActive,
   mutateProductCard,
   retryIngestJob,
+  extractIngestSourceAnyway,
+  INTAKE_NONE_CODE,
   type CardListItem,
   type IngestJobDetail,
 } from "@/lib/api";
@@ -163,10 +165,18 @@ const SOURCE_STATUS: Record<string, string> = {
   FAILED: "실패",
 };
 
-function SourceList({ job }: { job: IngestJobDetail }) {
+type JobSource = IngestJobDetail["sources"][number];
+
+// 업무 자료가 아니라고 판단해 추출하지 않은 자료. 작업 전체 상태와 무관하게 자료별로 고른다
+function judgedNone(source: JobSource) {
+  return source.status === "NO_RESULT" && source.error?.code === INTAKE_NONE_CODE && source.source_availability !== "DELETED";
+}
+
+function SourceList({ job, sources = job.sources }: { job: IngestJobDetail; sources?: JobSource[] }) {
+  const active = isIngestJobActive(job.status);
   return (
     <ul className="flex w-full flex-col gap-2">
-      {job.sources.map((source) => {
+      {sources.map((source) => {
         const deleted = source.source_availability === "DELETED";
         return (
           <li key={source.source_id} className="flex flex-col gap-1 rounded-[16px] bg-surface px-4 py-3 shadow-card">
@@ -179,10 +189,35 @@ function SourceList({ job }: { job: IngestJobDetail }) {
               </Chip>
             </div>
             {source.error && !deleted && <p className="text-[12px] text-danger-700">{source.error.message}</p>}
+            {!active && judgedNone(source) && <ExtractAnyway jobId={job.job_id} sourceId={source.source_id} />}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** 이 자료만 그래도 추출한다. 서버가 그 자료만 다시 처리하고, 작업 상태는 폴링이 따라간다. */
+function ExtractAnyway({ jobId, sourceId }: { jobId: number; sourceId: number }) {
+  const { state } = useApp();
+  const client = useQueryClient();
+  const extract = useMutation({
+    mutationFn: () => extractIngestSourceAnyway(jobId, sourceId, state.token!),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.ingestJob(state.storeId, jobId) }),
+        client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) }),
+      ]),
+  });
+  return (
+    <div className="mt-1 flex flex-col gap-2">
+      {extract.error && (
+        <ErrorInline message={apiErrorMessage(extract.error, "이 자료를 다시 처리하지 못했어요.")} onRetry={() => extract.mutate()} retrying={extract.isPending} />
+      )}
+      <Button variant="secondary" className="py-[11px] text-[14px]" loading={extract.isPending} onClick={() => extract.mutate()}>
+        그래도 추출하기
+      </Button>
+    </div>
   );
 }
 
@@ -256,6 +291,7 @@ function ResultReview({
     groups.set(name, [...(groups.get(name) ?? []), card]);
   }
   const sourceNames = job.sources.map((s) => s.filename).join(", ");
+  const noneSources = job.sources.filter(judgedNone);
   const allDone = cards !== undefined && toApprove.length === 0;
 
   return (
@@ -313,6 +349,13 @@ function ResultReview({
           ))}
         </section>
       ))}
+
+      {noneSources.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <SectionTitle>추출하지 않은 자료 · {noneSources.length}</SectionTitle>
+          <SourceList job={job} sources={noneSources} />
+        </section>
+      )}
 
       {sourceNames && <Caption>출처 · {sourceNames}</Caption>}
       <RefreshingHint active={approveAll.isPending} />

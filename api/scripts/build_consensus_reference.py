@@ -22,26 +22,21 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNS_DIR = ROOT / "추출결과"
 BASE = ROOT / "api" / "eval" / "data" / "store-a"
 TODAY = datetime.date.today().strftime("%Y%m%d")
-# 대표 레코드 우선순위: PDF 원본 + 4배 재확인 → 전 쪽 확대 → 확대 → 확대 → 확대 → 확대 없음
-PRIORITY = ["C2 opus", "C1 opus", "C4 sonnet", "G3 sol", "G4 sol", "C3 sonnet"]
-RUN_LABEL = {
-    "C1 opus": "claude-opus-5.5 #1 (PNG 4장+basestock)",
-    "C2 opus": "claude-opus-5.5 #2 (recipebook.pdf)",
-    "C3 sonnet": "claude-sonnet-5.5 #3 (PNG 4장+basestock, 확대 없음)",
-    "C4 sonnet": "claude-sonnet-5.5 #4 (recipebook.pdf)",
-    "G3 sol": "gpt-6 sol #3 (recipebook.pdf)",
-    "G4 sol": "gpt-6 sol #4 (PNG 4장+basestock)",
-}
-# 실행 ID → 결과 폴더 (추출결과/ 기준). 폴더 안의 결과 JSON 하나를 읽는다.
-# 외부 앱이 붙인 파일명에 자료 고유명이 섞일 수 있어 파일명은 코드에 적지 않는다
-RUN_DIRS = {
-    "C1 opus": "claude 추출결과/1. opus 5.5 높음",
-    "C2 opus": "claude 추출결과/2. opus 5.5 높음",
-    "C3 sonnet": "claude 추출결과/3. sonnet 5.5 중간",
-    "C4 sonnet": "claude 추출결과/4. sonnet 5.5 중간",
-    "G3 sol": "gpt 추출결과/3. 6 sol 중간/outputs",
-    "G4 sol": "gpt 추출결과/4. 6 sol 중간/outputs",
-}
+RUNS_FILE = ROOT / "api" / "eval" / "consensus" / "recipe_runs.json"
+
+
+def load_runs(path):
+    """실행 목록 파일을 읽는다. `priority` 가 대표 레코드 우선순위이고, `runs` 배열 순서는
+    목록(출력 표기) 순서다. 둘은 서로 다르다.
+    반환: (우선순위, 실행 ID → 라벨, 실행 ID → 결과 폴더).
+    외부 앱이 붙인 파일명에 자료 고유명이 섞일 수 있어 파일명은 목록에 적지 않는다."""
+    doc = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    runs = doc["runs"]
+    return (list(doc["priority"]), {r["id"]: r["label"] for r in runs},
+            {r["id"]: r["dir"] for r in runs})
+
+
+PRIORITY, RUN_LABEL, RUN_DIRS = load_runs(RUNS_FILE)
 
 
 def load_all():
@@ -119,6 +114,16 @@ def key(x):
     return ("TXT", v, u) if v else None
 
 
+def core_key(x):
+    """공통 핵심 칸 키. 다른 로직의 키 함수가 시작할 자리다."""
+    return ("CORE", n(x.get("attribute")), value(x.get("value")), unit(x.get("unit")),
+            x.get("polarity") or "AFFIRM")
+
+
+# 로직 이름 → 투표 키 함수. 새 로직은 여기에 등록한 뒤 쓴다
+KEY_FUNCS = {"RECIPE": key}
+
+
 def t(s):
     """비교 전용 정규화. 레코드 값은 바꾸지 않는다."""
     s = n(s).replace("블랜더", "블렌더").replace("쥬스", "주스")
@@ -153,7 +158,7 @@ def row_maps(D, runs):
     return out
 
 
-def vote(groups, runs, quorum):
+def vote(groups, runs, quorum, *, key_fn=None, priority=None):
     """groups[run] = [(row, fact)].
 
     지지 판정:
@@ -163,11 +168,13 @@ def vote(groups, runs, quorum):
     대표 실행(우선순위 첫째)의 사실을 먼저 받고, 다른 실행의 사실은 이미 받은 글에
     담기지 않은 것만 더한다 — 같은 값을 표현만 바꿔 두 번 싣지 않는다.
     """
+    key_fn = key_fn or key
+    priority = PRIORITY if priority is None else priority
     exact = collections.defaultdict(set)
     text = collections.defaultdict(dict)
     for k in runs:
         for row, x in groups[k]:
-            kk = key(x)
+            kk = key_fn(x)
             if kk:
                 exact[(row, kk)].add(k)
             text[row][k] = text[row].get(k, "") + "|" + blob(x)
@@ -191,19 +198,19 @@ def vote(groups, runs, quorum):
     agreed, contested = {}, {}
     accepted_text = collections.defaultdict(str)
     present = set()
-    for k in PRIORITY:
+    for k in priority:
         if k not in runs:
             continue
         rep_pass = not agreed  # 첫 실행이 대표
         for row, x in groups[k]:
-            kk = key(x)
+            kk = key_fn(x)
             if not kk:
                 continue
             who = support(row, kk)
             if len(who) < quorum:
                 c = contested.setdefault((row, kk), {
                     "row": row, "key": [str(p) for p in kk], "votes": len(who), "of": len(runs),
-                    "runs": sorted(who, key=PRIORITY.index), "assertions": {}})
+                    "runs": sorted(who, key=priority.index), "assertions": {}})
                 c["assertions"].setdefault(k, x.get("original_assertion"))
                 continue
             # 대표 실행 안에서는 같은 키가 여러 번 나와도 모두 받는다 (예: 시럽 두 종류가 각각 3P)
@@ -214,7 +221,7 @@ def vote(groups, runs, quorum):
             nd = needle(kk)
             if not rep_pass and nd and nd in accepted_text[row]:
                 continue  # 대표 실행이 이미 같은 글을 담았다
-            agreed[ident] = (sorted(who, key=PRIORITY.index), k, x)
+            agreed[ident] = (sorted(who, key=priority.index), k, x)
         for (row, _, _), (_, rk, x) in agreed.items():
             if rk == k:
                 accepted_text[row] += "|" + blob(x)
@@ -378,7 +385,10 @@ def write(source_key, fname, prefix, facts, contested, runs, quorum, sizes):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--date", help="출력 파일명 날짜 YYYYMMDD (기본 오늘)")
+    ap.add_argument("--logic", default="RECIPE", help="투표 키 함수를 고르는 로직 (기본 RECIPE)")
     a = ap.parse_args()
+    if a.logic not in KEY_FUNCS:
+        raise SystemExit(f"{a.logic}: 키 함수가 없는 로직이다 — KEY_FUNCS 에 등록한 뒤 쓴다")
     if a.date:
         TODAY = a.date
     main()

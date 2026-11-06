@@ -8,7 +8,7 @@ SUPPORTED_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "VOICE": ("mp3", "m4a", "wav"),
     "VIDEO": ("mp4", "mov"),
     "KAKAO": ("txt", "jpg", "jpeg", "png"),
-    "SCAN": ("pdf", "jpg", "jpeg", "png"),
+    "SCAN": ("pdf", "jpg", "jpeg", "png", "docx"),
 }
 
 

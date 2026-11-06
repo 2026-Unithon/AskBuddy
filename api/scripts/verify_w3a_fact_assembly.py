@@ -47,6 +47,7 @@ from app.reg.hybrid import hybrid_search, read_current_index
 from app.usage.recorder import DbUsageSink
 from verify_w_entity_revision import _MODEL_SETTINGS, _fact, _new_owner_answer, _w2_counts
 from verify_w_partial_extraction import _new_source, _seed
+from _intake_stub import intake_patches
 
 Z, B = "음료Z", "합성음료B"
 
@@ -927,6 +928,8 @@ def _w3a_patches(pool, settings, fake_call, parts=None, *, hints=False):
         (extract, "get_settings", lambda: NS(ingest_mode="real")),
         (gemini, "get_settings", lambda: model_settings),
         (gemini, "_call", fake_call),
+        # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE) — 유료 호출 없음
+        *intake_patches(),
     ]
     if parts is not None:
         if len(parts) > 1:

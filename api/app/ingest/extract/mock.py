@@ -75,6 +75,21 @@ async def extract_facts(*, source_id, source_type, text, glossary, media=(),
                               prompt=prompt, media=list(media or []))
 
 
+async def extract_facts_with_intake(*, source_id, source_type, text, glossary, media=(), hints=(),
+                                    usage_context=None, raw_sink=None):
+    """mock 한 호출 — 기존 mock 추출 결과에 칩 첫째(없으면 RECIPE) 순위를 붙인다."""
+    from app.ingest.schemas import IntakeFactExtractionResult, IntakeRank
+    base = await extract_facts(source_id=source_id, source_type=source_type, text=text,
+                               glossary=glossary, media=media, usage_context=usage_context,
+                               raw_sink=raw_sink)
+    out = IntakeFactExtractionResult(
+        assertions=base.assertions, unresolved=base.unresolved,
+        intake_ranking=[IntakeRank(logic=hints[0] if hints else "RECIPE", score=0.9)],
+        intake_reason="mock")
+    out._raw_response_id = base.raw_response_id
+    return out
+
+
 async def assemble_plan(*, source_id, entities, category_names, glossary,
                         usage_context=None, raw_sink=None):
     """사실 조립(W3a) 합성 대역. 실제 경로와 같은 완성 프롬프트로 기록·재사용한다."""

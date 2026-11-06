@@ -39,7 +39,7 @@ async def verify(pool, db):
 
     async def card(store, title, content, status="APPROVED"):
         # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고, 승인 상태면 공개 포인터도 둔다.
-        # 체크리스트는 공개 판의 본문 줄만 읽으므로 사실 블록은 필요 없다
+        # 체크리스트는 공개 판의 제목만 읽는다(항목 = 카드 하나). 사실 블록은 필요 없다
         card_id = await db.fetchval("""insert into knowledge_cards(store_id,title,content,review_status)
             values($1,$2,$3,$4) returning card_id""", store, title, content, status)
         version_id = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
@@ -97,6 +97,20 @@ async def verify(pool, db):
     assert view['current_shift_id'] == middle_id and view['scope_counts'] == {'total': 2, 'done': 0}, view
     print('PASS checklist staff scope = common + assigned, drafts hidden')
 
+    # 카드 응답의 item_id(Phase B Task 14) — 로드맵에 걸린 카드는 그 항목 id, 아니면 null
+    stage = await db.fetchval("""insert into roadmap_stages(store_id,stage_name,stage_order)
+        values($1,'합성 체크 단계',1) returning stage_id""", sid)
+    common_published = await db.fetchval('select published_version_id from knowledge_cards where store_id=$1 and card_id=$2', sid, common)
+    item = await db.fetchval("""insert into roadmap_items(stage_id,card_id,item_name,published_version_id)
+        values($1,$2,'합성 공통 항목',$3) returning item_id""", stage, common, common_published)
+    with patch.object(cl, '_now', return_value=NOON):
+        member = await cl.require_member(session, s)
+        linked_view = await cl.today_view(session, member, now_utc=NOON, selected_shift_id=None, requested_date=None, include_all=True)
+    by_card = {c['card_id']: c for g in linked_view['groups'] for c in g['cards']}
+    assert by_card[common]['item_id'] == item, by_card[common]
+    assert by_card[closing]['item_id'] is None, by_card[closing]
+    print('PASS checklist roadmap-linked card carries item_id, unlinked card null')
+
     with patch.object(cl, '_now', return_value=NOON):
         version = view['groups'][0]['cards'][0]['card_version_id']
         await cl.put_check(CheckRequest(business_date=TODAY, card_version_id=version, line_no=1, checked=True), session, s)
@@ -119,16 +133,16 @@ async def verify(pool, db):
     assert await db.fetchval('select updated_by from checklist_checks where store_id=$1 and card_version_id=$2', sid, closing_version) is None
     assert await db.fetchval('select count(*) from checklist_check_events where store_id=$1 and user_id=$2', sid, quiet) == 0
     assert await db.fetchval('select personal from checklist_submissions where store_id=$1 and user_id=$2', sid, quiet) is False
-    assert sub['total_lines'] == 4 and sub['scope_shift_ids'] is None, sub   # 담당 없음 → 전체
+    assert sub['total_lines'] == 3 and sub['scope_shift_ids'] is None, sub   # 담당 없음 → 전체 (카드 3개: 공통·오픈·마감)
     assert sub['done_lines'] == 2, sub   # 알바가 체크한 공통 1줄 + 기록끈 알바가 체크한 마감 1줄
     print('PASS checklist personal records off leaves no trace but keeps store state')
 
-    # 한 카드가 범위 안 근무조 둘에 걸려도 줄은 한 번만 센다 (오픈 카드 2줄을 미들·마감에 동시 연결)
+    # 한 카드가 범위 안 근무조 둘에 걸려도 한 번만 센다 (오픈 카드를 미들·마감에 동시 연결)
     await cl.set_card_links(opening, CardLinks(checklist=True, shift_ids=[middle_id, close_id]), session, o)
     with patch.object(cl, '_now', return_value=NOON):
         member = await cl.require_member(session, s)
         linked = await cl.today_view(session, member, now_utc=NOON, selected_shift_id=None, requested_date=None, include_all=True)
-    assert linked['scope_counts']['total'] == 4, linked['scope_counts']   # 2 + 오픈 카드 2줄(중복 4줄 아님)
+    assert linked['scope_counts']['total'] == 3, linked['scope_counts']   # 공통 + 마감 + 오픈(중복 4개 아님)
     await cl.set_card_links(opening, CardLinks(checklist=True, shift_ids=[open_id]), session, o)
 
     with patch.object(cl, '_now', return_value=NOON):
@@ -155,13 +169,13 @@ async def verify(pool, db):
     tomorrow = NOON + timedelta(days=1)
     with patch.object(cl, '_now', return_value=tomorrow):
         late = (await cl.submit(SubmissionRequest(business_date=TODAY, checks=[
-            {'card_version_id': opening_version, 'line_no': 2, 'checked': True}]), session, o))['submission']
+            {'card_version_id': opening_version, 'line_no': 1, 'checked': True}]), session, o))['submission']
         await _expect('BUSINESS_DATE_CHANGED', cl.submit(SubmissionRequest(business_date=TODAY), session, s))
         await _expect('BUSINESS_DATE_CHANGED', cl.submit(SubmissionRequest(business_date=TODAY - timedelta(days=1)), session, o))
     assert late['late'] is True and late['scope_shift_ids'] is None
     print('PASS checklist late save only for previous unsubmitted day')
 
-    # 새 공개 버전이면 그날 체크는 새로 시작
+    # 새 공개 버전이면 그날 체크는 새로 시작 (P4: 체크 키는 (card_version_id, 1))
     # 레거시 트리거가 없으므로 새 판(2)을 명시적으로 만들고 초안·공개 포인터를 옮긴다
     new_common = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
         values($1,$2,2,'합성 공통',$3,'OWNER_EDIT') returning version_id""", sid, common, '물 채우기\n컵 채우기')
@@ -196,7 +210,7 @@ async def verify(pool, db):
     shown = await cl.get_records(session, o, month=month, user_id=staff)
     assert shown['days'], shown
     day = await cl.get_record_day(TODAY, session, o, user_id=staff)
-    assert [l['text'] for l in day['lines']] == ['물 채우기'], day
+    assert [l['text'] for l in day['lines']] == ['합성 공통'], day   # 줄이 아니라 카드 제목
     quiet_records = await cl.get_records(session, q, month=month, user_id=None)
     assert quiet_records['days'] == [] and quiet_records['recording'] is False
     await _expect('MEMBER_NOT_FOUND', cl.get_records(session, o, month=month, user_id=other_owner))

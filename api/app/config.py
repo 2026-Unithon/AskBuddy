@@ -187,6 +187,37 @@ class Settings(BaseSettings):
     # TEXT 는 그 수정 이전 동작이므로 실험에서 대조군으로만 명시 지정한다.
     pdf_input_mode: Literal["TEXT", "FILE", "BOTH", "HYBRID"] = "HYBRID"
 
+    # ── Phase B 입구 분류(B-D2·B-D3). 시작값이다 — 분류기 평가로 조정한다 ──
+    # 분류 모델. '공급자:모델' 형식(providers.parse_model_spec). 가장 싼 경량 모델로 바꾸는 것은 평가 뒤
+    intake_classifier_model: str = "gemini:gemini-3.6-flash"
+    intake_classifier_max_output_tokens: int = Field(default=2048, ge=256)
+    # 훑기 상한: 글 자료 표본 전체 글자 수, 이미지 장수·긴 변, 음성·영상 STT 창
+    intake_probe_text_chars: int = Field(default=3000, ge=200)
+    intake_probe_max_images: int = Field(default=6, ge=1)
+    intake_probe_image_px: int = Field(default=512, ge=128)
+    intake_probe_av_windows: int = Field(default=3, ge=1)
+    intake_probe_av_window_sec: int = Field(default=20, ge=5)
+    intake_probe_video_keyframes: int = Field(default=5, ge=1)
+    # 후보 구간 수 상한과 작은 구간 합치기 기준(글자)
+    intake_max_sections: int = Field(default=12, ge=1)
+    intake_min_section_chars: int = Field(default=80, ge=0)
+    # 결정 규칙(B-D3a·B-D3b·B-D6)
+    intake_owner_hint_boost: float = Field(default=0.15, ge=0, le=1)
+    intake_multi_label_min: float = Field(default=0.35, ge=0, le=1)
+    intake_ambiguous_top_min: float = Field(default=0.5, ge=0, le=1)
+    intake_ambiguous_gap_min: float = Field(default=0.15, ge=0, le=1)
+
+    # ── Phase B 추가 — 작은 자료 호출 줄이기(S1·S3) ──
+    # 한 작업의 판정 없는 자료가 둘 이상이면 묶어 분류 1회. 상한을 넘으면 묶음을 나눈다
+    intake_bundle_enabled: bool = True
+    intake_bundle_max_sources: int = Field(default=8, ge=2)
+    intake_bundle_max_chars: int = Field(default=12000, ge=1000)
+    intake_bundle_max_images: int = Field(default=12, ge=1)
+    # 묶음 분류 출력 잘림을 막는 표본 후보 수 상한(후보마다 판정 한 줄을 출력한다)
+    intake_bundle_max_candidates: int = Field(default=24, ge=2)
+    # 홀로 남은 작은 자료(훑기가 전체를 담음)는 분류+추출 한 호출. 평가 뒤 켠다(기본 꺼짐)
+    intake_single_call_small: bool = False
+
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""
     supabase_service_key: str = ""

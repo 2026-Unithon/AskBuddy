@@ -88,6 +88,8 @@ async def main():
             await verify_legacy_owner(pool, fresh)
             from verify_checklist import verify as verify_checklist
             await verify_checklist(pool, fresh)
+            from verify_w_intake import verify as verify_w_intake
+            await verify_w_intake(pool, fresh)
             from verify_r_fact_consumption import verify as verify_fact_consumption
             await verify_fact_consumption(pool, fresh)
             from verify_w_fact_only import verify as verify_w_fact_only

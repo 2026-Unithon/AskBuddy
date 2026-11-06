@@ -17,6 +17,17 @@ from app.ingest.fact_cards import DispositionCounts, EntityCardState, WrittenEnt
 from app.ingest.pipeline import ExtractionOutcome, PreparedAssembly
 
 
+def _recipe_route_stub(normalizer):
+    """Phase B 입구 분류 대역 — 자료 전체가 RECIPE 한 구간이다(분류 모델·판정 기록을 부르지 않는다)."""
+    from app.ingest.intake.decide import Ranked, SectionDecision
+    from app.ingest.intake.records import StoredRoute
+    r = (Ranked("RECIPE", 0.9),)
+
+    def d(cid):
+        return SectionDecision(cid, "RECIPE", ("RECIPE",), False, False, False, None, r, r)
+    return AsyncMock(return_value=StoredRoute(1, normalizer, [d("c1")], d("source")))
+
+
 def _fact(entity_id: int, revision_id: int) -> PlanFact:
     return PlanFact(fact_revision_id=revision_id, fact_id=revision_id * 10, entity_id=entity_id,
                     subject="음료Z", predicate="물", variant_temperature=None, variant_size=None,
@@ -278,6 +289,7 @@ async def _run_source(tmp_path):
          patch.object(pipeline, "_record_segment_failures", AsyncMock()), \
          patch.object(pipeline, "_prepare_fact_assembly", mocks.prepare), \
          patch.object(pipeline, "_persist_fact_cards", mocks.persist_facts), \
+         patch.object(pipeline.intake_route, "route_source", _recipe_route_stub("DOC_TEXT")), \
          patch("app.config.get_settings", return_value=settings):
         await pipeline.process_source(1, 7)
     return mocks, prepared, conn

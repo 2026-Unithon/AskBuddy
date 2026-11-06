@@ -30,6 +30,8 @@ export type ChecklistGroup = {
     card_id: number;
     card_version_id: number;
     title: string;
+    /** 직원 카드 상세 주소용 로드맵 항목. 로드맵에 없으면 null */
+    item_id?: number | null;
     lines: { line_no: number; text: string; checked: boolean }[];
   }[];
 };

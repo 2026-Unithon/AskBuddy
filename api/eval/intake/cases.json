@@ -1,0 +1,254 @@
+[
+ {
+  "case_id": "syn-doc-text-recipe-1",
+  "normalizer": "DOC_TEXT",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "PAGE",
+     "start": "1",
+     "end": "1"
+    },
+    "text": "음료Z 만드는 법. 컵에 얼음 200g, 합성시럽 30ml, 우유 150ml를 넣고 샷 2개를 부어 저어 줍니다.",
+    "expected": "RECIPE"
+   },
+   {
+    "candidate_id": "c2",
+    "locator": {
+     "kind": "PAGE",
+     "start": "2",
+     "end": "2"
+    },
+    "text": "음료Y 레시피 표. 합성시럽 20ml, 물 100ml, 얼음 150g. 휘핑은 선택.",
+    "expected": "RECIPE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-doc-text-mixed-1",
+  "normalizer": "DOC_TEXT",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "PAGE",
+     "start": "1",
+     "end": "1"
+    },
+    "text": "합성매장 오픈 절차. 1. 불을 켠다. 2. 머신을 예열한다. 3. 매대에 진열한다. 4. 금고를 확인한다.",
+    "expected": "PROCEDURE"
+   },
+   {
+    "candidate_id": "c2",
+    "locator": {
+     "kind": "PAGE",
+     "start": "2",
+     "end": "2"
+    },
+    "text": "음료Y 레시피 표. 합성시럽 20ml, 물 100ml, 얼음 150g. 휘핑은 선택.",
+    "expected": "RECIPE"
+   },
+   {
+    "candidate_id": "c3",
+    "locator": {
+     "kind": "PAGE",
+     "start": "3",
+     "end": "3"
+    },
+    "text": "점심 뭐 먹을까요? ㅋㅋ 오늘 날씨 좋네요.",
+    "expected": "NONE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-doc-image-policy-1",
+  "normalizer": "DOC_IMAGE",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "WHOLE",
+     "start": "",
+     "end": ""
+    },
+    "text": "환불 규정. 결제 후 7일 이내 영수증이 있으면 환불할 수 있습니다. 음료는 제조 후 환불 불가입니다.",
+    "expected": "POLICY"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-audio-procedure-1",
+  "normalizer": "AUDIO",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "TIME",
+     "start": "00:00",
+     "end": "00:30"
+    },
+    "text": "마감 절차. 1. 머신 세척. 2. 쓰레기 배출. 3. 문 잠금 확인.",
+    "expected": "PROCEDURE"
+   },
+   {
+    "candidate_id": "c2",
+    "locator": {
+     "kind": "TIME",
+     "start": "00:30",
+     "end": "01:00"
+    },
+    "text": "합성매장 오픈 절차. 1. 불을 켠다. 2. 머신을 예열한다. 3. 매대에 진열한다. 4. 금고를 확인한다.",
+    "expected": "PROCEDURE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-audio-none-1",
+  "normalizer": "AUDIO",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "TIME",
+     "start": "00:00",
+     "end": "00:30"
+    },
+    "text": "점심 뭐 먹을까요? ㅋㅋ 오늘 날씨 좋네요.",
+    "expected": "NONE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-video-reference-1",
+  "normalizer": "VIDEO",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "TIME",
+     "start": "00:00",
+     "end": "00:20"
+    },
+    "text": "거래처 연락처 안내. 합성유업 담당 010-0000-0000, 납품은 화요일과 금요일 오전입니다.",
+    "expected": "REFERENCE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-chat-notice-1",
+  "normalizer": "CHAT",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "DATE",
+     "start": "2026-10-01",
+     "end": "2026-10-01"
+    },
+    "text": "공지. 이번 주 토요일은 합성매장 정기 점검으로 오후 3시에 영업을 마칩니다.",
+    "expected": "NOTICE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-chat-mixed-1",
+  "normalizer": "CHAT",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "DATE",
+     "start": "2026-10-01",
+     "end": "2026-10-01"
+    },
+    "text": "마감 절차. 1. 머신 세척. 2. 쓰레기 배출. 3. 문 잠금 확인.",
+    "expected": "PROCEDURE"
+   },
+   {
+    "candidate_id": "c2",
+    "locator": {
+     "kind": "DATE",
+     "start": "2026-10-02",
+     "end": "2026-10-02"
+    },
+    "text": "공지. 이번 주 토요일은 합성매장 정기 점검으로 오후 3시에 영업을 마칩니다.",
+    "expected": "NOTICE"
+   },
+   {
+    "candidate_id": "c3",
+    "locator": {
+     "kind": "DATE",
+     "start": "2026-10-03",
+     "end": "2026-10-03"
+    },
+    "text": "점심 뭐 먹을까요? ㅋㅋ 오늘 날씨 좋네요.",
+    "expected": "NONE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-owner-text-recipe-1",
+  "normalizer": "OWNER_TEXT",
+  "hints": [
+   "RECIPE"
+  ],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "LINE",
+     "start": "1",
+     "end": "3"
+    },
+    "text": "음료Z 만드는 법. 컵에 얼음 200g, 합성시럽 30ml, 우유 150ml를 넣고 샷 2개를 부어 저어 줍니다.",
+    "expected": "RECIPE"
+   }
+  ]
+ },
+ {
+  "case_id": "syn-owner-text-mixed-1",
+  "normalizer": "OWNER_TEXT",
+  "hints": [],
+  "candidates": [
+   {
+    "candidate_id": "c1",
+    "locator": {
+     "kind": "LINE",
+     "start": "1",
+     "end": "2"
+    },
+    "text": "환불 규정. 결제 후 7일 이내 영수증이 있으면 환불할 수 있습니다. 음료는 제조 후 환불 불가입니다.",
+    "expected": "POLICY"
+   },
+   {
+    "candidate_id": "c2",
+    "locator": {
+     "kind": "LINE",
+     "start": "3",
+     "end": "4"
+    },
+    "text": "거래처 연락처 안내. 합성유업 담당 010-0000-0000, 납품은 화요일과 금요일 오전입니다.",
+    "expected": "REFERENCE"
+   },
+   {
+    "candidate_id": "c3",
+    "locator": {
+     "kind": "LINE",
+     "start": "5",
+     "end": "5"
+    },
+    "text": "점심 뭐 먹을까요? ㅋㅋ 오늘 날씨 좋네요.",
+    "expected": "NONE"
+   }
+  ]
+ }
+]

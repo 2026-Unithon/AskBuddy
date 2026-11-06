@@ -22,6 +22,7 @@ import { bootstrapQuery, queryKeys, rDetailQuery, rKeys } from "@/lib/query";
 import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
 import { rOwnerAnswer, rOwnerRetry, type ROwnerInput, type RPending } from "@/lib/r-v2-api";
 import { useApp } from "@/lib/store";
+import { OwnerAnswerAttachments } from "@/components/owner/owner-answer-attachments";
 
 type Answer = RPending["answers"][number];
 
@@ -174,6 +175,7 @@ export default function OwnerAnswerPage() {
         </div>
       )}
       {latest && <AnswerStatus answer={latest} pendingId={pendingId} onEdit={() => setEditing(true)} editing={editing} />}
+      {/^\d+$/.test(pendingId) && <OwnerAnswerAttachments questionId={Number(pendingId)} />}
       {data.legacy_answers?.map((previous) => <Surface key={previous.owner_answer_id} className="space-y-2 p-4">
         <Caption>이전에 전달한 답변 · 카드 반영 상태는 카드에서 확인해 주세요</Caption>
         <p className="whitespace-pre-wrap">{previous.answer}</p>

@@ -81,6 +81,7 @@ from app.ingest import fact_assembly
 from app.ingest.extract import mock
 from app.ingest.schemas import FactExtractionResult
 from verify_w_partial_extraction import _new_source, _seed
+from _intake_stub import intake_patches
 
 
 def _checker(prefix):
@@ -310,6 +311,8 @@ class _Ingest:
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: self.pool),
+                # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE)
+                *intake_patches(),
                 (pipeline, "_preprocess", AsyncMock(return_value=("합성 자료 본문", [], []))),
                 (pipeline.shutil, "rmtree", lambda *a, **kw: None),
                 (app.config, "get_settings", lambda: settings),

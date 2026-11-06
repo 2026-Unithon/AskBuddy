@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from app.deps import get_pool
 from app.ingest import pipeline
@@ -18,6 +19,8 @@ PARTIAL_RETRY_UNAVAILABLE_MESSAGE = (
 PARTIAL_RETRY_FAILED_MESSAGE = "잃은 구간을 다시 읽다가 실패했습니다. 다시 시도해 주세요."
 # W3a — 반영된 카드(새 판)는 없지만 검수할 사실(REVIEW_PENDING)이 남은 자료
 NO_NEW_CARD_PENDING_MESSAGE = "카드에 반영되지 않고 검수할 사실이 남았습니다."
+# Phase B — 입구 분류가 업무 자료가 아니라고(NONE) 판정해 추출하지 않은 자료
+INTAKE_NONE_MESSAGE = "업무 자료가 아니라고 판단해 추출하지 않았어요."
 
 
 def final_job_status(*, total: int, failed: int, cards: int,
@@ -73,9 +76,29 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
             job_id,
         )
 
+    # S1 — 판정 없는 자료가 둘 이상이면 묶어 분류 1회. PARTIAL 재시도 자료는 판정이 이미 있다.
+    # 훑기 결과(다운로드·파싱)는 caches 에 남아 process_source 가 다시 쓴다
+    caches: dict = {}
+    fresh = [int(r["source_id"]) for r in source_ids if not r["failed_segment_ids"]]
+    if len(fresh) >= 2:
+        from app.ingest.intake import route as intake_route
+        from app.usage import DbUsageSink
+        bundle_tag = int(time.time() * 1000)
+        try:
+            await intake_route.route_job_bundle(
+                pool, store_id, job_id=job_id, source_ids=fresh,
+                usage_sink=DbUsageSink(pool, resilient=True),
+                usage_base=(store_id, job_id, "REGISTRATION", "PRODUCT", None, bundle_tag),
+                caches=caches)
+        except Exception:
+            # 묶음은 비용 절감 장치다. 실패해도 자료마다 따로 판정하면 된다(Review Focus 1)
+            logger.exception("작업 묶음 분류 단계 실패 job=%s — 자료마다 처리한다", job_id)
+
     try:
         for row in source_ids:
             source_id = int(row["source_id"])
+            # 묶음이 훑은 자료만 캐시를 넘긴다 — 묶지 않은 자료는 지금과 같은 호출이다
+            cache_kw = ({"intake_cache": caches[source_id]} if source_id in caches else {})
             async with pool.acquire() as conn:
                 started_at = await conn.fetchval(
                     """
@@ -99,11 +122,11 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     store_id, source_id, job_id=job_id,
                     retry_segments=list(lost_ids),
                     expected_segments_total=row["segments_total"],
-                    run_tag=run_tag,
+                    run_tag=run_tag, **cache_kw,
                 )
             else:
                 outcome = await pipeline.process_source(
-                    store_id, source_id, job_id=job_id, run_tag=run_tag)
+                    store_id, source_id, job_id=job_id, run_tag=run_tag, **cache_kw)
 
             async with pool.acquire() as conn:
                 source = await conn.fetchrow(
@@ -160,6 +183,12 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     result_status = 'PARTIAL' if card_count else 'FAILED'
                     error_code = 'PARTIAL_RETRY_UNAVAILABLE'
                     error_message = PARTIAL_RETRY_UNAVAILABLE_MESSAGE
+                elif outcome == pipeline.INTAKE_NONE:
+                    # 자료 상태는 무결과 그대로, 코드는 INTAKE_NONE 으로 가른다 — 화면이
+                    # 이 코드로 자료별 "그래도 추출하기"를 보인다(후속 1)
+                    result_status = "NO_RESULT"
+                    error_code = pipeline.INTAKE_NONE
+                    error_message = INTAKE_NONE_MESSAGE
                 elif card_count == 0:
                     result_status = "NO_RESULT"
                     error_code = "NO_RESULT"

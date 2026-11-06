@@ -21,10 +21,13 @@ from app.deps import Claims, CurrentStoreId, CurrentUserId, Db
 from app.ingest import pipeline
 from app.ingest import job_repository as job_repo
 from app.ingest.capabilities import get_capabilities
+from app.ingest.intake import records as intake_records
+from app.ingest.intake import route as intake_route
 from app.ingest.job_worker import process_ingest_job
 from app.ingest.preprocess import storage
 from app.ingest import repository as repo
 from app.ingest.schemas import (
+    AttachOwnerAnswerRequest,
     CategoryOut,
     CreateSourceRequest,
     CreateIngestJobRequest,
@@ -36,6 +39,7 @@ from app.ingest.schemas import (
     IngestJobSource,
     IngestJobStatus,
     KakaoMeta,
+    OwnerAnswerAttachment,
     ProcessRequest,
     ReviewCard,
     ReviewFact,
@@ -224,6 +228,7 @@ async def create_source(
             content_hash=req.content_hash,
             mime_type=req.mime_type,
             original_filename=req.original_filename,
+            owner_hints=req.owner_hints,
         )
         await _create_sub_row(db, source_id, req)
 
@@ -448,6 +453,8 @@ async def retry_ingest_job(
         job = await job_repo.get_job(db, store_id, job_id)
         if job is None:
             raise ApiError(404, "INGEST_JOB_NOT_FOUND", "자료 작업을 찾을 수 없습니다.")
+        # 재시도는 저장된 입구 판정을 그대로 쓴다(덮지 않는다). 업무 자료 아님(NONE) 판정을
+        # 덮는 길은 자료별 "그래도 추출하기"(extract-anyway) 하나다(후속 1)
         retry_count = await job_repo.reset_retryable_sources(
             db, store_id, job_id, include_no_result=include_no_result
         )
@@ -461,6 +468,57 @@ async def retry_ingest_job(
         status=row["status"],
         category_version=int(row["category_version"]),
         source_count=retry_count,
+    )
+
+
+_ACTIVE_JOB_STATUSES = ("QUEUED", "EXTRACTING", "CLASSIFYING")
+
+
+@router.post("/jobs/{job_id}/sources/{source_id}/extract-anyway",
+             response_model=IngestJobAccepted, status_code=202)
+async def extract_source_anyway(
+    job_id: int,
+    source_id: int,
+    background: BackgroundTasks,
+    db: Db,
+    claims: ApiClaims,
+) -> IngestJobAccepted:
+    """업무 자료 아님(NONE)으로 끝난 자료 하나를 점주가 그래도 추출한다(후속 1). 점주만.
+
+    분류를 다시 부르지 않고 덮은 판정을 남긴 뒤, 같은 작업에서 **그 자료 행만** 다시 대기열에
+    넣고 작업을 다시 시작한다. 같은 작업의 다른 무결과 자료는 다시 돌리지 않는다(유료 재추출
+    방지). 작업·자료가 이 매장 것이 아니면 404, 처리 중이면 409, 그 자료가 INTAKE_NONE 무결과가
+    아니거나 지워졌으면 409.
+    """
+    _, store_id = _job_identity(claims)
+    async with db.transaction():
+        job = await job_repo.get_job(db, store_id, job_id)
+        if job is None:
+            raise ApiError(404, "INGEST_JOB_NOT_FOUND", "자료 작업을 찾을 수 없습니다.")
+        row = await job_repo.lock_job_source(db, store_id, job_id, source_id)
+        if row is None:
+            raise ApiError(404, "SOURCE_NOT_FOUND", "이 작업에서 자료를 찾을 수 없습니다.")
+        if row["job_status"] in _ACTIVE_JOB_STATUSES or row["status"] in _ACTIVE_JOB_STATUSES:
+            raise ApiError(409, "INGEST_JOB_IN_PROGRESS",
+                           "자료를 처리하고 있어요. 끝난 뒤 다시 시도해 주세요.", retryable=True)
+        not_none = ApiError(409, "SOURCE_NOT_JUDGED_NONE",
+                            "업무 자료가 아니라고 판단한 자료만 그래도 추출할 수 있어요.")
+        if (row["status"] != "NO_RESULT" or row["error_code"] != pipeline.INTAKE_NONE
+                or row["source_availability"] == "DELETED"):
+            raise not_none
+        # 덮은 판정 행과 자료 재대기는 한 트랜잭션이다 — 하나라도 실패하면 둘 다 없다
+        if await intake_route.override_none_for_source(db, store_id, source_id) is None:
+            raise not_none
+        if not await job_repo.requeue_intake_none_source(db, store_id, job_id, source_id):
+            raise not_none
+        accepted = await job_repo.get_job(db, store_id, job_id)
+
+    background.add_task(process_ingest_job, store_id, job_id)
+    return IngestJobAccepted(
+        job_id=job_id,
+        status=accepted["status"],
+        category_version=int(accepted["category_version"]),
+        source_count=1,
     )
 
 
@@ -616,4 +674,100 @@ async def review(
             )
             for r in rows
         ],
+    )
+
+
+async def _supplement_ready(db, store_id: int, source_id: int) -> bool:
+    """보충 작업을 만들어도 되는 자료인가 — UPLOADED·FAILED, 삭제 아님, 진행 중 작업 없음."""
+    rows = await job_repo.source_rows(db, store_id, [source_id])
+    if not rows or rows[0]["status"] not in ("UPLOADED", "FAILED") \
+            or rows[0]["source_availability"] == "DELETED":
+        return False
+    return not await job_repo.source_in_progress(db, store_id, source_id)
+
+
+@router.post(
+    "/owner-answers/{question_id}/attachments",
+    response_model=OwnerAnswerAttachment,
+)
+async def attach_owner_answer_file(
+    question_id: int,
+    req: AttachOwnerAnswerRequest,
+    background: BackgroundTasks,
+    db: Db,
+    claims: ApiClaims,
+) -> OwnerAnswerAttachment:
+    """점주 답변에 자료를 붙인다. 답변 처리가 끝난 뒤 붙은 첨부는 보충 작업을 만든다."""
+    user_id, store_id = _job_identity(claims)
+    source_id = req.source_id
+    key = f"owner-answer-attach:{source_id}"
+
+    job_id: int | None = None
+    start_job = False
+    async with db.transaction():
+        found = await db.fetchval(
+            "select question_id from pending_questions where store_id = $1 and question_id = $2",
+            store_id, question_id,
+        )
+        if found is None:
+            raise ApiError(404, "QUESTION_NOT_FOUND", "접근할 수 있는 질문이 없습니다.")
+        source_type = await db.fetchval(
+            "select source_type from sources where store_id = $1 and source_id = $2",
+            store_id, source_id,
+        )
+        if source_type is None:
+            raise ApiError(404, "SOURCE_NOT_FOUND", "접근할 수 없는 자료입니다.")
+        if source_type == "OWNER_TEXT":
+            raise ApiError(422, "INVALID_ATTACHMENT", "글 답변은 첨부할 수 없습니다.")
+
+        created = await intake_records.attach(
+            db, store_id, pending_question_id=question_id, source_id=source_id
+        )
+        if created:
+            # 답변이 있고 그 답변의 자료 처리가 끝났으면 첨부 하나로 보충 작업을 만든다
+            answer_status = await db.fetchval(
+                "select s.status from pending_questions q "
+                "join owner_answers oa on oa.question_id = q.question_id "
+                "join owner_answer_sources oas on oas.store_id = q.store_id "
+                "and oas.owner_answer_id = oa.answer_id "
+                "join sources s on s.store_id = oas.store_id and s.source_id = oas.source_id "
+                "where q.store_id = $1 and q.question_id = $2 "
+                "order by oa.answer_id desc limit 1",
+                store_id, question_id,
+            )
+            if answer_status == "DONE":
+                await db.execute(
+                    "select pg_advisory_xact_lock(hashtext($1))",
+                    f"askbuddy:ingest:{store_id}:{key}",
+                )
+                existing = await job_repo.find_by_idempotency(db, store_id, key)
+                if existing is not None:
+                    job_id = int(existing["job_id"])
+                    start_job = existing["status"] == "QUEUED"
+                # /ingest/jobs 와 같은 가드(최종 리뷰 I2) — 이미 처리했거나 지웠거나 다른 작업이
+                # 잡고 있는 자료는 다시 처리하지 않는다. 첨부 기록만 남고 작업은 없다(job_id=None)
+                elif await _supplement_ready(db, store_id, source_id):
+                    category_version = await db.fetchval(
+                        "select category_version from stores where store_id = $1", store_id
+                    )
+                    if category_version is None:
+                        raise ApiError(404, "STORE_NOT_FOUND", "접근할 수 있는 매장이 없습니다.")
+                    row = await job_repo.create_job(
+                        db,
+                        store_id,
+                        user_id,
+                        title="점주 답변 첨부",
+                        source_ids=[source_id],
+                        category_version=int(category_version),
+                        prompt_version="extract-cards-v1",
+                        settings={"ingest_mode": get_settings().ingest_mode},
+                        idempotency_key=key,
+                    )
+                    job_id = int(row["job_id"])
+                    start_job = True
+
+    if start_job and job_id is not None:
+        background.add_task(process_ingest_job, store_id, job_id)
+    return OwnerAnswerAttachment(
+        question_id=question_id, source_id=source_id, job_id=job_id, created=created
     )

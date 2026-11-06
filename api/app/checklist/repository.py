@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import date, time
 from typing import Any
 
-from app.checklist.calendar import split_lines
 from app.checklist.scope import ChecklistCard, Shift
 
 PRESET = (("오픈", time(7), time(11)), ("미들", time(14), time(18)), ("마감", time(18), time(23)))
@@ -259,6 +258,10 @@ async def load_cards(db, store_id: int) -> list[ChecklistCard]:
     """승인·공개 버전이 있는 체크리스트 카드. 보관 근무조 연결은 빼고, 연결 행이 아예 없으면 공통 (C9)."""
     rows = await db.fetch(
         """select c.card_id, k.published_version_id as card_version_id, v.title, v.content,
+                  (select min(i.item_id) from roadmap_items i
+                     join roadmap_stages g on g.stage_id = i.stage_id and g.store_id = $1 and g.is_active = true
+                    where i.card_id = c.card_id and i.is_active = true
+                      and i.published_version_id = k.published_version_id) as item_id,
                   bool_and(cs.shift_id is null) as common,
                   coalesce(array_agg(s.shift_id) filter (where s.shift_id is not null), '{}') as shift_ids
            from checklist_cards c
@@ -273,10 +276,13 @@ async def load_cards(db, store_id: int) -> list[ChecklistCard]:
     )
     cards = []
     for r in rows:
-        lines = tuple(split_lines(r["content"]))
-        if lines:
-            cards.append(ChecklistCard(int(r["card_id"]), int(r["card_version_id"]), r["title"], lines,
-                                       bool(r["common"]), frozenset(int(x) for x in r["shift_ids"])))
+        # 항목 = 카드 하나. 본문 줄 수와 무관하고, 제목이 비면 항목으로 세지 않는다 (B-D9).
+        title = (r["title"] or "").strip()
+        if title:
+            item_id = r.get("item_id")
+            cards.append(ChecklistCard(int(r["card_id"]), int(r["card_version_id"]), title, (title,),
+                                       bool(r["common"]), frozenset(int(x) for x in r["shift_ids"]),
+                                       int(item_id) if item_id is not None else None))
     return cards
 
 
@@ -438,16 +444,16 @@ async def record_day(db, store_id: int, user_id: int, day: date) -> dict[str, An
              where store_id = $1 and user_id = $2 and business_date = $3
              order by card_version_id, line_no, event_id desc
            )
-           select l.card_version_id, l.line_no, l.created_at, v.title, v.content
+           select l.card_version_id, l.line_no, l.created_at, v.title
            from last l join card_versions v on v.store_id = $1 and v.version_id = l.card_version_id
            where l.checked order by l.created_at""",
         store_id, user_id, day,
     )
     lines = []
     for r in rows:
-        texts = split_lines(r["content"])
-        if 1 <= r["line_no"] <= len(texts):
-            lines.append({"title": r["title"], "text": texts[r["line_no"] - 1],
+        # 카드 단위 체크는 line_no 1 하나다. 예전 줄 단위 체크(2 이상)는 보이지 않는다.
+        if r["line_no"] == 1 and (r["title"] or "").strip():
+            lines.append({"title": r["title"], "text": r["title"],
                           "checked_at": r["created_at"].isoformat()})
     sub = await db.fetchrow(
         """select user_id, scope_shift_ids, total_lines, done_lines, late, submitted_at from checklist_submissions

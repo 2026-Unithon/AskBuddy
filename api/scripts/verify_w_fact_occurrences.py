@@ -29,6 +29,7 @@ from app.ingest.extract import mock
 from app.ingest.schemas import (FactExtractionResult, LocatedAssertion, LocatedEvidence,
                                 LocatedFactExtractionResult)
 from verify_w_partial_extraction import _new_source, _seed
+from _intake_stub import intake_patches
 
 
 PDF_TEXT = ("[1쪽]\n음료Z 는 물 10ml 를 넣는다.\n\n"
@@ -99,6 +100,8 @@ async def verify(db, dsn):
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: pool),
+                # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE)
+                *intake_patches(),
                 (pipeline, "_preprocess", AsyncMock(return_value=(PDF_TEXT, [], []))),
                 (pipeline.shutil, "rmtree", lambda *a, **kw: None),
                 (app.config, "get_settings", lambda: app_settings),

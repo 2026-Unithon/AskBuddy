@@ -18,11 +18,6 @@ def local_time(now_utc: datetime, tz: str) -> time:
     return now_utc.astimezone(ZoneInfo(tz)).time().replace(second=0, microsecond=0)
 
 
-def split_lines(content: str) -> list[str]:
-    """체크 항목 = 공개 본문의 한 줄. 빈 줄은 뺀다 (C8, 웹 NumberedContent 와 같은 규칙)."""
-    return [line.strip() for line in content.split("\n") if line.strip()]
-
-
 @dataclass(frozen=True)
 class ShiftWindow:
     shift_id: int

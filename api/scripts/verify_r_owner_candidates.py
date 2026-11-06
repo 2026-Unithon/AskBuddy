@@ -107,7 +107,10 @@ async def verify(pool, admin):
                 return FactExtractionResult(assertions=[a_facts[0].model_copy(update={
                     'evidence': a_facts[0].evidence.model_copy(update={'source_id': source_id})})])
             settings = _mock_settings()
-            with patch('app.ingest.extract.extract_facts', single_extract), \
+            # 입구 분류(Phase B)는 합성 대역(분류 RECIPE) — 유료 호출 없음
+            from _intake_stub import intake_context
+            with intake_context(), \
+                    patch('app.ingest.extract.extract_facts', single_extract), \
                     patch.object(extract, 'get_settings', lambda: settings):
                 status = await asyncio.wait_for(process_next_owner_event(single, store_id=sid), timeout=8)
             check('real worker links via new index without legacy vectors', status == 'LINKED' and

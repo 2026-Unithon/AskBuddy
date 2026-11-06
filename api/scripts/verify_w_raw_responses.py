@@ -29,6 +29,7 @@ from app.ingest import fact_assembly
 from app.ingest.extract import mock
 from app.ingest.schemas import FactExtractionResult
 from verify_w_partial_extraction import _new_source, _seed
+from _intake_stub import intake_patches
 
 GOOD = ('{"assertions": [{"local_ref": "f1", "original_assertion": "음료Z 물 10ml", '
         '"subject": "음료Z", "attribute": "물", "value": "10", "unit": "ml", "confidence": 0.9}]}')
@@ -159,6 +160,8 @@ async def verify(db, dsn):
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: pool),
+                # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE)
+                *intake_patches(),
                 (pipeline, "_preprocess", AsyncMock(return_value=("t", [], [("a", []), ("b", [])]))),
                 (pipeline.shutil, "rmtree", lambda *a, **kw: None),
                 (extract, "get_settings", lambda: NS(ingest_mode="mock")),
@@ -197,6 +200,8 @@ async def verify(db, dsn):
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: pool),
+                # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE)
+                *intake_patches(),
                 (pipeline, "_preprocess", AsyncMock(return_value=(
                     "t", [], [("줄A 첫째\n줄A 둘째", []), ("줄B", [])]))),
                 (pipeline.shutil, "rmtree", lambda *a, **kw: None),
@@ -245,6 +250,8 @@ async def verify(db, dsn):
             with ExitStack() as stack:
                 for obj, name, replacement in [
                     (pipeline, "get_pool", lambda: pool),
+                    # 입구 분류(Phase B)는 원본을 받으므로 합성 대역(분류 RECIPE)
+                    *intake_patches(),
                     (pipeline, "_preprocess", AsyncMock(return_value=("t", [], list(segments)))),
                     (pipeline.shutil, "rmtree", lambda *a, **kw: None),
                     (app.config, "get_settings", lambda: settings),

@@ -1,12 +1,16 @@
 """Phase A Task 5 — 점주 답변 글을 사실 수집 입력으로 만든다."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.ingest import owner_text, pipeline
 from app.ingest.schemas import Evidence, ExtractedAssertion
+
+# Phase B Task 11: ingest_owner_text 는 입구 판정을 받는다. 여기서는 보통 업무 글(RECIPE)이다
+_RECIPE_ROUTE = SimpleNamespace(source=SimpleNamespace(logic="RECIPE"))
 
 
 def _a(ref, original):
@@ -93,7 +97,8 @@ async def test_resume_skips_extraction_when_ledger_exists():
             patch.object(owner_text.pipeline, "_prepare_fact_assembly", AsyncMock()), \
             patch.object(owner_text.pipeline, "_persist_fact_cards", AsyncMock(return_value=0)):
         await owner_text.ingest_owner_text(_Pool(conn), store_id=7, source_id=11,
-                                           question="질문", answer="답", run_tag=1)
+                                           question="질문", answer="답", run_tag=1,
+                                           route=_RECIPE_ROUTE)
     extract.assert_not_awaited()
 
 
@@ -180,7 +185,8 @@ async def test_extraction_path_filters_and_persists_ledger():
             patch.object(owner_text.pipeline, "_prepare_fact_assembly", AsyncMock()), \
             patch.object(owner_text.pipeline, "_persist_fact_cards", AsyncMock(return_value=0)):
         await owner_text.ingest_owner_text(_Pool(conn), store_id=7, source_id=11,
-                                           question=q, answer=ans, run_tag=1)
+                                           question=q, answer=ans, run_tag=1,
+                                           route=_RECIPE_ROUTE)
     kw = extract.await_args.kwargs
     assert kw["source_type"] == "OWNER_TEXT" and kw["text"] == owner_text.compose_text(q, ans)
     args = persist.await_args.args

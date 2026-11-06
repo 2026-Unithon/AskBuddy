@@ -14,6 +14,17 @@ from app.ingest.pipeline import ExtractionOutcome, _extract_facts_all
 from app.ingest.schemas import Evidence, ExtractedAssertion
 
 
+def _recipe_route_stub(normalizer):
+    """Phase B 입구 분류 대역 — 자료 전체가 RECIPE 한 구간이다(분류 모델·판정 기록을 부르지 않는다)."""
+    from app.ingest.intake.decide import Ranked, SectionDecision
+    from app.ingest.intake.records import StoredRoute
+    r = (Ranked("RECIPE", 0.9),)
+
+    def d(cid):
+        return SectionDecision(cid, "RECIPE", ("RECIPE",), False, False, False, None, r, r)
+    return AsyncMock(return_value=StoredRoute(1, normalizer, [d("c1")], d("source")))
+
+
 def _assertion(ref: str) -> ExtractedAssertion:
     return ExtractedAssertion(
         local_ref=ref, original_assertion="원두 18g", subject="음료Z",
@@ -215,6 +226,7 @@ async def _run_retry(tmp_path, *, segments, retry_segments, expected_total):
                       AsyncMock(return_value=NS(planning=NS(unresolved=[])))), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(pipeline, "_record_segment_failures", record), \
+         patch.object(pipeline.intake_route, "route_source", _recipe_route_stub("VIDEO")), \
          patch.object(pipeline, "_persist_fact_cards", persist):
         returned = await pipeline.process_source(
             1, 2, job_id=5, retry_segments=retry_segments,
@@ -552,6 +564,7 @@ async def _run_with_ledger(tmp_path, ledger, *, run_tag, retry_segments=None,
          patch.object(pipeline, "_prepare_fact_assembly", fake_prepare), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(pipeline, "_record_segment_failures", record), \
+         patch.object(pipeline.intake_route, "route_source", _recipe_route_stub("VIDEO")), \
          patch.object(pipeline, "_persist_fact_cards", persist):
         await pipeline.process_source(
             1, 2, job_id=5, run_tag=run_tag, retry_segments=retry_segments,

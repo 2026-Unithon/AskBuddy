@@ -1,0 +1,135 @@
+{
+ "facts": [
+  {
+   "subject": "음료Z",
+   "variant": "ICE",
+   "attribute": "샷수",
+   "value": "2",
+   "unit": "샷",
+   "step_order": null,
+   "polarity": "AFFIRM",
+   "conditions": [],
+   "original_assertion": "음료Z 샷수 2샷",
+   "source_key": "syn",
+   "source_type": "SCAN",
+   "consensus": {
+    "votes": 3,
+    "of": 3,
+    "row": 1,
+    "representative": "C2 opus",
+    "runs": [
+     "C2 opus",
+     "C1 opus",
+     "C4 sonnet"
+    ]
+   },
+   "fact_id": "t-0001"
+  },
+  {
+   "subject": "음료Z",
+   "variant": "ICE",
+   "attribute": "물량",
+   "value": "225",
+   "unit": "ml",
+   "step_order": null,
+   "polarity": "AFFIRM",
+   "conditions": [],
+   "original_assertion": "음료Z 물량 225ml",
+   "source_key": "syn",
+   "source_type": "SCAN",
+   "consensus": {
+    "votes": 2,
+    "of": 3,
+    "row": 1,
+    "representative": "C2 opus",
+    "runs": [
+     "C2 opus",
+     "C4 sonnet"
+    ]
+   },
+   "fact_id": "t-0002"
+  },
+  {
+   "subject": "음료Z",
+   "variant": "ICE",
+   "attribute": "제조순서",
+   "value": "얼음 담기",
+   "unit": "",
+   "step_order": 1,
+   "polarity": "AFFIRM",
+   "conditions": [],
+   "original_assertion": "음료Z 제조순서 얼음 담기",
+   "source_key": "syn",
+   "source_type": "SCAN",
+   "consensus": {
+    "votes": 2,
+    "of": 3,
+    "row": 1,
+    "representative": "C2 opus",
+    "runs": [
+     "C2 opus",
+     "C1 opus"
+    ]
+   },
+   "fact_id": "t-0003"
+  },
+  {
+   "subject": "음료Y",
+   "variant": "ICE",
+   "attribute": "판매가",
+   "value": "4500",
+   "unit": "원",
+   "step_order": null,
+   "polarity": "AFFIRM",
+   "conditions": [],
+   "original_assertion": "음료Y 판매가 4500원",
+   "source_key": "syn",
+   "source_type": "SCAN",
+   "consensus": {
+    "votes": 2,
+    "of": 3,
+    "row": 2,
+    "representative": "C2 opus",
+    "runs": [
+     "C2 opus",
+     "C1 opus"
+    ]
+   },
+   "fact_id": "t-0004"
+  }
+ ],
+ "contested": [
+  {
+   "row": 1,
+   "key": [
+    "NUM",
+    "220",
+    "ml"
+   ],
+   "votes": 1,
+   "of": 3,
+   "runs": [
+    "C1 opus"
+   ],
+   "assertions": {
+    "C1 opus": "음료Z 물량 220ml"
+   }
+  },
+  {
+   "row": 1,
+   "key": [
+    "TXT",
+    "시나몬",
+    ""
+   ],
+   "votes": 1,
+   "of": 3,
+   "runs": [
+    "C4 sonnet"
+   ],
+   "assertions": {
+    "C4 sonnet": "음료Z 토핑 시나몬"
+   }
+  }
+ ]
+}

@@ -149,7 +149,7 @@ Supabase를 쓰면서도 RLS를 도입하지 않았다. 정책이 DB와 코드 �
 | STT | OpenAI `whisper-1` |
 | 멀티모달 추출 | Gemini Flash (`response_schema` 강제 JSON) |
 | 파일 | Supabase Storage 비공개 버킷 · 서명 URL 업로드 |
-| 배포 | Vercel (web) · Railway (api, ffmpeg 포함 Dockerfile) |
+| 배포 | Vercel (web) · AWS EC2 + Caddy (api) |
 
 ## 팀과 기여
 
