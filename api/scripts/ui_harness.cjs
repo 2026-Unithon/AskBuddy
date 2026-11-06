@@ -8,10 +8,11 @@ const BASE = process.env.UI_BASE || 'http://127.0.0.1:3011';
 const here = (page) => { const u = new URL(page.url()); return u.pathname + u.search; };
 const opened = [];
 
-async function open(browser, role, url, { viewport = { width: 390, height: 844 }, overrides } = {}) {
+async function open(browser, role, url, { viewport = { width: 390, height: 844 }, overrides, touch = false } = {}) {
   const api = syntheticApi(role, overrides);
   opened.push(api);
-  const ctx = await browser.newContext({ viewport, locale: 'ko-KR' });
+  // touch: 폰처럼 손가락 입력(hasTouch, isMobile). 당겨서 새로고침 같은 몸짓 검사용
+  const ctx = await browser.newContext({ viewport, locale: 'ko-KR', ...(touch ? { hasTouch: true, isMobile: true } : {}) });
   await ctx.route('http://localhost:8000/**', api.handler);
   const page = await ctx.newPage();
   page.on('pageerror', (error) => api.misses.push(`pageerror ${error.message}`));

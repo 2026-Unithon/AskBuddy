@@ -33,6 +33,7 @@ import {
   STAFF_TABS,
   Stagger,
   SwipeRow,
+  Switch,
   TabBar,
   useFeedback,
 } from "@/components/kit";
@@ -47,6 +48,7 @@ function Preview() {
 
   if (screen === "feedback") return <FeedbackPreview />;
   if (screen === "gestures") return <GesturesPreview />;
+  if (screen === "forms") return <FormsPreview />;
 
   if (screen === "a2") {
     return (
@@ -170,6 +172,19 @@ function Preview() {
       <CardLink href="/dev/kit?s=a5" title="디카페인 원두 어디 있어요?" meta="답하면 카드로 남아요" />
       <CardLink href="/dev/kit?s=a5" title="오트밀크 라떼도 시럽 2펌프인가요?" meta="답하면 카드로 남아요" />
       <Caption>질문이 오면 바로 알려드려요</Caption>
+    </Screen>
+  );
+}
+
+// ?s=forms: 스위치·당겨서 새로고침 (계획 3)
+function FormsPreview() {
+  const [on, setOn] = useState(false);
+  const [count, setCount] = useState(0);
+  return (
+    <Screen onRefresh={() => new Promise((resolve) => setTimeout(() => resolve(setCount((n) => n + 1)), 200))}>
+      <PageHeader title="입력" />
+      <Switch label="알림" checked={on} onChange={setOn} />
+      <p>새로고침 {count}번</p>
     </Screen>
   );
 }

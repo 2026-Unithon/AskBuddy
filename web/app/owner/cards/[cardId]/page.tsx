@@ -3,11 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState } from "react";
+import { sharedTitleProps } from "@/lib/shared-title";
 import {
   BackButton,
   Button,
   ButtonLink,
-  Caption,
   Chip,
   Empty,
   ErrorInline,
@@ -16,8 +16,8 @@ import {
   Sheet,
   Skeleton,
   Surface,
-  TextButton,
   focusRing,
+  useFeedback,
 } from "@/components/kit";
 import { ApiError, apiErrorMessage, moveProductCard, mutateProductCard, type CardDetailDto } from "@/lib/api";
 import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
@@ -25,17 +25,8 @@ import { CardAssignment } from "@/components/checklist/card-assignment";
 import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
-
-const STATUS: Record<CardDetailDto["review_status"], { label: string; tone: "brand" | "warn" | "neutral" | "danger" }> = {
-  PENDING: { label: "공개 전", tone: "neutral" },
-  NEEDS_REVIEW: { label: "확인이 필요해요", tone: "warn" },
-  APPROVED: { label: "공개 중", tone: "brand" },
-  EXCLUDED: { label: "지운 카드", tone: "danger" },
-};
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" });
-}
+import { evidenceNames } from "@/components/owner/fact-card/fact-row";
+import { pressable } from "@/components/kit/buttons";
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
 // 사실 카드(card.fact_card)는 W3b 사실 단위 편집(/cards/{id}/facts)으로 고친다. 제목은 읽기 전용(D-7).
@@ -45,10 +36,9 @@ export default function OwnerCardPage() {
   const cardId = /^\d+$/.test(params.cardId) ? Number(params.cardId) : 0;
   const { state } = useApp();
   const client = useQueryClient();
+  const { snackbar } = useFeedback();
   const detail = useQuery(cardQuery(state.token, state.storeId, cardId));
-  const [confirmExclude, setConfirmExclude] = useState(false);
   const [moving, setMoving] = useState(false);
-  const [showEvidence, setShowEvidence] = useState(false);
   const factCard = Boolean(detail.data?.fact_card);
   const factEditor = useFactCardEditor(cardId, factCard);
 
@@ -69,9 +59,11 @@ export default function OwnerCardPage() {
   const status = useMutation({
     mutationFn: (action: "approve" | "exclude" | "restore") => mutateProductCard(cardId, action, state.token!),
     onSuccess: async (_result, action) => {
-      setConfirmExclude(false);
-      // 마지막 사실을 빼려다 카드를 지운 경우: 편집 초안을 닫는다
-      if (action === "exclude") factEditor.cancel();
+      // 마지막 사실을 빼려다 카드를 지운 경우: 편집 초안을 닫고, 삭제는 5초 되돌리기만 남긴다
+      if (action === "exclude") {
+        factEditor.cancel();
+        snackbar({ message: "삭제했어요", actionLabel: "되돌리기", onAction: () => status.mutate("restore") });
+      }
       await refresh();
     },
     onError: onConflict,
@@ -112,11 +104,30 @@ export default function OwnerCardPage() {
   const title = shown?.title ?? "";
   const content = shown?.content ?? "";
   const unpublishedDraft = Boolean(card.draft && card.published && card.draft.version_id !== card.published.version_id);
-  const excluded = card.review_status === "EXCLUDED";
   const canPublish = card.review_status === "PENDING" || card.review_status === "NEEDS_REVIEW" || unpublishedDraft;
-  const sourceDeleted = card.source?.source_availability === "DELETED";
-  const statusView = STATUS[card.review_status];
   const actionError = status.error;
+
+  // 삭제한 카드는 어디에서도 보이지 않는다(2026-11-06 사용자). 옛 알림·뒤로가기로 와도 안내만
+  if (card.review_status === "EXCLUDED") {
+    return (
+      <Screen>
+        <BackButton parent="/owner/cards" label="카드" />
+        <Empty title="삭제한 카드예요" description="이 카드는 이제 어디에도 보이지 않아요." />
+      </Screen>
+    );
+  }
+
+  // 근거 자료 한 줄(o06c): 사실 카드는 모든 사실의 근거, 아니면 카드 근거의 자료 이름
+  const evidence = card.fact_card
+    ? evidenceNames(factEditor.facts.data?.blocks.flatMap((block) => block.facts.flatMap((fact) => fact.origins)) ?? [])
+    : [...new Set(card.evidence.map((item) => `${item.source.title ?? "자료"}${item.source.source_availability === "DELETED" ? " (원본 지워짐)" : ""}`))];
+  const statusLine = unpublishedDraft
+    ? { dot: "bg-warn-500", text: "고친 내용은 아직 공개 전이에요" }
+    : card.review_status === "APPROVED"
+      ? { dot: "bg-primary", text: "직원에게 보여요" }
+      : card.review_status === "PENDING"
+        ? { dot: "bg-ink-muted", text: "아직 공개 전이에요" }
+        : null;
 
   const screen = (
     <Screen
@@ -124,56 +135,59 @@ export default function OwnerCardPage() {
         factEditor.editing ? (
           <FactCardEditFooter editor={factEditor} />
         ) : (
-        <>
-          {actionError && status.variables !== "exclude" && (
-            <ErrorInline
-              message={apiErrorMessage(actionError, "이 변경은 저장되지 않았어요.")}
-              onRetry={() => status.variables && status.mutate(status.variables)}
-              retrying={status.isPending}
-            />
-          )}
-          {excluded ? (
-            <Button loading={status.isPending} onClick={() => status.mutate("restore")}>
-              다시 살리기
-            </Button>
-          ) : (
+          canPublish && (
             <>
-              {canPublish && (
-                <Button loading={status.isPending && status.variables === "approve"} onClick={() => status.mutate("approve")}>
-                  공개하기
-                </Button>
+              {actionError && (
+                <ErrorInline
+                  message={apiErrorMessage(actionError, "이 변경은 저장되지 않았어요.")}
+                  onRetry={() => status.variables && status.mutate(status.variables)}
+                  retrying={status.isPending}
+                />
               )}
-              {card.fact_card && factEditor.canEdit && (
-                <Button variant={canPublish ? "secondary" : "primary"} onClick={factEditor.start}>
-                  고치기
-                </Button>
-              )}
-              <Button variant="secondary" onClick={() => setConfirmExclude(true)}>
-                지우기
+              {/* 검수 필요의 '미공개'는 서버 전환이 생긴 뒤(백로그) */}
+              <Button loading={status.isPending && status.variables === "approve"} onClick={() => status.mutate("approve")}>
+                공개
               </Button>
             </>
-          )}
-        </>
+          )
         )
       }
     >
-      <BackButton parent="/owner/cards" label="카드" />
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setMoving(true)}
-          disabled={excluded}
-          aria-label={`카테고리 ${card.category?.name ?? "기타"}, 옮기기`}
-          className={`min-h-8 text-[13px] font-bold text-primary underline-offset-2 hover:underline ${focusRing}`}
-        >
-          {card.category?.name ?? "기타"}
-        </button>
-        <Chip size="sm" tone={statusView.tone}>{statusView.label}</Chip>
-        {unpublishedDraft && <Chip size="sm" tone="warn">고친 내용 공개 전</Chip>}
+      <div className="flex items-center justify-between gap-2">
+        <BackButton parent="/owner/cards" label="카드" />
+        {card.fact_card && factEditor.canEdit && !factEditor.editing && (
+          <button
+            type="button"
+            onClick={factEditor.start}
+            className={`min-h-11 rounded-full bg-surface px-4 text-[14px] font-bold text-primary shadow-card ${pressable} ${focusRing}`}
+          >
+            수정하기
+          </button>
+        )}
       </div>
-      <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{title}</h1>
-        {card.review_status === "NEEDS_REVIEW" && card.needs_review_reason && (
-        <p className="rounded-[14px] bg-warn-50 px-3.5 py-2.5 text-[13px] leading-[1.45] text-warn-700">{card.needs_review_reason}</p>
+      <button
+        type="button"
+        onClick={() => setMoving(true)}
+        aria-label={`카테고리 ${card.category?.name ?? "기타"}, 옮기기`}
+        className={`inline-flex min-h-8 items-center gap-1 self-start rounded-full bg-empty px-3 text-[13px] font-bold text-primary ${pressable} ${focusRing}`}
+      >
+        {card.category?.name ?? "기타"}
+        <span aria-hidden>▾</span>
+      </button>
+      <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="-mt-2 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
+        {title}
+      </h1>
+      {statusLine && (
+        <p className="-mt-2 flex items-center gap-1.5 text-[13px] text-ink-muted">
+          <span aria-hidden className={`size-2 rounded-full ${statusLine.dot}`} />
+          {statusLine.text}
+        </p>
+      )}
+      {card.review_status === "NEEDS_REVIEW" && (
+        <div className="rounded-[14px] border-l-4 border-warn-500 bg-warn-50 px-4 py-3">
+          <p className="text-[15px] font-bold text-warn-700">확인해 주세요</p>
+          <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{card.needs_review_reason ?? "내용이 확실하지 않아요"}</p>
+        </div>
       )}
       {card.fact_card ? (
         <FactCardPanel editor={factEditor} card={card} />
@@ -182,46 +196,8 @@ export default function OwnerCardPage() {
           <NumberedContent content={content} />
         </Surface>
       )}
-      {!excluded && card.review_status === "APPROVED" && card.published && <CardAssignment cardId={cardId} />}
-      {unpublishedDraft && card.published && <Caption>직원에게는 아직 이전 내용({card.published.title})이 보여요</Caption>}
-      <Caption>
-        <span className="mr-2">출처 {card.source?.title ?? "알 수 없음"}</span>
-        {card.published && <span className="mr-2">{formatDate(card.published.created_at)}</span>}
-        {sourceDeleted && <span>인용 끊김</span>}
-      </Caption>
-      {card.evidence.length > 0 && (
-        <TextButton onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}>
-          {showEvidence ? "근거 접기" : `근거 보기 ${card.evidence.length}`}
-        </TextButton>
-      )}
-      {showEvidence && (
-        <ul className="flex flex-col gap-2">
-          {card.evidence.map((item) => (
-            <li key={item.evidence_id} className="rounded-[14px] bg-surface px-3.5 py-2.5 text-[13px] leading-[1.45] text-ink shadow-card">
-              <p className="whitespace-pre-wrap">{item.excerpt ?? "원문 위치만 남아 있어요"}</p>
-              <p className="mt-1 text-[12px] text-ink-muted">
-                {item.source.title ?? "자료"}
-                {item.source.source_availability === "DELETED" ? " (인용 끊김, 원본이 지워졌어요)" : ""}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <Sheet
-        open={confirmExclude}
-        onClose={() => setConfirmExclude(false)}
-        title="이 카드를 지울까요?"
-        description="직원에게 더는 보이지 않고 버디도 이 카드로 답하지 않아요. 나중에 다시 살릴 수 있어요."
-      >
-        {status.error !== null && status.variables === "exclude" && <ErrorInline message={apiErrorMessage(status.error, "지우지 못했어요.")} />}
-        <Button variant="danger" loading={status.isPending} onClick={() => status.mutate("exclude")}>
-          지우기
-        </Button>
-        <Button variant="secondary" onClick={() => setConfirmExclude(false)}>
-          그대로 두기
-        </Button>
-      </Sheet>
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && <CardAssignment cardId={cardId} />}
+      {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>
   );

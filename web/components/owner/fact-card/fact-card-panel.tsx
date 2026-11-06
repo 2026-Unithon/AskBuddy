@@ -3,24 +3,30 @@
 // W3b 사실 카드 본문: 사실 목록 읽기(Query)·편집 초안(지역 reducer)·저장(mutation).
 // 서버 값은 cardFactsQuery 가 정본이다. 편집 중 초안은 저장 성공 전까지 서버에 쓰지 않는다.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Button, Caption, Chip, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface } from "@/components/kit";
+import { useState, type ReactNode } from "react";
+import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface, useFeedback } from "@/components/kit";
 import { ApiError, apiErrorMessage, saveCardFacts, type CardDetailDto, type FactEditRequest, type FactFields, type ParsedFactProposal } from "@/lib/api";
 import { cardFactsQuery, checklistKeys, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
-import { FactRowItem, blockLabel } from "./fact-row";
+import { FactRowItem, FactViewRow, blockHeading } from "./fact-row";
+import { SortableList } from "./sortable-list";
+import { useLongPress } from "@/lib/use-long-press";
+import { focusRing } from "@/components/kit/buttons";
 import { disturbsLocked, fieldsOf, isModified, moveStepRows, useFactEditDraft, type DraftBlock } from "./use-fact-edit-draft";
 
 const CONFLICT_CODES = ["CARD_VERSION_CONFLICT", "FACT_CHANGED_ELSEWHERE"];
+
 const ENTITY_TEXT = "메뉴 정리가 바뀌어 이 카드에서 고칠 수 없어요.";
+const RAW_TEXT = "이 카드에는 사실로 나뉘지 않은 내용이 섞여 있어 사실 단위로 고칠 수 없어요.";
 
 /** 사실 카드 화면 상태. 페이지가 본문(FactCardPanel)과 하단(FactCardEditFooter)에 같이 넘긴다. */
 export function useFactCardEditor(cardId: number, enabled: boolean) {
   const { state } = useApp();
   const client = useQueryClient();
+  const { toast } = useFeedback();
   const facts = useQuery(cardFactsQuery(state.token, state.storeId, cardId, enabled));
   const { draft, dirty, remaining, actions, buildRequest } = useFactEditDraft();
   const [editKey, setEditKey] = useState<string | null>(null);
@@ -47,6 +53,8 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
         client.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
       ]);
       actions.clear();
+      // 되돌리기 스낵바는 서버 '이전 판으로'가 생긴 뒤(백로그). 지금은 완료만 알린다
+      toast("수정 완료");
     },
     onError: async (error) => {
       const code = errorCode(error);
@@ -145,7 +153,6 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
 
 export type FactCardEditor = ReturnType<typeof useFactCardEditor>;
 
-const RAW_TEXT = "이 카드에는 사실로 나뉘지 않은 내용이 섞여 있어 사실 단위로 고칠 수 없어요.";
 
 /** 두 줄 사이에 같은 블록 선행 관계가 있나(어느 쪽이든). */
 function dependsOn(a: DraftBlock["rows"][number], b: DraftBlock["rows"][number]): boolean {
@@ -195,6 +202,7 @@ function flaggedKey(error: unknown): string | null {
 
 export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: CardDetailDto }) {
   const { facts, draft, save } = editor;
+  const [menuKey, setMenuKey] = useState<string | null>(null);
   if (facts.isLoading) {
     return (
       <div className="flex flex-col gap-3" data-testid="fact-panel-loading">
@@ -219,6 +227,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
   const excluded = card.review_status === "EXCLUDED";
   const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;
+  const menuRow = draft?.blocks.flatMap((block) => block.rows).find((row) => row.key === menuKey) ?? null;
 
   return (
     <div className="flex flex-col gap-3" data-testid="fact-panel">
@@ -232,55 +241,90 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
         />
       )}
       {editor.notice && excluded && <Caption className="text-danger-700">{editor.notice}</Caption>}
+      {/* '수정하기'가 없는 이유는 알려 준다(고칠 수 없는 카드) */}
       {!editor.editing && !view.editable && !excluded && (
         <Caption>{view.entity_problem ? ENTITY_TEXT : "지금은 이 카드를 사실 단위로 고칠 수 없어요."}</Caption>
       )}
       {!editor.editing && view.editable && editor.hasRaw && !excluded && <Caption>{RAW_TEXT}</Caption>}
       {draft
-        ? draft.blocks.map((block) => (
-            <Surface key={block.key} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
-              <div className="flex">
-                <Chip>{blockLabel(block.kind, block.variant)}</Chip>
-              </div>
-              {block.kind === "STEPS" && <Caption className="pt-1.5">위나 아래로 옮기면 일하는 순서가 바뀌어요.</Caption>}
-              <ul className="flex flex-col">
-                {block.rows.map((row, i) => {
-                  const steps = block.kind === "STEPS";
-                  return (
-                    <FactRowItem
-                      key={row.key}
-                      fields={row.fields}
-                      base={row.base}
-                      state={!row.base ? "ADDED" : isModified(row) ? "MODIFIED" : null}
-                      flagged={flagged === row.key}
-                      requireLabels={steps ? draftRequireLabels(block, i) : undefined}
-                      edit={{
-                        locked,
-                        isSteps: steps,
-                        canUp: canSwap(block, i, i - 1),
-                        canDown: canSwap(block, i, i + 1),
-                        onEdit: () => editor.setEditKey(row.key),
-                        onRemove: () => editor.remove(row.key),
-                        onMove: (dir) => (steps ? editor.actions.moveStep(row.key, dir) : editor.actions.moveDisplay(row.key, dir)),
-                      }}
-                    />
-                  );
-                })}
-              </ul>
-            </Surface>
-          ))
+        ? draft.blocks.map((block) => {
+            const steps = block.kind === "STEPS";
+            return (
+              <Surface key={block.key} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
+                <h3 className="text-[15px] font-bold text-ink">{blockHeading(block.kind, block.variant)}</h3>
+                <SortableList
+                  items={block.rows.map((row) => ({ ...row, label: row.fields.sentence }))}
+                  canMove={(from, to) => !locked && canSwap(block, from, to)}
+                  onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
+                  renderItem={(row, i) => (
+                    <LongPressRow onLongPress={() => setMenuKey(row.key)}>
+                      <FactRowItem
+                        fields={row.fields}
+                        base={row.base}
+                        state={!row.base ? "ADDED" : isModified(row) ? "MODIFIED" : null}
+                        flagged={flagged === row.key}
+                        requireLabels={steps ? draftRequireLabels(block, i) : undefined}
+                        edit={{ locked, onEdit: () => editor.setEditKey(row.key), onRemove: () => editor.remove(row.key) }}
+                      />
+                    </LongPressRow>
+                  )}
+                />
+              </Surface>
+            );
+          })
         : view.blocks.map((block) => (
-            <Surface key={block.block_id} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
-              <div className="flex">
-                <Chip>{blockLabel(block.kind, block.variant)}</Chip>
-              </div>
-              <ul className="flex flex-col">
-                {block.facts.map((row) => (
-                  <FactRowItem key={row.fact_revision_id} fields={fieldsOf(row)} base={row} />
-                ))}
-              </ul>
-            </Surface>
+            // 보기 모드(o06b): 머리글은 카드 밖에 굵게, 칩과 줄마다 근거는 없다
+            <section key={block.block_id} className="flex flex-col gap-2">
+              <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
+              <Surface className="flex flex-col px-[18px] py-1">
+                <ul className="flex flex-col">
+                  {block.facts.map((row) => (
+                    <FactViewRow key={row.fact_revision_id} fields={fieldsOf(row)} />
+                  ))}
+                </ul>
+              </Surface>
+            </section>
           ))}
+      {draft && (
+        <button
+          type="button"
+          disabled={locked}
+          onClick={() => editor.setAdding(true)}
+          className={`min-h-12 rounded-[16px] border-2 border-dashed border-empty text-[15px] font-bold text-primary disabled:opacity-50 ${focusRing}`}
+        >
+          + 사실 추가
+        </button>
+      )}
+      <Sheet open={menuRow !== null} onClose={() => setMenuKey(null)} title={menuRow ? menuRow.fields.sentence.slice(0, 20) : ""}>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            if (menuRow) editor.setEditKey(menuRow.key);
+            setMenuKey(null);
+          }}
+        >
+          고치기
+        </Button>
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (menuRow) editor.remove(menuRow.key);
+            setMenuKey(null);
+          }}
+        >
+          빼기
+        </Button>
+      </Sheet>
+    </div>
+  );
+}
+
+/** 수정 모드에서 줄을 길게 누르면 고치기·빼기 시트(o06d). 글자 선택·iOS 링크 메뉴는 막는다. */
+function LongPressRow({ onLongPress, children }: { onLongPress: () => void; children: ReactNode }) {
+  const longPress = useLongPress(onLongPress);
+  return (
+    <div className="select-none [-webkit-touch-callout:none]" {...longPress}>
+      {children}
     </div>
   );
 }
@@ -337,6 +381,7 @@ export function FactCardSheets({
 /** 편집 중 하단: 오류·충돌 배너, 사실 추가, 저장, 그만두기. */
 export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
   const { save } = editor;
+  const [discard, setDiscard] = useState(false);
   const code = errorCode(save.error);
   const conflict = code !== null && CONFLICT_CODES.includes(code);
   return (
@@ -377,17 +422,26 @@ export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
         ) : (
           <ErrorInline message={saveErrorMessage(save.error)} />
         ))}
-      <Button loading={save.isPending} disabled={!editor.dirty} onClick={editor.submit}>
-        고친 내용 저장
-      </Button>
+      {/* o06f: 수정 완료(초록, 왼쪽) / 돌아가기(흰색, 오른쪽) */}
       <div className="flex gap-2">
-        <Button variant="secondary" disabled={save.isPending} onClick={() => editor.setAdding(true)}>
-          사실 추가
+        <Button className="flex-1" loading={save.isPending} disabled={!editor.dirty} onClick={editor.submit}>
+          수정 완료
         </Button>
-        <Button variant="secondary" disabled={save.isPending} onClick={editor.cancel}>
-          그만두기
+        <Button className="flex-1" variant="secondary" disabled={save.isPending} onClick={() => (editor.dirty ? setDiscard(true) : editor.cancel())}>
+          돌아가기
         </Button>
       </div>
+      <ConfirmDialog
+        open={discard}
+        title="고친 내용을 버릴까요?"
+        confirmLabel="버리기"
+        tone="danger"
+        onCancel={() => setDiscard(false)}
+        onConfirm={() => {
+          setDiscard(false);
+          editor.cancel();
+        }}
+      />
     </>
   );
 }

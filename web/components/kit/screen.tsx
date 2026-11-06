@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
+import { PullIndicator, usePullToRefresh } from "@/components/kit/pull-to-refresh";
 import { useEffect, useRef, type ReactNode } from "react";
 
 // 화면 오른쪽 위의 흐린 초록 빛. Figma: 380px 원, 프레임 오른쪽 밖으로 160px, 위로 160px.
@@ -26,15 +27,19 @@ export function Screen({
   tabBar,
   aurora = true,
   className = "",
+  onRefresh,
 }: {
   children: ReactNode;
   footer?: ReactNode;
   tabBar?: ReactNode;
   aurora?: boolean;
   className?: string;
+  /** 주면 맨 위에서 아래로 당겨 새로고침한다 */
+  onRefresh?: () => Promise<unknown>;
 }) {
   const main = useRef<HTMLElement>(null);
   const { enter } = useNavHistory();
+  const refresh = usePullToRefresh(main, onRefresh);
   // 탭 화면은 스크롤 위치를 기억해 탭을 오갈 때 되살린다(NAV-3).
   const rememberScroll = Boolean(tabBar);
   const pathname = usePathname();
@@ -89,10 +94,11 @@ export function Screen({
       {aurora && <Aurora />}
       <main
         ref={main}
-        className={`relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-[calc(28px+env(safe-area-inset-top,0px))] ${gutter} ${
+        className={`relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto ${onRefresh ? "overscroll-y-contain" : ""} pt-[calc(28px+env(safe-area-inset-top,0px))] ${gutter} ${
           footer ? "pb-4" : bottomSpace
         } ${className}`}
       >
+        {onRefresh && <PullIndicator pull={refresh.pull} refreshing={refresh.refreshing} threshold={refresh.threshold} />}
         {children}
       </main>
       {footer && <div className={`relative flex flex-col gap-3 pt-2 ${gutter} ${bottomSpace}`}>{footer}</div>}

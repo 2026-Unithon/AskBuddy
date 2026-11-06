@@ -11,6 +11,58 @@ export function variantLabel(variant: FactVariant): string {
   return parts.length > 0 ? parts.join(" ") : "규격 표시 없음";
 }
 
+/** 보기 모드 블록 머리글(o06b): 규격이 있으면 규격 이름, 없으면 블록 이름. */
+export function blockHeading(kind: EditBlockKind | "RAW", variant: FactVariant): string {
+  const parts = [variant.temperature, variant.size].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : BLOCK_NAME[kind];
+}
+
+/** 페이지 맨 아래 근거 자료 한 줄(o06c). 이름은 중복 없이, 원본이 지워졌으면 표시. */
+export function evidenceNames(origins: FactOrigin[]): string[] {
+  const names = origins.map((origin) => {
+    if (origin.kind === "OWNER_ANSWER") return "사장님 답변";
+    if (origin.kind === "OWNER_TEXT") return "사장님 직접 입력";
+    const name = origin.source_title ?? "자료";
+    return origin.source_availability === "DELETED" ? `${name} (원본 지워짐)` : name;
+  });
+  return [...new Set(names)];
+}
+
+/** 문장 안에 값(숫자+단위)이 있으면 그 부분만 굵게. */
+function withValue(sentence: string, value: string | null, unit: string | null) {
+  if (!value) return sentence;
+  const needle = [`${value}${unit ?? ""}`, value].find((n) => sentence.includes(n));
+  if (!needle) return sentence;
+  const at = sentence.indexOf(needle);
+  return (
+    <>
+      {sentence.slice(0, at)}
+      <strong className="font-bold">{needle}</strong>
+      {sentence.slice(at + needle.length)}
+    </>
+  );
+}
+
+/** 보기 모드 한 줄(o06b·o06d): 번호, 문장(값 굵게), 조건·예외. 칩과 근거 줄은 없다. */
+export function FactViewRow({ fields }: { fields: FactFields }) {
+  return (
+    <li data-testid="fact-row" className="flex flex-col gap-1 border-b border-background py-3 last:border-b-0">
+      <div className="flex items-start gap-2">
+        {fields.step_order !== null && (
+          <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+            {fields.step_order}
+          </span>
+        )}
+        <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
+          {withValue(fields.sentence, fields.value, fields.unit)}
+        </p>
+      </div>
+      {fields.conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {fields.conditions.join(" / ")}</p>}
+      {fields.exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {fields.exceptions.join(" / ")}</p>}
+    </li>
+  );
+}
+
 export function blockLabel(kind: EditBlockKind | "RAW", variant: FactVariant): string {
   return `${BLOCK_NAME[kind]} ${variantLabel(variant)}`;
 }
@@ -49,14 +101,11 @@ const EDIT_BLOCK_TEXT: Record<NonNullable<FactRow["edit_block"]>, { chip: string
   MOVED_ENTITY: { chip: "메뉴 정리 바뀜", text: "메뉴 정리가 바뀌어 이 카드에서 고칠 수 없어요. 빼고 새로 넣어 주세요." },
 };
 
+// 순서 바꾸기는 줄 오른쪽 손잡이(SortableList)가 맡는다
 export type FactRowEdit = {
   locked: boolean;
-  isSteps: boolean;
-  canUp: boolean;
-  canDown: boolean;
   onEdit: () => void;
   onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
 };
 
 function SmallButton({ label, onClick, disabled, children }: { label?: string; onClick: () => void; disabled?: boolean; children: string }) {
@@ -93,7 +142,7 @@ export function FactRowItem({
   const blocked = base?.edit_block ? EDIT_BLOCK_TEXT[base.edit_block] : null;
   const shortSentence = fields.sentence.length > 20 ? `${fields.sentence.slice(0, 20)}…` : fields.sentence;
   return (
-    <li
+    <div
       data-testid="fact-row"
       className={`flex flex-col gap-1.5 border-b border-background py-3 last:border-b-0 ${flagged ? "rounded-[12px] bg-danger-50 px-2" : ""}`}
     >
@@ -141,22 +190,8 @@ export function FactRowItem({
           <SmallButton label={`빼기: ${shortSentence}`} onClick={edit.onRemove} disabled={edit.locked}>
             빼기
           </SmallButton>
-          <SmallButton
-            label={edit.isSteps ? `위로 (일하는 순서가 바뀌어요): ${shortSentence}` : `위로: ${shortSentence}`}
-            onClick={() => edit.onMove(-1)}
-            disabled={edit.locked || !edit.canUp}
-          >
-            위로
-          </SmallButton>
-          <SmallButton
-            label={edit.isSteps ? `아래로 (일하는 순서가 바뀌어요): ${shortSentence}` : `아래로: ${shortSentence}`}
-            onClick={() => edit.onMove(1)}
-            disabled={edit.locked || !edit.canDown}
-          >
-            아래로
-          </SmallButton>
         </div>
       )}
-    </li>
+    </div>
   );
 }

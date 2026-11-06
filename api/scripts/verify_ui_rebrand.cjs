@@ -155,9 +155,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByRole('link', { name: /합성 라테/ }).waitFor();
     check('card list groups by category', await page.getByText('재고 · 위치', { exact: true }).count() >= 1);
     check('all filter hides excluded cards', await page.getByText('합성 지운 카드').count() === 0);
-    await page.getByRole('tab', { name: '지운 카드' }).click();
-    await page.getByText('합성 지운 카드', { exact: true }).waitFor();
-    check('excluded filter shows excluded cards', page.url().includes('status=excluded'));
+    // 화면 개선 계획 3: 삭제한 카드는 어디에서도 보이지 않는다(지운 카드 탭 없음)
+    check('no deleted-card tab', await page.getByRole('tab', { name: '지운 카드' }).count() === 0);
     await page.goto(`${BASE}/owner/cards`);
     await page.getByLabel('카드 찾기').fill('원두');
     await page.getByLabel('카드 찾기').press('Enter');
@@ -170,9 +169,9 @@ const BASE = 'http://127.0.0.1:3011';
     check('job review deep link keeps job filter', true);
 
     // 지식 제안: 저장 실패는 그 자리에, 재시도 성공 후 빈 상태
-    await page.getByRole('link', { name: /기존 카드와 다른 답이 있어요/ }).click();
-    await page.waitForURL('**/owner/cards/proposals');
-    await page.getByRole('button', { name: '확인한 카드 공개' }).click();
+    // 제안 배너는 없어지고 제안 걸린 카드가 검수 필요에 들어간다(계획 3 o05b)
+    await page.goto(`${BASE}/owner/cards/proposals`);
+    await page.getByRole('button', { name: '수정 완료' }).click();
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
     check('proposal failure shown in place', state.proposals.length === 1);
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
@@ -183,10 +182,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/cards/1`);
     await page.getByRole('heading', { name: '합성 라테' }).waitFor();
     check('detail shows numbered lines', await page.locator('ol li').count() === 3);
-    await page.getByRole('button', { name: /근거 보기/ }).click();
-    await page.getByText('합성 근거 문장', { exact: true }).waitFor();
-    check('evidence expands', true);
-    check('deleted source marked as broken citation', await page.getByText('인용 끊김', { exact: false }).count() >= 1);
+    // 화면 개선 계획 3: 근거는 맨 아래 작은 한 줄, 끊긴 원본은 (원본 지워짐)
+    check('evidence line at bottom marks deleted source', (await page.getByText(/^근거 자료 /).innerText()).includes('합성 메모.png (원본 지워짐)'));
     // Phase A — 자유 본문 편집이 없어졌다. 사실 카드가 아닌 카드는 읽기만 한다
     check('legacy card has no free-text edit', await page.getByRole('button', { name: '고치기', exact: true }).count() === 0
       && await page.locator('textarea').count() === 0);
@@ -194,13 +191,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByRole('button', { name: '재고 · 위치' }).click();
     await page.getByRole('button', { name: /카테고리 재고 · 위치/ }).waitFor();
     check('category move updates card', state.cards[0].category.category_id === 11);
-    await page.getByRole('button', { name: '지우기', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: '지우기', exact: true }).click();
-    await page.getByRole('button', { name: '다시 살리기' }).waitFor();
-    check('exclude goes through confirm sheet', state.cards[0].review_status === 'EXCLUDED');
-    await page.getByRole('button', { name: '다시 살리기' }).click();
-    await page.getByRole('button', { name: '공개하기' }).waitFor();
-    check('restore brings card back', state.cards[0].review_status === 'PENDING');
+    // 상세에는 지우기·다시 살리기가 없다(삭제는 목록 미공개 탭에서 밀기, 되돌리기는 5초 스낵바만)
+    check('detail has no delete or restore buttons', await page.getByRole('button', { name: /^(지우기|다시 살리기)$/ }).count() === 0);
     await page.goto(`${BASE}/owner/cards/999`);
     await page.getByText('이 카드를 볼 수 없어요', { exact: true }).waitFor();
     check('missing card does not leak', true);

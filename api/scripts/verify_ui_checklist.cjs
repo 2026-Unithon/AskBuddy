@@ -564,11 +564,11 @@ const fs = require("node:fs");
       await page
         .getByRole("heading", { name: "어느 근무조 할 일인가요?" })
         .waitFor();
-      await page.getByRole("button", { name: "공통", exact: true }).click();
+      // 화면 개선 계획 3(o06e): 공통·근무조는 스위치
+      const common = page.getByRole("switch", { name: "공통", exact: true });
+      await common.click();
       await page.waitForFunction(
-        () =>
-          document.querySelector("button[aria-pressed=true]")?.textContent ===
-          "공통",
+        () => document.querySelector('[role=switch][aria-checked=true]')?.textContent?.startsWith("공통"),
       );
       check(
         "카드 공통 연결",

@@ -13,9 +13,9 @@ test('NAV-1 질문 상세의 앱 뒤로는 왔던 오늘 매장, 폰 뒤로로 �
 });
 test('NAV-1 카드 상세 왕복이 없다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
-  await page.getByText('바닐라 라떼').first().click(); await to(page, '/owner/cards/1');
+  await page.getByText('아메리카노').first().click(); await to(page, '/owner/cards/2');
   await back(page).click(); await to(page, '/owner/cards');
-  assert.notEqual(await phoneBack(page), '/owner/cards/1');
+  assert.notEqual(await phoneBack(page), '/owner/cards/2');
   await ctx.close();
 });
 test('NAV-1 주소로 바로 연 카드 상세의 뒤로는 부모로 replace', async (b) => {
@@ -35,10 +35,10 @@ test('NAV-1 레시피에서 연 버디의 뒤로는 레시피 상세', async (b)
 });
 test('NAV-1 새로고침 뒤에도 앱 뒤로는 왔던 곳', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
-  await page.getByText('바닐라 라떼').first().click(); await to(page, '/owner/cards/1');
+  await page.getByText('아메리카노').first().click(); await to(page, '/owner/cards/2');
   await page.reload({ waitUntil: 'networkidle' });
   await back(page).click(); await to(page, '/owner/cards');
-  assert.notEqual(await phoneBack(page), '/owner/cards/1');
+  assert.notEqual(await phoneBack(page), '/owner/cards/2');
   await ctx.close();
 });
 test('NAV-1 옛 상단 바(알림)의 뒤로: 기록이 없으면 오늘 매장(T3)', async (b) => {
@@ -97,13 +97,13 @@ test('NAV-3 탭을 오가도 폰 뒤로는 탭을 되짚지 않는다', async (b
 });
 test('NAV-3 탭마다 스크롤 위치를 기억한다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards', { viewport: { width: 390, height: 480 } });
-  await page.locator('main').evaluate((m) => { m.scrollTop = 300; m.dispatchEvent(new Event('scroll')); });
+  await page.locator('main').evaluate((m) => { m.scrollTop = 120; m.dispatchEvent(new Event('scroll')); });
   const tabs = page.getByRole('navigation', { name: '주요 메뉴' });
   await tabs.getByRole('link', { name: '오늘 매장' }).click(); await to(page, '/owner');
   await tabs.getByRole('link', { name: '카드' }).click(); await to(page, '/owner/cards');
   await page.waitForTimeout(300);
   const top = await page.locator('main').evaluate((m) => m.scrollTop);
-  assert.ok(Math.abs(top - 300) <= 2, `scrollTop ${top}`);
+  assert.ok(Math.abs(top - 120) <= 2, `scrollTop ${top}`);
   await ctx.close();
 });
 test('NAV-4 옛 하단 탭이 어디에도 없다', async (b) => {
@@ -144,7 +144,7 @@ test('G1 앞으로는 forward, 앱 뒤로는 back, 탭은 fade', async (b) => {
     await page.waitForFunction((v) => document.querySelector('[data-enter]')?.getAttribute('data-enter') === v, value, { timeout: 3000 });
   };
   await expectEnter('initial');
-  await page.getByText('바닐라 라떼').first().click(); await to(page, '/owner/cards/1');
+  await page.getByText('아메리카노').first().click(); await to(page, '/owner/cards/2');
   await expectEnter('forward');
   await back(page).click(); await to(page, '/owner/cards');
   await expectEnter('back');
@@ -240,7 +240,7 @@ test('G1 같은 화면 안 필터 replace 는 진입 모션을 다시 틀지 않
   const { page, ctx } = await open(b, 'OWNER', '/owner');
   await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '카드' }).click(); await to(page, '/owner/cards');
   await page.waitForFunction(() => document.querySelector('[data-enter]')?.getAttribute('data-enter') === 'fade');
-  await page.getByRole('tab', { name: '확인 필요', exact: true }).click(); await page.waitForURL(/review_status|status=/);
+  await page.getByRole('tab', { name: /검수 필요/ }).click(); await page.waitForURL(/review_status|status=/);
   await page.waitForTimeout(300);
   assert.notEqual(await page.locator('[data-enter]').first().getAttribute('data-enter'), 'forward');
   await ctx.close();
@@ -262,14 +262,14 @@ test('NAV-3 닿을 수 없는 저장 위치여도 사용자가 스크롤하면 �
 });
 test('NAV-3 새로고침으로 캐시가 비어도(늦게 그려져도) 탭 스크롤을 되살린다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards', { viewport: { width: 390, height: 480 } });
-  await page.locator('main').evaluate((m) => { m.scrollTop = 300; m.dispatchEvent(new Event('scroll')); });
+  await page.locator('main').evaluate((m) => { m.scrollTop = 120; m.dispatchEvent(new Event('scroll')); });
   await page.waitForTimeout(200);
   await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '오늘 매장' }).click(); await to(page, '/owner');
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '카드' }).click(); await to(page, '/owner/cards');
   await page.waitForTimeout(500);
   const top = await page.locator('main').evaluate((m) => m.scrollTop);
-  assert.ok(Math.abs(top - 300) <= 2, `scrollTop ${top}`);
+  assert.ok(Math.abs(top - 120) <= 2, `scrollTop ${top}`);
   await ctx.close();
 });
 

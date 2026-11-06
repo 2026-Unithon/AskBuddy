@@ -11,6 +11,35 @@ const CATEGORIES = [
   { category_id: 12, name: '재고 위치', is_system: false, sort_order: 3 },
   { category_id: 13, name: '기타', is_system: true, sort_order: 4 },
 ];
+// 사실 카드(카드 1) 보기. verify_w3b_card_facts_ui.cjs 의 factCardView 구조를 옮겼다.
+const origin = (o) => ({ kind: 'SOURCE', source_id: null, source_title: null, source_type: null, source_availability: null,
+  locator_type: null, locator: {}, owner_answer_id: null, created_at: null, ...o });
+const factRow = (o) => ({ subject: '바닐라 라떼', predicate: null, variant: { temperature: null, size: null }, value: null, unit: null,
+  polarity: 'AFFIRM', step_order: null, conditions: [], exceptions: [], requires: [], change_kind: 'EXTRACTION',
+  previous_sentence: null, origins: [], edit_block: null, assertion: o.sentence, ...o });
+const memo = (page) => origin({ source_id: 5, source_title: '레시피 메모.jpg', source_type: 'SCAN', source_availability: 'AVAILABLE', locator_type: 'PAGE', locator: { page } });
+function factCardView(version, status) {
+  return { card_id: 1, version_id: version, title: '바닐라 라떼', entity_id: 9, entity_name: '바닐라 라떼', review_status: status,
+    published_version_id: 10, editable: true, entity_problem: null,
+    blocks: [
+      { block_id: 'b1', kind: 'QUANTITIES', order: 1, variant: { temperature: 'ICE', size: null }, facts: [
+        factRow({ fact_revision_id: 101, fact_id: 1, position: 1, sentence: '바닐라 라떼 ICE 우유는 225ml 넣는다.', value: '225', unit: 'ml', variant: { temperature: 'ICE', size: null }, origins: [memo(1)] }),
+        factRow({ fact_revision_id: 103, fact_id: 8, position: 3, sentence: 'ICE 얼음은 컵 가득 담는다.', variant: { temperature: 'ICE', size: null }, origins: [memo(1)] }),
+        factRow({ fact_revision_id: 102, fact_id: 2, position: 2, sentence: '바닐라 라떼 ICE 시럽은 10g 넣는다.', value: '10', unit: 'g', variant: { temperature: 'ICE', size: null },
+          origins: [origin({ source_id: 6, source_title: '지난 메모.jpg', source_type: 'SCAN', source_availability: 'DELETED', locator_type: 'WHOLE_SOURCE' })] }),
+      ] },
+      { block_id: 'b2', kind: 'STEPS', order: 2, variant: { temperature: null, size: null }, facts: [
+        factRow({ fact_revision_id: 201, fact_id: 3, position: 1, sentence: '컵에 얼음을 담는다.', step_order: 1, origins: [memo(2)] }),
+        factRow({ fact_revision_id: 202, fact_id: 4, position: 2, sentence: '샷을 붓는다.', step_order: 2, requires: [{ fact_id: 3, label: '1번' }], origins: [memo(2)] }),
+        factRow({ fact_revision_id: 203, fact_id: 5, position: 3, sentence: '물을 붓는다.', step_order: 3, origins: [origin({ kind: 'OWNER_ANSWER', owner_answer_id: 3 })] }),
+        factRow({ fact_revision_id: 204, fact_id: 7, position: 4, sentence: '뚜껑을 닫는다.', step_order: 4, requires: [{ fact_id: 4, label: '2번' }], origins: [memo(3)] }),
+      ] },
+      { block_id: 'b3', kind: 'NOTES', order: 3, variant: { temperature: null, size: null }, facts: [
+        factRow({ fact_revision_id: 301, fact_id: 6, position: 1, sentence: '바닐라 라떼에는 휘핑을 올리지 않는다.', polarity: 'NEGATE', exceptions: ['손님이 따로 요청하면'], origins: [memo(3)] }),
+      ] },
+    ] };
+}
+
 const category = (id) => { const c = CATEGORIES.find((x) => x.category_id === id); return { category_id: c.category_id, name: c.name }; };
 
 function initialState(overrides) {
@@ -41,6 +70,11 @@ function initialState(overrides) {
     uploadDelayMs: 0,
     failUpload: false,
     failRestore: false,
+    factVersion: 10,
+    cardLinks: {},
+    proposals: [{ proposal_id: 9, relation_type: 'CONFLICT', status: 'PENDING_REVIEW', question_text: '바닐라 라떼 ICE 시럽 몇 펌프?', answer_text: '3펌프',
+      target_card_id: 1, target_version_id: 10, current_title: '바닐라 라떼', current_content: 'ICE 시럽 2펌프', proposed_title: '바닐라 라떼', proposed_content: 'ICE 시럽 3펌프',
+      reason: null, can_approve: true, approval_block_reason: null, affected_cards: [{ card_id: 1, title: '바닐라 라떼' }], category_id: 10, created_at: NOW }],
     ...overrides,
   };
 }
@@ -55,7 +89,7 @@ function syntheticApi(role, overrides = {}) {
     assignment_type: 'AUTOMATIC', job_id: 7, source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null },
     has_evidence: true, needs_review_reason: c.needs_review_reason ?? null, updated_at: NOW });
   const version = (c) => ({ version_id: c.card_id * 10, version_no: 1, title: c.title, content: c.content, change_source: 'EXTRACT', created_at: NOW });
-  const detail = (c) => ({ ...listItem(c), draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
+  const detail = (c) => ({ ...listItem(c), fact_card: c.card_id === 1, draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
     evidence: [{ evidence_id: 1, locator_type: 'PAGE', locator: {}, excerpt: c.content.split('\n')[0], source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null, source_availability: 'AVAILABLE' } }] });
   const roadmapItems = state.cards.filter((c) => c.review_status === 'APPROVED').map((c) => ({ item_id: c.card_id + 10, card_id: c.card_id, published_version_id: c.card_id * 10, title: c.title, status: 'NOT_STARTED', category_id: c.category_id }));
   const checklistToday = () => ({
@@ -133,9 +167,18 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       c.category_id = body.category_id;
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: null, updated_at: NOW, undo_until: null };
+    } else if (p === '/cards/1/facts' && m === 'GET') payload = factCardView(state.factVersion, state.cards[0].review_status);
+    else if (p === '/cards/1/facts' && m === 'PUT') {
+      state.factVersion += 1;
+      payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
     } else if (/^\/cards\/\d+\/facts$/.test(p)) payload = { card_id: Number(p.split('/')[2]), blocks: [], facts: [] };
     else if (p === '/categories') payload = { version: 1, reclassification: null, items: CATEGORIES };
-    else if (p === '/learn/knowledge-proposals') payload = { store_id: 1, status: 'PENDING_REVIEW', items: [] };
+    else if (p === '/learn/knowledge-proposals') payload = { store_id: 1, status: 'PENDING_REVIEW', items: state.proposals };
+    else if (/^\/learn\/knowledge-proposals\/\d+\/(approve|dismiss)$/.test(p) && m === 'POST') {
+      const [, , , id, action] = p.split('/');
+      state.proposals = state.proposals.filter((x) => x.proposal_id !== Number(id));
+      payload = { proposal_id: Number(id), status: action === 'approve' ? 'PUBLISHED' : 'DISMISSED' };
+    }
     // 직원 학습·레시피
     else if (p === '/learn/roadmap') payload = { store: { store_id: 1, name: STORE.store_name }, counts: { total: roadmapItems.length, done: 0, reconfirm_required: 0 }, continue_item_id: roadmapItems[0].item_id,
       stages: CATEGORIES.filter((c) => roadmapItems.some((i) => i.category_id === c.category_id)).map((c, i) => ({ category_id: c.category_id, name: c.name, order: i + 1, items: roadmapItems.filter((x) => x.category_id === c.category_id) })) };
@@ -165,7 +208,11 @@ function syntheticApi(role, overrides = {}) {
       days: [['2026-10-29', 100], ['2026-10-30', 78], ['2026-10-31', 50]].map(([date, percent]) => ({ date, percent, total: 9, done: Math.round(9 * percent / 100), checked_lines: 4, submitted: true })) };
     else if (p === '/checklist/shifts' && m === 'GET') payload = { items: state.shifts };
     else if (p === '/checklist/members') payload = { items: [{ member_id: 2, user_id: 2, role: 'STAFF', name: '박지호', shift_ids: [1] }, { member_id: 3, user_id: 3, role: 'STAFF', name: '김민준', shift_ids: [3] }] };
-    else if (/^\/checklist\/cards\/\d+$/.test(p)) payload = { checklist: false, shift_ids: [] };
+    else if (/^\/checklist\/cards\/\d+$/.test(p)) {
+      const id = Number(p.split('/').at(-1));
+      if (body) state.cardLinks[id] = body;
+      payload = state.cardLinks[id] ?? { checklist: false, shift_ids: [] };
+    }
     // 직원 관리
     else if (p === '/members') payload = { pending: [{ request_id: 9, name: '이서연', requested_at: NOW }],
       active: [{ user_id: 2, name: '박지호', role: 'STAFF', joined_at: NOW }, { user_id: 3, name: '김민준', role: 'STAFF', joined_at: NOW }] };
