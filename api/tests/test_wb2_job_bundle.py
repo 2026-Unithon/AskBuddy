@@ -106,6 +106,8 @@ def _run(source_ids, *, stored=(), probe_fail=(), bundle_error=None, types=None,
             raise bundle_error
         return {i[0]: f"route{i[0]}" for i in items}
 
+    # 2026-11-07 — 영상 밖 자료는 한 번 호출이 판정까지 내므로 묶음 분류는 구역(LAYOUT) 스캔에만 쓴다
+    settings.setdefault("scan_extract_mode", "LAYOUT")
     s = Settings(_env_file=None).model_copy(update=settings)
     caches = {}
     with patch.object(route.records, "latest_decision", side_effect=latest), \
@@ -162,8 +164,9 @@ def test_media_leaving_one_source_does_not_bundle_or_probe():
     assert calls == [] and out == {} and probed == []
 
 
-def test_disabled_does_nothing():
-    out, calls, _ = _run([11, 12, 13], intake_bundle_enabled=False)
+def test_single_call_sources_are_not_bundled():
+    # 2026-11-07 S8 — 구역 스캔이 아닌 자료는 한 번 호출이 판정까지 낸다. 미리 묶어 분류하지 않는다
+    out, calls, _ = _run([11, 12, 13], scan_extract_mode="SINGLE")
     assert out == {} and calls == []
 
 

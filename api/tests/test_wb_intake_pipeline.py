@@ -12,6 +12,7 @@ from app.ingest.intake.classify import ClassifyOutcome
 from app.ingest.intake.decide import IntakeClassificationError, Ranked, SectionDecision
 from app.ingest.intake.ir import Candidate, Locator, ProbeResult
 from app.ingest.intake.records import StoredRoute
+from app.ingest.schemas import SingleCallExtractionResult
 from app.ingest.pipeline import ExtractionOutcome, PreparedAssembly
 from tests.test_w3a_pipeline_wiring import _ConnLease, _planning, _Tx, _worker
 
@@ -66,11 +67,17 @@ async def _run(tmp_path, *, route, sections=None, text="본문", source_type="SC
             cache.sections = sections
         return text, [], []
 
+    async def fake_single(pool, store_id, s, pending, *, text, media, glossary, usage_sink, usage_base,
+                          raw_sink, only_lines=None, owner_forced=False):
+        log.append(("single", text))
+        return intake_route.SingleCallResult(None, SingleCallExtractionResult(), (), text)
+
     mocks = NS(extract=AsyncMock(return_value=ExtractionOutcome([], [], 1, 0, [], {})),
                prepare=AsyncMock(return_value=PreparedAssembly((), {}, {}, (), {}, _planning())),
                persist=AsyncMock(return_value=0), set_status=AsyncMock(), failed=AsyncMock())
     with patch.object(pipeline, "get_pool", return_value=Pool()), \
          patch.object(intake_route, "route_source", fake_route), \
+         patch.object(intake_route, "extract_with_intake", fake_single), \
          patch.object(pipeline, "_preprocess", fake_preprocess), \
          patch.object(pipeline.recovery, "load", AsyncMock(return_value=None)), \
          patch.object(pipeline.recovery, "replace", AsyncMock()), \
@@ -112,19 +119,23 @@ async def test_source_none_skips_preprocess_and_extraction(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_text_all_none_sections_skip_after_preprocess(tmp_path):
+async def test_stored_none_text_source_skips_before_preprocess(tmp_path):
+    # 2026-11-07 — 한 호출 자료는 구간 계획이 없다. 저장된 NONE 판정이면 전처리·모델 호출 없이 끝낸다
     result, log, m = await _run(tmp_path, route=_route("CHAT", "NONE", "NONE"),
                                 source_type="KAKAO", sections={"c1": "a", "c2": "b"}, text="a\nb")
-    assert result == pipeline.INTAKE_NONE and "preprocess" in log
+    assert result == pipeline.INTAKE_NONE and "preprocess" not in log
+    assert not any(isinstance(x, tuple) and x[0] == "single" for x in log)
     m.extract.assert_not_awaited()
     assert _statuses(m)[-1] == "DONE"
 
 
 @pytest.mark.asyncio
-async def test_none_section_removed_from_extraction_text(tmp_path):
-    _, _, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NONE", "RECIPE"),
-                         sections=SECTIONS, text=FULL)
-    assert m.extract.await_args.kwargs["text"] == "[1쪽]\n음료Z 샷 2\n\n[3쪽]\n음료Z 물 225ml"
+async def test_single_call_source_reads_whole_text_despite_none_section(tmp_path):
+    # 2026-11-07 S8 — 한 번 호출 자료는 자료 단위 판정이다. 구간별로 거르지 않고 글 전체를 한 호출에 넣는다
+    _, log, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NONE", "RECIPE"),
+                           sections=SECTIONS, text=FULL)
+    assert ("single", FULL) in log
+    assert m.extract.await_args.kwargs["text"] == FULL and m.extract.await_args.kwargs["segments"] == []
 
 
 @pytest.mark.asyncio
@@ -138,11 +149,10 @@ async def test_unchanged_text_when_nothing_dropped(tmp_path):
 
 @pytest.mark.asyncio
 async def test_notice_facts_held_from_assembly(tmp_path):
-    _, _, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NOTICE", "RECIPE"),
+    # 자료 전체가 공지면 이 자료의 사실을 모두 공지 보류한다. 구간으로 나누지 않는다(S8)
+    _, _, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NOTICE", "RECIPE", source="NOTICE"),
                          sections=SECTIONS, text=FULL, notice_fact_ids=(501, 502))
-    kw = m.extract.await_args.kwargs
-    assert [s[0] for s in kw["segments"]] == ["[1쪽]\n음료Z 샷 2\n\n[3쪽]\n음료Z 물 225ml",
-                                              "[2쪽]\n잡담"]
+    assert m.extract.await_args.kwargs["segments"] == []
     assert m.prepare.await_args.kwargs["held_fact_ids"] == {501: "INTAKE_NOTICE",
                                                             502: "INTAKE_NOTICE"}
 
@@ -192,7 +202,8 @@ async def test_route_source_reuses_latest_decision():
 
 @pytest.mark.asyncio
 async def test_route_source_classifies_and_saves_when_new():
-    probe = ProbeResult("DOC_TEXT", (Candidate("c1", Locator("PAGE", "1", "1"), "글"),))
+    # 2026-11-07 — 분류 호출은 한 번 호출 대상이 아닌 자료(영상)에만 남는다
+    probe = ProbeResult("VIDEO", (Candidate("c1", Locator("PAGE", "1", "1"), "글"),))
     outcome = ClassifyOutcome({"c1": [Ranked("RECIPE", 0.45), Ranked("PROCEDURE", 0.40)]},
                               {}, "gemini-3.6-flash", "abcd")
     save = AsyncMock(return_value=42)
@@ -206,7 +217,7 @@ async def test_route_source_classifies_and_saves_when_new():
         got = await intake_route.route_source(_Pool(), 1, SRC, cache=intake_route.IntakeCache(),
                                               usage_sink=None, usage_base=BASE)
     # 칩 가산(0.15)으로 PROCEDURE 가 1위, 미등록이라 추출기는 RECIPE
-    assert got.decision_id == 42 and got.normalizer == "DOC_TEXT"
+    assert got.decision_id == 42 and got.normalizer == "VIDEO"
     assert got.decisions[0].logic == "PROCEDURE" and got.decisions[0].extractors == ("RECIPE",)
     assert got.decisions[0].hint_changed_decision and got.source.logic == "PROCEDURE"
     kw = save.await_args.kwargs
@@ -244,6 +255,7 @@ async def test_evaluation_run_skips_intake_routing(tmp_path, run_kw):
     # 평가 실행은 지금까지와 같은 입력으로 잰다 — 판정·분류를 부르지 않는다
     _, log, m = await _run(tmp_path, route=_route("DOC_TEXT", "NONE"), **run_kw)
     assert "route" not in log and "preprocess" in log
+    assert ("single", "본문") in log  # 2026-11-07 — 평가도 제품과 같은 한 번 호출로 잰다
     assert m.extract.await_args.kwargs["text"] == "본문"
     assert "held_fact_ids" not in m.prepare.await_args.kwargs
 
@@ -251,7 +263,7 @@ async def test_evaluation_run_skips_intake_routing(tmp_path, run_kw):
 @pytest.mark.asyncio
 async def test_supported_notice_fact_stays_in_assembly(tmp_path):
     # 공지에만 나왔어도 다른 자료가 받치는 사실(502)은 조립에 남고, 이 자료 occurrence 만 보류한다
-    _, _, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NOTICE", "RECIPE"),
+    _, _, m = await _run(tmp_path, route=_route("DOC_TEXT", "RECIPE", "NOTICE", "RECIPE", source="NOTICE"),
                          sections=SECTIONS, text=FULL, notice_fact_ids=(501, 502),
                          supported=(502,))
     kw = m.prepare.await_args.kwargs
@@ -325,3 +337,18 @@ async def test_real_kakao_preprocess_plan_text_is_byte_identical(tmp_path):
         {"source_id": 8, "source_type": "KAKAO", "file_url": "b/1/kakao/x.txt"}, path,
         settings=Settings(_env_file=None))
     assert plan.text == plain and plan.segments is None
+
+
+@pytest.mark.asyncio
+async def test_route_source_new_text_source_waits_for_single_call():
+    # 2026-11-07 S8 — 영상 밖 새 자료는 분류를 부르지 않고 한 번 호출이 판정까지 낸다
+    probe = ProbeResult("DOC_TEXT", (Candidate("c1", Locator("PAGE", "1", "1"), "글"),))
+    with patch.object(intake_route.records, "latest_decision", AsyncMock(return_value=None)), \
+         patch.object(intake_route.records, "source_owner_hints", AsyncMock(return_value=("RECIPE",))), \
+         patch.object(intake_route, "probe_source", AsyncMock(return_value=probe)), \
+         patch.object(intake_route.classify, "classify", AsyncMock()) as cls, \
+         patch.object(intake_route, "get_settings", return_value=Settings(_env_file=None)):
+        got = await intake_route.route_source(_Pool(), 1, SRC, cache=intake_route.IntakeCache(),
+                                              usage_sink=None, usage_base=BASE)
+    assert isinstance(got, intake_route.SingleCallPending) and got.hints == ("RECIPE",)
+    cls.assert_not_awaited()

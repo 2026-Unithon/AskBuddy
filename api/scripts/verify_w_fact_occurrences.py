@@ -8,9 +8,7 @@ verify_r_schema_rebuild 가 만든 새 UUID DB(모든 migration 적용)의 연�
   4. 카톡 LINE·음성 TIMESTAMP 위치
   5. 다른 매장 — 조회되지 않고, 다른 매장 ID 로 위치를 달지 못하며, 복합 FK 가 매장 교차를 막는다
   6. 사실을 물리적으로 지우는 절차(평가 매장 초기화)에서는 위치가 함께 지워진다
-  7. 플래그(extract_locator_hints) 꺼짐 — 요청 스키마는 이전 그대로, 위치 표는 여전히 남고 쪽은 무시된다
-  8. 플래그(extract_clear_ungrounded_values) 켬 — 글만 있는 입력의 근거 없는 단위를 비우고 CLEARED 로 남긴다
-1~6 은 위치 플래그를 켠 경로다.
+2026-11-07 — 위치 표지는 늘 켜고(S11) 근거 없는 값 비우기는 늘 끈다. 스위치를 없애 그 반대 경로 시나리오(옛 7·8)는 지웠다.
 """
 import json
 from contextlib import ExitStack
@@ -62,8 +60,8 @@ async def verify(db, dsn):
     _, other_store, _ = await _seed(db)
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=1)
     real = NS(gemini_api_key="synthetic", gemini_model="gemini-synthetic",
-              ingest_mode="real", extract_temperature=0.0, extract_locator_hints=True)
-    settings = Settings(_env_file=None, extract_locator_hints=True)
+              ingest_mode="real", extract_temperature=0.0)
+    settings = Settings(_env_file=None)
     category = next(iter(await repo.enabled_categories(db, store)))
     calls = []
 
@@ -90,13 +88,9 @@ async def verify(db, dsn):
                          "values($1,$2,$3,'QUEUED')", store, job_id, source)
         return job_id
 
-    async def run(source, run_tag, *, hints=True, clear=False):
+    async def run(source, run_tag):
         job_id = await new_job(source)
-        model_settings = real if hints else NS(**(vars(real) | {"extract_locator_hints": False}))
-        app_settings = settings if hints else Settings(_env_file=None)
-        if clear:
-            app_settings = Settings(_env_file=None, extract_locator_hints=hints,
-                                    extract_clear_ungrounded_values=True)
+        model_settings, app_settings = real, settings
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: pool),
@@ -147,7 +141,7 @@ async def verify(db, dsn):
               y["locator_type"] == "WHOLE_SOURCE"
               and [(o["locator_type"], o["locator"]) for o in y_occ] == [("WHOLE_SOURCE", "{}")])
         check("기본 설정 — 근거 없는 단위는 값을 남기고 check_flags 에 판정을 영속한다",
-              Settings(_env_file=None).extract_clear_ungrounded_values is False
+              not hasattr(Settings(_env_file=None), "extract_clear_ungrounded_values")
               and y["unit"] == "펌프"
               and json.loads(y_occ[0]["check_flags"]) == [
                   {"field": "unit", "verdict": "UNGROUNDED_TEXT", "value": "펌프"}]
@@ -233,29 +227,7 @@ async def verify(db, dsn):
         check("사실을 물리 삭제하면 위치도 함께 지워진다",
               await occurrences.list_occurrences(db, store, source_id=kakao_src) == [])
 
-        # 7. 플래그 꺼짐 — 대역이 page 를 보내도 스키마에 없어 버려지고, 위치는 자료 전체
-        off_src = await _new_source(db, store, user, "SCAN")
-        await run(off_src, 93, hints=False)
-        off_occ = await occurrences.list_occurrences(db, store, source_id=off_src)
-        off_raw = await db.fetchval(
-            "select schema_version from extraction_raw_responses "
-            "where store_id=$1 and source_id=$2 and stage='EXTRACT'", store, off_src)
-        off_facts = await db.fetchval(
-            "select count(*) from source_facts where store_id=$1 and source_id=$2", store, off_src)
-        check("플래그 꺼짐 — 이전 스키마로 요청하고, 위치 표는 남기되 쪽은 보지 않는다",
-              off_raw == "FactExtractionResult/286f526e798a"
-              and off_facts == 2 and len(off_occ) == 2
-              and all(o["locator_type"] == "WHOLE_SOURCE" for o in off_occ))
-
-        # 8. 비우기 플래그 켬 — 같은 입력의 새 자료. 단위를 비우고 CLEARED 로 남긴다
-        clear_src = await _new_source(db, store, user, "SCAN")
-        await run(clear_src, 94, clear=True)
-        c_y = await db.fetchrow("select fact_id, unit from source_facts where store_id=$1 "
-                                "and source_id=$2 and subject='음료Y'", store, clear_src)
-        c_occ = await occurrences.list_occurrences(db, store, fact_id=c_y["fact_id"])
-        check("비우기 플래그 켬 — 글만 있는 입력의 근거 없는 단위를 비우고 CLEARED 로 남긴다",
-              c_y["unit"] is None and [json.loads(o["check_flags"]) for o in c_occ] == [
-                  [{"field": "unit", "verdict": "CLEARED", "value": "펌프"}]])
+        # 7·8(플래그 끔·비우기 켬)은 2026-11-07 에 없앴다 — 위치 표지는 늘 켜고 비우기는 늘 끔(S11)
     finally:
         await pool.close()
     print(f"PASS W fact occurrences: {len(passed)} checks")

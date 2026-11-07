@@ -90,7 +90,7 @@ class _Conn:
 async def test_resume_skips_extraction_when_ledger_exists():
     conn = _Conn(ledger_exists=True)
     extract = AsyncMock()
-    with patch("app.ingest.extract.extract_facts", extract), \
+    with patch("app.ingest.extract.single_call.extract_single", extract), \
             patch.object(owner_text.repo, "enabled_categories", AsyncMock(return_value={"기타": 1})), \
             patch.object(owner_text.repo, "glossary", AsyncMock(return_value=[])), \
             patch.object(owner_text.repo, "set_status", AsyncMock()), \
@@ -175,9 +175,11 @@ async def test_extraction_path_filters_and_persists_ledger():
     q, ans = "음료Z 물은 몇 ml 넣나요?", "음료Z 물은 225ml 넣어요"
     result = SimpleNamespace(assertions=[_a("f1", "음료Z 물은 몇 ml 넣나요"),
                                          _a("f2", "음료Z 물은 225ml 넣어요")])
-    extract = AsyncMock(return_value=result)
+    # 2026-11-07 — 점주 답변 사실 추출은 한 번 호출(extract_single)이다
+    from app.ingest.extract.single_call import SingleCallOutcome
+    extract = AsyncMock(return_value=SingleCallOutcome(result, [], 1, ""))
     persist = AsyncMock(return_value={})
-    with patch("app.ingest.extract.extract_facts", extract), \
+    with patch("app.ingest.extract.single_call.extract_single", extract), \
             patch.object(owner_text.repo, "enabled_categories", AsyncMock(return_value={"기타": 1})), \
             patch.object(owner_text.repo, "glossary", AsyncMock(return_value=[])), \
             patch.object(owner_text.repo, "set_status", AsyncMock()), \

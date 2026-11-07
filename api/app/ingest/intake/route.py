@@ -60,9 +60,11 @@ class SingleCallPending:
 
 @dataclass(frozen=True)
 class SingleCallResult:
-    """한 호출의 결과 — 저장한 판정과 이미 뽑은 사실."""
-    route: StoredRoute
-    result: FactExtractionResult  # 또는 Located 변형
+    """한 호출의 결과 — 판정(저장했거나 이미 있던 것), 뽑은 사실, 처리 안 된 범위, 번호 붙인 입력 글."""
+    route: StoredRoute | None
+    result: FactExtractionResult  # SingleCallExtractionResult
+    unprocessed: tuple = ()
+    numbered_text: str = ""
 
 
 # 한 호출의 원장 하위 이름. 잘려서 보통 추출로 돌아갈 때 그 호출(`…:extract`)과
@@ -74,9 +76,9 @@ async def route_source(pool, store_id: int, src, *, cache: IntakeCache, usage_si
                        usage_base: tuple | None) -> StoredRoute | SingleCallPending:
     """자료의 판정. 최신 판정이 있으면 분류 0회로 돌려준다. 없으면 훑고 분류해 저장한다.
 
-    스위치(`intake_single_call_small`)가 켜져 있고 작은 자료(훑기가 내용 전체를 담음)면
-    분류하지 않고 `SingleCallPending` 을 돌려준다 — process_source 가 추출 한 호출로
-    판정까지 받는다. 저장된 판정이 있으면(재시도·복구) 늘 그 판정을 쓴다.
+    영상·구역(LAYOUT) 스캔이 아니면 분류하지 않고 `SingleCallPending` 을 돌려준다 —
+    process_source 가 Sonnet 한 호출로 판정까지 받는다(2026-11-07 S8). 저장된 판정이
+    있으면(재시도·복구) 늘 그 판정을 쓴다.
 
     분류 실패(모델 오류·JSON·후보 누락)는 IntakeClassificationError 로 올라가
     process_source 가 FAILED 로 멈춘다 — 조용히 다른 로직으로 보내지 않는다.
@@ -93,7 +95,7 @@ async def route_source(pool, store_id: int, src, *, cache: IntakeCache, usage_si
     probe = await probe_source(pool, store_id, src, cache=cache, usage_sink=usage_sink,
                                usage_base=usage_base)
     if single_call_eligible(probe, get_settings()):
-        # 작은 자료 — 여기서는 분류하지 않고 본 추출 한 호출로 판정을 함께 받는다(S3)
+        # 분류하지 않고 본 추출 한 호출로 판정을 함께 받는다(S8)
         logger.info("입구 한 호출 대상 source=%s 정규화기 %s", source_id, probe.normalizer)
         return SingleCallPending(probe, tuple(hints or ()))
     return await classify_and_save(pool, store_id, src, probe, hints=hints,
@@ -148,36 +150,47 @@ def single_call_route(probe: ProbeResult, result, *, hints, model: str):
     return decisions, source, ClassifyOutcome(model_sections, raw, model, "")
 
 
-async def extract_with_intake(pool, store_id: int, src, pending: SingleCallPending, *, text,
+async def extract_with_intake(pool, store_id: int, src, pending: SingleCallPending | None, *, text,
                               media, glossary, usage_sink, usage_base: tuple | None,
-                              raw_sink) -> SingleCallResult:
-    """분류와 추출을 한 호출로(S3). 원장 문맥은 EXTRACT, 판정은 entry=UPLOAD 로 저장한다.
+                              raw_sink, only_lines: list[int] | None = None,
+                              owner_forced: bool = False) -> SingleCallResult:
+    """분류와 추출을 Sonnet 한 호출로(S8). 끊긴 줄은 이어서 최대 3번(S7), 남은 줄은 범위로 돌려준다(S9).
 
-    출력이 잘리면 `TruncatedOutputError` 가 그대로 올라간다 — 호출부가 분류 후 보통 추출로 간다.
-    순위가 비면 IntakeClassificationError 로 올라가고 판정은 저장하지 않는다.
+    `pending` 이 있으면(판정 없음) 결과의 순위로 판정을 만들어 entry=UPLOAD 로 저장한다. 없으면(이미 판정이
+    있는 재시도·복구·평가 실행) 판정을 저장하지 않고 route=None 으로 돌려준다.
+    한 번도 성공하지 못하면 IntakeClassificationError(자료 FAILED, 사유 포함).
     모델 호출 중에는 DB 연결을 쥐지 않는다. 연결은 저장할 때만 짧게 빌린다.
     """
-    from app.ingest import extract, pipeline
+    from app.ingest import pipeline
+    from app.ingest.extract import single_call
 
     source_id = src["source_id"]
     ctx = pipeline._ctx_for(usage_base, source_id, "EXTRACT", segment_id=SINGLE_CALL_SEGMENT)
-    result = await extract.extract_facts_with_intake(
+    hints = tuple(pending.hints) if pending is not None else ()
+    outcome = await single_call.extract_single(
         source_id=source_id, source_type=src["source_type"], text=text, glossary=glossary,
-        media=media, hints=tuple(pending.hints), usage_sink=usage_sink, usage_context=ctx,
-        raw_sink=raw_sink)
-    decisions, source, outcome = single_call_route(
-        pending.probe, result, hints=pending.hints, model=get_settings().gemini_model)
+        media=list(media), hints=hints, usage_sink=usage_sink, usage_context=ctx,
+        raw_sink=raw_sink, only_lines=only_lines, owner_forced=owner_forced)
+    if outcome.result is None:
+        reason = outcome.unprocessed[0]["reason"] if outcome.unprocessed else single_call.CALL_FAILED
+        raise IntakeClassificationError(
+            f"한 번 호출 추출이 {outcome.attempts}번 모두 실패했다(사유 {reason})")
+    if pending is None:
+        return SingleCallResult(None, outcome.result, tuple(outcome.unprocessed), outcome.numbered_text)
+    decisions, source, decided = single_call_route(
+        pending.probe, outcome.result, hints=pending.hints, model=get_settings().extract_model)
     async with pool.acquire() as conn:
         decision_id = await records.save_decision(
             conn, store_id, source_id=source_id, entry="UPLOAD", owner_answer_id=None,
-            probe=pending.probe, owner_hints=pending.hints, outcome=outcome,
+            probe=pending.probe, owner_hints=pending.hints, outcome=decided,
             decisions=decisions, source=source,
             logical_call_id=ctx.logical_call_id if ctx else None)
-    logger.info("입구 한 호출 판정 source=%s 정규화기 %s 자료 로직 %s 사실 %d",
+    logger.info("입구 한 호출 판정 source=%s 정규화기 %s 자료 로직 %s 사실 %d 남은 범위 %d",
                 source_id, pending.probe.normalizer, source.logic,
-                len(getattr(result, "assertions", []) or []))
+                len(outcome.result.assertions), len(outcome.unprocessed))
     return SingleCallResult(
-        StoredRoute(decision_id, pending.probe.normalizer, list(decisions), source), result)
+        StoredRoute(decision_id, pending.probe.normalizer, list(decisions), source),
+        outcome.result, tuple(outcome.unprocessed), outcome.numbered_text)
 
 
 async def override_none_for_source(conn, store_id: int, source_id: int) -> int | None:
@@ -206,20 +219,26 @@ async def override_none_for_source(conn, store_id: int, source_id: int) -> int |
     return decision_id
 
 
-# 한 호출(분류+추출) 대상 정규화기 — 음성·영상은 이번 범위가 아니다(S4)
-SINGLE_CALL_NORMALIZERS = frozenset({"DOC_TEXT", "CHAT", "DOC_IMAGE"})
+# 한 호출(분류+추출) 대상이 아닌 정규화기 — 영상은 이번 범위가 아니다(S4)
+SINGLE_CALL_EXCLUDED = frozenset({"VIDEO"})
 
 
 def single_call_eligible(probe: ProbeResult, settings) -> bool:
-    """작은 자료(훑기가 내용 전체를 담음)를 한 호출로 처리하는가. 스위치가 꺼져 있으면 늘 False."""
-    if not getattr(settings, "intake_single_call_small", False):
-        return False
-    if not probe.complete or probe.normalizer not in SINGLE_CALL_NORMALIZERS:
+    """영상·구역(LAYOUT) 스캔이 아니면 늘 한 호출이다(S8·S11 — 스위치·크기 제한 없음)."""
+    if probe.normalizer in SINGLE_CALL_EXCLUDED:
         return False
     # 구역(LAYOUT) 스캔은 다단계 추출이라 한 호출로 합칠 수 없다
     if probe.normalizer == "DOC_IMAGE" and getattr(settings, "scan_extract_mode", "SINGLE") == "LAYOUT":
         return False
     return True
+
+
+def single_call_source(src, settings) -> bool:
+    """판정이 이미 저장된 자료도 같은 기준으로 한 호출로 뽑는다(재시도·복구·평가 실행)."""
+    if src["source_type"] == "VIDEO":
+        return False
+    return not (src["source_type"] == "SCAN"
+                and getattr(settings, "scan_extract_mode", "SINGLE") == "LAYOUT")
 
 
 def _prefixed(source_id: int, probe: ProbeResult) -> ProbeResult:
@@ -318,8 +337,6 @@ async def route_job_bundle(pool, store_id: int, *, job_id: int, source_ids: Sequ
     from app.ingest import pipeline
 
     s = get_settings()
-    if not s.intake_bundle_enabled:
-        return {}
     pending: list[tuple[int, object, tuple[str, ...]]] = []
     async with pool.acquire() as conn:
         for sid in source_ids:
@@ -331,6 +348,9 @@ async def route_job_bundle(pool, store_id: int, *, job_id: int, source_ids: Sequ
             if row["source_type"] in ("VOICE", "VIDEO"):
                 # 음성·영상은 묶지 않는다(S4) — 미리 내려받고 훑기 STT 를 내면 디스크·비용만
                 # 늘고 아끼는 건 분류 한 번뿐이다. process_source 에서 지금처럼 따로 간다
+                continue
+            if single_call_source(row, s):
+                # 한 번 호출 자료는 그 호출이 판정까지 낸다(S8) — 미리 분류하면 그 판정이 묻힌다
                 continue
             pending.append((sid, row, tuple(await records.source_owner_hints(conn, store_id,
                                                                              sid))))
@@ -497,7 +517,7 @@ async def probe_source(pool, store_id: int, src, *, cache: IntakeCache, usage_si
                 raw = path.read_text(encoding="utf-8", errors="replace")
                 # 전처리와 같은 설정으로 파싱해야 구간 글이 추출 입력과 같다
                 cache.chat_text = kakao.parse(
-                    raw, message_numbers=bool(getattr(s, "extract_locator_hints", False))
+                    raw, message_numbers=True
                 )["parsed_text"]
             groups = grouping.group_chat(cache.chat_text, max_sections=s.intake_max_sections)
             return probe_text.probe_groups("CHAT", groups, budget_chars=s.intake_probe_text_chars)

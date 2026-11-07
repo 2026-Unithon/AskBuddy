@@ -1,4 +1,4 @@
-"""Phase B 추가 S3 — 한 호출 경로. 무관이면 원장 없음, 재시도는 저장 판정 재사용."""
+"""한 호출 경로(Phase B S3 → 2026-11-07 S8: 영상 밖 모든 자료). 무관이면 원장 없음, 재시도는 저장 판정 + 한 호출."""
 import asyncio
 from contextlib import ExitStack
 from types import SimpleNamespace as NS
@@ -129,11 +129,15 @@ def test_single_call_none_writes_nothing(tmp_path):
     m.prepare.assert_not_awaited()
 
 
-def test_truncated_single_call_falls_back_to_classify_then_normal_extract(tmp_path):
-    result, m = _run_source(tmp_path, route_value=PENDING,
-                            single_error=TruncatedOutputError("잘림"))
-    m.classify_save.assert_awaited_once()
-    assert m.extract.await_args.kwargs["prefetched"] is None
+def test_unprocessed_lines_keep_facts_and_report_partial(tmp_path):
+    # S9 — 3번 시도 뒤 남은 줄이 있어도 뽑힌 사실은 쓰고, 결과는 UNPROCESSED_LINES(작업자가 PARTIAL)
+    rest = ({"from_line": 3, "to_line": 4, "reason": "TRUNCATED", "first_line": "x", "attempts": 3},)
+    single = intake_route.SingleCallResult(_single("RECIPE").route, DONE_RESULT, rest, "[#1] a")
+    result, m = _run_source(tmp_path, route_value=PENDING, single=single)
+    assert result == pipeline.UNPROCESSED_LINES
+    assert m.extract.await_args.kwargs["prefetched"] is DONE_RESULT
+    assert m.extract.await_args.kwargs["text"] == "[#1] a"  # 서버 위치 검사가 줄 번호를 본다
+    m.classify_save.assert_not_awaited()
     m.failed.assert_not_awaited()
 
 
@@ -147,20 +151,21 @@ def test_single_call_without_ranking_fails_clearly(tmp_path):
     m.extract.assert_not_awaited()
 
 
-def test_stored_route_skips_single_call_and_classify(tmp_path):
-    # Review Focus 3 — 저장 판정(재시도·복구)이 오면 한 호출·분류 없이 보통 추출 경로
+def test_stored_route_reuses_decision_and_still_single_calls(tmp_path):
+    # Review Focus 3 + 2026-11-07 — 저장 판정(재시도·복구)은 분류 없이 그대로 쓰고, 추출은 늘 한 호출이다
     stored = StoredRoute(9, "DOC_TEXT", [_d("c1", "RECIPE"), _d("c2", "RECIPE")],
                          _d("source", "RECIPE"))
-    result, m = _run_source(tmp_path, route_value=stored)
-    m.single.assert_not_awaited()
+    single = intake_route.SingleCallResult(None, DONE_RESULT, (), "[#1] 본문")
+    result, m = _run_source(tmp_path, route_value=stored, single=single)
+    m.single.assert_awaited_once()
+    assert m.single.await_args.args[3] is None  # 판정을 다시 저장하지 않는다
     m.classify_save.assert_not_awaited()
-    assert m.extract.await_args.kwargs["prefetched"] is None
+    assert m.extract.await_args.kwargs["prefetched"] is DONE_RESULT
 
 
 def test_layout_scan_classifies_instead_of_single_call(tmp_path):
     # 구역(LAYOUT) 추출로 갈 SCAN 자료는 한 호출 결과를 못 쓴다 — 두 번 내지 않게 분류만 한다
-    s = Settings(_env_file=None).model_copy(update={"intake_single_call_small": True,
-                                                    "scan_extract_mode": "LAYOUT"})
+    s = Settings(_env_file=None).model_copy(update={"scan_extract_mode": "LAYOUT"})
     result, m = _run_source(tmp_path, route_value=PENDING, single=_single("RECIPE"), settings=s)
     m.single.assert_not_awaited()
     m.classify_save.assert_awaited_once()
@@ -193,12 +198,12 @@ SRC = {"source_id": 7, "store_id": 1, "source_type": "SCAN",
 BASE = (1, 3, "REGISTRATION", "PRODUCT", None, 42)
 
 
-def _route_source(**settings):
+def _route_source(probe=PROBE, **settings):
     s = Settings(_env_file=None).model_copy(update=settings)
     cls = AsyncMock()
     with patch.object(intake_route.records, "latest_decision", AsyncMock(return_value=None)), \
          patch.object(intake_route.records, "source_owner_hints", AsyncMock(return_value=("NOTICE",))), \
-         patch.object(intake_route, "probe_source", AsyncMock(return_value=PROBE)), \
+         patch.object(intake_route, "probe_source", AsyncMock(return_value=probe)), \
          patch.object(intake_route, "classify_and_save", cls), \
          patch.object(intake_route, "get_settings", return_value=s):
         out = asyncio.run(intake_route.route_source(
@@ -207,21 +212,22 @@ def _route_source(**settings):
     return out, cls
 
 
-def test_route_source_switch_off_classifies():
-    out, cls = _route_source(intake_single_call_small=False)
+def test_route_source_video_classifies():
+    # 한 호출 대상이 아닌 자료(영상)만 분류를 부른다
+    out, cls = _route_source(probe=ProbeResult("VIDEO", PROBE.candidates, complete=True))
     cls.assert_awaited_once()
 
 
-def test_route_source_switch_on_returns_pending_without_classify():
-    out, cls = _route_source(intake_single_call_small=True)
+def test_route_source_text_returns_pending_without_classify():
+    out, cls = _route_source()
     assert isinstance(out, intake_route.SingleCallPending) and out.hints == ("NOTICE",)
     cls.assert_not_awaited()
 
 
-def test_route_source_stored_decision_skips_single_call_even_when_on():
+def test_route_source_stored_decision_skips_probe_and_classify():
     # Review Focus 3 — 재시도·복구는 저장 판정을 그대로 쓴다
     stored = StoredRoute(9, "DOC_TEXT", [_d("c1", "RECIPE")], _d("source", "RECIPE"))
-    s = Settings(_env_file=None).model_copy(update={"intake_single_call_small": True})
+    s = Settings(_env_file=None)
     probe = AsyncMock()
     cls = AsyncMock()
     with patch.object(intake_route.records, "latest_decision", AsyncMock(return_value=stored)), \
@@ -252,10 +258,15 @@ def test_classify_and_save_classifies_and_stores():
     assert save.await_args.kwargs["entry"] == "UPLOAD"
 
 
+def _outcome(result, unprocessed=()):
+    from app.ingest.extract.single_call import SingleCallOutcome
+    return SingleCallOutcome(result, list(unprocessed), 1, "[#1] 음료Z 샷 2")
+
+
 def _extract_with_intake(result, hints=()):
-    ext = AsyncMock(return_value=result)
+    ext = AsyncMock(return_value=_outcome(result))
     save = AsyncMock(return_value=31)
-    with patch("app.ingest.extract.extract_facts_with_intake", ext), \
+    with patch("app.ingest.extract.single_call.extract_single", ext), \
          patch.object(intake_route.records, "save_decision", save):
         out = asyncio.run(intake_route.extract_with_intake(
             _RPool(), 1, SRC, intake_route.SingleCallPending(PROBE, hints),
@@ -288,9 +299,9 @@ def test_extract_with_intake_notice_ranking_routes_notice():
 
 
 def test_extract_with_intake_without_ranking_saves_nothing():
-    ext = AsyncMock(return_value=IntakeFactExtractionResult())
+    ext = AsyncMock(return_value=_outcome(IntakeFactExtractionResult()))
     save = AsyncMock(return_value=31)
-    with patch("app.ingest.extract.extract_facts_with_intake", ext), \
+    with patch("app.ingest.extract.single_call.extract_single", ext), \
          patch.object(intake_route.records, "save_decision", save):
         with pytest.raises(IntakeClassificationError):
             asyncio.run(intake_route.extract_with_intake(
@@ -319,7 +330,7 @@ def test_extract_facts_all_uses_prefetched_without_calling():
     assert len(out.assertions) == 1 and seen == [(1, None)]
 
 
-def test_single_call_chip_overturning_model_none_extracts_normally(tmp_path):
+def test_single_call_chip_overturning_model_none_extracts_again_forced(tmp_path):
     # 최종 검토 I-1 — 모델 1위가 NONE 인데 점주 칩이 결정을 바꾸면, 꼬리 지시대로 비어 온
     # 한 호출 사실을 버리고 저장 판정으로 보통 추출 1회를 한다(빈 NO_RESULT 로 끝내지 않는다)
     raw = IntakeFactExtractionResult(
@@ -331,9 +342,24 @@ def test_single_call_chip_overturning_model_none_extracts_normally(tmp_path):
     single = intake_route.SingleCallResult(StoredRoute(11, "DOC_TEXT", decisions, source), raw)
     result, m = _run_source(tmp_path, route_value=intake_route.SingleCallPending(PROBE, ("RECIPE",)),
                             single=single)
-    m.single.assert_awaited_once()
+    # 2026-11-07 — 보통(Gemini) 추출 대신 업무 자료로 지정해(owner_forced) 한 호출로 다시 뽑는다
+    assert m.single.await_count == 2
+    assert m.single.await_args_list[1].kwargs["owner_forced"] is True
     m.none.assert_not_awaited()
     m.classify_save.assert_not_awaited()
     m.extract.assert_awaited_once()
-    assert m.extract.await_args.kwargs["prefetched"] is None
     m.failed.assert_not_awaited()
+
+
+def test_extract_with_intake_all_attempts_failed_is_classification_error():
+    # 한 번도 성공하지 못하면 자료 FAILED(사유 포함). 판정은 저장하지 않는다
+    rest = [{"from_line": 1, "to_line": 2, "reason": "CALL_FAILED", "first_line": "", "attempts": 3}]
+    ext = AsyncMock(return_value=_outcome(None, rest))
+    save = AsyncMock()
+    with patch("app.ingest.extract.single_call.extract_single", ext), \
+         patch.object(intake_route.records, "save_decision", save):
+        with pytest.raises(IntakeClassificationError, match="CALL_FAILED"):
+            asyncio.run(intake_route.extract_with_intake(
+                _RPool(), 1, SRC, PENDING, text="x", media=[], glossary=[],
+                usage_sink=None, usage_base=BASE, raw_sink=None))
+    save.assert_not_awaited()

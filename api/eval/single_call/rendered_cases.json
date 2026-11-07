@@ -1,0 +1,252 @@
+[
+  {
+    "case_id": "ph-01-notice-wall",
+    "format": "PHOTO",
+    "logic": "POLICY",
+    "style": "print",
+    "title": "주방 위생 수칙 (11월부터 적용)",
+    "lines": [
+      "1. 출근하면 손 씻기 30초, 앞치마 착용 후 작업 시작",
+      "2. 행주는 용도별 색 구분: 파랑=테이블, 초록=조리대, 빨강=바닥",
+      "   ※ 색이 다른 행주를 섞어 쓰지 않는다",
+      "3. 우유는 개봉하면 개봉일 라벨을 붙이고 48시간 지나면 폐기",
+      "4. 제빙기 스쿱은 제빙기 안에 두지 않는다 (옆 스쿱 꽂이에)",
+      "5. 쓰레기통 뚜껑은 항상 닫아 두고, 음식물은 마감 때 비운다",
+      "6. 손을 다치면 구급상자는 창고 문 오른쪽 선반",
+      "7. 위반을 보면 매니저에게 바로 보고"
+    ],
+    "facts": [
+      {"subject": "위생 수칙", "attribute": "적용 시점", "value": "11월부터", "must_have": false},
+      {"subject": "출근 후 손 씻기", "attribute": "시간", "value": "30초", "must_have": true},
+      {"subject": "앞치마", "attribute": "착용", "value": "착용 후 작업 시작", "must_have": true},
+      {"subject": "파랑 행주", "attribute": "용도", "value": "테이블", "must_have": true},
+      {"subject": "초록 행주", "attribute": "용도", "value": "조리대", "must_have": true},
+      {"subject": "빨강 행주", "attribute": "용도", "value": "바닥", "must_have": true},
+      {"subject": "행주", "attribute": "금지", "value": "색이 다른 행주를 섞어 쓰지 않는다", "must_have": true},
+      {"subject": "개봉한 우유", "attribute": "라벨", "value": "개봉일 라벨을 붙인다", "must_have": true},
+      {"subject": "개봉한 우유", "attribute": "폐기", "value": "48시간 지나면 폐기", "must_have": true},
+      {"subject": "제빙기 스쿱", "attribute": "보관", "value": "제빙기 안에 두지 않고 옆 스쿱 꽂이에 둔다", "must_have": true},
+      {"subject": "쓰레기통", "attribute": "뚜껑", "value": "항상 닫아 둔다", "must_have": false},
+      {"subject": "음식물 쓰레기", "attribute": "비우는 때", "value": "마감 때", "must_have": true},
+      {"subject": "구급상자", "attribute": "위치", "value": "창고 문 오른쪽 선반", "must_have": true},
+      {"subject": "위생 위반", "attribute": "조치", "value": "매니저에게 바로 보고", "must_have": false}
+    ]
+  },
+  {
+    "case_id": "ph-02-hand-memo",
+    "format": "PHOTO",
+    "logic": "PROCEDURE",
+    "style": "hand",
+    "title": "마감조 보세요!",
+    "lines": [
+      "- 그라인더에 남은 원두는 밀폐통에 옮기기",
+      "- 우유 주문 {strike:3개} 4개",
+      "- 쇼케이스 전원 끄지 말 것!! (케이크 있음)",
+      "- 바닥 물걸레 2번",
+      "- 매장 키는 포스기 아래 서랍"
+    ],
+    "facts": [
+      {"subject": "그라인더에 남은 원두", "attribute": "마감 처리", "value": "밀폐통에 옮긴다", "must_have": true},
+      {"subject": "우유 주문", "attribute": "수량", "value": "4개(3개를 지우고 고침)", "must_have": true, "note": "지운 값 3개를 현재 값으로 내면 틀린 것이다"},
+      {"subject": "쇼케이스 전원", "attribute": "마감", "value": "끄지 않는다(케이크가 있음)", "must_have": true},
+      {"subject": "바닥", "attribute": "물걸레", "value": "2번", "must_have": true},
+      {"subject": "매장 키", "attribute": "보관 위치", "value": "포스기 아래 서랍", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ph-03-recipe-card",
+    "format": "PHOTO",
+    "logic": "RECIPE",
+    "style": "table",
+    "title": "음료 레시피 카드",
+    "table": [
+      ["메뉴", "규격", "샷", "우유/물", "시럽·파우더", "얼음"],
+      ["바닐라라떼", "HOT", "2샷", "우유 260ml", "바닐라 2펌프", "-"],
+      ["바닐라라떼", "ICE", "2샷", "우유 200ml", "바닐라 2펌프", "컵 가득"],
+      ["복숭아아이스티", "ICE", "-", "물 250ml", "복숭아 파우더 3스푼", "컵 가득"],
+      ["아메리카노", "HOT", "2샷", "뜨거운 물 300ml", "-", "-"],
+      ["아메리카노", "ICE", "2샷", "찬물 200ml", "-", "컵 가득"]
+    ],
+    "lines": ["* 연하게 요청하면 1샷"],
+    "facts": [
+      {"subject": "바닐라라떼", "variant": "HOT", "attribute": "샷", "value": "2샷", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "HOT", "attribute": "우유", "value": "260ml", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "HOT", "attribute": "시럽", "value": "바닐라 2펌프", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "ICE", "attribute": "샷", "value": "2샷", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "ICE", "attribute": "우유", "value": "200ml", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "ICE", "attribute": "시럽", "value": "바닐라 2펌프", "must_have": true},
+      {"subject": "바닐라라떼", "variant": "ICE", "attribute": "얼음", "value": "컵 가득", "must_have": false},
+      {"subject": "복숭아아이스티", "variant": "ICE", "attribute": "물", "value": "250ml", "must_have": true},
+      {"subject": "복숭아아이스티", "variant": "ICE", "attribute": "파우더", "value": "복숭아 파우더 3스푼", "must_have": true},
+      {"subject": "복숭아아이스티", "variant": "ICE", "attribute": "얼음", "value": "컵 가득", "must_have": false},
+      {"subject": "아메리카노", "variant": "HOT", "attribute": "샷", "value": "2샷", "must_have": true},
+      {"subject": "아메리카노", "variant": "HOT", "attribute": "물", "value": "뜨거운 물 300ml", "must_have": true},
+      {"subject": "아메리카노", "variant": "ICE", "attribute": "샷", "value": "2샷", "must_have": true},
+      {"subject": "아메리카노", "variant": "ICE", "attribute": "물", "value": "찬물 200ml", "must_have": true},
+      {"subject": "아메리카노", "variant": "ICE", "attribute": "얼음", "value": "컵 가득", "must_have": false},
+      {"subject": "연하게 요청", "attribute": "샷", "value": "1샷", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ph-04-whiteboard",
+    "format": "PHOTO",
+    "logic": "REFERENCE",
+    "style": "board",
+    "title": "이번 주 발주 / 연락처",
+    "lines": [
+      "원두: 금요일 오전까지 주문, 2kg 2봉",
+      "16oz 컵: 3박스 남으면 주문",
+      "정수기 A/S 1588-0000",
+      "건물 관리실 내선 210",
+      "화요일 오후 3시 소방 점검 → 주방 통로 비워두기"
+    ],
+    "facts": [
+      {"subject": "원두 발주", "attribute": "마감", "value": "금요일 오전까지", "must_have": true},
+      {"subject": "원두 발주", "attribute": "수량", "value": "2kg 2봉", "must_have": true},
+      {"subject": "16oz 컵", "attribute": "발주 시점", "value": "3박스 남으면 주문", "must_have": true},
+      {"subject": "정수기 A/S", "attribute": "연락처", "value": "1588-0000", "must_have": true},
+      {"subject": "건물 관리실", "attribute": "연락처", "value": "내선 210", "must_have": true},
+      {"subject": "소방 점검", "attribute": "일시", "value": "화요일 오후 3시", "must_have": true},
+      {"subject": "소방 점검", "attribute": "준비", "value": "주방 통로를 비워 둔다", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ph-05-season-poster",
+    "format": "PHOTO",
+    "logic": "NOTICE",
+    "style": "poster",
+    "title": "겨울 시즌 메뉴 안내",
+    "lines": [
+      "기간 12월 1일 ~ 2월 28일",
+      "시즌 메뉴: 군고구마라떼, 유자차",
+      "시즌 메뉴 주문 시 쿠폰 도장 2개",
+      "12월 24일·25일은 오후 8시까지 영업"
+    ],
+    "facts": [
+      {"subject": "겨울 시즌 메뉴", "attribute": "기간", "value": "12월 1일 ~ 2월 28일", "must_have": true},
+      {"subject": "겨울 시즌 메뉴", "attribute": "메뉴", "value": "군고구마라떼, 유자차", "must_have": true},
+      {"subject": "시즌 메뉴 주문", "attribute": "쿠폰 도장", "value": "2개", "must_have": true},
+      {"subject": "12월 24일·25일", "attribute": "영업시간", "value": "오후 8시까지", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ch-01-chat-reversal",
+    "format": "CHAT_IMAGE",
+    "logic": "REFERENCE",
+    "messages": [
+      {"date": "11월 3일 월요일"},
+      {"who": "사장님", "text": "이번 주부터 우유는 3번 냉장고에 넣어 주세요", "time": "오후 2:10"},
+      {"who": "나", "text": "네 알겠습니다", "time": "오후 2:12"},
+      {"date": "11월 5일 수요일"},
+      {"who": "사장님", "text": "아 우유 다시 2번 냉장고로 옮겼어요. 3번은 이제 디저트용이에요", "time": "오전 10:31"},
+      {"who": "사장님", "text": "그리고 휘핑기 가스 교체는 저녁조가 해 주세요", "time": "오전 10:32"},
+      {"who": "나", "text": "넵!", "time": "오전 10:40"}
+    ],
+    "facts": [
+      {"subject": "우유", "attribute": "보관 위치", "value": "2번 냉장고(3번에서 다시 옮김)", "must_have": true, "note": "옛 지시 3번을 현재 값으로 내면 틀린 것이다"},
+      {"subject": "3번 냉장고", "attribute": "용도", "value": "디저트용", "must_have": true},
+      {"subject": "휘핑기 가스 교체", "attribute": "담당", "value": "저녁조", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ch-02-chat-qa",
+    "format": "CHAT_IMAGE",
+    "logic": "POLICY",
+    "messages": [
+      {"date": "11월 6일 목요일"},
+      {"who": "나", "text": "사장님 손님이 음료 다 드시고 환불해 달라고 하시는데 어떻게 해요?", "time": "오후 4:02"},
+      {"who": "사장님", "text": "다 마신 건 환불 안 돼요. 맛 문제면 다시 만들어 드리는 것까지만요", "time": "오후 4:05"},
+      {"who": "나", "text": "쿠폰 2장 같이 써도 돼요?", "time": "오후 4:06"},
+      {"who": "사장님", "text": "한 주문에 쿠폰은 1장만이에요", "time": "오후 4:07"},
+      {"who": "사장님", "text": "그리고 포인트 적립은 현금이든 카드든 결제 금액의 5%예요", "time": "오후 4:08"}
+    ],
+    "facts": [
+      {"subject": "다 마신 음료", "attribute": "환불", "value": "환불하지 않는다", "must_have": true},
+      {"subject": "맛 문제", "attribute": "처리", "value": "다시 만들어 드리는 것까지만", "must_have": true},
+      {"subject": "쿠폰", "attribute": "한 주문 사용 수", "value": "1장만", "must_have": true},
+      {"subject": "포인트 적립", "attribute": "비율", "value": "현금·카드 모두 결제 금액의 5%", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "ch-03-chat-chitchat",
+    "format": "CHAT_IMAGE",
+    "logic": "MIXED",
+    "messages": [
+      {"date": "11월 7일 금요일"},
+      {"who": "나", "text": "ㅋㅋㅋ 오늘 진짜 바빴어요", "time": "오후 6:01"},
+      {"who": "사장님", "text": "고생했어요 ㅎㅎ", "time": "오후 6:03"},
+      {"who": "사장님", "text": "내일부터 오픈조는 8시 30분까지 출근이에요 (원래 9시)", "time": "오후 6:04"},
+      {"who": "나", "text": "헐 넵", "time": "오후 6:05"},
+      {"who": "사장님", "text": "오픈하면 제일 먼저 머신 예열 버튼 누르고 그다음에 포스 켜기", "time": "오후 6:06"},
+      {"who": "나", "text": "👍", "time": "오후 6:06"},
+      {"who": "사장님", "text": "점심 피크(12시~1시)에는 설거지 미루고 주문 먼저 받아요", "time": "오후 6:09"},
+      {"who": "나", "text": "알겠습니다 들어가세요~", "time": "오후 6:10"}
+    ],
+    "facts": [
+      {"subject": "오픈조", "attribute": "출근 시각", "value": "8시 30분(원래 9시, 내일부터)", "must_have": true},
+      {"subject": "오픈", "attribute": "첫 순서", "value": "머신 예열 버튼을 먼저 누른다", "must_have": true},
+      {"subject": "오픈", "attribute": "두 번째 순서", "value": "그다음 포스를 켠다", "must_have": true},
+      {"subject": "점심 피크(12시~1시)", "attribute": "우선순위", "value": "설거지를 미루고 주문을 먼저 받는다", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "pd-01-work-rules",
+    "format": "PDF_TEXT",
+    "logic": "POLICY",
+    "html": "<h1>근무 규칙</h1><ol><li>근무 시작 10분 전에 도착하고, 출근 기록은 포스기 \"근태\" 메뉴에서 한다.</li><li>지각이 한 달에 3회면 면담한다.</li><li>휴대폰은 카운터에서 사용하지 않는다(휴게시간 제외).</li><li>휴게시간은 4시간 근무 시 30분, 8시간 근무 시 1시간이다.</li><li>근무 교대는 최소 3일 전에 단톡방에 알리고 사장님 승인을 받는다.</li><li>유니폼은 검정 상의, 앞치마는 매장에서 지급한다.</li><li>급여일은 매월 10일이다.</li></ol><div style=\"page-break-before:always\"></div><h2>기타</h2><ol start=\"8\"><li>직원 할인: 음료 50%, 디저트 30%.</li><li>퇴사는 최소 2주 전에 알린다.</li><li>매장 사진을 SNS 에 올릴 때 손님 얼굴이 나오지 않게 한다.</li></ol>",
+    "facts": [
+      {"subject": "출근", "attribute": "도착", "value": "근무 시작 10분 전", "must_have": true},
+      {"subject": "출근 기록", "attribute": "방법", "value": "포스기 근태 메뉴", "must_have": true},
+      {"subject": "지각", "attribute": "조치", "value": "한 달 3회면 면담", "must_have": true},
+      {"subject": "휴대폰", "attribute": "사용", "value": "카운터에서 사용하지 않는다(휴게시간 제외)", "must_have": true},
+      {"subject": "휴게시간", "attribute": "4시간 근무", "value": "30분", "must_have": true},
+      {"subject": "휴게시간", "attribute": "8시간 근무", "value": "1시간", "must_have": true},
+      {"subject": "근무 교대", "attribute": "절차", "value": "최소 3일 전 단톡방에 알리고 사장님 승인", "must_have": true},
+      {"subject": "유니폼", "attribute": "상의", "value": "검정 상의", "must_have": true},
+      {"subject": "앞치마", "attribute": "지급", "value": "매장 지급", "must_have": false},
+      {"subject": "급여일", "attribute": "날짜", "value": "매월 10일", "must_have": true},
+      {"subject": "직원 할인", "attribute": "음료", "value": "50%", "must_have": true},
+      {"subject": "직원 할인", "attribute": "디저트", "value": "30%", "must_have": true},
+      {"subject": "퇴사", "attribute": "통보", "value": "최소 2주 전", "must_have": true},
+      {"subject": "매장 사진 SNS", "attribute": "주의", "value": "손님 얼굴이 나오지 않게", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "pd-02-recipe-table",
+    "format": "PDF_TEXT",
+    "logic": "RECIPE",
+    "html": "<h1>음료 제조표</h1><table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>메뉴</th><th>규격</th><th>재료</th><th>양</th></tr><tr><td rowspan=\"2\">카페라떼</td><td>HOT</td><td>에스프레소 / 우유</td><td>2샷 / 250ml</td></tr><tr><td>ICE</td><td>에스프레소 / 우유 / 얼음</td><td>2샷 / 180ml / 컵의 70%</td></tr><tr><td>카페모카</td><td>HOT</td><td>에스프레소 / 초코소스 / 우유 / 휘핑</td><td>2샷 / 30ml / 220ml / 위에 올림</td></tr><tr><td>녹차라떼</td><td>ICE</td><td>녹차 파우더 / 우유 / 얼음</td><td>3스푼 / 200ml / 컵 가득</td></tr></table><p>※ 우유는 스팀 온도 65도를 넘기지 않는다.</p>",
+    "facts": [
+      {"subject": "카페라떼", "variant": "HOT", "attribute": "에스프레소", "value": "2샷", "must_have": true},
+      {"subject": "카페라떼", "variant": "HOT", "attribute": "우유", "value": "250ml", "must_have": true},
+      {"subject": "카페라떼", "variant": "ICE", "attribute": "에스프레소", "value": "2샷", "must_have": true},
+      {"subject": "카페라떼", "variant": "ICE", "attribute": "우유", "value": "180ml", "must_have": true},
+      {"subject": "카페라떼", "variant": "ICE", "attribute": "얼음", "value": "컵의 70%", "must_have": true},
+      {"subject": "카페모카", "variant": "HOT", "attribute": "에스프레소", "value": "2샷", "must_have": true},
+      {"subject": "카페모카", "variant": "HOT", "attribute": "초코소스", "value": "30ml", "must_have": true},
+      {"subject": "카페모카", "variant": "HOT", "attribute": "우유", "value": "220ml", "must_have": true},
+      {"subject": "카페모카", "variant": "HOT", "attribute": "휘핑", "value": "위에 올림", "must_have": false},
+      {"subject": "녹차라떼", "variant": "ICE", "attribute": "녹차 파우더", "value": "3스푼", "must_have": true},
+      {"subject": "녹차라떼", "variant": "ICE", "attribute": "우유", "value": "200ml", "must_have": true},
+      {"subject": "녹차라떼", "variant": "ICE", "attribute": "얼음", "value": "컵 가득", "must_have": false},
+      {"subject": "우유 스팀", "attribute": "온도", "value": "65도를 넘기지 않는다", "must_have": true}
+    ]
+  },
+  {
+    "case_id": "pd-03-opening-manual",
+    "format": "PDF_TEXT",
+    "logic": "PROCEDURE",
+    "html": "<h1>오픈 매뉴얼</h1><ol><li>08:30 출근, 카드키를 문 옆 단말기에 대서 보안 해제</li><li>전등과 간판 켜기</li><li>커피 머신 예열 15분</li><li>그라인더 원두 확인, 부족하면 창고 2번 선반의 원두 보충</li><li>첫 샷 2잔은 버리고 맛 확인(추출 시간 25~30초)</li><li>쇼케이스 온도 2~4도 확인</li><li>09:00 오픈, 입구 표지판을 OPEN 으로 돌리기</li></ol><p><b>주의:</b> 추출 시간이 20초 이하면 분쇄도를 한 칸 곱게 조정한다.</p>",
+    "facts": [
+      {"subject": "오픈 1단계", "attribute": "출근·보안", "value": "08:30 출근, 카드키를 문 옆 단말기에 대서 보안 해제", "must_have": true},
+      {"subject": "오픈 2단계", "attribute": "전등·간판", "value": "켠다", "must_have": true},
+      {"subject": "오픈 3단계", "attribute": "머신 예열", "value": "15분", "must_have": true},
+      {"subject": "오픈 4단계", "attribute": "원두", "value": "그라인더 원두 확인, 부족하면 창고 2번 선반 원두 보충", "must_have": true},
+      {"subject": "오픈 5단계", "attribute": "첫 샷", "value": "2잔 버리고 맛 확인", "must_have": true},
+      {"subject": "샷 추출 시간", "attribute": "기준", "value": "25~30초", "must_have": true},
+      {"subject": "오픈 6단계", "attribute": "쇼케이스 온도", "value": "2~4도", "must_have": true},
+      {"subject": "오픈 7단계", "attribute": "오픈", "value": "09:00, 입구 표지판을 OPEN 으로", "must_have": true},
+      {"subject": "추출 20초 이하", "attribute": "조치", "value": "분쇄도를 한 칸 곱게", "must_have": true}
+    ]
+  }
+]

@@ -285,9 +285,10 @@ def main():
         "참조 sha256[:16]": hashlib.sha256(ref_bytes).hexdigest()[:16],
         "원장 사실 수": len(ledger),
         "label": a.label,
-        "pdf_input_mode": s.pdf_input_mode,
-        "extract_locator_hints": s.extract_locator_hints,
-        "extract_truncation_split_max_depth": s.extract_truncation_split_max_depth,
+        # 2026-11-07 S11 — 추출 스위치는 없앴다. 지금 경로를 기록한다
+        "extract_model": s.extract_model,
+        "pdf_input_mode": "HYBRID",
+        "extract_locator_hints": True,
     }
     print(f"재현율 {res['recalled']}/{res['reference_total']} = {res['recall']}  "
           f"메뉴행 {res['menu_rows_touched']}/{res['menu_rows_total']}  "

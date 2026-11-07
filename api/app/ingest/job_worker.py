@@ -1,6 +1,7 @@
 """다중 자료 ingest 작업 오케스트레이터."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -41,6 +42,25 @@ def final_job_status(*, total: int, failed: int, cards: int,
     return "SUCCEEDED"
 
 
+UNPROCESSED_LINES = pipeline.UNPROCESSED_LINES
+UNPROCESSED_LINES_MESSAGE = "자료의 일부를 정리하지 못했어요. 정리된 내용은 반영했어요."
+
+
+def owner_retry_lines(ranges) -> list[int] | None:
+    """사장님 다시 시도로 이어서 뽑을 줄 번호. 다시 시도를 쓰지 않은 범위가 없으면 None.
+
+    줄 번호가 없는 자료(사진 등, 0~0 범위)는 빈 목록 — 자료 전체를 다시 본다.
+    """
+    if not ranges:
+        return None
+    rows = json.loads(ranges) if isinstance(ranges, str) else list(ranges)
+    open_rows = [r for r in rows if not r.get("owner_retry_used")]
+    if not open_rows:
+        return None
+    return sorted({n for r in open_rows if r["from_line"] > 0
+                   for n in range(r["from_line"], r["to_line"] + 1)})
+
+
 def _run_tag(started_at) -> int | None:
     """자료 시작 시각을 epoch 밀리초 정수로 바꾼다. 행이 없으면 표지 없이 돈다."""
     if started_at is None:
@@ -67,7 +87,7 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
             return
         source_ids = await conn.fetch(
             """
-            select source_id, failed_segment_ids, segments_total
+            select source_id, failed_segment_ids, segments_total, unprocessed_ranges
             from ingest_job_sources
             where store_id = $1 and job_id = $2 and status = 'QUEUED'
             order by source_id
@@ -79,7 +99,8 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
     # S1 — 판정 없는 자료가 둘 이상이면 묶어 분류 1회. PARTIAL 재시도 자료는 판정이 이미 있다.
     # 훑기 결과(다운로드·파싱)는 caches 에 남아 process_source 가 다시 쓴다
     caches: dict = {}
-    fresh = [int(r["source_id"]) for r in source_ids if not r["failed_segment_ids"]]
+    fresh = [int(r["source_id"]) for r in source_ids
+             if not r["failed_segment_ids"] and not r.get("unprocessed_ranges")]
     if len(fresh) >= 2:
         from app.ingest.intake import route as intake_route
         from app.usage import DbUsageSink
@@ -117,6 +138,8 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
 
             # PARTIAL 재시도면 잃은 구간만 다시 읽는다. 전체를 다시 돌리면 카드가 겹친다
             lost_ids = row["failed_segment_ids"]
+            # 사장님 [다시 시도](S10) — 처리 안 된 줄 범위만 이어서 뽑는다. 이미 쓴 범위는 다시 하지 않는다
+            retry_lines = owner_retry_lines(row.get("unprocessed_ranges"))
             if lost_ids:
                 outcome = await pipeline.process_source(
                     store_id, source_id, job_id=job_id,
@@ -124,6 +147,12 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     expected_segments_total=row["segments_total"],
                     run_tag=run_tag, **cache_kw,
                 )
+            elif retry_lines is not None:
+                outcome = await pipeline.process_source(
+                    store_id, source_id, job_id=job_id, run_tag=run_tag, only_lines=retry_lines)
+            elif row.get("unprocessed_ranges"):
+                # 남은 범위가 있지만 다시 시도를 이미 썼다 — 추출하지 않는다([직접 적기]만 남는다).
+                outcome = pipeline.UNPROCESSED_LINES
             else:
                 outcome = await pipeline.process_source(
                     store_id, source_id, job_id=job_id, run_tag=run_tag, **cache_kw)
@@ -162,7 +191,24 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     )
                     or 0
                 )
-                if lost_ids and source is not None and source["status"] == "FAILED":
+                if retry_lines is not None and source is not None and source["status"] == "FAILED":
+                    # 사장님 다시 시도가 3번 모두 실패했다. 앞서 만든 카드는 그대로 두고, 다시 시도 버튼은 거둔다
+                    await conn.execute(
+                        """
+                        update ingest_job_sources
+                        set unprocessed_ranges = (
+                            select jsonb_agg(r || '{"owner_retry_used": true}'::jsonb)
+                            from jsonb_array_elements(unprocessed_ranges) r)
+                        where store_id = $1 and job_id = $2 and source_id = $3
+                        """,
+                        store_id, job_id, source_id)
+                    await conn.execute(
+                        "update sources set status = 'DONE' where store_id = $1 and source_id = $2",
+                        store_id, source_id)
+                    result_status = "PARTIAL"
+                    error_code = UNPROCESSED_LINES
+                    error_message = UNPROCESSED_LINES_MESSAGE
+                elif lost_ids and source is not None and source["status"] == "FAILED":
                     # 잃은 구간 재시도가 예외로 끝났다. 앞서 만든 카드는 그대로 있다.
                     # FAILED 로 적으면 다음 재시도가 전체를 다시 돌려 카드가 겹치므로
                     # PARTIAL 로 남기고 구간 기록도 건드리지 않는다
@@ -189,6 +235,11 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     result_status = "NO_RESULT"
                     error_code = pipeline.INTAKE_NONE
                     error_message = INTAKE_NONE_MESSAGE
+                elif outcome == pipeline.UNPROCESSED_LINES:
+                    # 뽑힌 사실은 반영됐고, 끝내 처리하지 못한 줄 범위가 남았다(S9)
+                    result_status = "PARTIAL"
+                    error_code = UNPROCESSED_LINES
+                    error_message = UNPROCESSED_LINES_MESSAGE
                 elif card_count == 0:
                     result_status = "NO_RESULT"
                     error_code = "NO_RESULT"

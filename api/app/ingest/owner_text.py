@@ -157,12 +157,19 @@ async def ingest_owner_text(pool, *, store_id: int, source_id: int, question: st
     if logic == "NONE":
         logger.info("점주 답변 source=%s — 업무 내용이 아니라고 판정, 추출하지 않음", source_id)
     if not has_ledger and logic != "NONE":
-        from app.ingest.extract import extract_facts
-        result = await extract_facts(
+        # 영상 밖 추출은 Sonnet 한 번 호출이다(2026-11-07 S1·S8). 판정은 이미 받았으므로 사실만 쓴다.
+        # 짧은 글이라 끝내 처리하지 못한 줄이 남으면 실패로 올린다 — 답변 작업자의 재시도 규칙을 따른다
+        from app.ingest.extract import single_call
+        outcome = await single_call.extract_single(
             source_id=source_id, source_type="OWNER_TEXT", text=compose_text(question, answer),
             glossary=glossary, media=[], usage_sink=usage_sink,
             usage_context=pipeline._ctx_for(usage_base, source_id, "EXTRACT"),
             raw_sink=raw_sink)
+        if outcome.result is None or outcome.unprocessed:
+            raise RuntimeError(
+                f"점주 답변 사실 추출이 {outcome.attempts}번 시도 뒤에도 끝나지 않았다 "
+                f"(남은 범위 {outcome.unprocessed})")
+        result = outcome.result
         assertions = drop_question_only(list(result.assertions), question=question, answer=answer)
         async with pool.acquire() as conn, conn.transaction():
             await pipeline._persist_ledger(conn, store_id, source_id, "OWNER_TEXT", assertions)

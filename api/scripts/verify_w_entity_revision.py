@@ -258,7 +258,7 @@ _W2_TABLES = ("knowledge_entities", "knowledge_entity_aliases", "knowledge_facts
               "source_fact_revision_links", "fact_conflicts", "fact_revision_requires",
               "fact_owner_answer_links")
 _MODEL_SETTINGS = NS(gemini_api_key="synthetic", gemini_model="gemini-synthetic",
-                     ingest_mode="real", extract_temperature=0.0, extract_locator_hints=False)
+                     ingest_mode="real", extract_temperature=0.0)
 
 
 async def _w2_counts(db, store) -> dict[str, int]:
