@@ -258,6 +258,22 @@ select:disabled {
   }
 }
 
+/* 로그인 첫 화면 버디(a01a): 한 번 통통 튄다 */
+@keyframes buddy-bounce {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-16px);
+  }
+  70% {
+    transform: translateY(0) scaleY(0.96);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
 [data-enter="forward"] > main {
   animation: screen-forward var(--dur-base) var(--ease-out);
 }

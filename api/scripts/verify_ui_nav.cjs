@@ -109,7 +109,7 @@ test('NAV-3 탭마다 스크롤 위치를 기억한다', async (b) => {
   await ctx.close();
 });
 test('NAV-4 옛 하단 탭이 어디에도 없다', async (b) => {
-  for (const [role, url] of [['OWNER', '/owner/questions'], ['STAFF', '/staff/faqs']]) {
+  for (const [role, url] of [['OWNER', '/owner/questions'], ['STAFF', '/staff/recipes']]) {
     const { page, ctx } = await open(b, role, url);
     for (const label of ['업로드', '답변 대기', '카드 목록', '학습', '자주 묻는 질문']) {
       assert.equal(await page.getByRole('navigation').getByText(label, { exact: true }).count(), 0, `${url} ${label}`);

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useInfiniteQuery,
   useIsMutating,
   useMutation,
   useQuery,
@@ -14,7 +15,10 @@ import {
   ButtonLink,
   Caption,
   CheckRow,
+  ConfirmDialog,
   Empty,
+  Icon,
+  NumberedContent,
   ErrorInline,
   HeroCard,
   HeroClock,
@@ -30,6 +34,7 @@ import {
   TabBar,
 } from "@/components/kit";
 import { TodayOnlyTasks } from "@/components/checklist/today-only-tasks";
+import { SuggestedQuestions } from "@/components/staff/suggested-questions";
 import { ApiError, apiErrorMessage } from "@/lib/api";
 import {
   checklistApi,
@@ -42,7 +47,9 @@ import {
   bootstrapQuery,
   checklistKeys,
   checklistTodayQuery,
+  learnItemQuery,
   myTodayTasksQuery,
+  rNotificationsQuery,
 } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
@@ -97,6 +104,12 @@ export function TodayScreen() {
   const [dayChanged, setDayChanged] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [question, setQuestion] = useState("");
+  // 줄 이름을 누르면 여는 레시피 시트(s01d)
+  const [preview, setPreview] = useState<{ itemId: number; title: string } | null>(null);
+  // 버디에 아직 안 본 새 답이 있으면 입력창에 점(NAV-8)
+  const notices = useInfiniteQuery(rNotificationsQuery(state.token, state.storeId, state.userId));
+  const newAnswer = Boolean(notices.data?.pages[0]?.notifications.some((n) => !n.read));
+  const ask = (text: string) => router.push(`/staff/ask?q=${encodeURIComponent(text.trim())}`);
   const saving =
     useIsMutating({
       mutationKey: [...checklistKeys.root(state.storeId), "check"],
@@ -158,13 +171,10 @@ export function TodayScreen() {
     <Screen
       tabBar={<TabBar tabs={STAFF_TABS} />}
       footer={
-        <AskBar
-          value={question}
-          onChange={setQuestion}
-          onSubmit={() =>
-            router.push(`/staff/ask?q=${encodeURIComponent(question.trim())}`)
-          }
-        />
+        <div className="flex flex-col gap-2">
+          <SuggestedQuestions onPick={ask} />
+          <AskBar value={question} onChange={setQuestion} onSubmit={() => ask(question)} newAnswer={newAnswer} />
+        </div>
       }
     >
       <PageHeader
@@ -194,8 +204,16 @@ export function TodayScreen() {
         <>
           {data.my_submission ? (
             <HeroCard>
+              {/* 끝의 기억을 좋게(피크엔드, s01e): 체크가 통통 튄다 */}
+              <span
+                data-celebrate=""
+                aria-hidden
+                className="mb-3 flex size-12 items-center justify-center rounded-full bg-primary text-white animate-[check-pop_400ms_var(--ease-spring)]"
+              >
+                <Icon name="check" size={26} />
+              </span>
               <p
-                className="pr-16 text-[24px] font-bold"
+                className="pr-16 text-[22px] font-bold"
                 data-testid="checklist-complete"
               >
                 오늘 할 일 끝났어요
@@ -215,7 +233,7 @@ export function TodayScreen() {
                   {data.upcoming ? "다음" : "지금"} {current.name}
                 </HeroClock>
               )}
-              <p className="my-4 pr-14 text-[28px] font-bold">
+              <p className="my-3 pr-14 text-[22px] font-bold">
                 {remaining}개 남았어요
               </p>
               <HeroProgress {...data.scope_counts} label="내 범위 진행" />
@@ -229,34 +247,19 @@ export function TodayScreen() {
               description="사장님이 정해 주면 여기에 생겨요"
             />
           )}
-          {data.shifts.length > 0 && (
-            <div className="flex flex-wrap gap-2" aria-label="근무조 선택">
-              {data.shifts.map((s) => (
-                <button
-                  key={s.shift_id}
-                  type="button"
-                  aria-pressed={data.current_shift_id === s.shift_id}
-                  disabled={saving || submit.isPending}
-                  onClick={() => setShift(s.shift_id)}
-                  className={`min-h-11 rounded-full px-4 ${data.current_shift_id === s.shift_id ? "bg-primary text-white" : "bg-surface text-primary"}`}
-                >
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* s01c: 직원은 자기 근무조만 본다(근무조 칩 없음) */}
           <Groups
             groups={
               data.shifts.length
                 ? data.groups
                 : data.groups.map((group) => ({ ...group, name: "전체" }))
             }
-            renderLine={(item, text, href) => (
+            renderLine={(item, text, itemId) => (
               <LiveLine
                 key={lineKey(item)}
                 item={{ ...item, business_date: data.business_date }}
                 text={text}
-                href={href}
+                onOpen={itemId ? () => setPreview({ itemId, title: text }) : undefined}
                 disabled={submit.isPending || Boolean(yesterday)}
                 onDateError={dateError}
               />
@@ -293,33 +296,17 @@ export function TodayScreen() {
         </>
       )}
       <RefreshingHint active={today.isRefetching && !today.isLoading} />
-      <Sheet
+      <ConfirmDialog
         open={confirm}
-        onClose={() => {
-          if (!submit.isPending) setConfirm(false);
-        }}
         title={`${remaining}개가 남았어요. 그래도 끝낼까요?`}
-        description="남은 개수도 함께 기록해요."
-      >
-        {submit.error && (
-          <ErrorInline
-            message={apiErrorMessage(submit.error, "제출하지 못했어요.")}
-          />
-        )}
-        <Button
-          loading={submit.isPending}
-          onClick={() => data && submit.mutate(data.business_date)}
-        >
-          그래도 끝내기
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={submit.isPending}
-          onClick={() => setConfirm(false)}
-        >
-          더 체크하기
-        </Button>
-      </Sheet>
+        confirmLabel="그래도 끝내기"
+        cancelLabel="더 체크하기"
+        loading={submit.isPending}
+        error={submit.error ? apiErrorMessage(submit.error, "제출하지 못했어요.") : null}
+        onConfirm={() => data && submit.mutate(data.business_date)}
+        onCancel={() => setConfirm(false)}
+      />
+      <RecipeSheet preview={preview} onClose={() => setPreview(null)} />
       {yesterday && (
         <YesterdaySheet
           date={yesterday}
@@ -344,7 +331,7 @@ function Groups({
   renderLine: (
     item: CheckItem,
     text: string,
-    href?: string,
+    itemId?: number | null,
   ) => React.ReactNode;
 }) {
   return (
@@ -362,7 +349,7 @@ function Groups({
                 checked: line.checked,
               },
               card.title,
-              card.item_id ? `/staff/recipes/${card.item_id}` : undefined,
+              card.item_id,
             );
           })}
         </ListGroup>
@@ -373,13 +360,13 @@ function Groups({
 function LiveLine({
   item,
   text,
-  href,
+  onOpen,
   disabled,
   onDateError,
 }: {
   item: CheckRequest;
   text: string;
-  href?: string;
+  onOpen?: () => void;
   disabled: boolean;
   onDateError: (error: unknown, item: CheckRequest) => void;
 }) {
@@ -424,7 +411,7 @@ function LiveLine({
   return (
     <CheckRow
       label={text}
-      href={href}
+      onOpen={onOpen}
       checked={item.checked}
       saving={change.isPending || disabled}
       error={
@@ -544,6 +531,32 @@ function YesterdaySheet({
       >
         저장
       </Button>
+    </Sheet>
+  );
+}
+
+/** 할 일 이름을 누르면 올라오는 레시피 미리 보기(s01d). 전체는 레시피 화면에서. */
+function RecipeSheet({ preview, onClose }: { preview: { itemId: number; title: string } | null; onClose: () => void }) {
+  const { state } = useApp();
+  const item = useQuery(learnItemQuery(state.token, state.storeId, state.userId, preview?.itemId ?? 0));
+  const missing = item.error instanceof ApiError && [403, 404].includes(item.error.status);
+  return (
+    <Sheet open={preview !== null} onClose={onClose} title={preview?.title ?? ""}>
+      {item.isLoading && <Skeleton className="h-32" />}
+      {missing && <p className="text-[15px] text-ink-muted">이 레시피를 볼 수 없어요</p>}
+      {item.error && !missing && (
+        <ErrorInline message={apiErrorMessage(item.error, "레시피를 불러오지 못했어요.")} onRetry={() => void item.refetch()} />
+      )}
+      {item.data && (
+        <div className="max-h-[50dvh] overflow-y-auto rounded-[16px] bg-surface px-4 py-3">
+          <NumberedContent content={item.data.content} />
+        </div>
+      )}
+      {preview && !missing && (
+        <ButtonLink href={`/staff/recipes/${preview.itemId}`} variant="secondary">
+          레시피 전체 보기
+        </ButtonLink>
+      )}
     </Sheet>
   );
 }

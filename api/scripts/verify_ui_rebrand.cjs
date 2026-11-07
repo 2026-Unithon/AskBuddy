@@ -293,7 +293,8 @@ const BASE = 'http://127.0.0.1:3011';
     await sp.goto(`${BASE}/staff/roadmap`);
     await sp.waitForURL('**/staff/recipes');
     await sp.getByRole('link', { name: /합성 라테/ }).waitFor();
-    check('old roadmap address opens recipes', await sp.getByText('바뀌었어요', { exact: true }).isVisible());
+    // 화면 개선 계획 5(s02b): 글 대신 주황 점
+    check('old roadmap address opens recipes', await sp.getByRole('img', { name: '내용이 바뀜' }).isVisible());
     await sp.goto(`${BASE}/staff/items/5`);
     await sp.waitForURL('**/staff/recipes/5');
     await sp.getByText('내용이 바뀌었어요. 다시 한 번 확인해주세요', { exact: true }).waitFor();
@@ -304,7 +305,7 @@ const BASE = 'http://127.0.0.1:3011';
     await sp.getByRole('button', { name: '확인했어요' }).click();
     await sp.getByRole('button', { name: '확인 취소하기' }).waitFor();
     check('completion saves current published version', state.completionBodies.every((b) => b.published_version_id === 10 && b.completed === true));
-    await sp.getByRole('link', { name: '이 레시피에 대해 물어보기' }).click();
+    await sp.getByRole('button', { name: '이 레시피에 대해 물어보기' }).click();
     await sp.waitForURL('**/staff/ask?q=*');
     check('ask from recipe prefills question', (await sp.getByLabel('모르는 거 물어보기').inputValue()).startsWith('합성 라테'));
     state.roadmapEmpty = true;

@@ -360,6 +360,10 @@ const fs = require("node:fs");
           events: [],
           updated_at: `${date}T09:00:00Z`,
         };
+      else if (/^\/learn\/items\/\d+$/.test(p))
+        // 화면 개선 계획 5(s01d): 할 일 이름을 누르면 여는 레시피 시트
+        payload = { item_id: Number(p.split("/").at(-1)), card_id: 1, published_version_id: 10, title: "합성 청소", status: "NOT_STARTED",
+          content: "머신 청소\n바닥 닦기", category: { category_id: 1, name: "매장 관리" }, evidence: [], return_to: { path: "/staff/recipes", item_id: 7 } };
       else if (p === "/ingest/capabilities") payload = {};
       else if (p === "/ingest/jobs")
         payload = { items: [], next_cursor: null, total: 0 };
@@ -695,7 +699,7 @@ const fs = require("node:fs");
       check(
         "카드마다 한 행",
         (await page.getByRole("checkbox").count()) === 2 &&
-          (await page.getByRole("link", { name: "합성 청소", exact: true }).count()) === 1,
+          (await page.getByRole("button", { name: "합성 청소", exact: true }).count()) === 1,
       );
       check("카드 머리·줄 목록 없음", (await page.locator("h3").count()) === 0);
       check(
@@ -710,9 +714,12 @@ const fs = require("node:fs");
         new URL(page.url()).pathname === "/staff" && s.calls.length === 1,
       );
       check("카드 단위 화면 런타임 오류 없음", errors.length === 0);
-      await page.getByRole("link", { name: "합성 청소", exact: true }).click();
+      // 화면 개선 계획 5(s01d): 제목을 누르면 레시피 시트, 거기서 전체 보기로
+      await page.getByRole("button", { name: "합성 청소", exact: true }).click();
+      await page.getByRole("dialog", { name: "합성 청소" }).getByText("바닥 닦기").waitFor();
+      await page.getByRole("link", { name: "레시피 전체 보기" }).click();
       await page.waitForURL("**/staff/recipes/7");
-      check("제목 누르면 카드 상세로", s.calls.length === 1);
+      check("제목 누르면 레시피 시트, 전체 보기로 카드 상세", s.calls.length === 1);
       await ctx.close();
     }
     console.log(`PASS P5 browser assertions: ${passed}`);

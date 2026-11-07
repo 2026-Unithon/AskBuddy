@@ -95,6 +95,17 @@ function initialState(overrides) {
     failCategoryDelete: false,
     reclassification: null,
     failRetry: false,
+    // 직원 화면(계획 5)
+    rNotifications: [{ notification_id: '51', title: '사장님 답이 왔어요', body: '디카페인 원두는 창고 위 칸에 있어요.', destination: '/staff/chat/v2?session_id=1', read: false }],
+    failRRead: false,
+    submitted: null,
+    signedOut: false,
+    faqs: null,
+    failItem: false,
+    chatDelayMs: 0,
+    chatEscalate: false,
+    sessionsDelayMs: 0,
+    itemContent: {},
     ...overrides,
   };
 }
@@ -117,8 +128,8 @@ function syntheticApi(role, overrides = {}) {
     scope: { all: role === 'OWNER', shift_ids: [1] }, current_shift_id: 1, upcoming: false,
     shifts: state.shifts.map((s) => ({ ...s, total: s.shift_id === 1 ? 4 : s.shift_id === 2 ? 2 : 3, done: s.shift_id === 1 ? 2 : 0, submitted: false })),
     scope_counts: { total: 4, done: 2 }, view: { total: 4, done: 2 },
-    groups: [{ shift_id: 1, name: '오픈', cards: [[4, 40, '오픈 준비', 1, true], [6, 60, '우유 재고 확인', 2, false]].map(([card_id, card_version_id, title, item_id, checked]) => ({ card_id, card_version_id, title, item_id, lines: [{ line_no: 1, text: title, checked }] })) }],
-    my_submission: null,
+    groups: [{ shift_id: 1, name: '오픈', cards: [[4, 40, '오픈 준비', null, true], [6, 60, '우유 발주', 16, false]].map(([card_id, card_version_id, title, item_id, checked]) => ({ card_id, card_version_id, title, item_id, lines: [{ line_no: 1, text: title, checked }] })) }],
+    my_submission: state.submitted,
   });
 
   const ACTIVE = new Set(['QUEUED', 'EXTRACTING', 'CLASSIFYING']);
@@ -144,6 +155,12 @@ function syntheticApi(role, overrides = {}) {
       headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true' } });
     let payload;
 
+    if (p === '/auth/refresh' && state.signedOut) return reply({ error: { message: '세션 없음' } }, 401);
+    if (p === '/auth/login' && m === 'POST') {
+      if (body.password !== 'right-pass') return reply({ error: { message: '이메일 또는 비밀번호가 맞지 않습니다' } }, 401);
+      state.signedOut = false;
+      return reply({ token: 'synthetic-ui-only', user: { user_id: user.user_id, role, store_id: 1 } });
+    }
     if (p === '/auth/refresh') payload = { token: 'synthetic-ui-only', user: { user_id: user.user_id, role, store_id: 1 } };
     else if (p === '/auth/providers') payload = { kakao: true };
     else if (p === '/app/bootstrap') payload = { user: { ...user, role }, store: STORE, badges: { waiting_questions: state.pending.length, pending_cards: 2 },
@@ -236,19 +253,40 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/learn/roadmap') payload = { store: { store_id: 1, name: STORE.store_name }, counts: { total: roadmapItems.length, done: 0, reconfirm_required: 0 }, continue_item_id: roadmapItems[0].item_id,
       stages: CATEGORIES.filter((c) => roadmapItems.some((i) => i.category_id === c.category_id)).map((c, i) => ({ category_id: c.category_id, name: c.name, order: i + 1, items: roadmapItems.filter((x) => x.category_id === c.category_id) })) };
     else if (/^\/learn\/items\/\d+$/.test(p)) {
+      if (state.failItem) return reply({ error: { message: '없는 항목' } }, 404);
       const item = roadmapItems.find((x) => x.item_id === Number(p.split('/').at(-1)));
       if (!item) return reply({ error: { message: '없는 항목' } }, 404);
       const c = state.cards.find((x) => x.card_id === item.card_id);
-      payload = { ...item, content: c.content, category: category(c.category_id), evidence: [], return_to: { path: '/staff/recipes', item_id: item.item_id } };
+      payload = { ...item, content: state.itemContent[item.item_id] ?? c.content, category: category(c.category_id), evidence: [], return_to: { path: '/staff/recipes', item_id: item.item_id } };
     }
-    else if (p === '/learn/v2/sessions' && m === 'GET') payload = { sessions: state.sessions };
+    else if (p === '/learn/v2/notifications' && m === 'GET') payload = { notifications: state.rNotifications, next_after: null };
+    else if (/^\/learn\/v2\/notifications\/\w+\/read$/.test(p) && m === 'POST') {
+      if (state.failRRead) return reply({ error: { message: '읽음 저장 실패' } }, 409);
+      const n = state.rNotifications.find((x) => x.notification_id === p.split('/')[4]);
+      if (n) n.read = true;
+      payload = { notification_id: p.split('/')[4], read: true };
+    }
+    else if (p === '/checklist/submissions' && m === 'POST') { state.submitted = { done_lines: 1, total_lines: 2, submitted_at: NOW }; payload = { submission: state.submitted }; }
+    else if (p === '/learn/v2/sessions' && m === 'GET') {
+      if (state.sessionsDelayMs) await new Promise((r) => setTimeout(r, state.sessionsDelayMs));
+      payload = { sessions: state.sessions };
+    }
     else if (p === '/learn/v2/sessions' && m === 'POST') { state.sessions = [{ session_id: '1' }]; payload = { session_id: '1' }; }
     else if (/^\/learn\/v2\/sessions\/\w+\/history$/.test(p)) payload = { messages: state.messages, next_before: null, has_pending_updates: false };
     else if (p === '/learn/v2/chat' && m === 'POST') {
-      payload = { action: 'ANSWER', message: 'ICE 바닐라 라떼는 바닐라 시럽 2펌프예요.', context_id: null, allowed_options: [], pending_id: null,
-        citations: [{ card_id: '1', card_version_id: '10', block_id: 'b1', source_availability: 'AVAILABLE' }] };
+      if (state.chatDelayMs) await new Promise((r) => setTimeout(r, state.chatDelayMs));
+      payload = state.chatEscalate
+        ? { action: 'ESCALATE', message: '사장님께 물어볼게요.', context_id: null, allowed_options: [], pending_id: '104', citations: [] }
+        : { action: 'ANSWER', message: 'ICE 바닐라 라떼는 바닐라 시럽 2펌프예요.', context_id: null, allowed_options: [], pending_id: null,
+          citations: [{ card_id: '1', card_version_id: '10', block_id: 'b1', source_availability: 'AVAILABLE' }] };
+      // 대화 기록에도 남긴다(다시 불러오면 같은 대화가 보이게)
+      const n = state.messages.length;
+      const base = { receipt_id: null, original_question: null, response: null, context_revision: null, owner_answer_id: null, revision: null, knowledge_status: null };
+      state.messages.push({ ...base, message_id: String(n + 1), sender: 'USER', content: body.question },
+        { ...base, message_id: String(n + 2), sender: 'BUDDY', content: payload.message, receipt_id: 'r1', original_question: body.question, response: payload, context_revision: 1 });
     }
     else if (p === '/learn/chat' && m === 'GET') payload = { messages: [], session_id: null };
+    else if (p === '/learn/faqs' && state.faqs) payload = { store_id: 1, items: state.faqs };
     else if (p === '/learn/faqs') payload = { store_id: 1, items: [
       { question: '바닐라 라떼 시럽 몇 펌프예요?', question_count: 7, distinct_questioners: 3, last_asked_at: NOW, card_id: 1, published_version_id: 10, card_title: '바닐라 라떼', card_content: state.cards[0].content, category_id: 10, category_name: '음료 레시피' },
       { question: '우유 발주 언제 해요?', question_count: 4, distinct_questioners: 2, last_asked_at: NOW, card_id: 6, published_version_id: 60, card_title: '우유 발주', card_content: state.cards[5].content, category_id: 12, category_name: '재고 위치' }] };

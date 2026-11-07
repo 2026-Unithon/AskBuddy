@@ -4,6 +4,8 @@
 import type { ReactNode } from "react";
 import { Chip, focusRing } from "@/components/kit";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
+import type { FactGroup } from "./fact-group";
+export { groupFacts, type FactGroup } from "./fact-group";
 
 const BLOCK_NAME: Record<EditBlockKind | "RAW", string> = { QUANTITIES: "수치", STEPS: "순서", NOTES: "목록", RAW: "내용" };
 
@@ -94,32 +96,6 @@ function withValues(sentence: string, values: { value: string | null; unit: stri
   });
   parts.push(sentence.slice(cursor));
   return <>{parts}</>;
-}
-
-export type FactGroup = { key: string; fields: FactFields[]; stepOrder: number | null };
-
-/**
- * 보기 모드에서 같은 문장에서 나온 사실들을 한 줄로 묶는다(한 문장에 값이 여러 개면 사실이 값마다 나뉘어 저장된다).
- * 묶은 뒤 번호가 겹치거나, 한 줄이 여러 단계를 담으면 그 블록은 번호를 숨긴다.
- */
-export function groupFacts(rows: FactFields[]): { groups: FactGroup[]; numbered: boolean } {
-  const byKey = new Map<string, FactGroup>();
-  const groups: FactGroup[] = [];
-  for (const fields of rows) {
-    const key = fields.sentence.trim();
-    const found = byKey.get(key);
-    if (found) {
-      found.fields.push(fields);
-      if (found.stepOrder !== fields.step_order) found.stepOrder = null;
-      continue;
-    }
-    const group = { key, fields: [fields], stepOrder: fields.step_order };
-    byKey.set(key, group);
-    groups.push(group);
-  }
-  const orders = groups.map((g) => g.stepOrder);
-  const numbered = orders.every((o) => o !== null) && new Set(orders).size === orders.length;
-  return { groups, numbered };
 }
 
 /** 묶은 한 줄: 문장 하나, 값 모두 굵게(여러 단계를 담은 줄은 굵게 하지 않는다), 조건·예외는 합친다. */
