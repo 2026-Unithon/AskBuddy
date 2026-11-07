@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   BackButton,
   Button,
@@ -14,11 +14,17 @@ import {
   CheckRow,
   Empty,
   ErrorInline,
+  Icon,
   PageHeader,
   Screen,
   Sheet,
   Skeleton,
+  SortableList,
   Surface,
+  Switch,
+  TextButton,
+  TimeWheel,
+  useFeedback,
 } from "@/components/kit";
 import { apiErrorMessage } from "@/lib/api";
 import { checklistApi, type Shift, type ShiftInput } from "@/lib/checklist-api";
@@ -33,271 +39,207 @@ import { useApp } from "@/lib/store";
 export function ShiftSettingsScreen() {
   const { state } = useApp();
   const client = useQueryClient();
+  const feedback = useFeedback();
   const shifts = useQuery(checklistShiftsQuery(state.token, state.storeId));
   const settings = useQuery(checklistSettingsQuery(state.token, state.storeId));
   const [edit, setEdit] = useState<number | "new" | null>(null);
   const [remove, setRemove] = useState<number | null>(null);
   const [cards, setCards] = useState<number | null>(null);
+  const [dayStart, setDayStart] = useState<string | null>(null);
   const editedShift = shifts.data?.items.find((s) => s.shift_id === edit);
   const cardsShift = shifts.data?.items.find((s) => s.shift_id === cards);
   const removedShift = shifts.data?.items.find((s) => s.shift_id === remove);
-  const refresh = () =>
-    client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) });
+  const refresh = () => client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) });
   const preset = useMutation({
     mutationFn: () => checklistApi.preset(state.token!),
     onSuccess: refresh,
   });
   const order = useMutation({
     mutationFn: (ids: number[]) => checklistApi.order(state.token!, ids),
-    onSuccess: refresh,
+    // 실패하면 서버 순서로 되돌린다(낙관 순서 버림)
+    onSettled: refresh,
   });
+  // 끄는 동안의 순서는 캐시에 바로 반영하고(낙관), 놓을 때 한 번만 저장한다. 끌기 전 순서를 기억해 바뀌었을 때만 보낸다
+  const dragStart = useRef<number[] | null>(null);
   const deletion = useMutation({
     mutationFn: (id: number) => checklistApi.deleteShift(state.token!, id),
     onSuccess: async () => {
       setRemove(null);
+      feedback.toast("지웠어요");
       await refresh();
     },
   });
   const setting = useMutation({
-    mutationFn: (body: {
-      business_day_starts_at?: string;
-      staff_records_visible?: boolean;
-    }) => checklistApi.setSettings(state.token!, body),
+    mutationFn: (body: { business_day_starts_at?: string; staff_records_visible?: boolean }) => checklistApi.setSettings(state.token!, body),
     onSuccess: refresh,
   });
-  const move = (index: number, by: number) => {
-    const ids = shifts.data!.items.map((s) => s.shift_id);
-    [ids[index], ids[index + by]] = [ids[index + by], ids[index]];
-    order.mutate(ids);
+  const items = shifts.data?.items ?? [];
+  const shiftsKey = checklistKeys.shifts(state.storeId);
+  const moveShift = (key: string, dir: -1 | 1) => {
+    const current = client.getQueryData<{ items: Shift[] }>(shiftsKey)?.items ?? items;
+    dragStart.current ??= current.map((s) => s.shift_id);
+    const next = [...current];
+    const index = next.findIndex((s) => s.shift_id === Number(key));
+    [next[index], next[index + dir]] = [next[index + dir], next[index]];
+    void client.cancelQueries({ queryKey: shiftsKey });
+    client.setQueryData<{ items: Shift[] }>(shiftsKey, (data) => (data ? { ...data, items: next } : data));
+  };
+  const saveOrder = () => {
+    const before = dragStart.current;
+    dragStart.current = null;
+    const ids = (client.getQueryData<{ items: Shift[] }>(shiftsKey)?.items ?? items).map((s) => s.shift_id);
+    if (before && before.join() !== ids.join()) order.mutate(ids);
   };
   return (
     <Screen>
       <BackButton parent="/owner/settings" />
       <PageHeader
-        title="근무조 설정"
-        description="매장에 맞게 이름과 시간을 정하고, 할 일을 담아요"
+        title="근무조"
+        action={
+          shifts.data ? (
+            <Button className="min-h-10 w-auto! px-4 py-2!" onClick={() => setEdit("new")}>
+              추가
+            </Button>
+          ) : undefined
+        }
       />
       {shifts.isLoading && <Skeleton className="h-64" />}
-      {shifts.error && (
-        <ErrorInline
-          message={apiErrorMessage(shifts.error, "근무조를 불러오지 못했어요.")}
-          onRetry={() => void shifts.refetch()}
-        />
-      )}
+      {shifts.error && <ErrorInline message={apiErrorMessage(shifts.error, "근무조를 불러오지 못했어요.")} onRetry={() => void shifts.refetch()} />}
       {shifts.data?.items.length === 0 && (
         <>
-          <Empty
-            title="아직 근무조가 없어요"
-            description="나누지 않으면 전체 할 일을 함께 봐요. 카드 상세에서 공통 할 일을 담을 수 있어요."
-          />
+          <Empty title="아직 근무조가 없어요" description="나누지 않으면 전체 할 일을 함께 봐요." />
           <Button loading={preset.isPending} onClick={() => preset.mutate()}>
             오픈, 미들, 마감으로 시작하기
           </Button>
         </>
       )}
-      {shifts.data?.items.map((shift, index, list) => (
-        <Surface key={shift.shift_id} className="p-4">
-          <h2 className="text-[20px] font-bold">{shift.name}</h2>
-          <Caption>
-            {shift.starts_at
-              ? `${shift.starts_at} ~ ${shift.ends_at}${shift.ends_at! <= shift.starts_at ? ", 다음 날 끝" : ""}`
-              : "시간을 정하지 않았어요"}
-          </Caption>
-          <div className="mt-3 flex gap-2">
-            <Button variant="secondary" onClick={() => setEdit(shift.shift_id)}>
-              고치기
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setCards(shift.shift_id)}
-            >
-              할 일 담기
-            </Button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              className="w-auto! px-3"
-              variant="secondary"
-              aria-label={`${shift.name} 위로`}
-              disabled={index === 0 || order.isPending}
-              onClick={() => move(index, -1)}
-            >
-              ↑
-            </Button>
-            <Button
-              className="w-auto! px-3"
-              variant="secondary"
-              aria-label={`${shift.name} 아래로`}
-              disabled={index === list.length - 1 || order.isPending}
-              onClick={() => move(index, 1)}
-            >
-              ↓
-            </Button>
-            <Button
-              className="w-auto! px-3"
-              variant="danger"
-              onClick={() => {
-                deletion.reset();
-                setRemove(shift.shift_id);
-              }}
-            >
-              지우기
-            </Button>
-          </div>
-        </Surface>
-      ))}
-      {shifts.data && (
-        <Button onClick={() => setEdit("new")}>근무조 추가</Button>
-      )}
-      {preset.error && (
-        <ErrorInline
-          message={apiErrorMessage(preset.error, "근무조를 만들지 못했어요.")}
-          onRetry={() => preset.mutate()}
+      {items.length > 0 && (
+        <SortableList
+          items={items.map((s) => ({ ...s, key: String(s.shift_id), label: s.name }))}
+          canMove={() => !order.isPending}
+          onMove={moveShift}
+          onEnd={saveOrder}
+          renderItem={(shift) => (
+            <div className="py-3">
+              <h2 className="text-[20px] font-bold text-ink">{shift.name}</h2>
+              <Caption>
+                {shift.starts_at ? `${shift.starts_at} ~ ${shift.ends_at}${shift.ends_at! <= shift.starts_at ? ", 다음 날 끝" : ""}` : "시간 없음"}
+              </Caption>
+              <div className="mt-3 flex items-center gap-2">
+                <Button className="min-h-11 flex-1 py-2.5!" onClick={() => setCards(shift.shift_id)}>
+                  할 일 담기
+                </Button>
+                <Button variant="secondary" className="min-h-11 flex-1 py-2.5!" onClick={() => setEdit(shift.shift_id)}>
+                  고치기
+                </Button>
+                <TextButton
+                  className="text-danger-700!"
+                  onClick={() => {
+                    deletion.reset();
+                    setRemove(shift.shift_id);
+                  }}
+                >
+                  지우기
+                </TextButton>
+              </div>
+            </div>
+          )}
         />
       )}
-      {order.error && (
-        <ErrorInline
-          message={apiErrorMessage(order.error, "순서를 저장하지 못했어요.")}
-          onRetry={() => order.variables && order.mutate(order.variables)}
-        />
-      )}
+      {preset.error && <ErrorInline message={apiErrorMessage(preset.error, "근무조를 만들지 못했어요.")} onRetry={() => preset.mutate()} />}
+      {order.error && <ErrorInline message={apiErrorMessage(order.error, "순서를 저장하지 못했어요.")} onRetry={() => order.variables && order.mutate(order.variables)} />}
       <ButtonLink href="/owner/member-shifts" variant="secondary">
         직원 담당 근무조
       </ButtonLink>
       <ButtonLink href="/owner/cards" variant="secondary">
         카드에서 공통 할 일 담기
       </ButtonLink>
-      {settings.isLoading && <Skeleton className="h-40" />}
-      {settings.error && (
-        <ErrorInline
-          message={apiErrorMessage(
-            settings.error,
-            "매장 설정을 불러오지 못했어요.",
-          )}
-          onRetry={() => void settings.refetch()}
-        />
-      )}
+      {settings.isLoading && <Skeleton className="h-28" />}
+      {settings.error && <ErrorInline message={apiErrorMessage(settings.error, "매장 설정을 불러오지 못했어요.")} onRetry={() => void settings.refetch()} />}
       {settings.data && (
-        <Surface className="p-4">
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const input = new FormData(event.currentTarget).get(
-                "dayStart",
-              ) as string;
-              setting.mutate({ business_day_starts_at: input });
-            }}
-          >
-            <label className="flex flex-col gap-2 text-[16px]">
-              영업일 시작 시각
-              <input
-                key={settings.data.business_day_starts_at}
-                name="dayStart"
-                type="time"
-                required
-                defaultValue={settings.data.business_day_starts_at.slice(0, 5)}
-                className="min-h-12 rounded-xl bg-background p-3"
-              />
-            </label>
-            <Caption>
-              매장 시간대 {settings.data.timezone}. 이 시각에 오늘 할 일이
-              새로 시작돼요.
-            </Caption>
-            <Button className="mt-3" type="submit" loading={setting.isPending}>
-              시각 저장
-            </Button>
-          </form>
+        <Surface className="flex flex-col px-[18px] py-1">
           <button
-            role="switch"
-            aria-checked={settings.data.staff_records_visible}
-            disabled={setting.isPending}
-            onClick={() =>
-              setting.mutate({
-                staff_records_visible: !settings.data.staff_records_visible,
-              })
-            }
-            className="mt-5 flex min-h-11 w-full items-center justify-between text-[16px]"
+            type="button"
+            onClick={() => setDayStart(settings.data.business_day_starts_at.slice(0, 5))}
+            className="flex min-h-12 w-full items-center justify-between gap-3 text-left text-[16px] text-ink"
           >
-            <span>알바생 기록</span>
-            <span className="font-bold text-primary">
-              {settings.data.staff_records_visible ? "켜짐" : "꺼짐"}
+            <span>영업일 시작</span>
+            <span className="flex items-center gap-1 font-bold text-primary">
+              {settings.data.business_day_starts_at.slice(0, 5)}
+              <Icon name="right" size={16} className="text-ink-muted" />
             </span>
           </button>
-          <Caption>
-            점주가 알바생 달력을 볼지 정해요. 꺼도 기록은 저장되고 다시 켜면 볼
-            수 있어요.
-          </Caption>
+          <Switch
+            label="알바생 기록"
+            checked={settings.data.staff_records_visible}
+            disabled={setting.isPending}
+            onChange={(next) => setting.mutate({ staff_records_visible: next })}
+          />
         </Surface>
       )}
       {setting.error && (
         <ErrorInline
-          message={apiErrorMessage(
-            setting.error,
-            "이 변경은 저장되지 않았어요.",
-          )}
+          message={apiErrorMessage(setting.error, "이 변경은 저장되지 않았어요.")}
           onRetry={() => setting.variables && setting.mutate(setting.variables)}
           retrying={setting.isPending}
         />
       )}
-      {(edit === "new" || editedShift) && (
-        <ShiftEditor
-          shift={editedShift ?? null}
-          onClose={() => setEdit(null)}
-        />
-      )}
-      {cardsShift && (
-        <ShiftCards shift={cardsShift} onClose={() => setCards(null)} />
-      )}
+      <Sheet open={dayStart !== null} onClose={() => !setting.isPending && setDayStart(null)} title="영업일 시작 시각">
+        {dayStart !== null && <TimeWheel label="영업일 시작" value={dayStart} onChange={setDayStart} />}
+        <Button
+          loading={setting.isPending}
+          onClick={() =>
+            dayStart &&
+            setting.mutate(
+              { business_day_starts_at: dayStart },
+              {
+                onSuccess: () => {
+                  setDayStart(null);
+                  feedback.toast("저장했어요");
+                },
+              },
+            )
+          }
+        >
+          저장
+        </Button>
+      </Sheet>
+      {(edit === "new" || editedShift) && <ShiftEditor shift={editedShift ?? null} onClose={() => setEdit(null)} />}
+      {cardsShift && <ShiftCards shift={cardsShift} onClose={() => setCards(null)} />}
       <Sheet
         open={Boolean(remove)}
         onClose={() => {
           if (!deletion.isPending) setRemove(null);
         }}
         title={`${removedShift?.name ?? "근무조"}를 지울까요?`}
-        description="과거 기록은 남아요. 이 근무조에만 담긴 카드는 오늘 할 일에서 빠져요."
+        description="과거 기록은 남아요."
       >
-        {deletion.error && (
-          <ErrorInline
-            message={apiErrorMessage(deletion.error, "지우지 못했어요.")}
-          />
-        )}
-        <Button
-          variant="danger"
-          loading={deletion.isPending}
-          onClick={() => remove && deletion.mutate(remove)}
-        >
+        {deletion.error && <ErrorInline message={apiErrorMessage(deletion.error, "지우지 못했어요.")} />}
+        <Button variant="danger" loading={deletion.isPending} onClick={() => remove && deletion.mutate(remove)}>
           지우기
         </Button>
-        <Button
-          variant="secondary"
-          disabled={deletion.isPending}
-          onClick={() => setRemove(null)}
-        >
+        <Button variant="secondary" disabled={deletion.isPending} onClick={() => setRemove(null)}>
           그대로 두기
         </Button>
       </Sheet>
     </Screen>
   );
 }
-function ShiftEditor({
-  shift,
-  onClose,
-}: {
-  shift: Shift | null;
-  onClose: () => void;
-}) {
+function ShiftEditor({ shift, onClose }: { shift: Shift | null; onClose: () => void }) {
   const { state } = useApp();
   const client = useQueryClient();
+  const feedback = useFeedback();
+  // 입력 초안(서버 값 아님): 시트를 닫으면 버린다
+  const [name, setName] = useState(shift?.name ?? "");
+  const [timed, setTimed] = useState(Boolean(shift?.starts_at));
+  const [start, setStart] = useState(shift?.starts_at?.slice(0, 5) ?? "09:00");
+  const [end, setEnd] = useState(shift?.ends_at?.slice(0, 5) ?? "18:00");
   const [validation, setValidation] = useState("");
   const save = useMutation({
-    mutationFn: (body: ShiftInput) =>
-      shift
-        ? checklistApi.updateShift(state.token!, shift.shift_id, body)
-        : checklistApi.createShift(state.token!, body),
+    mutationFn: (body: ShiftInput) => (shift ? checklistApi.updateShift(state.token!, shift.shift_id, body) : checklistApi.createShift(state.token!, body)),
     onSuccess: async () => {
-      await client.invalidateQueries({
-        queryKey: checklistKeys.root(state.storeId),
-      });
+      feedback.toast("저장했어요");
+      await client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) });
       onClose();
     },
   });
@@ -308,26 +250,21 @@ function ShiftEditor({
         if (!save.isPending) onClose();
       }}
       title={shift ? "근무조 고치기" : "근무조 추가"}
-      description="시간은 정하지 않아도 돼요. 시작과 끝은 함께 적어 주세요."
     >
       <form
         className="flex flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          const name = (form.get("name") as string).trim(),
-            start = form.get("start") as string,
-            end = form.get("end") as string;
-          if (Boolean(start) !== Boolean(end) || (start && start === end)) {
-            setValidation("시작과 끝을 함께, 서로 다르게 적어 주세요.");
+          if (timed && start === end) {
+            setValidation("시작과 끝을 다르게 골라 주세요.");
             return;
           }
           setValidation("");
           save.mutate({
-            name,
-            starts_at: start || null,
-            ends_at: end || null,
-            ...(shift && !start ? { clear_time: true } : {}),
+            name: name.trim(),
+            starts_at: timed ? start : null,
+            ends_at: timed ? end : null,
+            ...(shift && !timed ? { clear_time: true } : {}),
           });
         }}
       >
@@ -337,43 +274,26 @@ function ShiftEditor({
             name="name"
             required
             maxLength={30}
-            defaultValue={shift?.name ?? ""}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
             className="min-h-12 rounded-xl bg-surface p-3 text-[16px]"
           />
         </label>
-        <div className="flex gap-3">
-          <label className="flex min-w-0 flex-1 flex-col gap-1">
-            시작
-            <input
-              name="start"
-              type="time"
-              defaultValue={shift?.starts_at ?? ""}
-              className="min-h-12 min-w-0 rounded-xl bg-surface p-2"
-            />
-          </label>
-          <label className="flex min-w-0 flex-1 flex-col gap-1">
-            끝
-            <input
-              name="end"
-              type="time"
-              defaultValue={shift?.ends_at ?? ""}
-              className="min-h-12 min-w-0 rounded-xl bg-surface p-2"
-            />
-          </label>
-        </div>
+        <Switch label="시간 정하기" checked={timed} onChange={setTimed} />
+        {timed && (
+          <div className="flex flex-col gap-2">
+            <p className="text-[14px] font-bold text-ink-muted">시작</p>
+            <TimeWheel label="시작" value={start} onChange={setStart} />
+            <p className="text-[14px] font-bold text-ink-muted">끝</p>
+            <TimeWheel label="끝" value={end} onChange={setEnd} />
+          </div>
+        )}
         {validation && (
           <p role="alert" className="text-danger-700">
             {validation}
           </p>
         )}
-        {save.error && (
-          <ErrorInline
-            message={apiErrorMessage(
-              save.error,
-              "저장하지 못했어요. 입력은 그대로 있어요.",
-            )}
-          />
-        )}
+        {save.error && <ErrorInline message={apiErrorMessage(save.error, "저장하지 못했어요. 입력은 그대로 있어요.")} />}
         <Button type="submit" loading={save.isPending}>
           저장
         </Button>

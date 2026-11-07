@@ -43,9 +43,9 @@ test('NAV-1 새로고침 뒤에도 앱 뒤로는 왔던 곳', async (b) => {
   assert.notEqual(await phoneBack(page), '/owner/cards/2');
   await ctx.close();
 });
-test('NAV-1 옛 상단 바(알림)의 뒤로: 기록이 없으면 오늘 매장(T3)', async (b) => {
+test('NAV-1 알림의 뒤로: 기록이 없으면 오늘 매장(T3)', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/notifications');
-  await page.getByRole('link', { name: '뒤로가기' }).click(); await to(page, '/owner');
+  await back(page).click(); await to(page, '/owner');
   await ctx.close();
 });
 test('NAV-1 BackButton 보조 키 클릭은 가로채지 않는다', async (b) => {

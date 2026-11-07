@@ -12,7 +12,7 @@ import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
 import { FactRowItem, FactViewRow, blockHeading } from "./fact-row";
-import { SortableList } from "./sortable-list";
+import { SortableList } from "@/components/kit/sortable-list";
 import { useLongPress } from "@/lib/use-long-press";
 import { focusRing } from "@/components/kit/buttons";
 import { disturbsLocked, fieldsOf, isModified, moveStepRows, useFactEditDraft, type DraftBlock } from "./use-fact-edit-draft";

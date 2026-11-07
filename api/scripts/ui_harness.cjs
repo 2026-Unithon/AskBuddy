@@ -17,7 +17,7 @@ async function open(browser, role, url, { viewport = { width: 390, height: 844 }
   // 처음 한 번 뜨는 안내(코치마크)는 기본으로 끈다. 안내를 보는 테스트만 overrides.coach 로 켠다
   if (!overrides?.coach) {
     await ctx.addInitScript(() => {
-      const keys = ['owner-home', 'dev', 'staff-home'];
+      const keys = ['owner-home', 'dev', 'staff-home', 'owner-notifications'];
       try { for (const k of keys) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {}
     });
   }

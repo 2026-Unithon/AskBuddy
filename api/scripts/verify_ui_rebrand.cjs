@@ -210,6 +210,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/settings`);
     await page.getByText('합성 매장', { exact: true }).waitFor();
     await page.getByRole('button', { name: '로그아웃' }).click();
+    // 화면 개선 계획 4b(o12b): 확인 창을 한 번 더 거친다
+    await page.getByRole('dialog', { name: '로그아웃할까요?' }).getByRole('button', { name: '로그아웃' }).click();
     // 세션 폐기 뒤 새로고침해도 로그인 화면에 머문다
     await page.waitForURL(`${BASE}/`);
     await page.getByRole('link', { name: '이메일로 시작하기' }).waitFor();

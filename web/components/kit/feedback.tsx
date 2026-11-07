@@ -118,9 +118,12 @@ export function ConfirmDialog({
   cancelLabel = "취소",
   tone = "primary",
   loading = false,
+  error,
   onConfirm,
   onCancel,
 }: {
+  /** 확인한 일이 실패했을 때 창 안에 보일 이유(창이 떠 있으면 뒤 화면은 가려진다) */
+  error?: string | null;
   open: boolean;
   title: string;
   description?: string;
@@ -155,6 +158,11 @@ export function ConfirmDialog({
       <div className="flex flex-col gap-2 p-5">
         <h2 className="text-[18px] font-bold leading-[1.4] tracking-[-0.36px] [word-break:keep-all]">{title}</h2>
         {description && <p className="text-[14px] leading-[1.5] text-ink-muted [word-break:keep-all]">{description}</p>}
+        {error && (
+          <p role="alert" className="text-[13px] font-semibold text-danger-700 [word-break:keep-all]">
+            {error}
+          </p>
+        )}
         <div className="mt-3 flex gap-2">
           <Button variant="secondary" className="flex-1 py-3.5" disabled={loading} onClick={onCancel}>
             {cancelLabel}
@@ -180,11 +188,14 @@ export function Banner({
   children,
   action,
   onDismiss,
+  dismissLabel,
 }: {
   tone?: "info" | "warn" | "danger";
   children: ReactNode;
   action?: { label: string; onClick: () => void };
   onDismiss?: () => void;
+  /** 있으면 × 대신 이 글자로 닫는다(예: 알림 권유의 '나중에') */
+  dismissLabel?: string;
 }) {
   return (
     <div
@@ -197,7 +208,12 @@ export function Banner({
           {action.label}
         </button>
       )}
-      {onDismiss && (
+      {onDismiss && dismissLabel && (
+        <button type="button" onClick={onDismiss} className={`min-h-11 shrink-0 px-1 text-[13px] font-medium opacity-80 ${focusRing}`}>
+          {dismissLabel}
+        </button>
+      )}
+      {onDismiss && !dismissLabel && (
         <button type="button" aria-label="닫기" onClick={onDismiss} className={`flex size-11 shrink-0 items-center justify-center text-[18px] ${focusRing}`}>
           ×
         </button>

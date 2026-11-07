@@ -9,6 +9,8 @@ export { Banner, ConfirmDialog, CountBadge, FeedbackProvider, useFeedback } from
 export { Coachmark } from "@/components/kit/coachmark";
 export { Segmented } from "@/components/kit/segmented";
 export { Switch } from "@/components/kit/switch";
+export { SortableList } from "@/components/kit/sortable-list";
+export { TimeWheel } from "@/components/kit/time-wheel";
 export { Stagger } from "@/components/kit/stagger";
 export { SwipeRow, type SwipeAction } from "@/components/kit/swipe-row";
 export { HeaderActions } from "@/components/kit/header-actions";

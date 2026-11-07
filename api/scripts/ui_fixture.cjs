@@ -80,6 +80,21 @@ function initialState(overrides) {
     proposals: [{ proposal_id: 9, relation_type: 'CONFLICT', status: 'PENDING_REVIEW', question_text: '바닐라 라떼 ICE 시럽 몇 펌프?', answer_text: '3펌프',
       target_card_id: 1, target_version_id: 10, current_title: '바닐라 라떼', current_content: 'ICE 시럽 2펌프', proposed_title: '바닐라 라떼', proposed_content: 'ICE 시럽 3펌프',
       reason: null, can_approve: true, approval_block_reason: null, affected_cards: [{ card_id: 1, title: '바닐라 라떼' }], category_id: 10, created_at: NOW }],
+    // 관리 화면(계획 4b): 직원·카테고리·근무조 설정·알림 쓰기
+    joinRequests: [{ request_id: 9, name: '이서연', requested_at: NOW }],
+    members: [{ user_id: 2, name: '박지호', role: 'STAFF', joined_at: NOW }, { user_id: 3, name: '김민준', role: 'STAFF', joined_at: NOW }],
+    categories: CATEGORIES.map((c) => ({ ...c })),
+    checklistMembers: [{ member_id: 2, user_id: 2, role: 'STAFF', name: '박지호', shift_ids: [1] }, { member_id: 3, user_id: 3, role: 'STAFF', name: '김민준', shift_ids: [3] }],
+    settings: { business_day_starts_at: '04:00', staff_records_visible: true, timezone: 'Asia/Seoul' },
+    pushConfigured: false,
+    failMemberShifts: false,
+    memberShiftDelayMs: 0,
+    failRead: false,
+    // 검토 고침: 요청마다 다른 지연(앞 요청이 늦게 끝나는 경우), 지우기·재분류 재시도 실패
+    memberShiftDelays: null,
+    failCategoryDelete: false,
+    reclassification: null,
+    failRetry: false,
     ...overrides,
   };
 }
@@ -136,8 +151,14 @@ function syntheticApi(role, overrides = {}) {
     // 알림: 사장(/notifications 목록)과 직원(R 읽음 표시)이 같은 경로를 쓴다
     else if (p === '/notifications' && m === 'GET') payload = { items: state.notifications, unread_count: state.unreadCount, next_cursor: null,
       notifications: state.notifications.map((n) => ({ notification_id: String(n.notification_id), title: n.title, body: n.body, destination: n.destination, read: Boolean(n.read_at) })), next_after: null };
-    else if (/^\/notifications\/\w+\/read$/.test(p)) payload = { notification_id: p.split('/')[2], read_at: NOW, read: true };
-    else if (p === '/notifications/support') payload = { push_configured: false, vapid_public_key: null, guide_version: '1', guide_seen: true };
+    else if (/^\/notifications\/\w+\/read$/.test(p)) {
+      if (state.failRead) return reply({ error: { message: '읽음 저장 실패' } }, 503);
+      const n = state.notifications.find((x) => String(x.notification_id) === p.split('/')[2]);
+      if (n && !n.read_at) { n.read_at = NOW; state.unreadCount = Math.max(0, state.unreadCount - 1); }
+      payload = { notification_id: p.split('/')[2], read_at: NOW, read: true };
+    }
+    else if (p === '/notifications/support') payload = { push_configured: state.pushConfigured, vapid_public_key: state.pushConfigured ? 'BAAA' : null, guide_version: '1', guide_seen: true };
+    else if (p === '/auth/logout' && m === 'POST') payload = {};
     else if (p === '/notifications/my-subscriptions') payload = { subscription_id: 0, enabled: false };
     // 사장 질문
     else if (p === '/learn/v2/pending') {
@@ -191,7 +212,20 @@ function syntheticApi(role, overrides = {}) {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
     } else if (/^\/cards\/\d+\/facts$/.test(p)) payload = { card_id: Number(p.split('/')[2]), blocks: [], facts: [] };
-    else if (p === '/categories') payload = { version: 1, reclassification: null, items: CATEGORIES };
+    else if (p === '/categories' && m === 'GET') payload = { version: 1, reclassification: state.reclassification, items: state.categories };
+    else if (p === '/categories' && m === 'POST') {
+      const category = { category_id: 20 + state.categories.length, name: body.name, is_system: false, sort_order: body.sort_order };
+      state.categories.push(category);
+      payload = { category, version: 2, reclass_job_id: null };
+    } else if (/^\/reclassification-jobs\/\d+\/retry$/.test(p) && m === 'POST') {
+      if (state.failRetry) return reply({ error: { message: '재분류 재시도 실패' } }, 409);
+      state.reclassification = { ...state.reclassification, status: 'QUEUED' }; payload = state.reclassification;
+    } else if (/^\/categories\/\d+$/.test(p) && m === 'DELETE') {
+      if (state.failCategoryDelete) return reply({ error: { message: '카테고리 삭제 실패' } }, 409);
+      const id = Number(p.split('/')[2]);
+      state.categories = state.categories.filter((c) => c.category_id !== id);
+      payload = { category_id: id, version: 2, reclass_job_id: null };
+    }
     else if (p === '/learn/knowledge-proposals') payload = { store_id: 1, status: 'PENDING_REVIEW', items: state.proposals };
     else if (/^\/learn\/knowledge-proposals\/\d+\/(approve|dismiss)$/.test(p) && m === 'POST') {
       const [, , , id, action] = p.split('/');
@@ -222,11 +256,36 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/checklist/today') payload = checklistToday();
     else if (p === '/checklist/status') payload = { ...checklistToday(), last_submission: { submitted_at: '2026-10-30T13:00:00Z', total_lines: 9, done_lines: 9, business_date: '2026-10-30', shift_names: ['마감'] } };
     else if (p === '/checklist/me') payload = { personal_records_enabled: true };
-    else if (p === '/checklist/settings') payload = { business_day_starts_at: '04:00', staff_records_visible: true, timezone: 'Asia/Seoul' };
-    else if (p === '/checklist/records') payload = { user_id: user.user_id, month: '2026-10', visible: true, recording: true,
-      days: [['2026-10-29', 100], ['2026-10-30', 78], ['2026-10-31', 50]].map(([date, percent]) => ({ date, percent, total: 9, done: Math.round(9 * percent / 100), checked_lines: 4, submitted: true })) };
+    else if (p === '/checklist/settings') { if (m === 'PATCH') Object.assign(state.settings, body); payload = state.settings; }
+    else if (p === '/checklist/records') {
+      const month = url.searchParams.get('month'), other = url.searchParams.has('user_id');
+      payload = { user_id: Number(url.searchParams.get('user_id') ?? user.user_id), month, visible: !other || state.settings.staff_records_visible, recording: true,
+        days: [['10', 100], ['11', 78], ['12', 50]].map(([d, percent]) => ({ date: `${month}-${d}`, percent, total: 9, done: Math.round(9 * percent / 100), checked_lines: 4, submitted: true })) };
+    } else if (/^\/checklist\/records\/[\d-]+$/.test(p)) payload = { date: p.split('/').at(-1), visible: true, submission: { done_lines: 7, total_lines: 9, late: false },
+      lines: [{ text: '우유 재고 확인', title: '우유 재고 확인', checked_at: NOW }] };
     else if (p === '/checklist/shifts' && m === 'GET') payload = { items: state.shifts };
-    else if (p === '/checklist/members') payload = { items: [{ member_id: 2, user_id: 2, role: 'STAFF', name: '박지호', shift_ids: [1] }, { member_id: 3, user_id: 3, role: 'STAFF', name: '김민준', shift_ids: [3] }] };
+    else if (p === '/checklist/shifts' && m === 'POST') {
+      const shift = { shift_id: Math.max(0, ...state.shifts.map((s) => s.shift_id)) + 1, name: body.name, starts_at: body.starts_at ?? null, ends_at: body.ends_at ?? null, sort_order: state.shifts.length, card_ids: [] };
+      state.shifts.push(shift); payload = shift;
+    } else if (p === '/checklist/shifts/order' && m === 'PUT') {
+      state.shifts = body.shift_ids.map((id, i) => ({ ...state.shifts.find((s) => s.shift_id === id), sort_order: i })); payload = {};
+    } else if (/^\/checklist\/shifts\/\d+\/cards$/.test(p) && m === 'PUT') {
+      state.shifts.find((s) => s.shift_id === Number(p.split('/')[3])).card_ids = body.ids; payload = {};
+    } else if (/^\/checklist\/shifts\/\d+$/.test(p) && m === 'PATCH') {
+      const shift = state.shifts.find((s) => s.shift_id === Number(p.split('/')[3]));
+      const { clear_time, ...rest } = body; Object.assign(shift, rest);
+      if (clear_time) { shift.starts_at = null; shift.ends_at = null; }
+      payload = shift;
+    } else if (/^\/checklist\/shifts\/\d+$/.test(p) && m === 'DELETE') {
+      state.shifts = state.shifts.filter((s) => s.shift_id !== Number(p.split('/')[3])); payload = {};
+    }
+    else if (p === '/checklist/members') payload = { items: state.checklistMembers };
+    else if (/^\/checklist\/members\/\d+\/shifts$/.test(p) && m === 'PUT') {
+      const wait = state.memberShiftDelays?.length ? state.memberShiftDelays.shift() : state.memberShiftDelayMs;
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      if (state.failMemberShifts) return reply({ error: { message: '저장 실패' } }, 503);
+      state.checklistMembers.find((x) => x.member_id === Number(p.split('/')[3])).shift_ids = body.ids; payload = {};
+    }
     else if (/^\/checklist\/cards\/\d+$/.test(p)) {
       const id = Number(p.split('/').at(-1));
       if (body) state.cardLinks[id] = body;
@@ -236,8 +295,17 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/today-tasks' && m === 'GET') payload = { business_date: '2026-10-31', items: [] };
     else if (p === '/today-tasks/mine' && m === 'GET') payload = { business_date: '2026-10-31', items: [] };
     // 직원 관리
-    else if (p === '/members') payload = { pending: [{ request_id: 9, name: '이서연', requested_at: NOW }],
-      active: [{ user_id: 2, name: '박지호', role: 'STAFF', joined_at: NOW }, { user_id: 3, name: '김민준', role: 'STAFF', joined_at: NOW }] };
+    else if (p === '/members') payload = { pending: state.joinRequests, active: state.members };
+    else if (/^\/members\/requests\/\d+\/(approve|reject)$/.test(p) && m === 'POST') {
+      const [, , , id, action] = p.split('/');
+      const request = state.joinRequests.find((r) => r.request_id === Number(id));
+      state.joinRequests = state.joinRequests.filter((r) => r !== request);
+      if (action === 'approve' && request) state.members.push({ user_id: 10 + request.request_id, name: request.name, role: 'STAFF', joined_at: NOW });
+      payload = {};
+    } else if (/^\/members\/\d+\/remove$/.test(p) && m === 'POST') {
+      state.members = state.members.filter((x) => x.user_id !== Number(p.split('/')[2])); payload = {};
+    }
+    else if (p === '/members/invite-link/rotate' && m === 'POST') payload = { url: 'http://127.0.0.1:3011/join/synthetic-invite-2' };
     else if (p === '/members/invite-link') payload = { url: 'http://127.0.0.1:3011/join/synthetic-invite' };
     // 넣기
     else if (p === '/ingest/capabilities') payload = { TEXT: { extensions: ['txt'], max_bytes: null }, SCAN: { extensions: ['pdf', 'jpg', 'jpeg', 'png', 'docx'], max_bytes: null, max_pages: null }, KAKAO: { extensions: ['txt', 'jpg', 'jpeg', 'png'], max_bytes: null } };

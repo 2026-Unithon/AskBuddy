@@ -37,6 +37,7 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
+      data-variant={variant}
       className={`${base} ${variants[variant]} ${className}`}
       {...props}
     >
@@ -58,7 +59,7 @@ export function ButtonLink({
   children: ReactNode;
 }) {
   return (
-    <Link href={href} className={`${base} ${variants[variant]} ${className}`}>
+    <Link href={href} data-variant={variant} className={`${base} ${variants[variant]} ${className}`}>
       {children}
     </Link>
   );

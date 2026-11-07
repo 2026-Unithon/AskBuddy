@@ -74,6 +74,7 @@ jobs:
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_intake.cjs
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_cards.cjs
           NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_today.cjs
+          NODE_PATH="$PWD/api/tmp/browser/node_modules" node api/scripts/verify_ui_manage.cjs
   r-required:
     if: always()
     needs: [contracts-unit, database, browser]

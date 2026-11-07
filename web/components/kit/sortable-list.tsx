@@ -14,16 +14,19 @@ export function SortableList<T extends Item>({
   canMove,
   onMove,
   renderItem,
+  onEnd,
 }: {
   items: T[];
   canMove: (from: number, to: number) => boolean;
   onMove: (key: string, dir: -1 | 1) => void;
   renderItem: (item: T, index: number) => ReactNode;
+  /** 끌기를 놓았을 때, 키보드로 한 칸 옮겼을 때. 저장은 여기서 한 번만 하면 된다 */
+  onEnd?: () => void;
 }) {
   // 끄는 동안 순서가 바뀌므로 최신 목록·규칙을 ref 로 본다
-  const latest = useRef({ items, canMove, onMove });
+  const latest = useRef({ items, canMove, onMove, onEnd });
   useLayoutEffect(() => {
-    latest.current = { items, canMove, onMove };
+    latest.current = { items, canMove, onMove, onEnd };
   });
   const drag = useRef<{ key: string; y: number; height: number } | null>(null);
 
@@ -59,6 +62,7 @@ export function SortableList<T extends Item>({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
+      latest.current.onEnd?.();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
@@ -67,7 +71,7 @@ export function SortableList<T extends Item>({
   const onKeyDown = (key: string) => (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    step(key, event.key === "ArrowUp" ? -1 : 1);
+    if (step(key, event.key === "ArrowUp" ? -1 : 1)) latest.current.onEnd?.();
   };
 
   return (
