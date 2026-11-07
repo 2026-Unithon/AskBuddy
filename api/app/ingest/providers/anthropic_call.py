@@ -48,6 +48,55 @@ def strict_schema(schema) -> dict:
     return walk(schema.model_json_schema())
 
 
+def _media_block(path: Path) -> dict:
+    """추출 입력 한 개. PDF 는 document 블록, 사진은 image 블록."""
+    if path.suffix.lower() == ".pdf":
+        data = base64.standard_b64encode(path.read_bytes()).decode("utf-8")
+        return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                               "data": data}}
+    return _image_block(path)
+
+
+def _result(resp) -> CallResult:
+    if resp.stop_reason == "refusal":
+        category = getattr(resp.stop_details, "category", None) if resp.stop_details else None
+        raise RuntimeError(f"모델이 거절했다 category={category}")
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    u = resp.usage
+    usage = {"prompt_tokens": int(u.input_tokens), "completion_tokens": int(u.output_tokens)}
+    cached = getattr(u, "cache_read_input_tokens", None)
+    if cached is not None:
+        usage["cached_tokens"] = int(cached)
+    usage["raw"] = u.model_dump()
+    return CallResult(text, usage, _FINISH.get(resp.stop_reason, resp.stop_reason))
+
+
+async def call_extract(model: str, prompt: str, media: list[Path], schema, *,
+                       effort: str | None, max_tokens: int) -> CallResult:
+    """한 번 호출 추출(분류+사실). 출력이 길어 스트리밍으로 받는다(HTTP 시간 초과 방지).
+
+    서버 측 fallback 은 쓰지 않는다 — 다른 모델로 바뀌면 사실의 출처 모델이 섞인다.
+    """
+    s = get_settings()
+    if not s.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY 가 없다")
+    blocks = [_media_block(p) for p in media]
+    # SDK 변환을 쓴다 — 숫자 칸의 minimum/maximum(신뢰도 0~1 등)을 API 가 거절하므로 설명으로 옮기고,
+    # 모든 object 에 additionalProperties:false 를 붙인다. strict_schema(레이아웃용)는 제약을 그대로 보내
+    # 사실 스키마에서 400 이 난다(2026-11-07 실제 DB 검증에서 발견)
+    output_config: dict = {"format": {"type": "json_schema",
+                                      "schema": anthropic.transform_schema(schema)}}
+    if effort:
+        output_config["effort"] = effort
+    async with _client(s.anthropic_api_key).messages.stream(
+        model=model, max_tokens=max_tokens,
+        messages=[{"role": "user", "content": [*blocks, {"type": "text", "text": prompt}]}],
+        output_config=output_config,
+    ) as stream:
+        resp = await stream.get_final_message()
+    return _result(resp)
+
+
 async def call(model: str, prompt: str, images: list[Path], schema,
                max_output_tokens: int | None) -> CallResult:
     s = get_settings()

@@ -51,7 +51,7 @@ def _ts(m: re.Match, day: tuple[int, int, int] | None = None) -> datetime:
 def parse(raw: str, *, message_numbers: bool = False) -> dict:
     """반환: room_name, participants, message_count, period_start/end, parsed_text
 
-    `message_numbers` 를 켜면(W1-4 extract_locator_hints) 메시지마다 `[#N]` 표지를 붙인다.
+    `message_numbers` 를 켜면(W1-4 위치 표지, 2026-11-07 부터 제품 경로는 늘 켬) 메시지마다 `[#N]` 표지를 붙인다.
     끄면 이전과 같은 글이다.
     """
     lines = raw.replace("\r\n", "\n").split("\n")

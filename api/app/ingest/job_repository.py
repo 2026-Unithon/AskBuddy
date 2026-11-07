@@ -170,7 +170,7 @@ async def get_job_sources(conn: asyncpg.Connection, store_id: int, job_id: int):
         """
         select js.source_id, coalesce(s.original_filename, s.title) as filename,
                js.status, js.card_count, js.error_code, js.error_message,
-               s.source_availability
+               s.source_availability, js.unprocessed_ranges
         from ingest_job_sources js
         join sources s on s.store_id = js.store_id and s.source_id = js.source_id
         where js.store_id = $1 and js.job_id = $2
@@ -195,7 +195,7 @@ async def reset_retryable_sources(
         update ingest_job_sources
         set status = 'QUEUED', error_code = null, error_message = null,
             card_count = 0, segments_total = null, segments_failed = null,
-            failed_segment_ids = null,
+            failed_segment_ids = null, unprocessed_ranges = null,
             recovery_state = case when status = 'NO_RESULT' then null else recovery_state end,
             started_at = null, completed_at = null, updated_at = now()
         where store_id = $1 and job_id = $2 and status = any($3::varchar[])
@@ -289,7 +289,7 @@ async def requeue_intake_none_source(conn: asyncpg.Connection, store_id: int, jo
         update ingest_job_sources
         set status = 'QUEUED', error_code = null, error_message = null,
             card_count = 0, segments_total = null, segments_failed = null,
-            failed_segment_ids = null, recovery_state = null,
+            failed_segment_ids = null, unprocessed_ranges = null, recovery_state = null,
             started_at = null, completed_at = null, updated_at = now()
         where store_id = $1 and job_id = $2 and source_id = $3
           and status = 'NO_RESULT' and error_code = 'INTAKE_NONE'

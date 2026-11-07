@@ -9,6 +9,7 @@
 파일 바이너리를 받지 않는다. Storage 경로 문자열만 받는다.
 store_id 는 JWT 에서만 꺼낸다. 요청 본문의 매장 정보를 신뢰하지 않는다 (D1).
 """
+import json
 import logging
 from typing import Annotated, Literal
 
@@ -37,6 +38,7 @@ from app.ingest.schemas import (
     IngestJobList,
     IngestJobListItem,
     IngestJobSource,
+    UnprocessedRange,
     IngestJobStatus,
     KakaoMeta,
     OwnerAnswerAttachment,
@@ -399,11 +401,20 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
                     else None
                 ),
                 source_availability=row.get("source_availability") or "AVAILABLE",
+                unprocessed_ranges=_ranges(row.get("unprocessed_ranges")),
             )
             for row in sources
         ],
         review_destination=f"/owner/cards/review?job_id={job_id}",
     )
+
+
+def _ranges(raw) -> list[UnprocessedRange]:
+    """작업 자료 행의 jsonb 를 화면 모델로. asyncpg 는 jsonb 를 글로 돌려준다."""
+    if not raw:
+        return []
+    rows = json.loads(raw) if isinstance(raw, str) else raw
+    return [UnprocessedRange.model_validate(r) for r in rows]
 
 
 @router.get("/jobs/{job_id}", response_model=IngestJobDetail)

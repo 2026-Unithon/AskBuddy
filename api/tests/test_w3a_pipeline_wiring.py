@@ -290,9 +290,18 @@ async def _run_source(tmp_path):
          patch.object(pipeline, "_prepare_fact_assembly", mocks.prepare), \
          patch.object(pipeline, "_persist_fact_cards", mocks.persist_facts), \
          patch.object(pipeline.intake_route, "route_source", _recipe_route_stub("DOC_TEXT")), \
+         patch.object(pipeline.intake_route, "extract_with_intake",
+                      AsyncMock(return_value=_single_result())), \
          patch("app.config.get_settings", return_value=settings):
         await pipeline.process_source(1, 7)
     return mocks, prepared, conn
+
+
+def _single_result():
+    """한 번 호출(2026-11-07) 대역 — 판정은 저장된 것을 쓰고(route=None) 사실 없이 끝난다."""
+    from app.ingest.intake.route import SingleCallResult
+    from app.ingest.schemas import SingleCallExtractionResult
+    return SingleCallResult(None, SingleCallExtractionResult(), (), "[#1] 본문")
 
 
 class _Tx:

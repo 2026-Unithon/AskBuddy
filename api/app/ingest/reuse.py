@@ -99,7 +99,7 @@ async def key_for(context, settings, *, model: str, mode: str, prompt: str, medi
             schema_version=schema_version(schema),
             temperature=getattr(settings, "extract_temperature", None),
             max_output_tokens=max_output_tokens,
-            pdf_input_mode=getattr(settings, "pdf_input_mode", None),
+            pdf_input_mode="HYBRID",  # 고정값(S11)
             video_input_mode=getattr(settings, "video_input_mode", None),
             thinking_level=thinking_level,
         )

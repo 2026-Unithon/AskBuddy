@@ -1,8 +1,8 @@
 """Phase 0 외부 모델 관찰을 자동으로 돌린다 (Claude Code · Codex CLI, 구독 사용).
 
-`추출결과/관찰/<로직>/<형식>/자료N/원본/` 에 파일이 있고 실행 폴더의 `result.json` 이 비어 있는 칸을 찾아,
+`api/eval/data/추출결과/관찰/<로직>/<형식>/자료N/원본/` 에 파일이 있고 실행 폴더의 `result.json` 이 비어 있는 칸을 찾아,
 실행마다 **저장소 밖 새 임시 폴더**에 원본만 복사해 같은 지시문으로 돌린다. 결과·실행 기록·격리 검사를 칸 폴더에 넣는다.
-사용법·규칙은 `추출결과/관찰/README.md`. 설계: docs/dev/plan/W_FACT_ONLY_ROADMAP_20261010.md Phase 0.
+사용법·규칙은 `api/eval/data/추출결과/관찰/README.md`. 설계: docs/dev/plan/W_FACT_ONLY_ROADMAP_20261010.md Phase 0.
 
     api/.venv/bin/python api/scripts/run_observation.py --list            # 할 일 목록만
     api/.venv/bin/python api/scripts/run_observation.py --dry-run         # 명령만 보여 주기
@@ -22,7 +22,7 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-OBS_DIR = ROOT / "추출결과" / "관찰"
+OBS_DIR = ROOT / "api" / "eval" / "data" / "추출결과" / "관찰"
 WORK_ROOT = pathlib.Path("/tmp/askbuddy-observe")
 STT_DIR_NAME = "원본_전사"
 OWNER_PLACEHOLDER = "(여기에 직원 질문을 붙여넣으세요)"

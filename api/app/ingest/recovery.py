@@ -15,7 +15,9 @@ def layout_hash(src, text, media, segments, settings) -> str:
 
     config = {k: getattr(settings, k) for k in (
         'video_segment_sec', 'frame_interval_sec', 'video_max_frames_to_model',
-        'video_input_mode', 'pdf_input_mode')}
+        'video_input_mode')}
+    # PDF 입력 방식은 고정값이다(S11). 지난 복구본의 hash 와 같도록 같은 이름으로 싣는다
+    config['pdf_input_mode'] = 'HYBRID'
     # 구간 겹침은 구간 내용을 바꾼다. 0(기존 동작)이면 싣지 않아 지난 복구본의 hash 가 그대로다.
     # 잘림 분할 깊이·동시 호출 수는 구간 구성(seg{i})을 바꾸지 않으므로 싣지 않는다 (W1-2)
     overlap = getattr(settings, 'video_segment_overlap_sec', 0)

@@ -177,7 +177,7 @@ async def run_layout_extraction(*, source_id: int, path: Path | None, workdir: P
                 notes = list(notes) + occurrences.validate_assertions(
                     facts, source_type="SCAN", text=text, media=[],
                     locator_hints=False,
-                    clear_ungrounded=bool(getattr(s, "extract_clear_ungrounded_values", False)))
+                    clear_ungrounded=False)
                 if checkpoint is not None:
                     # 끝낸 즉시 적는다(구역별 트랜잭션, 순서 무관). 적지 못하면 그 구역은 잃은 것으로 센다
                     await checkpoint(facts, rid)

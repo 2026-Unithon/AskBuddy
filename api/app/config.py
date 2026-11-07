@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     ingest_db_timeout_seconds: float = Field(default=10.0, gt=0)
     stt_model: str = "whisper-1"
 
+    # 한 번 호출 추출(2026-11-07, W_SINGLE_CALL_EXTRACT_DESIGN) — 영상·SCAN LAYOUT 을 뺀 모든 자료의
+    # 분류+사실 추출을 이 모델 한 호출로 한다. 'anthropic:모델' 만 받는다(S1 — 이 경로에 Gemini 를 쓰지 않는다)
+    extract_model: str = "anthropic:claude-sonnet-5-5"
+    extract_anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] | None = "high"
+    extract_anthropic_max_tokens: int = Field(default=64000, ge=1024)
+    # 끊김·호출 실패·잘림·빈 결과일 때 같은 자료를 몇 번까지 시도하는가(S7). 2번째부터는 처리 안 된 줄만 보낸다
+    extract_max_attempts: int = Field(default=3, ge=1, le=5)
+
     # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).
     # 기본값은 현재 검증된 경로다. 실험은 플래그로 opt-in 한다.
     #   frames — 프레임을 솎아 이미지로 투입 (현재 기본)
@@ -138,17 +146,10 @@ class Settings(BaseSettings):
     # 구간 추출을 몇 개까지 동시에 부를지. 1 이면 앞 구간부터 차례대로(기존 동작) (W1-2)
     extract_segment_concurrency: int = Field(default=1, ge=1)
 
-    # 출력 token 상한 (W1-2). None 이면 넘기지 않는다 — 공급자 기본값(기존 동작).
-    # 측정 전이라 값을 가정하지 않는다. 상한에 닿아 잘린 응답(MAX_TOKENS)은
-    # 상한 설정과 무관하게 언제나 성공으로 처리하지 않는다
-    extract_max_output_tokens: int | None = Field(default=None, ge=1)
     assemble_batch_facts: int = Field(default=200, ge=1)
     assemble_max_output_tokens: int | None = Field(default=None, ge=1)
     # W3-1b — 조립 배치 동시 호출 수. 1 이면 앞 배치부터 차례대로(기존 동작). 실제 동시 모델 호출 상한은 ingest_model_concurrency
     assemble_concurrency: int = Field(default=1, ge=1)
-    # 잘린 추출을 반으로 나눠 다시 뽑는 깊이 상한 (W1-2). 0 이면 나누지 않는다(기본, 꺼 둠).
-    # 깊이 d 까지 나누면 한 구간이 최대 2^(d+1)-1 번 호출된다 — 비용 상한을 함께 본다
-    extract_truncation_split_max_depth: int = Field(default=0, ge=0, le=4)
     # 같은 입력 재사용 (W1-3). 켜면 같은 매장·같은 재사용 키로 파싱에 성공한 지난 응답이
     # 있을 때 모델을 부르지 않고 그 응답을 되쓴다(원장에 REUSED·비용 0). 기본 켜짐 —
     # 입력·모델·프롬프트·설정이 모두 같을 때만 적중하므로 제품 경로에서 켜 둔다(2026-09-29 사용자 결정).
@@ -157,16 +158,6 @@ class Settings(BaseSettings):
     # 평가 실행(EVALUATION·extraction_run_id)은 모델의 흔들림을 잰다. 지난 응답을 되쓰면
     # 반복(D17/D18)이 전부 같아져 변동 측정이 무너진다. 이 플래그를 따로 켤 때만 재사용한다
     extract_reuse_for_evaluation: bool = False
-    # W1-4 근거 위치 표지. 켜면 사실 추출에 쪽·메시지 번호(page·line)를 받는다 —
-    # 위치 표지 프롬프트(extract_facts_locator.ko.txt)·스키마(LocatedFactExtractionResult)·
-    # 카톡 `[#N]` 표지를 쓰고, 서버가 그 번호를 검사해 PAGE·LINE 위치로 남긴다.
-    # 끄면 추출 요청이 이전과 같다(D16 비교 기준 유지). 근거 위치 표 기록·서버 검사는 플래그와 무관하다
-    extract_locator_hints: bool = False
-    # W1-4 근거 없는 단위·규격 값 비우기. 기본 꺼짐 — 판정만 근거 위치 행(check_flags)과
-    # unresolved 에 남기고 값은 그대로 둔다. 글만 있는 입력(음성 전사·카톡·TEXT PDF)의 판정은
-    # 오탐이 있고, 값을 비우면 content_hash 가 바뀌며 HOT/ICE 가 합쳐질 수 있다(D19·D16).
-    # 켜면 글만 있는 입력의 근거 없는 값을 비운다(첨부가 있는 입력은 켜도 남기고 표시만 한다)
-    extract_clear_ungrounded_values: bool = False
     # Files API 업로드가 ACTIVE 가 될 때까지 기다리는 한도·폴링 간격 (gemini.py 에서 옮김)
     gemini_file_active_timeout_sec: int = Field(default=600, ge=0)
     gemini_file_poll_sec: int = Field(default=5, ge=0)
@@ -178,14 +169,6 @@ class Settings(BaseSettings):
     # 측정 도구의 오차가 측정하려는 효과보다 크면 실험이 성립하지 않으므로 0.0 을 기본으로 둔다.
     # 0.2 단위로 올려가며 다양성 이득이 있는지는 하네스로 확인한다
     extract_temperature: float = 0.0
-    # PDF 를 모델에 어떻게 넣는가. A/B/C 실험용 (W1 결함3 후속).
-    #   TEXT   — pypdf 텍스트만. 기존 동작이자 대조군. 표 구조가 깨질 수 있다
-    #   FILE   — PDF 원본만. Gemini 가 페이지를 직접 읽는다
-    #   BOTH   — 둘 다. 잃는 것이 없는 대신 페이지마다 비용이 든다
-    #   HYBRID — 텍스트 + 그림이 있는 페이지가 있을 때만 원본을 붙인다 (비용 절충)
-    # 어느 쪽이 정확한지는 측정 전까지 모른다. 기본값은 결함3 수정본인 HYBRID 다.
-    # TEXT 는 그 수정 이전 동작이므로 실험에서 대조군으로만 명시 지정한다.
-    pdf_input_mode: Literal["TEXT", "FILE", "BOTH", "HYBRID"] = "HYBRID"
 
     # ── Phase B 입구 분류(B-D2·B-D3). 시작값이다 — 분류기 평가로 조정한다 ──
     # 분류 모델. '공급자:모델' 형식(providers.parse_model_spec). 가장 싼 경량 모델로 바꾸는 것은 평가 뒤
@@ -207,16 +190,14 @@ class Settings(BaseSettings):
     intake_ambiguous_top_min: float = Field(default=0.5, ge=0, le=1)
     intake_ambiguous_gap_min: float = Field(default=0.15, ge=0, le=1)
 
-    # ── Phase B 추가 — 작은 자료 호출 줄이기(S1·S3) ──
-    # 한 작업의 판정 없는 자료가 둘 이상이면 묶어 분류 1회. 상한을 넘으면 묶음을 나눈다
-    intake_bundle_enabled: bool = True
+    # ── Phase B 추가 — 작은 자료 호출 줄이기(S1) ──
+    # 한 작업의 판정 없는 자료가 둘 이상이면 묶어 분류 1회(늘 켬 — 2026-11-07 S11). 상한을 넘으면 묶음을 나눈다
+    # 영상 밖 자료는 한 번 호출이 판정까지 내므로 묶음 분류는 영상 자료에만 쓰인다
     intake_bundle_max_sources: int = Field(default=8, ge=2)
     intake_bundle_max_chars: int = Field(default=12000, ge=1000)
     intake_bundle_max_images: int = Field(default=12, ge=1)
     # 묶음 분류 출력 잘림을 막는 표본 후보 수 상한(후보마다 판정 한 줄을 출력한다)
     intake_bundle_max_candidates: int = Field(default=24, ge=2)
-    # 홀로 남은 작은 자료(훑기가 전체를 담음)는 분류+추출 한 호출. 평가 뒤 켠다(기본 꺼짐)
-    intake_single_call_small: bool = False
 
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
     supabase_url: str = ""

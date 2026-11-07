@@ -1,11 +1,11 @@
 # 외부 앱 관찰 실행 기록부
 
-> 실행마다 한 줄. 이 파일은 양식이다. 실제 기록은 Git 제외 `추출결과/<로직>/<자료 id>/RUN_SHEET.md` 에 복사해 채운다.
+> 실행마다 한 줄. 이 파일은 양식이다. 실제 기록은 Git 제외 `api/eval/data/추출결과/<로직>/<자료 id>/RUN_SHEET.md` 에 복사해 채운다.
 > **자료 이름은 익명 id 로만**(예: `proc-close-manual-1`). 브랜드·상호·메뉴 고유명을 쓰지 않는다(CLAUDE.md).
 
 | 실행 id | 로직 | 형식 | 자료 id | 앱·모델·모드 | 입력 형태 | 지시문 | 시작 | 걸린 시간 | 결과 건수 | 화면에 보인 도구 실행 | 앱 사용료 | 결과 위치 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C1 | PROCEDURE | VIDEO | proc-clean-video-1 | Claude 데스크톱 / Opus / 확장 사고 켜짐 | mp4 원본 첨부 | `build_observation_instruction.py PROCEDURE VIDEO` | 2026-10-10 14:00 | 18분 | 42 | 코드 실행 6회(캡처 첨부) | 구독(추가 없음) | `추출결과/PROCEDURE/proc-clean-video-1/C1/` |
+| C1 | PROCEDURE | VIDEO | proc-clean-video-1 | Claude 데스크톱 / Opus / 확장 사고 켜짐 | mp4 원본 첨부 | `build_observation_instruction.py PROCEDURE VIDEO` | 2026-10-10 14:00 | 18분 | 42 | 코드 실행 6회(캡처 첨부) | 구독(추가 없음) | `api/eval/data/추출결과/PROCEDURE/proc-clean-video-1/C1/` |
 | G1 | … | | | GPT 데스크톱 / … | | | | | | | | |
 
 칸 설명

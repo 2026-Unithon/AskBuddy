@@ -8,6 +8,7 @@
 실패하면 다음 단계로 넘어가지 않고 FAILED 로 명확히 멈춘다.
 """
 import asyncio
+import json
 import logging
 import shutil
 import time
@@ -38,6 +39,10 @@ PARTIAL_RETRY_UNAVAILABLE = "PARTIAL_RETRY_UNAVAILABLE"
 # 입구 분류가 업무 자료가 아니라고(NONE) 판정해 추출하지 않았을 때 돌려준다(Phase B).
 # 호출부(job_worker)가 이 값을 보고 작업 자료를 NO_RESULT 와 안내 메시지로 적는다
 INTAKE_NONE = "INTAKE_NONE"
+# PDF 를 모델에 넣는 방식(2026-11-07 S11 — 설정에서 고정값으로 옮김). 재사용 키·복구 지문도 이 값을 쓴다
+PDF_INPUT_MODE = "HYBRID"
+# 뽑힌 사실은 반영했지만 끝내 처리하지 못한 줄 범위가 남았다(S9). job_worker 가 PARTIAL 로 적는다
+UNPROCESSED_LINES = "UNPROCESSED_LINES"
 
 
 from app.config import get_settings
@@ -53,6 +58,7 @@ async def process_source(
     expected_segments_total: int | None = None,
     run_tag: int | None = None,
     intake_cache: "intake_route.IntakeCache | None" = None,
+    only_lines: list[int] | None = None,
 ) -> str | None:
     """자료 하나를 처리한다.
 
@@ -70,6 +76,9 @@ async def process_source(
 
     `intake_cache` 를 주면 그 캐시를 쓴다 — 작업 묶음 분류가 훑으며 받은 다운로드·파싱을
     다시 하지 않는다(S1). 없으면 새 캐시를 만든다.
+
+    `only_lines` 를 주면 사장님 [다시 시도](S10)다 — 처리 안 된 줄만 한 번 호출로 이어서 뽑아 사실·카드를
+    **추가**한다. 복구 기록은 쓰지 않는다(이미 확정된 자료다).
     """
     from app.ingest.raw_responses import DbRawResponseSink
     from app.usage import DbUsageSink
@@ -80,7 +89,10 @@ async def process_source(
     # 모델 원래 응답 기록 (W1-1). mock 도 같은 기록을 남긴다. 저장 실패는 추출을 멈춘다
     raw_sink = DbRawResponseSink(pool, run_tag=run_tag)
     started = time.perf_counter()
-    recovery_enabled = job_id is not None and extraction_run_id is None and cost_purpose == 'PRODUCT'
+    recovery_enabled = (job_id is not None and extraction_run_id is None and cost_purpose == 'PRODUCT'
+                        and only_lines is None)
+    # 한 번 호출이 끝내 처리하지 못한 줄 범위(S9). 작업 자료 행과 복구 기록에 남긴다
+    unprocessed: list[dict] = []
     previous = None
 
     # 연결은 DB 를 칠 때만 짧게 빌린다. 다운로드·STT·추출·조립처럼 느린 외부
@@ -142,6 +154,7 @@ async def process_source(
         plan = None
         # 한 호출(S3)이 이미 뽑은 사실. 구간 없는 첫 추출 대신 쓴다
         prefetched = None
+        single = intake_route.single_call_source(src, get_settings())
         if intake_enabled:
             cache = intake_cache or intake_route.IntakeCache()
             route = await intake_route.route_source(
@@ -149,53 +162,58 @@ async def process_source(
             single_pending = (route if isinstance(route, intake_route.SingleCallPending)
                               else None)
             if (single_pending is None and route.source.logic == "NONE"
-                    and route.normalizer not in SECTIONED_NORMALIZERS):
-                # 업무 자료가 아니다 — 전처리(전체 STT·프레임 업로드)부터 하지 않는다
+                    and (single or route.normalizer not in SECTIONED_NORMALIZERS)):
+                # 업무 자료가 아니다 — 전처리(전체 STT·프레임 업로드)·모델 호출부터 하지 않는다.
+                # 한 호출 자료는 구간별 계획이 없으므로 저장된 NONE 판정이면 바로 끝낸다(재시도에 모델 0회)
                 return await _finish_intake_none(pool, store_id, source_id, job_id, started)
 
             text, media, segments = await _preprocess(
                 pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context,
                 cache=cache)
-            if single_pending is not None and _layout_mode(src, get_settings()):
-                # 구역(LAYOUT) 추출로 갈 자료다 — 한 호출 결과를 쓸 수 없어 두 번 내게 된다.
-                # 한 호출 없이 분류해 저장하고 보통(구역) 추출로 간다
+            if single_pending is not None and not single:
+                # 구역(LAYOUT) 추출로 갈 자료다 — 한 호출 결과를 쓸 수 없다. 분류해 저장하고 보통(구역) 추출로
                 logger.warning("구역 추출 자료 — 한 호출 대신 분류한다 source=%s", source_id)
                 route = await intake_route.classify_and_save(
                     pool, store_id, src, single_pending.probe, hints=single_pending.hints,
                     usage_sink=usage_sink, usage_base=usage_base)
                 if route.source.logic == "NONE":
                     return await _finish_intake_none(pool, store_id, source_id, job_id, started)
-            elif single_pending is not None:
-                # 작은 자료 — 분류와 추출을 한 호출로(S3). 잘리면 분류 후 보통 경로로 간다.
-                # 순위 없는 결과(IntakeClassificationError)는 아래 except 가 FAILED 로 적는다
+            elif single:
+                # 영상·구역 스캔 밖 — 분류와 추출을 Sonnet 한 호출로(S8). 끊긴 줄은 이어서 최대 3번(S7),
+                # 남은 줄은 처리 안 된 범위로(S9). 한 번도 성공하지 못하면 IntakeClassificationError → FAILED
                 async with pool.acquire() as conn:
                     glossary_now = await repo.glossary(conn, store_id)
-                try:
-                    single = await intake_route.extract_with_intake(
-                        pool, store_id, src, single_pending, text=text, media=media,
-                        glossary=glossary_now, usage_sink=usage_sink, usage_base=usage_base,
-                        raw_sink=raw_sink)
-                    route, prefetched = single.route, single.result
-                except TruncatedOutputError:
-                    logger.warning("한 호출 출력 잘림 — 분류 후 보통 추출로 간다 source=%s",
-                                   source_id)
-                    route = await intake_route.classify_and_save(
-                        pool, store_id, src, single_pending.probe, hints=single_pending.hints,
-                        usage_sink=usage_sink, usage_base=usage_base)
+                forced = (single_pending is None and route.source.logic != "NONE"
+                          and bool(route.source.model_ranking)
+                          and route.source.model_ranking[0].logic == "NONE")
+                got = await intake_route.extract_with_intake(
+                    pool, store_id, src, single_pending, text=text, media=media,
+                    glossary=glossary_now, usage_sink=usage_sink, usage_base=usage_base,
+                    raw_sink=raw_sink, only_lines=only_lines, owner_forced=forced)
+                if got.route is not None:
+                    route = got.route
+                prefetched, unprocessed = got.result, list(got.unprocessed)
+                # 서버 위치 검사가 줄 번호를 보도록 번호 붙인 글을 쓴다
+                text = got.numbered_text or text
                 if route.source.logic == "NONE":
                     # 업무 자료가 아니다 — 뽑은 사실은 원장에 적지 않는다(Review Focus 2)
                     return await _finish_intake_none(pool, store_id, source_id, job_id, started)
-                if (prefetched is not None and route.source.hint_changed_decision
+                if (single_pending is not None and route.source.hint_changed_decision
                         and route.source.model_ranking
                         and route.source.model_ranking[0].logic == "NONE"):
-                    # 모델 1위는 NONE 이라 꼬리 지시대로 사실을 비웠는데 점주 칩이 결정을 바꿨다.
-                    # 빈 결과를 쓰지 않고 저장 판정으로 보통 추출 1회를 한다(최종 검토 I-1)
-                    logger.warning("한 호출 NONE 을 점주 칩이 뒤집음 — 보통 추출로 다시 뽑는다 "
-                                   "source=%s logic=%s", source_id, route.source.logic)
-                    prefetched = None
+                    # 모델 1위는 NONE 이라 사실을 비웠는데 점주 칩이 결정을 바꿨다 — 업무 자료로 지정해 다시 뽑는다
+                    logger.warning("한 호출 NONE 을 점주 칩이 뒤집음 — 다시 뽑는다 source=%s logic=%s",
+                                   source_id, route.source.logic)
+                    got = await intake_route.extract_with_intake(
+                        pool, store_id, src, None, text=text, media=media, glossary=glossary_now,
+                        usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink,
+                        owner_forced=True)
+                    prefetched, unprocessed = got.result, list(got.unprocessed)
+            # 한 호출 자료는 자료 단위 판정이다 — 구간을 나누지 않는다(설계 §4-1)
             plan = plan_extraction(normalizer=route.normalizer, decisions=route.decisions,
                                    source=route.source,
-                                   sections=intake_route.full_sections(cache, route.normalizer))
+                                   sections=None if single else intake_route.full_sections(
+                                       cache, route.normalizer))
             if plan.skip:
                 return await _finish_intake_none(pool, store_id, source_id, job_id, started)
             # 거른 것이 없으면 계획 글은 전처리 글과 같다(D16). 구간별 묶음이면 구간을 바꾼다
@@ -206,6 +224,16 @@ async def process_source(
         else:
             text, media, segments = await _preprocess(
                 pool, store_id, src, usage_sink=usage_sink, usage_context=stt_context)
+            if single:
+                # 평가 실행 — 판정은 저장하지 않고 제품과 같은 한 호출로 뽑는다
+                async with pool.acquire() as conn:
+                    glossary_now = await repo.glossary(conn, store_id)
+                got = await intake_route.extract_with_intake(
+                    pool, store_id, src, None, text=text, media=media, glossary=glossary_now,
+                    usage_sink=usage_sink, usage_base=usage_base, raw_sink=raw_sink,
+                    only_lines=only_lines)
+                prefetched, unprocessed = got.result, list(got.unprocessed)
+                text = got.numbered_text or text
 
         fingerprint = await asyncio.to_thread(recovery.layout_hash, src, text, media, segments, get_settings()) if recovery_enabled else None
         if previous and previous['phase'] == 'COMMITTED':
@@ -258,6 +286,7 @@ async def process_source(
                 # 복구본에는 원래 응답 ID 가 없다. 인스턴스마다 새 dict 를 준다
                 {})
             ledger_ids = previous['ledger_ids']
+            unprocessed = list(cached.get('unprocessed') or [])
         else:
             # SCAN·LAYOUT 은 구역 기반 다단계 추출로 간다. mock 은 원본이 없어(media 빈 목록)
             # 오케스트레이터가 빈 쪽으로 돈다. 그 밖의 경로는 이전과 같다
@@ -286,7 +315,8 @@ async def process_source(
                 pending = dict(version=1, phase='EXTRACTED', layout_hash=fingerprint,
                     outcome=dict(assertions=[a.model_dump(mode='json') for a in outcome.assertions],
                         unresolved=outcome.unresolved, segments_total=outcome.segments_total,
-                        segments_failed=outcome.segments_failed, failed_segment_ids=outcome.failed_segment_ids),
+                        segments_failed=outcome.segments_failed, failed_segment_ids=outcome.failed_segment_ids,
+                        unprocessed=unprocessed),
                     ledger_ids=ledger_ids)
                 async with pool.acquire() as c, c.transaction():
                     await recovery.replace(c, store_id, job_id, source_id, previous, pending)
@@ -361,6 +391,8 @@ async def process_source(
                 # 카드·구간 결과·완료를 함께 확정한다. 중간 오류는 모두 rollback한다.
                 await _record_segment_failures(
                     conn, store_id, job_id, source_id, outcome=outcome)
+                await _record_unprocessed(conn, store_id, job_id, source_id, unprocessed,
+                                          owner_retry=only_lines is not None)
 
                 await repo.set_status(conn, store_id, source_id, "DONE")
         logger.info("ingest DONE source=%s cards=%d unresolved=%d "
@@ -369,7 +401,7 @@ async def process_source(
                     unresolved_total,
                     outcome.segments_failed, outcome.segments_total,
                     time.perf_counter() - started)
-        return None
+        return UNPROCESSED_LINES if unprocessed else None
 
     except recovery.RecoveryConflict:
         # 다른 호출이 확정한 상태를 FAILED로 덮지 않는다.
@@ -741,7 +773,7 @@ async def _preprocess_kakao(
     raw = path.read_text(encoding="utf-8", errors="replace")
     # 번호 표지는 W1-4 플래그를 켰을 때만. 끄면 이전과 같은 글이다
     parsed = kakao.parse(
-        raw, message_numbers=bool(getattr(get_settings(), "extract_locator_hints", False)))
+        raw, message_numbers=True)
 
     async with pool.acquire() as conn:
         await repo.update_kakao_result(
@@ -816,7 +848,8 @@ async def _preprocess_scan(
             read = document.pdf_read_of(cache.pdf)
         else:
             read = document.read_pdf(path)
-        mode = getattr(get_settings(), "pdf_input_mode", "TEXT")
+        # PDF 입력 방식은 HYBRID 로 고정한다(S11): 글 + 그림이 있는 쪽이 있으면 원본도 붙인다
+        mode = PDF_INPUT_MODE
 
         # 글이 아예 없는 스캔본은 arm 과 무관하게 문서를 넘긴다. 안 넘기면 빈손이다
         if not read.text:
@@ -951,14 +984,11 @@ async def _extract_facts_all(
     from app.ingest.extract import extract_facts
 
     settings = get_settings()
-    max_depth = settings.extract_truncation_split_max_depth
-    # W1-4 — 끄면 모델이 준 쪽·메시지 번호를 보지 않는다(스키마에도 없다)
-    hints = bool(getattr(settings, "extract_locator_hints", False))
-    # W1-4 최종 수정 — 끄면(기본) 근거 없는 단위·규격을 비우지 않고 판정만 남긴다
-    clear_ungrounded = bool(getattr(settings, "extract_clear_ungrounded_values", False))
+    # W1-4 위치 표지는 늘 켠다(S11). 근거 없는 단위·규격은 비우지 않고 판정만 남긴다
+    hints = True
+    clear_ungrounded = False
 
     def _tag(items, prefix: str | None, segment: str | None):
-        # prefix 는 하위 경로까지 붙은 이름(seg3.2), segment 는 부모 구간(seg3)이다
         for a in items:
             if prefix:
                 a.local_ref = f"{prefix}:{a.local_ref}"
@@ -967,21 +997,18 @@ async def _extract_facts_all(
         return items
 
     async def _extract_part(part_text, part_media, segment):
-        """구간 하나를 뽑는다. 잘리면 반으로 나눠 다시 뽑는다 (W1-2).
+        """구간 하나를 뽑는다. [(구간 이름, 결과)] 를 돌려준다.
 
-        [(하위 경로 이름, 결과)] 를 돌려준다. 하나라도 끝내 잘리면 `TruncatedOutputError`
-        를 올린다 — 반쪽만 건진 결과는 쓰지 않는다. PARTIAL 재시도가 구간 전체를 다시
-        뽑으므로, 반쪽을 원장에 적으면 재시도 때 겹친다.
+        잘리면 `TruncatedOutputError` 가 그대로 올라간다 — 그 구간은 잃은 것으로 남는다.
+        잘린 출력을 반으로 나눠 다시 뽑던 기능은 없앴다(2026-11-07 S11). 영상 밖 자료는
+        한 번 호출의 이어서 뽑기(single_call)가 끊긴 줄을 다시 뽑는다.
         """
-        return await _extract_with_split(
-            part_text, part_media, segment=segment, path="", depth=0,
-            max_depth=max_depth,
-            call=lambda text, media, label: extract_facts(
-                source_id=source_id, source_type=source_type, text=text,
-                glossary=glossary, media=media, usage_sink=usage_sink,
-                usage_context=_ctx_for(usage_base, source_id, "EXTRACT", segment_id=label),
-                raw_sink=raw_sink,
-            ))
+        result = await extract_facts(
+            source_id=source_id, source_type=source_type, text=part_text,
+            glossary=glossary, media=part_media, usage_sink=usage_sink,
+            usage_context=_ctx_for(usage_base, source_id, "EXTRACT", segment_id=segment),
+            raw_sink=raw_sink)
+        return [(segment, result)]
 
     def _collect(parts, segment, part_text, part_media):
         """하위 결과를 합치고 서버 검사(W1-4)를 한다. 원장에 적기 **전에** 부른다.
@@ -993,7 +1020,9 @@ async def _extract_facts_all(
         for label, result in parts:
             raw_id = _raw_id_of(result)
             for a in _tag(result.assertions, label, segment):
-                a._raw_response_id = raw_id
+                # 한 번 호출의 이어서 뽑은 사실은 이미 자기 응답을 가리킨다(single_call)
+                if getattr(a, "_raw_response_id", None) is None:
+                    a._raw_response_id = raw_id
                 assertions.append(a)
             unresolved.extend(result.unresolved)
             raw_ids[label] = raw_id
@@ -1080,77 +1109,6 @@ async def _extract_facts_all(
                              _raw_ids(raw_ids))
 
 
-# 구간 없는 자료를 나눌 때 하위 경로 앞에 붙이는 이름. `whole.1:f1` 처럼 쓴다
-_WHOLE_SOURCE_LABEL = "whole"
-
-
-def _sub_label(segment: str | None, path: str) -> str | None:
-    """하위 경로 이름. seg3 + '2.1' → seg3.2.1, 구간 없음 + '1' → whole.1, 나누지 않았으면 그대로."""
-    if not path:
-        return segment
-    return f"{segment or _WHOLE_SOURCE_LABEL}.{path}"
-
-
-async def _extract_with_split(text, media, *, segment, path, depth,
-                              max_depth, call):
-    """잘리면 반으로 나눠 다시 뽑는다. 깊이 상한·더 못 나눔이면 `TruncatedOutputError`.
-
-    잘림은 호출 예외가 아니다 — `_call` 의 재시도가 같은 입력을 되풀이하지 않는다.
-    나누기는 여기(호출 위)에서만 한다. 한 반쪽이 끝내 잘리면 나머지는 부르지 않는다.
-    """
-    from app.ingest.raw_responses import TruncatedOutputError
-
-    label = _sub_label(segment, path)
-    try:
-        return [(label, await call(text, media, label))]
-    except TruncatedOutputError as exc:
-        where = label or "자료 전체"
-        if depth >= max_depth:
-            raise TruncatedOutputError(
-                f"{where} 출력이 잘렸고 분할 깊이 상한({max_depth})에 닿았다: {exc}") from exc
-        halves = _split_input(text, media)
-        if halves is None:
-            raise TruncatedOutputError(
-                f"{where} 출력이 잘렸고 더 나눌 수 없다: {exc}") from exc
-        logger.warning("%s 출력 잘림 — 반으로 나눠 다시 뽑는다 (깊이 %d/%d)",
-                       where, depth + 1, max_depth)
-        parts = []
-        for i, (half_text, half_media) in enumerate(halves, start=1):
-            parts.extend(await _extract_with_split(
-                half_text, half_media, segment=segment,
-                path=f"{path}.{i}" if path else str(i), depth=depth + 1,
-                max_depth=max_depth, call=call))
-        return parts
-
-
-def _split_input(text: str, media: list[Path]):
-    """입력을 앞/뒤 반으로 나눈다. 더 나눌 수 없으면 None.
-
-    - 글은 줄 경계에서 반으로 나눈다(앞쪽이 짧거나 같다).
-    - 첨부 목록(영상 프레임 등)은 앞/뒤 반씩 나눈다.
-    - 첨부가 하나(문서·캡처 한 장)면 나누지 않는다 — 글만 나눠도 그 첨부가 매번
-      통째로 들어가 출력이 줄지 않는다.
-    - 글이 한 줄이고 첨부가 둘 이상이면 글은 양쪽에 그대로 두고 첨부만 나눈다.
-    """
-    media = list(media or [])
-    if len(media) == 1:
-        return None
-    lines = (text or "").splitlines()
-    text_halves = None
-    if len(lines) >= 2:
-        mid = len(lines) // 2
-        text_halves = ("\n".join(lines[:mid]), "\n".join(lines[mid:]))
-    media_halves = None
-    if len(media) >= 2:
-        mid = len(media) // 2
-        media_halves = (media[:mid], media[mid:])
-    if text_halves is None and media_halves is None:
-        return None
-    text_halves = text_halves or (text, text)
-    media_halves = media_halves or ([], [])
-    return [(text_halves[0], media_halves[0]), (text_halves[1], media_halves[1])]
-
-
 def _raw_id_of(result) -> int | None:
     """추출 결과에 붙은 원래 응답 행. 대역(fake)이 돌려준 결과에는 없을 수 있다."""
     return getattr(result, "raw_response_id", None)
@@ -1184,6 +1142,26 @@ async def _record_segment_failures(
         store_id, job_id, source_id,
         outcome.segments_total, outcome.segments_failed,
         list(outcome.failed_segment_ids) or None,
+    )
+
+
+async def _record_unprocessed(conn: asyncpg.Connection, store_id: int, job_id: int | None,
+                              source_id: int, ranges: list[dict], *, owner_retry: bool) -> None:
+    """한 번 호출이 끝내 처리하지 못한 줄 범위를 작업 자료 행에 적는다(S9). 없으면 비운다.
+
+    사장님 [다시 시도](S10) 뒤의 남은 범위는 `owner_retry_used` 를 붙여 버튼을 다시 그리지 않게 한다.
+    D1 — store_id 는 필수 인자다. job 없이 도는 경로(점주 답변)에는 적을 행이 없다.
+    """
+    if job_id is None:
+        return
+    rows = [dict(r, owner_retry_used=owner_retry) for r in ranges]
+    await conn.execute(
+        """
+        update ingest_job_sources
+        set unprocessed_ranges = $4::jsonb, updated_at = now()
+        where store_id = $1 and job_id = $2 and source_id = $3
+        """,
+        store_id, job_id, source_id, json.dumps(rows, ensure_ascii=False) if rows else None,
     )
 
 
@@ -1233,7 +1211,7 @@ async def _persist_ledger(
     # 반환 열쇠도 갈라진 이름표다
     assertions = split_hot_ice(assertions)
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
-    hints = bool(getattr(s, "extract_locator_hints", False))
+    hints = True  # W1-4 위치 표지는 늘 켠다(S11)
     rows = []
     for a in assertions:
         locator_type, locator = _locator_of(source_type, a, hints=hints)

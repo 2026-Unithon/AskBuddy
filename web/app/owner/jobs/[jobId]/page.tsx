@@ -32,6 +32,7 @@ import {
   type IngestJobDetail,
 } from "@/lib/api";
 import { bootstrapQuery, cardsQuery, ingestJobQuery, queryKeys } from "@/lib/query";
+import { UnprocessedRanges } from "@/components/owner/unprocessed-ranges";
 import { useApp } from "@/lib/store";
 
 // O4 알아서 정리됐어요 — 작업 하나의 처리 상태와 결과 카드 확인.
@@ -315,7 +316,8 @@ function ResultReview({
       <BackButton href="/owner" label="오늘 매장" />
       <PageHeader title="이렇게 나눴어요" description="다르면 눌러서 고치면 돼요" />
 
-      {job.status === "PARTIAL" && (
+      <UnprocessedRanges sources={job.sources} onRetry={onRetryJob} retrying={retrying} />
+      {job.status === "PARTIAL" && !job.sources.some((s) => (s.unprocessed_ranges ?? []).length > 0) && (
         <ErrorInline message="준비된 카드와 처리하지 못한 자료가 있어요. 실패한 자료만 다시 시도할 수 있어요." onRetry={onRetryJob} retrying={retrying} />
       )}
       {cardsLoading && (

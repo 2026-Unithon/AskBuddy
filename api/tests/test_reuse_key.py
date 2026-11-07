@@ -220,12 +220,13 @@ async def test_same_input_twice_calls_model_once_and_ledgers_reuse():
 
 @pytest.mark.asyncio
 async def test_prompt_file_one_char_change_calls_again(tmp_path):
-    prompt = tmp_path / "extract_facts.ko.txt"
-    prompt.write_text(gemini.FACTS_PROMPT_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    # 2026-11-07 S11 — 위치 표지 판이 늘 쓰인다
+    prompt = tmp_path / "extract_facts_locator.ko.txt"
+    prompt.write_text(gemini.FACTS_LOCATOR_PROMPT_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     sink, calls = MemorySink(), Calls()
     with patch.object(gemini, "get_settings", return_value=_settings()), \
          patch.object(gemini, "_call", calls), \
-         patch.object(gemini, "FACTS_PROMPT_PATH", prompt):
+         patch.object(gemini, "FACTS_LOCATOR_PROMPT_PATH", prompt):
         await _extract(sink, _ctx())
         await _extract(sink, _ctx())
         prompt.write_text(prompt.read_text(encoding="utf-8") + ".", encoding="utf-8")

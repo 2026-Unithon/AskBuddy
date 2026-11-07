@@ -99,7 +99,7 @@ async def verify(db, dsn):
             store, result.raw_response_id)
         check("성공 응답은 parsed_ok=true 로 표시된다",
               ok_row["parsed_ok"] is True and ok_row["error"] is None
-              and ok_row["finish_reason"] == "STOP" and ok_row["schema_version"].startswith("FactExtractionResult/"))
+              and ok_row["finish_reason"] == "STOP" and ok_row["schema_version"].startswith("LocatedFactExtractionResult/"))  # 2026-11-07 S11 위치 표지 늘 켬
 
         # 3. 매장 격리
         check("다른 매장에서 조회되지 않는다",
@@ -151,8 +151,8 @@ async def verify(db, dsn):
                   "select count(*) from extraction_raw_responses where store_id=$1 and source_id=$2",
                   store, source) == 3)
 
-        # 6. mock 모드 전체 경로
-        mock_source = await _new_source(db, store, user, "VOICE")
+        # 6. mock 모드 전체 경로 — 구간 경로는 영상에만 남았다(2026-11-07)
+        mock_source = await _new_source(db, store, user, "VIDEO")
         await db.execute("update sources set status='UPLOADED' where store_id=$1 and source_id=$2",
                          store, mock_source)
         await db.execute("insert into ingest_job_sources(store_id,job_id,source_id,status) "
@@ -179,8 +179,8 @@ async def verify(db, dsn):
         check("다른 매장에는 mock 기록도 보이지 않는다",
               await raw_responses.list_raw_responses(db, other_store) == [])
 
-        # 7. 잘린 출력 (W1-2) — seg1 은 반으로 나눠도 계속 잘린다, seg2 는 정상
-        cut_source = await _new_source(db, store, user, "VOICE")
+        # 7. 잘린 출력 (W1-2) — seg1 은 잘린다, seg2 는 정상. 구간 경로는 영상에만 남았다(2026-11-07)
+        cut_source = await _new_source(db, store, user, "VIDEO")
         await db.execute("update sources set status='UPLOADED' where store_id=$1 and source_id=$2",
                          store, cut_source)
         await db.execute("insert into ingest_job_sources(store_id,job_id,source_id,status) "
@@ -190,13 +190,13 @@ async def verify(db, dsn):
         async def cutting(prompt, media, schema=None, max_output_tokens=None):
             async with pool.acquire() as c:   # 모델 호출 중 연결을 쥐지 않는다 (max_size=1)
                 assert await c.fetchval("select 1") == 1
-            if schema is FactExtractionResult:
+            if issubclass(schema, FactExtractionResult):
                 if "줄A" in prompt:
                     return gemini.CallResult('{"assertions": [{"local_ref": "f1"', {}, "MAX_TOKENS")
                 return gemini.CallResult(GOOD, {}, "STOP")
             return _plan_reply(prompt, category)
 
-        split_on = Settings(_env_file=None, extract_truncation_split_max_depth=1)
+        split_on = Settings(_env_file=None)
         with ExitStack() as stack:
             for obj, name, replacement in [
                 (pipeline, "get_pool", lambda: pool),
@@ -215,7 +215,7 @@ async def verify(db, dsn):
         rows = await raw_responses.list_raw_responses(db, store, source_id=cut_source)
         check("잘린 응답도 원래 응답으로 남고 실패로 표시된다",
               [(r["stage"], r["segment_id"], r["finish_reason"], r["parsed_ok"]) for r in rows]
-              == [("EXTRACT", "seg1", "MAX_TOKENS", False), ("EXTRACT", "seg1.1", "MAX_TOKENS", False),
+              == [("EXTRACT", "seg1", "MAX_TOKENS", False),
                   ("EXTRACT", "seg2", "STOP", True), ("ASSEMBLE", "plan0", "STOP", True)]
               and all("MAX_TOKENS" in r["error"] for r in rows if r["parsed_ok"] is False))
         seg = await db.fetchrow(
@@ -223,7 +223,7 @@ async def verify(db, dsn):
             "where store_id=$1 and job_id=$2 and source_id=$3", store, job, cut_source)
         facts = await db.fetch("select local_ref, segment_id from source_facts "
                                "where store_id=$1 and source_id=$2", store, cut_source)
-        check("끝내 잘린 구간은 부모 구간 ID 로 실패 기록된다 (PARTIAL)",
+        check("잘린 구간은 그 구간 ID 로 실패 기록된다 (PARTIAL)",
               seg["segments_total"] == 2 and seg["segments_failed"] == 1
               and list(seg["failed_segment_ids"]) == ["seg1"]
               and [(f["local_ref"], f["segment_id"]) for f in facts] == [("seg2:f1", "seg2")]
@@ -239,8 +239,9 @@ async def verify(db, dsn):
             async def _call(prompt, media, schema=None, max_output_tokens=None):
                 async with pool.acquire() as c:   # 모델 호출 중 연결을 쥐지 않는다 (max_size=1)
                     assert await c.fetchval("select 1") == 1
-                calls.append((tag, "EXTRACT" if schema is FactExtractionResult else "ASSEMBLE"))
-                if schema is FactExtractionResult:
+                is_facts = issubclass(schema, FactExtractionResult)  # 위치 표지 판 포함(S11)
+                calls.append((tag, "EXTRACT" if is_facts else "ASSEMBLE"))
+                if is_facts:
                     return gemini.CallResult(GOOD, {"prompt_tokens": 5, "completion_tokens": 7}, "STOP")
                 return _plan_reply(prompt, category)
             return _call
@@ -280,7 +281,8 @@ async def verify(db, dsn):
                 "order by fact_id", target_store, source)]
 
         # 8. 같은 자료 두 번 처리 — 두 번째 작업은 모델을 부르지 않는다
-        twice = await _new_source(db, store, user, "VOICE")
+        # 구간 경로(Gemini 재사용)는 영상에만 남았다(2026-11-07)
+        twice = await _new_source(db, store, user, "VIDEO")
         first_job = await new_job(store, twice)
         await run(store, twice, first_job, 81, "first")
         raw_after_first = await raw_responses.list_raw_responses(db, store, source_id=twice)
@@ -327,7 +329,7 @@ async def verify(db, dsn):
 
         # 9. 다른 매장 — 같은 입력이어도 재사용하지 않는다
         other_user = await db.fetchval("select owner_id from stores where store_id=$1", other_store)
-        other_source = await _new_source(db, other_store, other_user, "VOICE")
+        other_source = await _new_source(db, other_store, other_user, "VIDEO")
         other_job_id = await db.fetchval(
             "insert into ingest_jobs (store_id, created_by, title, status, category_version, "
             "prompt_version) values ($1,$2,'재사용 격리','EXTRACTING',1,'v1') returning job_id",
