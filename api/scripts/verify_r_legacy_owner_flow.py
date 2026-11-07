@@ -70,11 +70,12 @@ async def verify(pool, db):
         aid = int(first['owner_answer_id'])
         check('legacy endpoint retry replays one answer to two staff', first == repeated and first['delivered_sessions'] == 2)
         check('same text in other question remains waiting', await db.fetchval('select status from pending_questions where store_id=$1 and question_id=$2', sid, other) == 'WAITING')
-        check('legacy destinations open readable history', await db.fetchval("select count(*) from notification_events where store_id=$1 and aggregate_id=$2 and destination='/staff/chat'", sid, aid) == 2)
+        # 화면 개선 NAV-9: 서버가 새 알림 주소(app/notifications/destinations.py STAFF_ASK)를 바로 준다
+        check('legacy destinations open readable history', await db.fetchval("select count(*) from notification_events where store_id=$1 and aggregate_id=$2 and destination='/staff/ask'", sid, aid) == 2)
         fact = assertion('f1','음료P','water_amount','225',unit='ml').model_copy(update={'original_assertion':'음료P 물은 225ml'})
         check('W publishes new facts from legacy answer', await process(fact) == 'PUBLISHED')
         check('publication notification reaches both legacy recipients', await db.fetchval(
-            "select count(*) from notification_events where store_id=$1 and aggregate_id=$2 and dedupe_key like 'r-knowledge-ready:%' and destination='/staff/chat'", sid, aid) == 2)
+            "select count(*) from notification_events where store_id=$1 and aggregate_id=$2 and dedupe_key like 'r-knowledge-ready:%' and destination='/staff/ask'", sid, aid) == 2)
         detail = await v2_router.pending_detail(str(qid), claims, uid)
         check('detail retains old answer beside published revision', detail['answers'][-1]['knowledge_status'] == 'PUBLISHED' and detail['legacy_answers'][0]['answer'] == '보존할 이전 원문')
         snapshot, _, _ = await read_current_index(db, store_id=sid)
