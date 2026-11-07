@@ -41,8 +41,7 @@ def test_gemini_single_call_uses_merged_prompt_and_schema():
         out = asyncio.run(gemini.extract_facts_with_intake(
             source_id=1, source_type="SCAN", text="토요일 휴무", glossary=[], media=[],
             hints=(), usage_sink=None, usage_context=None, raw_sink=None))
-    # 2026-11-07 S11 — 위치 표지는 늘 켠다
-    assert seen["schema"] is IntakeLocatedFactExtractionResult
+    assert seen["schema"] is IntakeFactExtractionResult
     assert "## 추가 — 자료의 용도 판정" in seen["prompt"]
     assert out.intake_ranking[0].logic == "NOTICE"
 

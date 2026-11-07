@@ -49,10 +49,11 @@ def test_default_schemas_unchanged_by_locator_hints():
     assert set(Evidence.model_fields) == {"source_id", "timestamp_sec"}
 
 
-def test_schema_and_prompt_always_use_locator():
-    # 2026-11-07 S11 — 위치 표지는 늘 켠다(스위치 삭제). 끊김 검사가 줄 번호를 쓴다
+def test_schema_and_prompt_are_chosen_by_flag():
     from app.ingest.extract import gemini
-    assert gemini.facts_schema(NS()) is LocatedFactExtractionResult
+    assert gemini.facts_schema(NS()) is FactExtractionResult
+    assert gemini.facts_schema(NS(extract_locator_hints=False)) is FactExtractionResult
+    assert gemini.facts_schema(NS(extract_locator_hints=True)) is LocatedFactExtractionResult
     off = gemini.render_facts_prompt(source_type="SCAN", text="t", glossary=[])
     on = gemini.render_facts_prompt(source_type="SCAN", text="t", glossary=[], locator_hints=True)
     assert off != on and "[#12]" in on and "[#12]" not in off
@@ -387,12 +388,13 @@ async def test_segment_validation_uses_that_segment_text():
                segments[1][0]: ([_a("f1", subject="음료Y", attribute="얼음", value="3",
                                     unit="ml", original="음료Y 얼음 3개", ts=61)], 12)}
     with patch("app.ingest.extract.extract_facts", _fake_extract(results)), \
-         patch("app.config.get_settings", return_value=NS(extract_segment_concurrency=1)):
+         patch("app.config.get_settings", return_value=NS(
+             extract_truncation_split_max_depth=0, extract_segment_concurrency=1,
+             extract_clear_ungrounded_values=True)):
         outcome = await pipeline._extract_facts_all(
             source_id=5, source_type="VOICE", text="", media=[], glossary=[],
             segments=segments)
-    # 2026-11-07 S11 — 비우기는 늘 끔. 2구간의 근거 없는 ml 은 값을 두고 판정만 남는다
-    assert [a.unit for a in outcome.assertions] == ["ml", "ml"]
+    assert [a.unit for a in outcome.assertions] == ["ml", ""]
     assert [a.raw_response_id for a in outcome.assertions] == [11, 12]
     assert len([r for r in outcome.unresolved if "seg2:f1" in r]) == 1
 
@@ -488,11 +490,26 @@ def test_occurrence_sql_filters_by_store():
 
 
 @pytest.mark.asyncio
-async def test_mock_extractor_uses_the_locator_schema():
+async def test_hints_off_still_writes_occurrences_but_ignores_page():
+    conn = _OccurrenceConn()
+    with patch.object(pipeline.repo, "insert_source_facts", AsyncMock(return_value=[77, 78])), \
+         patch("app.config.get_settings", return_value=_settings(hints=False)):
+        await pipeline._persist_ledger(conn, 3, 5, "SCAN", [_a("f1", page=1), _a("f2", value="11",
+                                                                                 page=2)])
+    assert sorted((k[0], v[3], v[4]) for k, v in conn.rows.items()) == [
+        (77, "WHOLE_SOURCE", "{}"), (78, "WHOLE_SOURCE", "{}")]
+
+
+@pytest.mark.asyncio
+async def test_mock_extractor_uses_the_flag_schema():
     from app.ingest.extract import mock
-    with patch.object(mock, "get_settings", return_value=NS()):
+    with patch.object(mock, "get_settings", return_value=NS(extract_locator_hints=False)):
+        off = await mock.extract_facts(source_id=1, source_type="SCAN", text="t", glossary=[])
+    with patch.object(mock, "get_settings", return_value=NS(extract_locator_hints=True)):
         on = await mock.extract_facts(source_id=1, source_type="SCAN", text="t", glossary=[])
-    assert type(on) is LocatedFactExtractionResult
+    assert type(off) is FactExtractionResult and type(on) is LocatedFactExtractionResult
+    assert [a.evidence.timestamp_sec for a in off.assertions] == [
+        a.evidence.timestamp_sec for a in on.assertions]
 
 
 # ── 최종 수정: 기본은 기록만 (값을 비우지 않는다) ─────────────────────────
@@ -605,18 +622,20 @@ async def test_occurrence_row_carries_check_flags_but_hash_ignores_them():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_never_clears_ungrounded_values():
-    # 2026-11-07 S11 — 비우기 스위치를 없애고 늘 끔(기존 기본값)으로 고정했다
+async def test_pipeline_passes_clear_flag_from_settings():
     segments = [("[00:01] 음료Z 물 10", [])]
     results = {segments[0][0]: ([_a("f1", unit="g", original="음료Z 물 10", ts=1)], 11)}
-    with patch("app.ingest.extract.extract_facts", _fake_extract(results)), \
-         patch("app.config.get_settings", return_value=NS(extract_segment_concurrency=1)):
-        outcome = await pipeline._extract_facts_all(
-            source_id=5, source_type="VOICE", text="", media=[], glossary=[],
-            segments=segments)
-    assert outcome.assertions[0].unit == "g"
+    for flag, expected in ((False, "g"), (True, "")):
+        with patch("app.ingest.extract.extract_facts", _fake_extract(results)), \
+             patch("app.config.get_settings", return_value=NS(
+                 extract_truncation_split_max_depth=0, extract_segment_concurrency=1,
+                 extract_clear_ungrounded_values=flag)):
+            outcome = await pipeline._extract_facts_all(
+                source_id=5, source_type="VOICE", text="", media=[], glossary=[],
+                segments=segments)
+        assert outcome.assertions[0].unit == expected
 
 
-def test_clear_flag_is_gone():
+def test_clear_flag_defaults_off():
     from app.config import Settings
-    assert "extract_clear_ungrounded_values" not in Settings.model_fields
+    assert Settings.model_fields["extract_clear_ungrounded_values"].default is False

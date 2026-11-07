@@ -9,7 +9,6 @@ from fastapi import HTTPException
 
 from _fact_card_fixture import assertion, _mock_settings, _vectors
 from verify_w_fact_only import _extracting
-from _intake_stub import intake_context
 from app.cards.owner_answer_worker import process_next_owner_event
 from app.db_session import ShortSession
 from app.errors import ApiError
@@ -47,8 +46,7 @@ async def verify(pool, db):
             request_id=key, answer=text, expected_revision=revision)
 
     async def process(*facts):
-        # 입구 분류·한 번 호출은 합성 대역(유료 호출 0) — 2026-11-07 W 가 더함
-        with intake_context(), patch('app.ingest.extract.extract_facts', _extracting(*facts)), \
+        with patch('app.ingest.extract.extract_facts', _extracting(*facts)), \
                 patch('app.ingest.extract.get_settings', return_value=_mock_settings()), \
                 patch('app.reg.index_preparation.recorded_embeddings', _vectors):
             return await process_next_owner_event(pool, store_id=sid)

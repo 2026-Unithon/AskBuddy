@@ -5,7 +5,7 @@
 한 행씩 남긴다. `source_facts.locator` 는 처음 적힌 위치 그대로다.
 W2 가 이 표를 `fact_occurrences`(fact revision 기준)로 옮긴다 — 지금은 거기에 쓰지 않는다.
 
-위치 표지 (2026-11-07 부터 늘 켠다 — 모델이 쪽·번호를 준다):
+위치 표지 (플래그 `extract_locator_hints` 를 켰을 때만 모델이 쪽·번호를 준다):
   - PDF 텍스트  `[N쪽]`       → LocatedEvidence.page → PAGE {"page": N}
   - 카톡 메시지 `[#N]`        → LocatedEvidence.line → LINE {"line": N}
   - 음성·영상   `[mm:ss]`     → Evidence.timestamp_sec → TIMESTAMP (플래그와 무관, 이전과 같다)
@@ -15,7 +15,7 @@ W2 가 이 표를 `fact_occurrences`(fact revision 기준)로 옮긴다 — 지�
 서버 검사 (원장에 적기 전, 구간마다, 그 구간 입력 글을 보고 한다):
   - (켰을 때) 입력에 없는 쪽·줄 → 번호를 지우고(자료 전체로 떨어진다) 사유를 unresolved 에 남긴다
   - 원문과 입력 글 어디에도 없는 단위·규격 — **기본은 기록만 한다**(값을 남긴다)
-      · 입력이 글뿐이면 → 판정 UNGROUNDED_TEXT. (옛 플래그 `extract_clear_ungrounded_values` — 2026-11-07 삭제, 늘 끔) 를
+      · 입력이 글뿐이면 → 판정 UNGROUNDED_TEXT. 플래그 `extract_clear_ungrounded_values` 를
         켰을 때만 값을 비우고 판정 CLEARED 로 남긴다. 사실은 늘 남긴다
       · 첨부(그림·문서·영상 프레임)가 있으면 → 첨부에서 읽었을 수 있으므로 값을 **남기고**
         판정 NEEDS_IMAGE_CHECK('텍스트 근거 없음(이미지 확인 필요)')
@@ -238,7 +238,7 @@ def validate_assertions(assertions: list, *, source_type: str, text: str,
     """구간 하나의 사실을 입력과 대조한다. 판정은 사실의 check_flags 에 붙이고 사유 목록을 돌려준다.
 
     사실 자체는 버리지 않는다. 근거 없는 단위·규격은 기본으로 **값을 남기고 기록만** 한다.
-    `clear_ungrounded` 를 켜면(제품 경로는 늘 끔 — 2026-11-07 플래그 삭제) 글만 있는 입력의 값을 비운다.
+    `clear_ungrounded`(플래그 extract_clear_ungrounded_values)를 켜면 글만 있는 입력의 값을 비운다.
     없는 requires 참조는 늘 뺀다. 사유는 unresolved 로 간다.
     """
     reasons: list[str] = []

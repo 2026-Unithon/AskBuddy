@@ -50,31 +50,26 @@ def _settings(**kw):
     return Settings(_env_file=None).model_copy(update=kw)
 
 
-def test_every_non_video_source_is_single_call_regardless_of_size():
-    # 2026-11-07 S8·S11 — 스위치·크기 제한 없이 영상 밖은 늘 한 호출이다
-    cands = (Candidate("c1", Locator("PAGE", "1", "1"), "글"),)
-    for normalizer in ("DOC_TEXT", "DOC_IMAGE", "CHAT", "AUDIO", "OWNER_TEXT"):
-        for complete in (True, False):
-            assert route.single_call_eligible(ProbeResult(normalizer, cands, complete=complete),
-                                              _settings()) is True
-    assert route.single_call_eligible(ProbeResult("VIDEO", cands, complete=True), _settings()) is False
+def test_eligible_needs_switch_complete_and_normalizer():
+    small = ProbeResult("DOC_TEXT", (Candidate("c1", Locator("PAGE", "1", "1"), "글"),),
+                        complete=True)
+    assert route.single_call_eligible(small, _settings(intake_single_call_small=False)) is False
+    assert route.single_call_eligible(small, _settings(intake_single_call_small=True)) is True
+    big = ProbeResult("DOC_TEXT", small.candidates, complete=False)
+    assert route.single_call_eligible(big, _settings(intake_single_call_small=True)) is False
+    audio = ProbeResult("AUDIO", small.candidates, complete=True)
+    assert route.single_call_eligible(audio, _settings(intake_single_call_small=True)) is False
 
 
 def test_layout_scan_is_never_single_call():
     img = ProbeResult("DOC_IMAGE", (Candidate("c1", Locator("PAGE", "1", "1"), ""),),
                       complete=True)
-    s = _settings(scan_extract_mode="LAYOUT")
+    s = _settings(intake_single_call_small=True, scan_extract_mode="LAYOUT")
     assert route.single_call_eligible(img, s) is False
 
 
 def test_config_defaults():
     s = Settings(_env_file=None)
-    assert (s.intake_bundle_max_sources, s.intake_bundle_max_chars,
-            s.intake_bundle_max_images, s.intake_bundle_max_candidates) == (8, 12000, 12, 24)
-    # 2026-11-07 — 한 번 호출 추출 설정. 추출 쪽 환경변수 스위치는 없앴다(S11)
-    assert (s.extract_model, s.extract_anthropic_effort, s.extract_anthropic_max_tokens,
-            s.extract_max_attempts) == ("anthropic:claude-sonnet-5-5", "high", 64000, 3)
-    for gone in ("intake_bundle_enabled", "intake_single_call_small", "extract_locator_hints",
-                 "extract_truncation_split_max_depth", "pdf_input_mode",
-                 "extract_clear_ungrounded_values", "extract_max_output_tokens"):
-        assert not hasattr(s, gone), gone
+    assert (s.intake_bundle_enabled, s.intake_bundle_max_sources, s.intake_bundle_max_chars,
+            s.intake_bundle_max_images, s.intake_bundle_max_candidates,
+            s.intake_single_call_small) == (True, 8, 12000, 12, 24, False)

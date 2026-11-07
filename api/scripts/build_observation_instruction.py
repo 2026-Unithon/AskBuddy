@@ -8,7 +8,7 @@
     python3 api/scripts/build_observation_instruction.py PROCEDURE DOC_TEXT -o 지시문.md
     python3 api/scripts/build_observation_instruction.py --list
     python3 api/scripts/build_observation_instruction.py --build-all   # 지시문 30개를 지시문/ 폴더에 다시 만든다
-    python3 api/scripts/build_observation_instruction.py --scaffold    # api/eval/data/추출결과/관찰/ 에 결과 넣을 폴더를 만든다(있는 파일은 건드리지 않음)
+    python3 api/scripts/build_observation_instruction.py --scaffold    # 추출결과/관찰/ 에 결과 넣을 폴더를 만든다(있는 파일은 건드리지 않음)
 """
 import argparse
 import pathlib
@@ -18,7 +18,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = ROOT / "docs" / "dev" / "templates" / "extraction_observation"
 BUILT_DIR = TEMPLATE_DIR / "지시문"
-SCAFFOLD_DIR = ROOT / "api" / "eval" / "data" / "추출결과" / "관찰"
+SCAFFOLD_DIR = ROOT / "추출결과" / "관찰"
 # 폴더·파일 순서와 한글 이름표
 LOGIC_ORDER = [("RECIPE", "레시피"), ("PROCEDURE", "업무절차"), ("POLICY", "운영규칙"),
                ("REFERENCE", "매장정보"), ("NOTICE", "공지일정")]

@@ -15,7 +15,7 @@ from app.ingest import extract, raw_responses
 from app.ingest.extract import gemini, mock
 from app.ingest import pipeline
 from app.ingest.pipeline import _extract_facts_all
-from app.ingest.schemas import (LocatedFactExtractionResult, CardPlanBatch, Evidence, ExtractedAssertion,
+from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion,
                                 FactExtractionResult)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -227,8 +227,7 @@ async def test_mock_extract_and_assemble_write_same_record():
     (_, first), (_, second) = sink.saved
     assert first.mode == second.mode == "mock"
     assert (first.stage, second.stage) == ("EXTRACT", "ASSEMBLE")
-    # 2026-11-07 S11 — 위치 표지 판이 늘 쓰인다
-    assert LocatedFactExtractionResult.model_validate_json(first.response_text).model_dump() == facts.model_dump()
+    assert FactExtractionResult.model_validate_json(first.response_text).model_dump() == facts.model_dump()
     assert facts.raw_response_id == 101 and cards.raw_response_id == 102
     assert [m[2] for m in sink.marks] == [True, True]
 

@@ -276,14 +276,12 @@ class IngestOwnerTextRouteTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(owner_text.repo, "glossary", AsyncMock(return_value=[])), \
              patch.object(owner_text.repo, "enabled_categories", AsyncMock(return_value={"기타": 1})), \
              patch.object(owner_text.repo, "set_status", AsyncMock()), \
-             patch("app.ingest.extract.single_call.extract_single", extract), \
+             patch("app.ingest.extract.extract_facts", extract), \
              patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
              patch.object(pipeline, "_prepare_fact_assembly", prepare), \
              patch.object(pipeline, "_persist_fact_cards", AsyncMock(return_value=0)), \
              patch.object(owner_text, "answer_fact_count", AsyncMock(return_value=0)):
-            from app.ingest.extract.single_call import SingleCallOutcome
-            extract.return_value = SingleCallOutcome(
-                type("R", (), {"assertions": [], "unresolved": []})(), [], 1, "")
+            extract.return_value = type("R", (), {"assertions": [], "unresolved": []})()
             await owner_text.ingest_owner_text(Pool(), store_id=7, source_id=SOURCE,
                                                question="q", answer="a", run_tag=1,
                                                route=_stored(logic))

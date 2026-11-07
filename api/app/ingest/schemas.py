@@ -127,19 +127,6 @@ class IntakeLocatedFactExtractionResult(LocatedFactExtractionResult):
     intake_reason: str = ""
 
 
-# ── 한 번 호출 추출 (2026-11-07, W_SINGLE_CALL_EXTRACT_DESIGN) — 분류+사실+줄 처리 보고 ─────
-class CoverageItem(BaseModel):
-    """입력 줄 하나의 처리 보고. 그 줄에서 나온 사실 이름표, 또는 업무 내용이 없다는 짧은 이유."""
-    line: int
-    refs: list[str] = []
-    no_content: str = ""
-
-
-class SingleCallExtractionResult(IntakeLocatedFactExtractionResult):
-    # 서버가 빠진 줄 번호로 끊김을 판정한다(정답 없이 입력만 본다)
-    coverage: list[CoverageItem] = []
-
-
 # ── 사실 조립 계획 (W3a) ──────────────────
 # 모델은 이름표(E…·F…)·카테고리·블록 종류만 낸다. 제목·문장·값 필드를 두지 않는다 —
 # 카드 제목과 본문은 서버가 사실 판에서 렌더링한다(card_plan).
@@ -337,17 +324,6 @@ class IngestJobSource(BaseModel):
     error: dict[str, str] | None = None
     # D20: DELETED 면 원본을 열 수 없고 다시 처리하지 않는다. 사실·카드·인용은 남는다
     source_availability: Literal["AVAILABLE", "DELETED", "UNAVAILABLE"] = "AVAILABLE"
-    # 한 번 호출이 끝내 처리하지 못한 줄 범위(S9). 화면이 위치·사유와 [다시 시도]/[직접 적기]를 보인다(S10)
-    unprocessed_ranges: list["UnprocessedRange"] = []
-
-
-class UnprocessedRange(BaseModel):
-    from_line: int
-    to_line: int
-    reason: Literal["TRUNCATED", "CALL_FAILED", "EMPTY"]
-    first_line: str = ""
-    attempts: int = 0
-    owner_retry_used: bool = False
 
 
 class SourceDeleted(BaseModel):

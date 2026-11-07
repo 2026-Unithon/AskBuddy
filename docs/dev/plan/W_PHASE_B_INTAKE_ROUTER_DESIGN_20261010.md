@@ -53,7 +53,7 @@
 | G5 | 업로드 화면 문구 "…찍거나 파일로 넣으면 레시피와 오늘 할 일로 알아서 나눠요" — 점주가 용도를 고르지 않는다 | `web/app/owner/add/page.tsx:11` |
 | G6 | 체크리스트 항목 = 연결 카드 공개 본문을 줄로 자른 것, 체크 키 `(card_version_id, line_no)`, 제출 `total_lines`·`done_lines` | `api/app/checklist/repository.py:261-276·441-448`, `checklist/calendar.py split_lines`, `20261006090000_checklist.sql` |
 | G7 | 모델 호출은 원가 원장(`ai_usage_attempts`)·원래 응답 저장·재사용 키 경로가 있다 | `api/app/ingest/extract/gemini.py`, `measured_call` |
-| G8 | 예전 관찰 방식: 외부 앱 실행(Claude opus·sonnet, GPT 2종, Gemini)에 자료를 주고 **사실 JSON + 작업 기록**(단계·한 일·도구 실행·왜·바뀐 것 표 + 실행 코드)을 받음 → 실행 간 전략 비교로 SCAN 다단계 설계(쪽 이미지 → 구역 → 띠 확대 전사 → 재확인 → 코드 전개), 칸 단위 다수결로 참조 생성. **당시 지시문 원본은 저장소에 없다** | Git 제외 `api/eval/data/추출결과/`, `api/scripts/build_consensus_reference.py`(레시피 표 전용 키·실행 이름 하드코딩), `docs/dev/plan/W_SCAN_LAYOUT_EXTRACTION_DESIGN.md`, `docs/dev/review/W_EXTRACTION_DIAGNOSIS_20261005.md`, `docs/dev/plan/W_REFERENCE_EXTRACTION_20260920.md` |
+| G8 | 예전 관찰 방식: 외부 앱 실행(Claude opus·sonnet, GPT 2종, Gemini)에 자료를 주고 **사실 JSON + 작업 기록**(단계·한 일·도구 실행·왜·바뀐 것 표 + 실행 코드)을 받음 → 실행 간 전략 비교로 SCAN 다단계 설계(쪽 이미지 → 구역 → 띠 확대 전사 → 재확인 → 코드 전개), 칸 단위 다수결로 참조 생성. **당시 지시문 원본은 저장소에 없다** | Git 제외 `추출결과/`, `api/scripts/build_consensus_reference.py`(레시피 표 전용 키·실행 이름 하드코딩), `docs/dev/plan/W_SCAN_LAYOUT_EXTRACTION_DESIGN.md`, `docs/dev/review/W_EXTRACTION_DIAGNOSIS_20261005.md`, `docs/dev/plan/W_REFERENCE_EXTRACTION_20260920.md` |
 
 ## 4. 두 축
 
@@ -237,7 +237,7 @@
      - `CHAT`: 날짜·화자 구분, 정정 메시지 추적 / `DATE`+`LINE` / "나중 메시지가 앞의 값을 바꾼 곳"
      - `OWNER_TEXT`(+첨부): 질문 맥락과 답변 구분 / `WHOLE` 또는 첨부의 형식 / "질문에 답한 사실과 덧붙인 사실 구분"
    - 조립 결과 예: `RECIPE × DOC_IMAGE` = 예전 지시문과 사실상 같다(회귀 기준). 조립 스크립트 `api/scripts/build_observation_instruction.py <LOGIC> <NORMALIZER>` 가 공통 본문 + 두 부록을 이어 붙여 한 파일로 낸다.
-2. **`RUN_SHEET.md` — 실행 기록부.** 실행 id(익명), 로직·형식, 앱·모델·추론 설정, 입력 형태(원본/이미지 변환/확대 여부), 소요 시간, 결과 건수, 저장 경로(Git 제외 `api/eval/data/추출결과/<로직>/<자료>/<실행 id>/`).
+2. **`RUN_SHEET.md` — 실행 기록부.** 실행 id(익명), 로직·형식, 앱·모델·추론 설정, 입력 형태(원본/이미지 변환/확대 여부), 소요 시간, 결과 건수, 저장 경로(Git 제외 `추출결과/<로직>/<자료>/<실행 id>/`).
 3. **`ANALYSIS.md` — 전략 비교 양식.** 실행별 작업 기록을 단계 단위로 맞춰 표로: 공통 단계(과반 실행이 한 것), 갈린 단계와 결과 차이, 값이 수렴한 조건(예: 확대 배율·띠 단위), 결과 건수·참조 대비 재현. 결론 = **"평균적인 처리 순서" → 우리 추출기의 단계·코드 검사·모델 역할 분담 초안**.
 4. **다수결 참조 일반화:** `build_consensus_reference.py` 의 레시피 전용 부분(실행 이름·우선순위 하드코딩, 칸 키)을 로직별 키 함수와 실행 목록 파일(`RUN_SHEET` 에서 읽음)로 분리한다. 기존 레시피 참조 결과는 바뀌지 않게(같은 입력 → 같은 출력 회귀 테스트).
 - 이 절차로 얻은 결론은 로직별 추출기 설계 문서의 근거로 쓰고, 참조는 정답지가 아니다(`W_REFERENCE_EXTRACTION_20260920.md` 역할 한계 그대로).

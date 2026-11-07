@@ -820,23 +820,8 @@ export type IngestJobDetail = {
     card_count: number;
     error: { code: string; message: string } | null;
     source_availability?: SourceAvailability;
-    // 한 번 호출이 끝내 정리하지 못한 줄 범위(S9). 없으면 빈 목록
-    unprocessed_ranges?: UnprocessedRange[];
   }>;
   review_destination: string;
-};
-
-export const UNPROCESSED_LINES_CODE = "UNPROCESSED_LINES";
-
-// from_line·to_line 이 0 이면 줄 번호가 없는 자료(사진 등) 전체다
-export type UnprocessedRange = {
-  from_line: number;
-  to_line: number;
-  reason: "TRUNCATED" | "CALL_FAILED" | "EMPTY";
-  first_line: string;
-  attempts: number;
-  // 사장님이 이미 [다시 시도]를 쓴 범위 — 버튼을 다시 그리지 않는다(S10)
-  owner_retry_used: boolean;
 };
 
 export function isIngestJobActive(status: IngestJobStatus) {
