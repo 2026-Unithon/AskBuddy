@@ -13,6 +13,7 @@ import {
   CardLink,
   CheckRow,
   Chip,
+  Coachmark,
   Composer,
   ComposerTool,
   Empty,
@@ -33,6 +34,7 @@ import {
   STAFF_TABS,
   Stagger,
   SwipeRow,
+  Segmented,
   Switch,
   TabBar,
   useFeedback,
@@ -49,6 +51,7 @@ function Preview() {
   if (screen === "feedback") return <FeedbackPreview />;
   if (screen === "gestures") return <GesturesPreview />;
   if (screen === "forms") return <FormsPreview />;
+  if (screen === "guide") return <GuidePreview />;
 
   if (screen === "a2") {
     return (
@@ -172,6 +175,28 @@ function Preview() {
       <CardLink href="/dev/kit?s=a5" title="디카페인 원두 어디 있어요?" meta="답하면 카드로 남아요" />
       <CardLink href="/dev/kit?s=a5" title="오트밀크 라떼도 시럽 2펌프인가요?" meta="답하면 카드로 남아요" />
       <Caption>질문이 오면 바로 알려드려요</Caption>
+    </Screen>
+  );
+}
+
+// ?s=guide: 코치마크·세그먼트·스크롤에 숨는 입력창 (계획 4a)
+function GuidePreview() {
+  const [seg, setSeg] = useState("a");
+  return (
+    <Screen hideFooterOnScroll footer={<Button>아래 입력창</Button>}>
+      <PageHeader title="안내" />
+      <Coachmark
+        id="dev"
+        steps={[
+          { target: "#coach-a", text: "첫 번째" },
+          { target: "#coach-missing", text: "없는 대상" },
+          { target: "#coach-b", text: "두 번째" },
+        ]}
+      />
+      <p id="coach-a">가 자리</p>
+      <Segmented label="예시 세그먼트" value={seg} onChange={setSeg} options={[{ value: "a", label: "가" }, { value: "b", label: "나" }]} />
+      <p id="coach-b">나 자리</p>
+      <div className="h-[1200px]" />
     </Screen>
   );
 }

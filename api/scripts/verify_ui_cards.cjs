@@ -350,4 +350,15 @@ test('검토 5 승인하면 함께 공개되는 다른 카드를 알려 준다',
   await ctx.close();
 });
 
+test('o05c 레시피 카테고리는 두 칸, 나머지는 한 칸씩(2026-11-07 스케치)', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
+  const widths = async (name) => page.getByRole('region', { name }).locator('[data-status]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  const section = async (name) => Math.round(await page.getByRole('region', { name }).evaluate((e) => e.getBoundingClientRect().width));
+  const recipe = await widths('음료 레시피'), full = await section('음료 레시피');
+  assert.ok(recipe.every((w) => w < full / 2 + 4), `레시피 ${recipe} / ${full}`);
+  const stock = await widths('재고 위치'), stockFull = await section('재고 위치');
+  assert.ok(stock.every((w) => w > stockFull - 8), `재고 ${stock} / ${stockFull}`);
+  await ctx.close();
+});
+
 run();

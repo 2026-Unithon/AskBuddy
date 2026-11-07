@@ -6,7 +6,9 @@ const { test, run } = createSuite('ui-nav');
 
 test('NAV-1 질문 상세의 앱 뒤로는 왔던 오늘 매장, 폰 뒤로로 상세에 돌아가지 않는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner');
-  await page.getByText('디카페인 원두는 어디 있어요?').first().click(); await to(page, '/owner/questions/101');
+  // 계획 4a: 질문은 시트로 열리고, 상세는 시트의 '자세히 보기'로 간다
+  await page.getByText('디카페인 원두는 어디 있어요?').first().click();
+  await page.getByRole('link', { name: '자세히 보기' }).click(); await to(page, '/owner/questions/101');
   await back(page).click(); await to(page, '/owner');
   assert.notEqual(await phoneBack(page), '/owner/questions/101');
   await ctx.close();

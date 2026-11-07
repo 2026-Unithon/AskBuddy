@@ -17,6 +17,8 @@ const fs = require("node:fs");
   };
   async function setup(role = "STAFF", width = 390) {
     const ctx = await browser.newContext({ viewport: { width, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     const date = new Date().toLocaleDateString("sv-SE", {
       timeZone: "Asia/Seoul",
     });
@@ -504,8 +506,8 @@ const fs = require("node:fs");
         .getByRole("progressbar", { name: "매장 체크리스트 진행" })
         .waitFor();
       check(
-        "점주 현황 실제 개수",
-        await page.getByText("체크 0/2개").isVisible(),
+        "점주 현황 남은 수(화면 개선 o01b)",
+        await page.getByText("아침 2개 남았어요").isVisible(),
       );
       await page.goto(`${BASE}/owner/shifts`);
       await page.getByRole("heading", { name: "아침", exact: true }).waitFor();

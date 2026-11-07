@@ -19,6 +19,8 @@ const path = require('node:path');
     citations: action === 'ANSWER' ? [{ card_id: '1', card_version_id: '2', block_id: 'b1', source_availability: 'AVAILABLE' }] : [] });
   async function context(role) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     await ctx.route('http://localhost:8000/**', async (route) => {
       const req = route.request(), url = new URL(req.url()), p = url.pathname;
       const body = req.method() === 'POST' ? req.postDataJSON() : null;
@@ -134,7 +136,9 @@ const path = require('node:path');
     ownerPage.on('pageerror', (e) => errors.push(e.message));
     const answerBox = () => ownerPage.getByLabel('직원에게 보낼 답');
     await ownerPage.goto('http://127.0.0.1:3011/owner');
-    await ownerPage.getByRole('link', { name: /미확인 업무/ }).click();
+    // 화면 개선 계획 4a: 오늘 매장 질문은 시트로 열리고, 상세는 '자세히 보기'
+    await ownerPage.getByRole('button', { name: /미확인 업무/ }).click();
+    await ownerPage.getByRole('link', { name: '자세히 보기' }).click();
     await ownerPage.waitForURL('**/owner/questions/1');
     await answerBox().waitFor();
     check('owner today lists waiting question', true);
@@ -144,6 +148,9 @@ const path = require('node:path');
     check('old owner v2 deep link opens answer screen', await ownerPage.locator('[data-back]').first().isVisible());
     await answerBox().fill('  점주 원문\n그대로  ');
     await ownerPage.getByRole('button', { name: '넣기', exact: true }).click();
+    // 화면 개선 계획 4a(o10c): 보낸 순간 '답을 보냈어요', 다시 열면 카드 반영 상태
+    await ownerPage.getByText('답을 보냈어요', { exact: true }).waitFor();
+    await ownerPage.reload();
     await ownerPage.getByText('카드로 정리하는 중', { exact: true }).waitFor();
     check('owner raw submission preserved', state.answers[0].answer === '  점주 원문\n그대로  ');
     check('retry hidden before terminal failure', await ownerPage.getByRole('button', { name: '카드로 다시 정리하기' }).count() === 0);

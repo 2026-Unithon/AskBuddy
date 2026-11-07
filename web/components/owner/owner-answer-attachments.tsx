@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Caption, ErrorInline } from "@/components/kit";
 import { ApiError, apiErrorMessage, attachOwnerAnswerFile, type IngestSourceType, type IntakeHint } from "@/lib/api";
 import { acceptAttribute, registerFileSource, sourceTypeFor, tooLargeMessage } from "@/lib/ingest-submit";
 import { ingestCapabilitiesQuery, queryKeys } from "@/lib/query";
@@ -28,10 +27,11 @@ type Attachment = {
 };
 
 /**
- * 점주 답변 파일 첨부(선택). 답을 보내기 전·후 모두 붙일 수 있다 — 답변 처리가 끝난 뒤 붙은 첨부는
+ * 점주 답변 파일 첨부(선택, o10b). 답을 보내기 전·후 모두 붙일 수 있다 — 답변 처리가 끝난 뒤 붙은 첨부는
  * 서버가 보충 작업을 만든다. 작업(job) 상태는 서버가 갖고 작업 목록 화면이 보여 준다.
+ * 화면은 입력창의 📎 도구로 고르고, 붙인 파일 줄과 종류 칩은 입력창 안팎에 놓는다.
  */
-export function OwnerAnswerAttachments({ questionId }: { questionId: number }) {
+export function useAnswerAttachments(questionId: number) {
   const { state } = useApp();
   const queryClient = useQueryClient();
   const caps = useQuery(ingestCapabilitiesQuery(state.token, state.storeId));
@@ -67,18 +67,6 @@ export function OwnerAnswerAttachments({ questionId }: { questionId: number }) {
     },
   });
 
-  if (caps.error) {
-    return (
-      <ErrorInline
-        message={apiErrorMessage(caps.error, "파일 첨부를 준비하지 못했어요.")}
-        onRetry={() => void caps.refetch()}
-        retrying={caps.isRefetching}
-      />
-    );
-  }
-  if (!caps.data) return null;
-  const capabilities = caps.data;
-
   function patch(id: number, next: Partial<Attachment>) {
     setAttachments((list) => list.map((a) => (a.id === id ? { ...a, ...next } : a)));
   }
@@ -107,16 +95,16 @@ export function OwnerAnswerAttachments({ questionId }: { questionId: number }) {
   }
 
   function handlePick(files: FileList | null) {
-    if (!files) return;
+    if (!files || !caps.data) return;
     setPickError(null);
     const rejected: string[] = [];
     for (const file of Array.from(files)) {
-      const sourceType = sourceTypeFor(file, capabilities);
+      const sourceType = sourceTypeFor(file, caps.data);
       if (!sourceType) {
         rejected.push(`'${file.name}'은(는) 올릴 수 없는 형식이에요.`);
         continue;
       }
-      const tooLarge = tooLargeMessage(file, sourceType, capabilities);
+      const tooLarge = tooLargeMessage(file, sourceType, caps.data);
       if (tooLarge) {
         rejected.push(tooLarge);
         continue;
@@ -129,63 +117,76 @@ export function OwnerAnswerAttachments({ questionId }: { questionId: number }) {
     if (fileInput.current) fileInput.current.value = "";
   }
 
-  return (
-    <div className="flex w-full flex-col gap-2 rounded-[20px] bg-surface px-[18px] py-4 shadow-card" data-testid="attach-area">
-      <Caption>사진, 문서, 음성을 함께 붙이면 카드로 같이 정리해요(선택)</Caption>
+  return {
+    caps,
+    attachments,
+    hints,
+    setHints,
+    pickError,
+    open: () => fileInput.current?.click(),
+    retry: (entry: Attachment) => void runAttach(entry),
+    remove: (id: number) => setAttachments((list) => list.filter((x) => x.id !== id)),
+    input: (
       <input
         ref={fileInput}
         type="file"
         multiple
         hidden
         data-testid="attach-input"
-        accept={acceptAttribute(capabilities)}
+        accept={caps.data ? acceptAttribute(caps.data) : undefined}
         onChange={(e) => handlePick(e.target.files)}
       />
-      <IntakeHintChips value={hints} onChange={setHints} />
-      <Button variant="secondary" data-testid="attach-button" onClick={() => fileInput.current?.click()}>
-        파일 첨부
-      </Button>
-      {pickError && (
+    ),
+  };
+}
+
+export type AnswerAttachments = ReturnType<typeof useAnswerAttachments>;
+
+/** 입력창 첨부 자리: 파일마다 한 줄(올리는 중·끝·실패와 다시·빼기). */
+export function AnswerAttachmentRows({ files }: { files: AnswerAttachments }) {
+  if (files.attachments.length === 0 && !files.pickError) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {files.pickError && (
         <p role="alert" data-testid="attach-pick-error" className="text-[13px] font-semibold text-danger-700">
-          {pickError}
+          {files.pickError}
         </p>
       )}
-      {attachments.length > 0 && (
-        <ul className="flex flex-col gap-1.5" data-testid="attach-list">
-          {attachments.map((a) => (
-            <li
-              key={a.id}
-              data-testid="attach-item"
-              data-status={a.status}
-              className="flex items-center justify-between gap-2 rounded-xl bg-background px-3 py-2 text-[13px]"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-ink">{a.file.name}</p>
-                <p className={a.status === "FAILED" ? "text-danger-700" : "text-ink-muted"}>
-                  {a.status === "UPLOADING" && "올리는 중"}
-                  {a.status === "DONE" && (a.message ?? "첨부 완료")}
-                  {a.status === "FAILED" && (a.message ?? "첨부하지 못했어요.")}
-                </p>
+      <ul className="flex flex-col gap-1.5" data-testid="attach-list">
+        {files.attachments.map((a) => (
+          <li
+            key={a.id}
+            data-testid="attach-item"
+            data-status={a.status}
+            className={`flex items-center justify-between gap-2 rounded-[12px] px-2.5 py-1.5 text-[12px] font-medium ${
+              a.status === "FAILED" ? "border border-danger-500 bg-danger-50 text-danger-700" : "bg-empty text-primary"
+            }`}
+          >
+            <div className="min-w-0">
+              <p className="truncate">{a.file.name}</p>
+              {a.status === "UPLOADING" && <p className="text-ink-muted">올리는 중</p>}
+              {a.status === "DONE" && a.message && <p className="text-ink-muted">{a.message}</p>}
+              {a.status === "FAILED" && <p>{a.message ?? "첨부하지 못했어요."}</p>}
+            </div>
+            {a.status === "FAILED" && (
+              <div className="flex shrink-0 gap-1">
+                <button type="button" data-testid="attach-retry" onClick={() => files.retry(a)} className="min-h-8 rounded-[8px] bg-surface px-2.5 font-bold text-danger-700">
+                  다시
+                </button>
+                <button type="button" data-testid="attach-remove" onClick={() => files.remove(a.id)} className="min-h-8 px-2 text-ink-muted">
+                  빼기
+                </button>
               </div>
-              {a.status === "FAILED" && (
-                <div className="flex shrink-0 gap-1">
-                  <button type="button" data-testid="attach-retry" onClick={() => void runAttach(a)} className="min-h-11 px-2 font-bold text-primary">
-                    다시 시도
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="attach-remove"
-                    onClick={() => setAttachments((list) => list.filter((x) => x.id !== a.id))}
-                    className="min-h-11 px-2 font-semibold text-ink-muted"
-                  >
-                    빼기
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
+}
+
+/** 파일을 하나라도 붙였을 때만 종류 칩을 보인다(o10b). 고른 종류는 그 뒤에 붙이는 파일부터 쓴다. */
+export function AnswerAttachmentHints({ files }: { files: AnswerAttachments }) {
+  if (files.attachments.length === 0) return null;
+  return <IntakeHintChips value={files.hints} onChange={files.setHints} />;
 }

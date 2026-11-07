@@ -6,6 +6,8 @@ export { AnswerBubble, QuestionBubble } from "@/components/kit/chat";
 export { CheckRow } from "@/components/kit/checkbox";
 export { AskBar, Composer, ComposerTool } from "@/components/kit/composer";
 export { Banner, ConfirmDialog, CountBadge, FeedbackProvider, useFeedback } from "@/components/kit/feedback";
+export { Coachmark } from "@/components/kit/coachmark";
+export { Segmented } from "@/components/kit/segmented";
 export { Switch } from "@/components/kit/switch";
 export { Stagger } from "@/components/kit/stagger";
 export { SwipeRow, type SwipeAction } from "@/components/kit/swipe-row";

@@ -54,9 +54,14 @@ function initialState(overrides) {
       { card_id: 6, review_status: 'APPROVED', title: '우유 발주', content: '화, 금 오전 10시 전 발주, 재고 6개 이하일 때', category_id: 12 },
     ],
     pending: [
-      { pending_id: '101', question: '디카페인 원두는 어디 있어요?', status: 'WAITING' },
-      { pending_id: '102', question: '오트밀크 라떼도 시럽 2펌프인가요?', status: 'WAITING' },
+      { pending_id: '101', question: '디카페인 원두는 어디 있어요?', status: 'WAITING', answers: [] },
+      { pending_id: '102', question: '오트밀크 라떼도 시럽 2펌프인가요?', status: 'WAITING', answers: [] },
+      { pending_id: '103', question: '포스 영수증 용지 교체는 어떻게 해요?', status: 'ANSWERED', answers: [
+        { owner_answer_id: '7', answer: '포스 오른쪽 서랍 안에 예비 용지 있어요.', revision: 1, knowledge_status: 'PUBLISHED', knowledge_availability: 'CURRENT', proposal_status: null, event_id: null, attempts: 0, retry_available: false }] },
     ],
+    answerConflict: false,
+    answerDelayMs: 0,
+    answerRequests: {},
     notifications: [
       { notification_id: 3, event_type: 'PENDING_QUESTION', aggregate_type: 'PENDING_QUESTION', aggregate_id: 101, title: '직원 질문이 왔어요', body: '디카페인 원두는 어디 있어요?', destination: '/owner/questions/101', delivery_status: 'REQUESTED', read_at: null, action_completed: false, created_at: NOW },
       { notification_id: 2, event_type: 'INGEST_COMPLETED', aggregate_type: 'INGEST_JOB', aggregate_id: 7, title: '카드 정리가 끝났어요', body: '레시피 메모.jpg 에서 카드 4장을 만들었어요.', destination: '/owner/cards?status=all&job_id=7', delivery_status: 'REQUESTED', read_at: null, action_completed: false, created_at: NOW },
@@ -135,11 +140,25 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/notifications/support') payload = { push_configured: false, vapid_public_key: null, guide_version: '1', guide_seen: true };
     else if (p === '/notifications/my-subscriptions') payload = { subscription_id: 0, enabled: false };
     // 사장 질문
-    else if (p === '/learn/v2/pending') payload = { questions: state.pending, next_after: null };
+    else if (p === '/learn/v2/pending') {
+      const status = url.searchParams.get('status');
+      payload = { questions: state.pending.filter((q) => !status || q.status === status).map(({ pending_id, question, status: s }) => ({ pending_id, question, status: s })), next_after: null };
+    } else if (/^\/learn\/v2\/pending\/\d+\/answers$/.test(p) && m === 'POST') {
+      const q = state.pending.find((x) => x.pending_id === p.split('/')[4]);
+      if (state.answerDelayMs) await new Promise((r) => setTimeout(r, state.answerDelayMs));
+      if (state.answerConflict) return reply({ error: { code: 'ANSWER_REVISION_CONFLICT', message: '답이 바뀌었습니다.' } }, 409);
+      // 같은 request_id 는 같은 응답(멱등)
+      if (state.answerRequests[body.request_id]) payload = state.answerRequests[body.request_id];
+      else {
+        const answer = { owner_answer_id: String(100 + q.answers.length), answer: body.answer, revision: q.answers.length + 1, knowledge_status: 'PENDING', knowledge_availability: 'NOT_APPLICABLE', proposal_status: null, event_id: null, attempts: 0, retry_available: false };
+        q.answers.push(answer); q.status = 'ANSWERED';
+        payload = state.answerRequests[body.request_id] = { owner_answer_id: answer.owner_answer_id, knowledge_status: 'PENDING' };
+      }
+    }
     else if (/^\/learn\/v2\/pending\/\d+$/.test(p)) {
       const q = state.pending.find((x) => x.pending_id === p.split('/').at(-1));
       if (!q) return reply({ error: { message: '없는 질문' } }, 404);
-      payload = { pending_id: q.pending_id, status: q.status, question: q.question, question_contract: 'v2', legacy_answers: [], answers: [],
+      payload = { pending_id: q.pending_id, status: q.status, question: q.question, question_contract: 'v2', legacy_answers: [], answers: q.answers ?? [],
         occurrences: [{ receipt_id: '1', original_question: q.question, resolved_query: { confirmed_slots: {} }, context_snapshot: null }, { receipt_id: '2', original_question: q.question, resolved_query: { confirmed_slots: {} }, context_snapshot: null }] };
     }
     // 카드
@@ -229,6 +248,7 @@ function syntheticApi(role, overrides = {}) {
       payload = {};
     }
     else if (p === '/ingest/sources' && m === 'POST') payload = { source_id: 31, status: 'QUEUED', duplicate: false };
+    else if (/^\/ingest\/owner-answers\/\d+\/attachments$/.test(p) && m === 'POST') payload = { job_id: 7 };
     else if (p === '/ingest/jobs' && m === 'POST') payload = { job_id: 7, status: 'QUEUED' };
     else if (p === '/ingest/jobs' && m === 'GET') {
       const status = jobStatus();

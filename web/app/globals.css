@@ -246,6 +246,12 @@ select:disabled {
   }
 }
 
+@keyframes grow-from-zero {
+  from {
+    width: 0;
+  }
+}
+
 @keyframes check-pop {
   from {
     transform: scale(0.6);

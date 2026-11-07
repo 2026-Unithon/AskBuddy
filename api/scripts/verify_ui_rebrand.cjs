@@ -36,6 +36,8 @@ const BASE = 'http://127.0.0.1:3011';
   async function context(role, { signedIn = true } = {}) {
     let sessionActive = signedIn, sessionRole = role;
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     await ctx.route('http://localhost:8000/**', async (route) => {
       const req = route.request(), url = new URL(req.url()), p = url.pathname, m = req.method();
       const body = ['POST', 'PATCH', 'PUT'].includes(m) && req.postData() ? req.postDataJSON() : null;

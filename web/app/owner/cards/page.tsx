@@ -21,7 +21,8 @@ import {
 } from "@/components/kit";
 import { CardTile, tileStatus } from "@/components/owner/card-tile";
 import { apiErrorMessage, mutateProductCard, type CardFilters, type CardListItem } from "@/lib/api";
-import { cardsInfiniteQuery, cardsQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
+import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
+import { useCardReviewCount } from "@/lib/card-review-count";
 import { useApp } from "@/lib/store";
 
 // 카드 상태(2026-11-06 사용자): 공개 = 살아 있는 카드, 검수 필요 = 뭔가 이상한 카드(제안 걸린 카드 포함),
@@ -35,6 +36,13 @@ const FILTERS: { value: "all" | "approved" | "needs_review" | "pending"; label: 
 type FilterValue = (typeof FILTERS)[number]["value"];
 
 const SEARCH_DELAY_MS = 250;
+
+// 레시피 카테고리는 두 칸, 공지·위치·순서 같은 나머지는 한 칸씩(2026-11-07 사용자 스케치).
+// 카테고리에 종류 정보가 없어 이름으로 가른다(서버 카테고리 종류가 생기면 그걸로 바꾼다: 백로그)
+const RECIPE_NAME = /레시피|음료|메뉴|제조|제작/;
+function isRecipeCategory(name: string) {
+  return RECIPE_NAME.test(name);
+}
 
 // O9 카드: 카테고리 섹션 + 2열 카드 + 검색 + 상태 필터. 알림 딥링크의 status/job_id/category_id/query 를 그대로 받는다.
 function CardsScreen() {
@@ -67,8 +75,7 @@ function CardsScreen() {
   );
   const cards = useInfiniteQuery(cardsInfiniteQuery(state.token, state.storeId, filters));
   const proposals = useQuery(proposalsQuery(state.token, state.storeId));
-  // 뱃지: 검수 필요 카드와 제안 걸린 카드의 합집합(같은 카드를 두 번 세지 않는다)
-  const reviewCards = useQuery(cardsQuery(state.token, state.storeId, { status: "needs_review", limit: 100 }));
+  const review = useCardReviewCount();
   const categories = useQuery(productCategoriesQuery(state.token, state.storeId));
 
   const setParam = (key: string, value: string | null) => {
@@ -163,11 +170,11 @@ function CardsScreen() {
     groups.set(name, [...(groups.get(name) ?? []), card]);
   }
   const sections = [...groups.entries()].sort(([a], [b]) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
-  const reviewCount = new Set([...(reviewCards.data?.items ?? []).map((card) => card.card_id), ...proposalCards]).size;
+  const reviewCount = review.count;
   const filtered = Boolean(jobId || categoryId || queryText) || status !== "all";
 
   return (
-    <Screen tabBar={<TabBar tabs={OWNER_TABS} />} onRefresh={() => Promise.all([cards.refetch(), proposals.refetch(), reviewCards.refetch()])}>
+    <Screen tabBar={<TabBar tabs={OWNER_TABS} />} onRefresh={() => Promise.all([cards.refetch(), review.refetch()])}>
       <PageHeader title="카드" />
       <form role="search" className="flex w-full items-center gap-2 rounded-full bg-surface px-4 py-3 shadow-card" onSubmit={(event) => event.preventDefault()}>
         <Icon name="search" size={16} className="text-ink-muted" />
@@ -233,7 +240,7 @@ function CardsScreen() {
             <h2 id={id} className="border-b-2 border-ink pb-1.5 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">
               {name}
             </h2>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${isRecipeCategory(name) ? "grid-cols-2" : "grid-cols-1"}`}>
               {list.map((card) => {
                 const proposal = proposalCards.has(card.card_id);
                 const tile = tileStatus(card, proposal);

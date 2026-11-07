@@ -14,6 +14,13 @@ async function open(browser, role, url, { viewport = { width: 390, height: 844 }
   // touch: 폰처럼 손가락 입력(hasTouch, isMobile). 당겨서 새로고침 같은 몸짓 검사용
   const ctx = await browser.newContext({ viewport, locale: 'ko-KR', ...(touch ? { hasTouch: true, isMobile: true } : {}) });
   await ctx.route('http://localhost:8000/**', api.handler);
+  // 처음 한 번 뜨는 안내(코치마크)는 기본으로 끈다. 안내를 보는 테스트만 overrides.coach 로 켠다
+  if (!overrides?.coach) {
+    await ctx.addInitScript(() => {
+      const keys = ['owner-home', 'dev', 'staff-home'];
+      try { for (const k of keys) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {}
+    });
+  }
   const page = await ctx.newPage();
   page.on('pageerror', (error) => api.misses.push(`pageerror ${error.message}`));
   await page.goto(BASE + url);
