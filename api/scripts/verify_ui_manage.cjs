@@ -375,6 +375,33 @@ test('검토 2 손가락으로 달을 넘긴 뒤 처음 누른 날짜가 열린�
   await page.getByRole('dialog', { name: `${Number(nextMonth.slice(5))}월 11일` }).waitFor({ timeout: 3000 });
   await ctx.close();
 });
+test('검토 2 날짜 터치는 끌기·취소와 구분하고 키보드로도 열린다', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner/me', { touch: true });
+  const month = monthOf(await page.getByRole('heading', { name: /\d+년 \d+월/ }).innerText());
+  const date = page.getByRole('button', { name: `${month}-11 78%` });
+  const box = await date.boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, atX = x) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x: atX, y }] });
+  // 조금 끌었다 제자리로 돌아와도 날짜를 고르는 탭은 아니다.
+  await touch('touchStart');
+  await touch('touchMove', x + 25);
+  await touch('touchMove');
+  await touch('touchEnd');
+  assert.equal(await page.getByRole('dialog').count(), 0, '끌었다 돌아와도 날짜를 열지 않는다');
+  await touch('touchStart');
+  await touch('touchCancel');
+  assert.equal(await page.getByRole('dialog').count(), 0, '취소한 터치로 날짜를 열지 않는다');
+  await date.tap();
+  const sheet = page.getByRole('dialog', { name: `${Number(month.slice(5))}월 11일` });
+  await sheet.waitFor({ timeout: 3000 });
+  await page.getByRole('button', { name: '닫기', exact: true }).click();
+  await sheet.waitFor({ state: 'detached' });
+  await date.focus();
+  await date.press('Enter');
+  await sheet.waitFor();
+  await ctx.close();
+});
 test('검토 3 시트를 열자마자 이름을 고쳐도 휠을 굴린 값이 저장된다', async (b) => {
   const shifts = [['오픈', '08:07', '12:00'], ['미들', '12:00', '17:00']].map(([name, starts_at, ends_at], i) => ({ shift_id: i + 1, name, starts_at, ends_at, sort_order: i, card_ids: [] }));
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/shifts', { overrides: { shifts } });

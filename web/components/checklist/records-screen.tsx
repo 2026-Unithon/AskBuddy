@@ -74,12 +74,23 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   };
 
   // 달력을 가로로 밀면 달을 바꾼다. 세로 스크롤은 그대로, 밀다 놓은 것은 날짜 누르기가 아니다
-  const swipe = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const swipe = useRef<{ x: number; y: number; moved: boolean; date: string | null } | null>(null);
   const swiped = useRef(false);
+  const touchDay = useRef<string | null>(null);
   const onDown = (event: PointerEvent) => {
+    touchDay.current = null;
+    if (!event.isPrimary) {
+      swipe.current = null;
+      return;
+    }
     // 터치로 민 뒤에는 click 이 오지 않아 표시가 남는다. 새로 누르기 시작하면 푼다
     swiped.current = false;
-    swipe.current = { x: event.clientX, y: event.clientY, moved: false };
+    const button = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-calendar-date]") : null;
+    swipe.current = { x: event.clientX, y: event.clientY, moved: false, date: button?.dataset.calendarDate ?? null };
+  };
+  const onMove = (event: PointerEvent) => {
+    const s = swipe.current;
+    if (s && Math.hypot(event.clientX - s.x, event.clientY - s.y) > 10) s.moved = true;
   };
   const onUp = (event: PointerEvent) => {
     const s = swipe.current;
@@ -89,6 +100,10 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
     if (Math.abs(dx) > SWIPE && Math.abs(dx) > Math.abs(dy)) {
       swiped.current = true;
       changeMonth(dx < 0 ? 1 : -1);
+    } else if (event.pointerType === "touch" && !s.moved && Math.hypot(dx, dy) <= 10) {
+      // 가로로 민 뒤 첫 터치에는 브라우저가 click 을 만들지 않을 수 있다.
+      // touchend 에서 날짜를 열고, 뒤따르는 합성 click 은 막는다.
+      touchDay.current = s.date;
     }
   };
 
@@ -177,9 +192,18 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
             <div
               data-calendar=""
               onPointerDown={onDown}
+              onPointerMove={onMove}
               onPointerUp={onUp}
               onPointerCancel={() => {
                 swipe.current = null;
+                touchDay.current = null;
+              }}
+              onTouchEnd={(event) => {
+                const date = touchDay.current;
+                touchDay.current = null;
+                if (!date) return;
+                event.preventDefault();
+                setDay(date);
               }}
               onClickCapture={(event) => {
                 if (swiped.current) {
@@ -208,6 +232,7 @@ export function RecordsScreen({ role }: { role: "OWNER" | "STAFF" }) {
                       <button
                         key={date}
                         type="button"
+                        data-calendar-date={date}
                         aria-label={`${date}${label ? ` ${label}` : " 기록 없음"}`}
                         aria-pressed={day === date}
                         onClick={() => setDay(date)}
