@@ -1,6 +1,6 @@
 """외부 앱 추출 실행 여러 개를 칸 단위 키로 투표해 다수결 참조(reference)를 만든다.
 
-입력: `api/eval/data/추출결과/` (Git 제외) — 실행별 결과 JSON 과 Gemini 결과 텍스트.
+입력: 저장소 루트 `추출결과/` (Git 제외) — 실행별 결과 JSON 과 Gemini 결과 텍스트.
 출력: `api/eval/data/store-a/reference/<source_key>__consensus<N>__<날짜>.json` (Git 제외).
 참조는 정답지가 아니다. 승격 절차는 docs/dev/plan/W_REFERENCE_EXTRACTION_20260920.md.
 
@@ -19,7 +19,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-RUNS_DIR = ROOT / "api" / "eval" / "data" / "추출결과"
+RUNS_DIR = ROOT / "추출결과"
 BASE = ROOT / "api" / "eval" / "data" / "store-a"
 TODAY = datetime.date.today().strftime("%Y%m%d")
 RUNS_FILE = ROOT / "api" / "eval" / "consensus" / "recipe_runs.json"

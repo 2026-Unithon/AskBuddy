@@ -10,8 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.ingest import extract, pipeline
-from app.ingest.extract import single_call
-from app.ingest.schemas import SingleCallExtractionResult
 from app.ingest.intake import route as intake_route
 from app.ingest.intake.decide import Ranked, SectionDecision
 from app.ingest.intake.records import StoredRoute
@@ -75,12 +73,6 @@ def _row(status: str = "PROCESSING"):
             "file_url": "x", "content_hash": "h", "status": status}
 
 
-def _empty_result(line_ids):
-    return SingleCallExtractionResult.model_validate({
-        "coverage": [{"line": n, "no_content": "대화"} for n in line_ids],
-        "intake_ranking": [{"logic": "RECIPE", "score": 0.9}]})
-
-
 async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
                job_id=None):
     """KAKAO 자료 하나를 대역으로 처리하고, 각 외부 호출 시점의 held 를 모은다."""
@@ -95,12 +87,11 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
         note("download")
         return txt
 
-    async def fake_extract_facts(prompt, media, ctx, *, line_ids=(), **kw):
-        # 한 번 호출(2026-11-07)의 모델 호출 자리. 모든 줄을 '내용 없음' 으로 보고한다
+    async def fake_extract_facts(**kw):
         note("extract")
         if extract_hook is not None:
             await extract_hook()
-        return _empty_result(line_ids)
+        return NS(assertions=[], unresolved=[])
 
     async def fake_assemble(*a, **kw):
         note("assemble")
@@ -134,7 +125,7 @@ async def _run(pool, tmp_path, *, get_source=None, extract_hook=None,
          patch.object(pipeline.kakao, "parse", return_value={
              "room_name": None, "message_count": 1, "participants": [],
              "period_start": None, "period_end": None, "parsed_text": "대화"}), \
-         patch.object(single_call, "_call_once", fake_extract_facts), \
+         patch.object(extract, "extract_facts", fake_extract_facts), \
          patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
          patch.object(pipeline, "_persist_ledger", fake_ledger), \
          patch.object(pipeline, "_persist_fact_cards", persist), \
@@ -247,8 +238,8 @@ async def _run_inner(pool, tmp_path, *, job_id):
     async def fake_download(source_id, url):
         return txt
 
-    async def fake_extract_facts(prompt, media, ctx, *, line_ids=(), **kw):
-        return _empty_result(line_ids)
+    async def fake_extract_facts(**kw):
+        return NS(assertions=[], unresolved=[])
 
     async def fake_assemble(*a, **kw):
         return NS(planning=NS(unresolved=[]))
@@ -273,7 +264,7 @@ async def _run_inner(pool, tmp_path, *, job_id):
          patch.object(pipeline.kakao, "parse", return_value={
              "room_name": None, "message_count": 1, "participants": [],
              "period_start": None, "period_end": None, "parsed_text": "대화"}), \
-         patch.object(single_call, "_call_once", fake_extract_facts), \
+         patch.object(extract, "extract_facts", fake_extract_facts), \
          patch.object(pipeline, "_prepare_fact_assembly", fake_assemble), \
          patch.object(pipeline, "_persist_ledger", AsyncMock(return_value={})), \
          patch.object(intake_route, "route_source", AsyncMock(return_value=_recipe_route())):

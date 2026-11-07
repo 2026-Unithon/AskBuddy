@@ -31,14 +31,14 @@ PARSE_OWNER_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "parse_owner_fact.ko.txt")
 # 이 머리 줄 다음 줄부터 끝까지가 JSON 입력이다
 PARSE_INPUT_MARKER = "## 점주 입력"
-# W1-4 위치 표지 판. 2026-11-07 부터 늘 쓴다(S11)
+# W1-4 위치 표지 판. extract_locator_hints 를 켰을 때만 쓴다
 FACTS_LOCATOR_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_locator.ko.txt")
 
 
 def locator_hints(settings) -> bool:
-    """근거 위치 표지(W1-4). 2026-11-07 부터 늘 켠다(S11) — 한 번 호출의 끊김 검사가 줄 번호를 쓴다."""
-    return True
+    """근거 위치 표지(W1-4)를 켰는가. 설정 대역에 칸이 없으면 꺼짐이다."""
+    return bool(getattr(settings, "extract_locator_hints", False))
 
 
 def facts_schema(settings):
@@ -225,7 +225,7 @@ async def _extract_with(prompt: str, schema, *, source_id: int, media, usage_sin
     reply = await _measured_call(prompt, media, usage_sink, usage_context,
                                  prompt_hash=_hash(prompt),
                                  schema=schema, raw_sink=raw_sink,
-                                 max_output_tokens=None)
+                                 max_output_tokens=getattr(s, "extract_max_output_tokens", None))
     usage = reply.usage
     elapsed = time.perf_counter() - started
     # 원래 응답은 _measured_call 이 이미 남겼다. 파싱 실패·잘림이어도 그 행은 남는다
@@ -330,7 +330,7 @@ async def parse_owner_facts(
     reply = await _measured_call(prompt, [], usage_sink, usage_context,
                                  prompt_hash=_hash(prompt),
                                  schema=FactExtractionResult, raw_sink=raw_sink,
-                                 max_output_tokens=None)
+                                 max_output_tokens=getattr(s, "extract_max_output_tokens", None))
     result = await raw_responses.parse_checked(
         _mark_sink(raw_sink, reply), usage_context, reply.raw_response_id, reply.finish_reason,
         lambda: FactExtractionResult.model_validate_json(reply.text), what="점주 사실 분석")

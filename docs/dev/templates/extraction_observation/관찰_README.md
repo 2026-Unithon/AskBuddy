@@ -1,8 +1,8 @@
 # Phase 0 — 외부 모델 관찰 실행 안내 (이 문서만 보고 시작)
 
-> 이 파일은 `api/eval/data/추출결과/관찰/README.md` 로 복사돼 쓰인다(원본: `docs/dev/templates/extraction_observation/관찰_README.md`, `--scaffold` 가 복사).
-> **Claude Code·Codex 어느 세션이든 "api/eval/data/추출결과/관찰/README.md 보고 시작해줘" 라고 하면 아래 '세션이 하는 일' 을 그대로 따른다.**
-> 이 폴더(`api/eval/data/추출결과/`)는 Git 에 올라가지 않는다. 원본·결과를 그대로 넣어도 된다. 저장소 문서·커밋에는 익명 id 만 쓴다.
+> 이 파일은 `추출결과/관찰/README.md` 로 복사돼 쓰인다(원본: `docs/dev/templates/extraction_observation/관찰_README.md`, `--scaffold` 가 복사).
+> **Claude Code·Codex 어느 세션이든 "추출결과/관찰/README.md 보고 시작해줘" 라고 하면 아래 '세션이 하는 일' 을 그대로 따른다.**
+> 이 폴더(`추출결과/`)는 Git 에 올라가지 않는다. 원본·결과를 그대로 넣어도 된다. 저장소 문서·커밋에는 익명 id 만 쓴다.
 
 ## 목적
 강한 모델이 카페 업무 자료에서 사실을 **스스로 어떻게** 뽑는지(작업 기록)를 같은 조건으로 여러 번 받아, 공통 처리 순서를 보고 우리 로직별 추출기를 설계한다(로드맵 `docs/dev/plan/W_FACT_ONLY_ROADMAP_20261010.md` Phase 0 → Phase D).
@@ -29,7 +29,7 @@ CLI 자체의 기본 지시(시스템 프롬프트·도구 정의, 호출마다 
    - 형식: `01_DOC_TEXT_문서글자`(pdf 글자·docx·hwp·txt) `02_DOC_IMAGE_문서이미지`(스캔 pdf·사진) `03_AUDIO_음성` `04_VIDEO_영상` `05_CHAT_카톡` `06_OWNER_TEXT_점주답변`
    - 30칸을 다 채울 필요 없다. 로직마다 실제로 많이 올라올 자료 1~2개. `01_RECIPE_레시피/02_DOC_IMAGE_문서이미지` 는 예전에 관찰했다.
 2. **점주답변 칸만:** 그 칸의 `지시문.md` 안 `직원 질문: (여기에 …)`·`점주 답변: (여기에 …)` 를 실제 글로 바꾼다. 바꾸지 않으면 실행기가 그 칸을 건너뛴다.
-3. 세션에 "`api/eval/data/추출결과/관찰/README.md` 보고 시작해줘" 라고 한다.
+3. 세션에 "`추출결과/관찰/README.md` 보고 시작해줘" 라고 한다.
 
 ## 세션이 하는 일 (Claude Code 든 Codex 든 같다)
 

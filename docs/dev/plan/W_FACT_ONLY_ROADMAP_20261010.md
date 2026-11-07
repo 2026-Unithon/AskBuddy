@@ -21,7 +21,7 @@
 2. R 담당자에게 인계 문서 §13 과 R 이 할 일 12·13 을 전달. 특히:
    - 12-(d): v1 `/pending/{id}/answer` 가 W 가 지울 `publish_new_proposal`·`publish_existing_proposal`·`prepare_proposal` 에 기대는지 — **Phase A 의 삭제 과제 전에** 답이 필요하다.
    - 12-(a): W3-4 사실 블록 공개판 검토 — **Phase A 배포 전에** 끝나야 한다(구현은 병행 가능).
-3. **Phase 0 — 외부 모델 관찰.** `api/eval/data/추출결과/관찰/<로직>/<형식>/자료1/원본/` 에 자료를 넣고(점주답변 칸은 `지시문.md` 에 질문·답변 글도), Claude Code·Codex 어느 세션에서든 "`api/eval/data/추출결과/관찰/README.md` 보고 시작해줘". 실행기 `api/scripts/run_observation.py` 가 칸마다 Opus 5.5·Sonnet 5.5·Sol 6.1·Luna 6.0 을 저장소 밖 격리 폴더에서 같은 지시문으로 돌리고 결과·감사를 채운다(구독 사용, 음성·영상 전사는 whisper-1 유료·승인 후). 로직마다 자료 1~2개. A 구현과 병행 가능(결과는 B 분류기 라벨 세트·D 추출기 근거).
+3. **Phase 0 — 외부 모델 관찰.** `추출결과/관찰/<로직>/<형식>/자료1/원본/` 에 자료를 넣고(점주답변 칸은 `지시문.md` 에 질문·답변 글도), Claude Code·Codex 어느 세션에서든 "`추출결과/관찰/README.md` 보고 시작해줘". 실행기 `api/scripts/run_observation.py` 가 칸마다 Opus 5.5·Sonnet 5.5·Sol 6.1·Luna 6.0 을 저장소 밖 격리 폴더에서 같은 지시문으로 돌리고 결과·감사를 채운다(구독 사용, 음성·영상 전사는 whisper-1 유료·승인 후). 로직마다 자료 1~2개. A 구현과 병행 가능(결과는 B 분류기 라벨 세트·D 추출기 근거).
 
 **배포 전**(구현이 끝난 뒤, 절차서 `FACT_ONLY_ROLLOUT.md` 가 자세히 안내)
 4. 배포 워크플로의 DB 백업 단계가 성공하는지 확인 — 1회 삭제 migration 의 유일한 되돌리기 수단.
@@ -32,11 +32,11 @@
 
 | 순서 | 단계 | 한 줄 목표 | 설계 | 상태 |
 |---|---|---|---|---|
-| 0 | **Phase 0** 외부 모델 관찰 | 지시문 30개(로직 × 형식) × 4모델(Opus·Sonnet·Sol·Luna)을 실행기가 격리 환경에서 자동 실행(원본은 사용자가 넣음). A 이전에 시작, A~C 와 병행 가능 | `docs/dev/templates/extraction_observation/README.md`, 결과 폴더 `api/eval/data/추출결과/관찰/README.md` | 준비 완료(지시문·폴더 2026-10-10). **사용자 실행 대기** |
+| 0 | **Phase 0** 외부 모델 관찰 | 지시문 30개(로직 × 형식) × 4모델(Opus·Sonnet·Sol·Luna)을 실행기가 격리 환경에서 자동 실행(원본은 사용자가 넣음). A 이전에 시작, A~C 와 병행 가능 | `docs/dev/templates/extraction_observation/README.md`, 결과 폴더 `추출결과/관찰/README.md` | 준비 완료(지시문·폴더 2026-10-10). **사용자 실행 대기** |
 | 1 | **Phase A** 레거시 제거 | RAW 를 만드는 W 경로 삭제, W 플래그 제거, 점주 답변→사실, 공개 카드 대상 새 사실→새 초안, 1회 삭제 migration | `W_PHASE_A_FACT_ONLY_DESIGN_20261010.md` | 구현 완료(브랜치 `w/phase-a-fact-only`), 배포 대기. 절차서 `FACT_ONLY_ROLLOUT.md` |
-| 2 | **Phase B** 분류기·정규화기·체크리스트 | 입구 2곳(업로드·점주 답변) → 정규화기 훑기 → 분류 1회 → 본 추출. 새 확장자 avi·docx·hwp, 점주 답변 첨부, 사실 `ext`, 체크리스트 카드 단위, 분류기 테스트, 다수결 참조 일반화 | `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md`, 계획 `W_PHASE_B_PLAN_20261011.md` | 구현 완료, main 머지(PR #62). 새 확장자는 docx 하나(avi·hwp 는 하지 않음, 2026-10-11 확정). 단위 테스트·합성 대역 실제 DB 종단 검증 통과. **실모델 분류 평가는 사용자 승인 대기**. 추가 계획 `W_PHASE_B2_SMALL_SOURCE_PLAN_20261014.md`(작은 자료 호출 줄이기: 묶음 분류 1회·작은 자료 한 호출(스위치 기본 꺼짐)·측정 보고) 구현, 커밋 전(B2 합성 대역 실제 DB 검증 통과 2026-10-15) |
+| 2 | **Phase B** 분류기·정규화기·체크리스트 | 입구 2곳(업로드·점주 답변) → 정규화기 훑기 → 분류 1회 → 본 추출. 새 확장자 avi·docx·hwp, 점주 답변 첨부, 사실 `ext`, 체크리스트 카드 단위, 분류기 테스트, 다수결 참조 일반화 | `W_PHASE_B_INTAKE_ROUTER_DESIGN_20261010.md`, 계획 `W_PHASE_B_PLAN_20261011.md` | 구현 완료(브랜치 `w/phase-b-intake`, 커밋 전). 새 확장자는 docx 하나(avi·hwp 는 하지 않음, 2026-10-11 확정). 단위 테스트·합성 대역 실제 DB 종단 검증 통과. **실모델 분류 평가는 사용자 승인 대기**. 추가 계획 `W_PHASE_B2_SMALL_SOURCE_PLAN_20261014.md`(작은 자료 호출 줄이기: 묶음 분류 1회·작은 자료 한 호출(스위치 기본 꺼짐)·측정 보고) 구현, 커밋 전(B2 합성 대역 실제 DB 검증 통과 2026-10-15) |
 | 3 | **Phase C** 공지·매장 지식 탭 | 공지사항(기간·회색·안 본 개수), 매장 지식 탭(맨 위 공지사항 + 카테고리 → 카드) | `W_PHASE_C_NOTICE_KNOWLEDGE_TAB_DESIGN_20261010.md` | 설계 완료(가정 2개 2026-10-10 확정) |
-| 4 | **Phase D** 로직별 전용 추출기 | `PROCEDURE`·`POLICY`·`REFERENCE` 전용 추출기와 로직별 본 추출 깊이 | 관찰 분석(`docs/dev/review/OBSERVATION_<LOGIC>_*.md`)이 근거 | **2026-11-06 보류 — 먼저 한 번 호출 시험.** Sonnet 5.5 한 번 호출 추출률이 90% 이상이면 전용 추출기를 만들지 않는다. 미만일 때만 에이전트 위임·전용 파이프라인을 검토한다. 시험 `api/eval/single_call/README.md`(브랜치 `w/extract-single-call-eval`) |
+| 4 | **Phase D** 로직별 전용 추출기 | `PROCEDURE`·`POLICY`·`REFERENCE` 전용 추출기와 로직별 본 추출 깊이 | 관찰 분석(`docs/dev/review/OBSERVATION_<LOGIC>_*.md`)이 근거 | 관찰 결과 대기 |
 | 5 | **Phase E** 역할별 모델 전환 | 감독·판단·일꾼 역할마다 비슷한 모델끼리 바꿔 쓰기: ① API 오류 시 다른 모델로 넘기기(장애 대비), ② 비용 효율 비교 실험(예: 일꾼 Flash ↔ Haiku 5.5, 판단 Sonnet ↔ Haiku 5.5)과 적용 | 이 문서 §2-1 | 설계 전 |
 | 6 | **Phase F** 업로드 작업 영속 worker | 서버가 재시작·배포돼도 업로드 작업이 사라지지 않고, 멈춘 작업은 lease 만료 뒤 회수·재시도된다(옛 계획의 J2 를 옮김) | 이 문서 §2-2, 옛 범위 `W_NEXT_PLAN_20260928.md` Phase J2 | 설계 전(2026-10-15 편입) |
 
@@ -95,7 +95,7 @@
 - **migration 은 가산형**만(Phase A 1회 삭제는 데이터 삭제 migration 으로 사용자 결정). 적용된 migration 파일을 고치지 않는다. 이름 `supabase/migrations/YYYYMMDDHHMMSS_w_<주제>.sql`.
 - 이미 발행된 snapshot 의 hash 가 바뀌면 안 된다(Phase A 이후엔 1회 삭제로 옛 snapshot 이 없다).
 - 모델명·임계값·상한은 `config.py`, 프롬프트는 `api/prompts/`, 주석은 한국어. LLM 호출마다 원장(`ai_usage_attempts`), 모델 호출 중 DB 연결을 쥐지 않는다(`ShortSession`).
-- **평가용 실제 자료의 브랜드·상호·메뉴 고유명을 문서·주석·테스트·커밋 메시지 어디에도 쓰지 않는다.** 관찰 자료는 익명 id. 원본·외부 실행 결과는 Git 제외 `api/eval/data/`(외부 실행 결과는 그 안 `api/eval/data/추출결과/`).
+- **평가용 실제 자료의 브랜드·상호·메뉴 고유명을 문서·주석·테스트·커밋 메시지 어디에도 쓰지 않는다.** 관찰 자료는 익명 id. 원본·외부 실행 결과는 Git 제외 `추출결과/`·`api/eval/data/`.
 - `docs/release/` 는 요청 없이 읽거나 고치지 않는다. `docs/experience/` 는 사용자가 요청할 때만.
 
 검증 명령(보고 전에 해당하는 것을 모두 돌리고 결과를 사실대로 적는다):
