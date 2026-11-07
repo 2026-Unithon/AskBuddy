@@ -361,4 +361,30 @@ test('o05c 레시피 카테고리는 두 칸, 나머지는 한 칸씩(2026-11-07
   await ctx.close();
 });
 
+// ── 사용자 실화면 지적(2026-11-07) ──
+test('실화면 1 밀지 않은 카드 뒤 동작 버튼은 보이지 않는다', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
+  await page.getByRole('link', { name: /원두 보관 위치/ }).waitFor();
+  const hidden = await page.locator('main').evaluate((main) => [...main.querySelectorAll('button[aria-label]')]
+    .filter((el) => /^(공개|미공개|삭제|빼기)/.test(el.getAttribute('aria-label') ?? '') && el.className.includes('absolute'))
+    .map((el) => getComputedStyle(el).opacity));
+  assert.ok(hidden.length > 0, '밀기 버튼이 있어야 한다');
+  assert.ok(hidden.every((o) => o === '0'), JSON.stringify(hidden));
+  await ctx.close();
+});
+test('실화면 2 상태 칩 줄이 눌리지 않고 다 보인다', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
+  const bar = page.getByRole('tablist', { name: '카드 상태' });
+  await bar.waitFor();
+  assert.ok((await bar.boundingBox()).height >= 36);
+  await ctx.close();
+});
+test('실화면 3 정리 중인 작업은 오늘 매장에 진행 줄로', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner', { overrides: { job: { status: 'EXTRACTING' } } });
+  const row = page.locator('[data-active-job]');
+  await row.getByText('읽는 중').waitFor();
+  await row.click(); await to(page, '/owner/jobs/7');
+  await ctx.close();
+});
+
 run();

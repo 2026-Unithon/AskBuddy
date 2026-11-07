@@ -1,5 +1,6 @@
 "use client";
 
+import { reviewReasonText } from "@/lib/review-reason";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
@@ -165,7 +166,7 @@ function Processing({ job }: { job: IngestJobDetail }) {
 const SOURCE_STATUS: Record<string, string> = {
   QUEUED: "기다리는 중",
   EXTRACTING: "읽는 중",
-  CLASSIFYING: "나누는 중",
+  CLASSIFYING: "카드 제작 중",
   SUCCEEDED: "완료",
   PARTIAL: "일부 완료",
   NO_RESULT: "내용 없음",
@@ -303,7 +304,7 @@ function ResultReview({
     onMutate: (cardId) => {
       const card = cards?.find((item) => item.card_id === cardId);
       if (card?.review_status === "NEEDS_REVIEW") {
-        setCheckReasons((prev) => ({ ...prev, [cardId]: card.needs_review_reason ?? "내용이 확실하지 않아요" }));
+        setCheckReasons((prev) => ({ ...prev, [cardId]: reviewReasonText(card.needs_review_reason) }));
       }
       setHiddenFor(cardId, true);
       setCardErrors((prev) => {
@@ -431,7 +432,7 @@ function ResultReview({
           </SectionTitle>
           <Stagger>
             {needsReview.map((card) => (
-              <ReviewCard key={card.card_id} tone="check" reason={card.needs_review_reason ?? checkReasons[card.card_id]} {...cardProps(card)} />
+              <ReviewCard key={card.card_id} tone="check" reason={card.needs_review_reason ? reviewReasonText(card.needs_review_reason) : checkReasons[card.card_id]} {...cardProps(card)} />
             ))}
           </Stagger>
         </section>

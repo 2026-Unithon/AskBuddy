@@ -11,7 +11,7 @@ import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
-import { FactRowItem, FactViewRow, blockHeading } from "./fact-row";
+import { FactGroupRow, FactRowItem, blockHeading, groupFacts } from "./fact-row";
 import { SortableList } from "@/components/kit/sortable-list";
 import { useLongPress } from "@/lib/use-long-press";
 import { focusRing } from "@/components/kit/buttons";
@@ -277,11 +277,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
             <section key={block.block_id} className="flex flex-col gap-2">
               <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
               <Surface className="flex flex-col px-[18px] py-1">
-                <ul className="flex flex-col">
-                  {block.facts.map((row) => (
-                    <FactViewRow key={row.fact_revision_id} fields={fieldsOf(row)} />
-                  ))}
-                </ul>
+                <FactGroupList rows={block.facts.map(fieldsOf)} />
               </Surface>
             </section>
           ))}
@@ -443,5 +439,17 @@ export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
         }}
       />
     </>
+  );
+}
+
+/** 보기 모드 블록 목록: 같은 문장은 한 줄로 묶는다. */
+function FactGroupList({ rows }: { rows: FactFields[] }) {
+  const { groups, numbered } = groupFacts(rows);
+  return (
+    <ul className="flex flex-col">
+      {groups.map((group) => (
+        <FactGroupRow key={group.key} group={group} numbered={numbered} />
+      ))}
+    </ul>
   );
 }

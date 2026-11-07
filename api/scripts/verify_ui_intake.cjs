@@ -110,7 +110,7 @@ test('o03a 정리 단계는 서버 상태대로 체크된다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/jobs/7', { overrides: { job: { status: 'CLASSIFYING' } } });
   const steps = page.getByRole('list', { name: '정리 단계' });
   await steps.waitFor();
-  assert.equal((await steps.locator('[aria-current="step"]').innerText()).trim(), '나누는 중');
+  assert.equal((await steps.locator('[aria-current="step"]').innerText()).trim(), '카드 제작 중');
   assert.equal(await page.getByText('%').count(), 0);
   await ctx.close();
 });

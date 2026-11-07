@@ -189,7 +189,7 @@ function CardsScreen() {
         />
       </form>
 
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="카드 상태">
+      <div className="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="카드 상태">
         {FILTERS.map((filter) => {
           const active = filter.value === status;
           return (

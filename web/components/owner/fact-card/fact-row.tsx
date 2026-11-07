@@ -1,6 +1,7 @@
 "use client";
 
 // 사실 한 줄: 단계 번호·문장·값·부정·조건/예외·선행·근거. 편집 중이면 고치기·빼기·위/아래.
+import type { ReactNode } from "react";
 import { Chip, focusRing } from "@/components/kit";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
 
@@ -59,6 +60,88 @@ export function FactViewRow({ fields }: { fields: FactFields }) {
       </div>
       {fields.conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {fields.conditions.join(" / ")}</p>}
       {fields.exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {fields.exceptions.join(" / ")}</p>}
+    </li>
+  );
+}
+
+/** 문장 안의 여러 값을 모두 굵게(겹치지 않게 앞에서부터). */
+function withValues(sentence: string, values: { value: string | null; unit: string | null }[]) {
+  const spans: [number, number][] = [];
+  for (const { value, unit } of values) {
+    if (!value) continue;
+    const needle = [`${value}${unit ?? ""}`, value].find((n) => sentence.includes(n));
+    if (!needle) continue;
+    let from = 0;
+    // 이미 굵게 한 자리와 겹치지 않는 다음 자리를 찾는다
+    for (;;) {
+      const at = sentence.indexOf(needle, from);
+      if (at < 0) break;
+      const end = at + needle.length;
+      if (!spans.some(([a, b]) => at < b && end > a)) {
+        spans.push([at, end]);
+        break;
+      }
+      from = at + 1;
+    }
+  }
+  if (spans.length === 0) return sentence;
+  spans.sort((a, b) => a[0] - b[0]);
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach(([a, b], i) => {
+    parts.push(sentence.slice(cursor, a), <strong key={i} className="font-bold">{sentence.slice(a, b)}</strong>);
+    cursor = b;
+  });
+  parts.push(sentence.slice(cursor));
+  return <>{parts}</>;
+}
+
+export type FactGroup = { key: string; fields: FactFields[]; stepOrder: number | null };
+
+/**
+ * 보기 모드에서 같은 문장에서 나온 사실들을 한 줄로 묶는다(한 문장에 값이 여러 개면 사실이 값마다 나뉘어 저장된다).
+ * 묶은 뒤 번호가 겹치거나, 한 줄이 여러 단계를 담으면 그 블록은 번호를 숨긴다.
+ */
+export function groupFacts(rows: FactFields[]): { groups: FactGroup[]; numbered: boolean } {
+  const byKey = new Map<string, FactGroup>();
+  const groups: FactGroup[] = [];
+  for (const fields of rows) {
+    const key = fields.sentence.trim();
+    const found = byKey.get(key);
+    if (found) {
+      found.fields.push(fields);
+      if (found.stepOrder !== fields.step_order) found.stepOrder = null;
+      continue;
+    }
+    const group = { key, fields: [fields], stepOrder: fields.step_order };
+    byKey.set(key, group);
+    groups.push(group);
+  }
+  const orders = groups.map((g) => g.stepOrder);
+  const numbered = orders.every((o) => o !== null) && new Set(orders).size === orders.length;
+  return { groups, numbered };
+}
+
+/** 묶은 한 줄: 문장 하나, 값 모두 굵게(여러 단계를 담은 줄은 굵게 하지 않는다), 조건·예외는 합친다. */
+export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: boolean }) {
+  const first = group.fields[0];
+  const steps = new Set(group.fields.map((f) => f.step_order).filter((o) => o !== null));
+  const conditions = [...new Set(group.fields.flatMap((f) => f.conditions))];
+  const exceptions = [...new Set(group.fields.flatMap((f) => f.exceptions))];
+  return (
+    <li data-testid="fact-row" className="flex flex-col gap-1 border-b border-background py-3 last:border-b-0">
+      <div className="flex items-start gap-2">
+        {numbered && group.stepOrder !== null && (
+          <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+            {group.stepOrder}
+          </span>
+        )}
+        <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
+          {steps.size > 1 ? first.sentence : withValues(first.sentence, group.fields)}
+        </p>
+      </div>
+      {conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {conditions.join(" / ")}</p>}
+      {exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {exceptions.join(" / ")}</p>}
     </li>
   );
 }

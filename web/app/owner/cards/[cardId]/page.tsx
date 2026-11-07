@@ -1,5 +1,6 @@
 "use client";
 
+import { reviewReasonText } from "@/lib/review-reason";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -186,7 +187,7 @@ export default function OwnerCardPage() {
       {card.review_status === "NEEDS_REVIEW" && (
         <div className="rounded-[14px] border-l-4 border-warn-500 bg-warn-50 px-4 py-3">
           <p className="text-[15px] font-bold text-warn-700">확인해 주세요</p>
-          <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{card.needs_review_reason ?? "내용이 확실하지 않아요"}</p>
+          <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{reviewReasonText(card.needs_review_reason)}</p>
         </div>
       )}
       {card.fact_card ? (

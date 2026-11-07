@@ -16,7 +16,8 @@ const STATUS_WORD: Record<TileStatus, string> = { approved: "공개", review: "�
 const STATUS_CLASS: Record<TileStatus, string> = {
   approved: "bg-surface shadow-card",
   review: "border-2 border-warn-500 bg-warn-50",
-  pending: "border-2 border-dashed border-ink-muted/40 bg-transparent",
+  // 밀기 버튼이 뒤에 깔려 있어 배경은 불투명해야 한다(투명이면 '공개'·'삭제' 판이 비친다)
+  pending: "border-2 border-dashed border-ink-muted/40 bg-background",
 };
 const DOT_CLASS: Record<TileStatus, string | null> = { approved: "bg-primary", review: "bg-warn-500", pending: null };
 
