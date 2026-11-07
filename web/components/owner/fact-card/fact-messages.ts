@@ -6,7 +6,7 @@ const ENTITY_MOVED = "메뉴 정리가 바뀌어 이 카드에서 고칠 수 없
 export const VALUE_CLEAR_TEXT = "값을 지우려면 이 사실을 빼고 새로 넣어 주세요.";
 export const PARSE_FAILED_TEXT = "분석하지 못했어요. 다시 시도해 주세요. (입력은 그대로 둬요)";
 export const NO_FACT_TEXT = "사실을 찾지 못했어요. 문장을 조금 더 구체적으로 써 주세요.";
-export const STEP_ORDER_TEXT = "순서 단계 번호가 앞뒤 단계와 맞지 않아요. 넣은 단계를 위로·아래로 옮겨 알맞은 자리에 둔 뒤 다시 저장해 주세요.";
+export const STEP_ORDER_TEXT = "순서 단계 번호가 앞뒤 단계와 맞지 않아요. 넣은 단계를 위나 아래로 옮겨 알맞은 자리에 둔 뒤 다시 저장해 주세요.";
 export const CARD_EXCLUDED_TEXT = "이 카드는 그사이 지워졌어요. 다시 살린 뒤 고쳐 주세요.";
 
 const SAVE_MESSAGES: Record<string, string> = {
@@ -19,7 +19,7 @@ const SAVE_MESSAGES: Record<string, string> = {
   FACT_REQUIRED_BY_OTHER: "다른 단계가 이 내용을 먼저 필요로 해서 뺄 수 없어요.",
   STEP_KIND_CHANGE: "순서 단계를 일반 내용으로(또는 반대로) 바꾸려면 빼고 새로 넣어 주세요.",
   FACT_DUPLICATE_IN_CARD: "이 카드에 이미 같은 내용이 있어요.",
-  VARIANT_UNRESOLVED: "어떤 규격(HOT/ICE·사이즈)인지 알 수 없어요. 규격을 고르거나 문장을 고쳐 주세요.",
+  VARIANT_UNRESOLVED: "어떤 규격(HOT/ICE, 사이즈)인지 알 수 없어요. 규격을 고르거나 문장을 고쳐 주세요.",
   CARD_WOULD_BE_EMPTY: "사실이 하나도 남지 않아요. 카드를 지우려면 \"카드 지우기\"를 눌러 주세요.",
   CARD_TOO_LARGE: CANNOT_SAVE,
   CARD_LAYOUT_INVALID: CANNOT_SAVE,
@@ -76,9 +76,9 @@ export function warningText(code: string, count = 0): string {
     case "MODIFY_SPLIT":
       return "문장에 사실이 여러 개 있어 첫 번째만 칸에 채웠어요. 나머지는 '사실 추가'로 따로 넣어 주세요.";
     case "SUBJECT_MISMATCH":
-      return "이 카드의 메뉴·업무와 다른 대상 같아요. 맞는지 확인해 주세요.";
+      return "이 카드의 메뉴나 업무와 다른 대상 같아요. 맞는지 확인해 주세요.";
     case "VARIANT_UNRESOLVED":
-      return "어떤 규격(HOT/ICE·사이즈)인지 알 수 없어 넣을 수 없어요. 문장을 고쳐 다시 분석해 주세요.";
+      return "어떤 규격(HOT/ICE, 사이즈)인지 알 수 없어 넣을 수 없어요. 문장을 고쳐 다시 분석해 주세요.";
     case "NEW_VARIANT":
       return "이 카드에 없던 규격이에요. 넣으면 새 묶음이 생겨요.";
     case "VALUE_NOT_IN_SENTENCE":

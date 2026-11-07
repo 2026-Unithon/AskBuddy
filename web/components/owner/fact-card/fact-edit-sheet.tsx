@@ -98,7 +98,7 @@ export function FactFieldsEditor({
           fields.polarity === "NEGATE" ? "bg-danger-50 text-danger-700" : "bg-background text-ink-muted"
         } ${focusRing}`}
       >
-        {fields.polarity === "NEGATE" ? "하지 않음 · 켜짐" : "하지 않음 · 꺼짐"}
+        {fields.polarity === "NEGATE" ? "하지 않음 켜짐" : "하지 않음 꺼짐"}
       </button>
       {showValue && (
         <div className="flex gap-2">
@@ -114,7 +114,7 @@ export function FactFieldsEditor({
       )}
       <ListEditor label="조건" items={fields.conditions} disabled={disabled} onChange={(conditions) => set({ conditions })} />
       <ListEditor label="예외" items={fields.exceptions} disabled={disabled} onChange={(exceptions) => set({ exceptions })} />
-      <Caption>규격 · {variantLabel(fields.variant)} (바꿀 수 없어요)</Caption>
+      <Caption>규격 {variantLabel(fields.variant)} (바꿀 수 없어요)</Caption>
     </div>
   );
 }

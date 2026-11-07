@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
 :root {
+  /* 모션(G1·G2): 등장은 이즈 아웃, 상태가 바뀌는 것(체크·스위치)만 스프링 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+
   --background: #f5f9f6;
   --surface: #ffffff;
   --surface-muted: #e0eee3;
@@ -203,6 +209,65 @@ select:disabled {
   to {
     transform: translateY(0);
   }
+}
+
+/* 화면 진입: 앞으로는 오른쪽에서, 뒤로는 왼쪽에서, 탭끼리는 페이드. 처음 연 화면은 모션 없음 */
+@keyframes screen-forward {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@keyframes screen-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes screen-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes feedback-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes grow-from-zero {
+  from {
+    width: 0;
+  }
+}
+
+@keyframes check-pop {
+  from {
+    transform: scale(0.6);
+  }
+}
+
+[data-enter="forward"] > main {
+  animation: screen-forward var(--dur-base) var(--ease-out);
+}
+
+[data-enter="back"] > main {
+  animation: screen-back var(--dur-base) var(--ease-out);
+}
+
+[data-enter="fade"] > main {
+  animation: screen-fade var(--dur-base) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

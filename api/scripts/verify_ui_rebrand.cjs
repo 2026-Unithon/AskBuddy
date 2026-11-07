@@ -36,6 +36,8 @@ const BASE = 'http://127.0.0.1:3011';
   async function context(role, { signedIn = true } = {}) {
     let sessionActive = signedIn, sessionRole = role;
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     await ctx.route('http://localhost:8000/**', async (route) => {
       const req = route.request(), url = new URL(req.url()), p = url.pathname, m = req.method();
       const body = ['POST', 'PATCH', 'PUT'].includes(m) && req.postData() ? req.postDataJSON() : null;
@@ -49,14 +51,15 @@ const BASE = 'http://127.0.0.1:3011';
       else if (p === '/app/bootstrap') payload = { user: { user_id: role === 'OWNER' ? 1 : 2, role: sessionRole, name: '합성 사용자' },
         store: state.hasStore ? { store_id: 1, store_name: '합성 매장', guide_completed: state.guideCompleted, category_version: 1 } : null,
         badges: { waiting_questions: 0, pending_cards: 1 },
-        default_destination: !sessionRole ? '/auth/role' : sessionRole === 'OWNER' ? (state.hasStore ? '/owner' : '/owner/intent') : '/staff' };
+        // 서버 규칙(bootstrap/router.py): 가이드를 안 끝낸 매장의 점주는 /owner/add
+        default_destination: !sessionRole ? '/auth/role' : sessionRole === 'OWNER' ? (state.hasStore ? (state.guideCompleted ? '/owner' : '/owner/add') : '/owner/intent') : '/staff' };
       else if (p === '/auth/login') {
         if (body.password !== 'right-pass') return fail(route, 401, '이메일 또는 비밀번호가 맞지 않습니다');
         sessionActive = true; payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: 'OWNER', store_id: state.hasStore ? 1 : null } };
       } else if (p === '/auth/signup') { state.hasStore = false; sessionActive = true; sessionRole = null; state.signupBodies.push(body); payload = { token: 'synthetic-ui-only', user: { user_id: 1, role: null, store_id: null } }; }
       else if (p === '/auth/stores') {
         if (state.failStore) { state.failStore = false; return fail(route, 503, '합성 매장 생성 실패'); }
-        state.hasStore = true; state.storeBodies.push(body);
+        state.hasStore = true; state.guideCompleted = false; state.storeBodies.push(body);
         payload = { token: 'synthetic-ui-only', store: { store_id: 1, store_name: body.store_name } };
       } else if (p === '/members/invite-link') payload = { url: 'http://localhost:3011/join/synthetic-invite-token' };
       else if (p === '/ingest/capabilities') payload = { SCAN: { extensions: ['pdf', 'jpg', 'jpeg', 'png'], max_bytes: 20000000 } };
@@ -123,20 +126,20 @@ const BASE = 'http://127.0.0.1:3011';
     const owner = await context('OWNER'), page = await owner.newPage();
     page.on('pageerror', (e) => errors.push(e.message));
 
-    // P2 작업 화면: 처리 중 → PARTIAL 결과 → "맞아요" 일부 실패 → 실패한 카드만 재시도
+    // P2 작업 화면: 처리 중 → PARTIAL 결과 → "검수 완료" 일부 실패 → 실패한 카드만 재시도(화면 개선 계획 2)
     await page.goto(`${BASE}/owner/jobs/7`);
     await page.getByText('정리하고 있어요', { exact: true }).waitFor();
     check('job processing shows server state without fake progress', await page.getByRole('progressbar').count() === 0);
     state.job.status = 'PARTIAL';
-    await page.getByText('이렇게 나눴어요', { exact: true }).waitFor({ timeout: 10000 });
-    check('job polling moves to result', await page.getByText('준비된 카드와 처리하지 못한 자료가 있어요.', { exact: false }).isVisible());
-    check('needs-review card separated from bulk approve', await page.getByText('하나씩 봐 주세요 · 1', { exact: true }).isVisible());
+    await page.getByRole('heading', { name: '카드가 준비됐어요! 검수 부탁드려요!' }).waitFor({ timeout: 10000 });
+    check('job polling moves to result', await page.getByRole('alert').getByText('처리하지 못한 자료가 있어요.', { exact: true }).isVisible());
+    check('needs-review card separated from bulk approve', await page.getByRole('region', { name: '맞는지 확인해 주세요!' }).isVisible());
     check('excluded card hidden from result', await page.getByText('합성 지운 카드').count() === 0);
     state.failApprove.add(2);
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
-    await page.getByText('를 다시 누르면 이 카드만 다시 시도해요.', { exact: false }).waitFor();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
+    await page.getByText('검수 완료를 다시 누르면 이 카드만 다시 해요.', { exact: false }).waitFor();
     check('bulk approve failure stays on failed card', state.approveCalls.join() === '2');
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
     await page.waitForURL('**/owner', { timeout: 10000 }).catch(() => {});
     check('retry approves only the failed card', state.approveCalls.join() === '2,2' && state.cards[1].review_status === 'APPROVED');
     state.job.status = 'FAILED'; state.failRetryJob = true;
@@ -154,9 +157,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByRole('link', { name: /합성 라테/ }).waitFor();
     check('card list groups by category', await page.getByText('재고 · 위치', { exact: true }).count() >= 1);
     check('all filter hides excluded cards', await page.getByText('합성 지운 카드').count() === 0);
-    await page.getByRole('tab', { name: '지운 카드' }).click();
-    await page.getByText('합성 지운 카드', { exact: true }).waitFor();
-    check('excluded filter shows excluded cards', page.url().includes('status=excluded'));
+    // 화면 개선 계획 3: 삭제한 카드는 어디에서도 보이지 않는다(지운 카드 탭 없음)
+    check('no deleted-card tab', await page.getByRole('tab', { name: '지운 카드' }).count() === 0);
     await page.goto(`${BASE}/owner/cards`);
     await page.getByLabel('카드 찾기').fill('원두');
     await page.getByLabel('카드 찾기').press('Enter');
@@ -165,13 +167,13 @@ const BASE = 'http://127.0.0.1:3011';
     check('search narrows list', await page.getByRole('link', { name: /합성 라테/ }).count() === 0);
     await page.goto(`${BASE}/owner/cards/review?job_id=7`);
     await page.waitForURL('**/owner/cards?status=all&job_id=7');
-    await page.getByText('이번에 넣은 자료의 카드만 · 모두 보기', { exact: true }).waitFor();
+    await page.getByText('이번에 넣은 자료의 카드만, 모두 보기', { exact: true }).waitFor();
     check('job review deep link keeps job filter', true);
 
     // 지식 제안: 저장 실패는 그 자리에, 재시도 성공 후 빈 상태
-    await page.getByRole('link', { name: /기존 카드와 다른 답이 있어요/ }).click();
-    await page.waitForURL('**/owner/cards/proposals');
-    await page.getByRole('button', { name: '확인한 카드 공개' }).click();
+    // 제안 배너는 없어지고 제안 걸린 카드가 검수 필요에 들어간다(계획 3 o05b)
+    await page.goto(`${BASE}/owner/cards/proposals`);
+    await page.getByRole('button', { name: '수정 완료' }).click();
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
     check('proposal failure shown in place', state.proposals.length === 1);
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
@@ -182,10 +184,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/cards/1`);
     await page.getByRole('heading', { name: '합성 라테' }).waitFor();
     check('detail shows numbered lines', await page.locator('ol li').count() === 3);
-    await page.getByRole('button', { name: /근거 보기/ }).click();
-    await page.getByText('합성 근거 문장', { exact: true }).waitFor();
-    check('evidence expands', true);
-    check('deleted source marked as broken citation', await page.getByText('인용 끊김', { exact: false }).count() >= 1);
+    // 화면 개선 계획 3: 근거는 맨 아래 작은 한 줄, 끊긴 원본은 (원본 지워짐)
+    check('evidence line at bottom marks deleted source', (await page.getByText(/^근거 자료 /).innerText()).includes('합성 메모.png (원본 지워짐)'));
     // Phase A — 자유 본문 편집이 없어졌다. 사실 카드가 아닌 카드는 읽기만 한다
     check('legacy card has no free-text edit', await page.getByRole('button', { name: '고치기', exact: true }).count() === 0
       && await page.locator('textarea').count() === 0);
@@ -193,13 +193,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.getByRole('button', { name: '재고 · 위치' }).click();
     await page.getByRole('button', { name: /카테고리 재고 · 위치/ }).waitFor();
     check('category move updates card', state.cards[0].category.category_id === 11);
-    await page.getByRole('button', { name: '지우기', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: '지우기', exact: true }).click();
-    await page.getByRole('button', { name: '다시 살리기' }).waitFor();
-    check('exclude goes through confirm sheet', state.cards[0].review_status === 'EXCLUDED');
-    await page.getByRole('button', { name: '다시 살리기' }).click();
-    await page.getByRole('button', { name: '공개하기' }).waitFor();
-    check('restore brings card back', state.cards[0].review_status === 'PENDING');
+    // 상세에는 지우기·다시 살리기가 없다(삭제는 목록 미공개 탭에서 밀기, 되돌리기는 5초 스낵바만)
+    check('detail has no delete or restore buttons', await page.getByRole('button', { name: /^(지우기|다시 살리기)$/ }).count() === 0);
     await page.goto(`${BASE}/owner/cards/999`);
     await page.getByText('이 카드를 볼 수 없어요', { exact: true }).waitFor();
     check('missing card does not leak', true);
@@ -215,6 +210,8 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/settings`);
     await page.getByText('합성 매장', { exact: true }).waitFor();
     await page.getByRole('button', { name: '로그아웃' }).click();
+    // 화면 개선 계획 4b(o12b): 확인 창을 한 번 더 거친다
+    await page.getByRole('dialog', { name: '로그아웃할까요?' }).getByRole('button', { name: '로그아웃' }).click();
     // 세션 폐기 뒤 새로고침해도 로그인 화면에 머문다
     await page.waitForURL(`${BASE}/`);
     await page.getByRole('link', { name: '이메일로 시작하기' }).waitFor();
@@ -258,10 +255,12 @@ const BASE = 'http://127.0.0.1:3011';
     check('store create failure keeps name', await jp.getByLabel('매장 이름').inputValue() === '합성 새 매장');
     await jp.getByRole('button', { name: '다시 시도', exact: true }).click();
     await jp.waitForURL('**/owner/add');
-    await jp.getByText('알려주고 싶은 걸 아무거나 넣어주세요', { exact: true }).waitFor();
+    // Next 경로 안내(__next-route-announcer__)도 같은 글을 읽어 주므로 제목 역할로 찾는다
+    await jp.getByRole('heading', { name: '알려주고 싶은 걸 아무거나 넣어주세요' }).waitFor();
     check('store created as cafe then add screen', state.storeBodies[0]?.store_name === '합성 새 매장' && state.storeBodies[0]?.business_type === 'CAFE');
     check('voice tool hidden until recording format decided', await jp.getByRole('button', { name: '말하기' }).count() === 0);
     await joiner.close();
+    state.guideCompleted = true; // 아래 로그인 흐름은 가이드를 끝낸 매장
 
     await page.goto(`${BASE}/auth/email`);
     await page.getByLabel('이메일').fill('owner@synthetic.test');
@@ -274,11 +273,11 @@ const BASE = 'http://127.0.0.1:3011';
     await page.goto(`${BASE}/owner/complete`);
     await page.waitForURL('**/owner/invite');
     await page.getByRole('button', { name: '링크 복사', exact: true }).waitFor();
-    check('invite link actions available', await page.getByRole('link', { name: '직원 관리 · 합류 승인' }).isVisible());
+    check('invite link actions available', await page.getByRole('link', { name: '직원 관리', exact: true }).isVisible());
     state.guideCompleted = false; state.job.status = 'SUCCEEDED';
     state.cards[0].review_status = 'PENDING'; state.cards[2].review_status = 'PENDING'; state.cards[2].needs_review_reason = null;
     await page.goto(`${BASE}/owner/jobs/7`);
-    await page.getByRole('button', { name: '맞아요', exact: true }).click();
+    await page.getByRole('button', { name: '검수 완료', exact: true }).click();
     await page.waitForURL('**/owner/invite');
     check('first publish continues to invite', state.cards[0].review_status === 'APPROVED' && state.cards[2].review_status === 'APPROVED');
     for (const width of [390, 360]) {

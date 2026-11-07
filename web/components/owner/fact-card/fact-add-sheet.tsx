@@ -81,7 +81,7 @@ export function FactAddSheet({
                     disabled={blocked}
                     onChange={(event) => update(i, { checked: event.target.checked })}
                   />
-                  제안 {i + 1} {blocked ? "· 넣을 수 없어요" : ""}
+                  제안 {i + 1} {blocked ? "(넣을 수 없어요)" : ""}
                 </label>
                 {choice.proposal.warnings.map((code) => (
                   <p key={code} className="text-[13px] leading-[1.45] text-warn-700 [word-break:keep-all]">
@@ -104,7 +104,7 @@ export function FactAddSheet({
           disabled={chosen.length === 0 || chosen.some((c) => !c.proposal.fact.sentence.trim())}
           onClick={() => onAdd(chosen.map((c) => c.proposal))}
         >
-          카드에 넣기{chosen.length > 0 ? ` · ${chosen.length}` : ""}
+          카드에 넣기{chosen.length > 0 ? ` ${chosen.length}` : ""}
         </Button>
       )}
       <Button variant="secondary" onClick={onClose}>

@@ -1,6 +1,6 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Caption, ErrorInline, Skeleton, Surface } from "@/components/kit";
+import { ErrorInline, Skeleton, Surface, Switch } from "@/components/kit";
 import { apiErrorMessage } from "@/lib/api";
 import { checklistApi, type CardLinks } from "@/lib/checklist-api";
 import {
@@ -42,66 +42,30 @@ export function CardAssignment({ cardId }: { cardId: number }) {
         />
       )}
       {data && shifts.data && (
-        <>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={data.checklist}
+        // o06e: 공통과 근무조마다 스위치. 공통을 켜면 근무조는 꺼지고, 근무조를 켜면 공통은 꺼진다. 모두 끄면 할 일에서 빠진다
+        <div className="mt-1 flex flex-col">
+          <Switch
+            label="공통"
+            checked={data.checklist && data.shift_ids.length === 0}
             disabled={save.isPending}
-            onClick={() =>
-              save.mutate({
-                checklist: !data.checklist,
-                shift_ids: data.checklist ? [] : data.shift_ids,
-              })
-            }
-            className="my-2 flex min-h-11 w-full items-center justify-between"
-          >
-            <span>오늘 할 일에 넣기</span>
-            <span className="font-bold text-primary">
-              {data.checklist ? "켜짐" : "꺼짐"}
-            </span>
-          </button>
-          {data.checklist && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                aria-pressed={data.shift_ids.length === 0}
+            onChange={(on) => save.mutate({ checklist: on, shift_ids: [] })}
+          />
+          {shifts.data.items.map((s) => {
+            const selected = data.checklist && data.shift_ids.includes(s.shift_id);
+            return (
+              <Switch
+                key={s.shift_id}
+                label={s.name}
+                checked={selected}
                 disabled={save.isPending}
-                onClick={() => save.mutate({ checklist: true, shift_ids: [] })}
-                className={`min-h-11 rounded-full px-4 ${data.shift_ids.length === 0 ? "bg-primary text-white" : "bg-empty text-primary"}`}
-              >
-                공통
-              </button>
-              {shifts.data.items.map((s) => {
-                const selected = data.shift_ids.includes(s.shift_id);
-                return (
-                  <button
-                    type="button"
-                    key={s.shift_id}
-                    disabled={save.isPending}
-                    aria-pressed={selected}
-                    onClick={() => {
-                      const ids = selected
-                        ? data.shift_ids.filter((id) => id !== s.shift_id)
-                        : [...data.shift_ids, s.shift_id];
-                      save.mutate({
-                        checklist: ids.length > 0,
-                        shift_ids: ids,
-                      });
-                    }}
-                    className={`min-h-11 rounded-full px-4 ${selected ? "bg-primary text-white" : "bg-empty text-primary"}`}
-                  >
-                    {s.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <Caption>
-            공통은 모두에게 보여요. 근무조를 여러 개 고를 수 있어요. 마지막
-            근무조를 빼면 오늘 할 일에서도 빠져요.
-          </Caption>
-        </>
+                onChange={(on) => {
+                  const ids = on ? [...data.shift_ids, s.shift_id] : data.shift_ids.filter((id) => id !== s.shift_id);
+                  save.mutate({ checklist: ids.length > 0, shift_ids: ids });
+                }}
+              />
+            );
+          })}
+        </div>
       )}
       {save.error && (
         <ErrorInline

@@ -46,7 +46,7 @@ export default function StaffRecipePage() {
   if (item.isLoading) {
     return (
       <Screen>
-        <BackButton href="/staff/recipes" label="레시피" />
+        <BackButton parent="/staff/recipes" label="레시피" />
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-40" />
       </Screen>
@@ -56,7 +56,7 @@ export default function StaffRecipePage() {
     const missing = !itemId || (item.error instanceof ApiError && [403, 404].includes(item.error.status));
     return (
       <Screen>
-        <BackButton href="/staff/recipes" label="레시피" />
+        <BackButton parent="/staff/recipes" label="레시피" />
         {missing ? (
           <Empty title="이 레시피를 볼 수 없어요" description="지워졌거나 아직 공개되지 않은 카드예요." action={<ButtonLink href="/staff/recipes">레시피로</ButtonLink>} />
         ) : (
@@ -103,7 +103,7 @@ export default function StaffRecipePage() {
         </>
       }
     >
-      <BackButton href="/staff/recipes" label="레시피" />
+      <BackButton parent="/staff/recipes" label="레시피" />
       <p className="text-[13px] font-bold text-primary">{data.category.name}</p>
       <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{data.title}</h1>
       <Surface className="px-[18px] py-4">
@@ -115,8 +115,8 @@ export default function StaffRecipePage() {
       {done && <Caption>확인했어요. 내용이 바뀌면 다시 알려드려요.</Caption>}
       {sources.length > 0 && (
         <Caption>
-          출처 · {sources.join(", ")}
-          {brokenSource ? " · 인용 끊김" : ""}
+          <span className="mr-2">출처 {sources.join(", ")}</span>
+          {brokenSource && <span>인용 끊김</span>}
         </Caption>
       )}
     </Screen>

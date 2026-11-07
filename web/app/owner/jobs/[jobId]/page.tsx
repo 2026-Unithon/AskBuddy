@@ -1,29 +1,34 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useNavHistory } from "@/lib/nav-history";
 import { useState } from "react";
 import {
   BackButton,
-  BuddyImage,
+  Banner,
   Button,
   ButtonLink,
   Caption,
   Chip,
+  CountBadge,
   Empty,
   ErrorInline,
+  Icon,
   PageHeader,
   RefreshingHint,
   Screen,
   SectionTitle,
   Skeleton,
-  focusRing,
+  Stagger,
+  TextButton,
+  useFeedback,
 } from "@/components/kit";
 import {
   ApiError,
   apiErrorMessage,
   isIngestJobActive,
+  moveProductCard,
   mutateProductCard,
   retryIngestJob,
   extractIngestSourceAnyway,
@@ -31,7 +36,9 @@ import {
   type CardListItem,
   type IngestJobDetail,
 } from "@/lib/api";
-import { bootstrapQuery, cardsQuery, ingestJobQuery, queryKeys } from "@/lib/query";
+import { JobSteps } from "@/components/owner/job-steps";
+import { ReviewCard } from "@/components/owner/review-card";
+import { bootstrapQuery, cardsQuery, ingestJobQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 // O4 알아서 정리됐어요 — 작업 하나의 처리 상태와 결과 카드 확인.
@@ -59,7 +66,7 @@ export default function JobPage() {
   if (!jobId) {
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <Empty title="잘못된 작업 주소예요" action={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>} />
       </Screen>
     );
@@ -68,7 +75,7 @@ export default function JobPage() {
   if (job.isLoading) {
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <Skeleton className="h-24" />
         <Skeleton className="h-28" />
       </Screen>
@@ -79,7 +86,7 @@ export default function JobPage() {
     const missing = job.error instanceof ApiError && [403, 404].includes(job.error.status);
     return (
       <Screen>
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         {missing ? (
           <Empty title="이 작업을 볼 수 없어요" description="다른 매장의 작업이거나 없는 작업이에요." action={<ButtonLink href="/owner">오늘 매장으로</ButtonLink>} />
         ) : (
@@ -113,7 +120,7 @@ export default function JobPage() {
           </>
         }
       >
-        <BackButton href="/owner" label="오늘 매장" />
+        <BackButton parent="/owner" label="오늘 매장" />
         <PageHeader
           title={failed ? "처리하지 못했어요" : "찾은 내용이 없어요"}
           description={
@@ -144,13 +151,13 @@ export default function JobPage() {
 function Processing({ job }: { job: IngestJobDetail }) {
   return (
     <Screen footer={<ButtonLink href="/owner" variant="secondary">오늘 매장으로</ButtonLink>}>
-      <BackButton href="/owner" label="오늘 매장" />
-      <PageHeader title="정리하고 있어요" description="자료에서 업무 내용을 정리하고 있어요. 다른 화면으로 가도 계속 처리돼요." />
-      <div className="flex justify-center py-4">
-        <BuddyImage size={120} className="motion-safe:animate-pulse" />
-      </div>
+      <BackButton parent="/owner" label="오늘 매장" />
+      <PageHeader title="정리하고 있어요" description="다른 화면으로 가도 계속 정리해요" />
+      <JobSteps status={job.status} />
       <SourceList job={job} />
-      <Caption>다 되면 알림으로 알려드려요</Caption>
+      {/* 만들어질 카드 자리 */}
+      <Skeleton className="h-24" />
+      <Skeleton className="h-24" />
     </Screen>
   );
 }
@@ -166,6 +173,21 @@ const SOURCE_STATUS: Record<string, string> = {
 };
 
 type JobSource = IngestJobDetail["sources"][number];
+
+const SOURCE_ACTIVE = new Set(["QUEUED", "EXTRACTING", "CLASSIFYING"]);
+
+/** 자료 한 줄의 상태: 진행 중이면 작은 스피너, 끝나면 체크. 글이 바뀔 때 페이드(o03b). */
+function SourceState({ status }: { status: string }) {
+  const label = status === "DELETED" ? "지워짐" : SOURCE_STATUS[status] ?? status;
+  const tone = status === "FAILED" ? "danger" : status === "PARTIAL" ? "warn" : "neutral";
+  return (
+    <span key={status} className="flex shrink-0 items-center gap-1.5 animate-[screen-fade_var(--dur-base)_var(--ease-out)]">
+      {SOURCE_ACTIVE.has(status) && <span aria-hidden className="size-3.5 rounded-full border-2 border-primary border-r-transparent motion-safe:animate-spin" />}
+      {status === "SUCCEEDED" && <Icon name="check" size={14} className="text-primary" />}
+      <Chip size="sm" tone={tone}>{label}</Chip>
+    </span>
+  );
+}
 
 // 업무 자료가 아니라고 판단해 추출하지 않은 자료. 작업 전체 상태와 무관하게 자료별로 고른다
 function judgedNone(source: JobSource) {
@@ -184,9 +206,7 @@ function SourceList({ job, sources = job.sources }: { job: IngestJobDetail; sour
               <span className={`min-w-0 flex-1 truncate text-[14px] font-medium text-ink ${deleted ? "line-through opacity-60" : ""}`}>
                 {source.filename}
               </span>
-              <Chip size="sm" tone={source.status === "FAILED" ? "danger" : source.status === "PARTIAL" ? "warn" : "neutral"}>
-                {deleted ? "지워짐" : SOURCE_STATUS[source.status] ?? source.status}
-              </Chip>
+              <SourceState status={deleted ? "DELETED" : source.status} />
             </div>
             {source.error && !deleted && <p className="text-[12px] text-danger-700">{source.error.message}</p>}
             {!active && judgedNone(source) && <ExtractAnyway jobId={job.job_id} sourceId={source.source_id} />}
@@ -231,7 +251,6 @@ function ResultReview({
   onRetryCards,
   retryBlock,
   onRetryJob,
-  retrying,
 }: {
   job: IngestJobDetail;
   cards: CardListItem[] | undefined;
@@ -245,17 +264,82 @@ function ResultReview({
   const { state } = useApp();
   const client = useQueryClient();
   const router = useRouter();
+  const { markReplace } = useNavHistory();
+  const { toast, snackbar } = useFeedback();
   const [approve, setApprove] = useState<ApproveState>({});
+  // 빼기는 누르는 즉시 숨기고(낙관적) 실패하면 되살린다
+  const [hidden, setHidden] = useState<Set<number>>(new Set());
+  const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
+  // 서버 restore 는 카드를 PENDING 으로 되돌려 '검수 필요' 표시가 사라진다.
+  // 빼기 전에 검수 필요였던 카드는 이유와 함께 기억해, 되돌린 뒤에도 위 섹션에 두고 검수 완료로 공개하지 않는다
+  const [checkReasons, setCheckReasons] = useState<Record<number, string>>({});
   // 매장의 첫 카드 공개라면 O5 초대로, 아니면 오늘 매장으로 (Figma O4 → O5 → O6)
   const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
   const firstGuide = bootstrap.data?.store ? !bootstrap.data.store.guide_completed : false;
+  const categories = useQuery(productCategoriesQuery(state.token, state.storeId));
 
-  const visible = (cards ?? []).filter((card) => card.review_status !== "EXCLUDED");
-  const needsReview = visible.filter((card) => card.review_status === "NEEDS_REVIEW");
-  const ready = visible.filter((card) => card.review_status !== "NEEDS_REVIEW");
-  // "맞아요"는 확인 대기(PENDING) 카드만 공개한다. 확인이 필요한 카드는 하나씩 본다
-  const toApprove = ready.filter((card) => card.review_status === "PENDING" && approve[card.card_id] !== "done");
+  const refreshCards = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
+    ]);
+  const setHiddenFor = (cardId: number, on: boolean) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(cardId);
+      else next.delete(cardId);
+      return next;
+    });
 
+  const restore = useMutation({
+    mutationFn: (cardId: number) => mutateProductCard(cardId, "restore", state.token!),
+    onSuccess: (_, cardId) => setHiddenFor(cardId, false),
+    // 카드가 숨어 있어 카드 위 글로는 보이지 않으므로 스낵바로 알린다
+    onError: (_error, cardId) => snackbar({ message: "되돌리지 못했어요", actionLabel: "다시", onAction: () => restore.mutate(cardId) }),
+    onSettled: refreshCards,
+  });
+  const exclude = useMutation({
+    mutationFn: (cardId: number) => mutateProductCard(cardId, "exclude", state.token!),
+    onMutate: (cardId) => {
+      const card = cards?.find((item) => item.card_id === cardId);
+      if (card?.review_status === "NEEDS_REVIEW") {
+        setCheckReasons((prev) => ({ ...prev, [cardId]: card.needs_review_reason ?? "내용이 확실하지 않아요" }));
+      }
+      setHiddenFor(cardId, true);
+      setCardErrors((prev) => {
+        const next = { ...prev };
+        delete next[cardId];
+        return next;
+      });
+    },
+    onSuccess: (_, cardId) => snackbar({ message: "뺐어요", actionLabel: "되돌리기", onAction: () => restore.mutate(cardId) }),
+    onError: (error, cardId) => {
+      setHiddenFor(cardId, false);
+      setCardErrors((prev) => ({ ...prev, [cardId]: apiErrorMessage(error, "빼지 못했어요.") }));
+    },
+    onSettled: refreshCards,
+  });
+  const move = useMutation({
+    mutationFn: ({ card, categoryId }: { card: CardListItem; categoryId: number }) =>
+      moveProductCard(card.card_id, categoryId, card.updated_at, state.token!),
+    onError: (error, { card }) => setCardErrors((prev) => ({ ...prev, [card.card_id]: apiErrorMessage(error, "카테고리를 옮기지 못했어요.") })),
+    onSettled: refreshCards,
+  });
+
+  const visible = (cards ?? []).filter((card) => card.review_status !== "EXCLUDED" && !hidden.has(card.card_id));
+  const isCheck = (card: CardListItem) => card.review_status === "NEEDS_REVIEW" || card.card_id in checkReasons;
+  const needsReview = visible.filter(isCheck);
+  const good = visible.filter((card) => !isCheck(card));
+  // 검수 완료는 잘 정리된 카드 중 아직 공개 전(PENDING)인 것만 공개한다. 확인이 필요한 카드는 남겨 카드 탭에서 본다
+  const toApprove = good.filter((card) => card.review_status === "PENDING" && approve[card.card_id] !== "done");
+
+  // published: 이번에 공개한 카드가 있는가. 없으면 "지식이 추가됐어요"도, 첫 매장 초대 화면도 맞지 않는다
+  const finish = (published: boolean) => {
+    if (published) toast("지식이 추가됐어요", { keepOnNavigate: true });
+    // 검수가 끝난 결과 화면으로는 돌아오지 않게 replace
+    markReplace();
+    router.replace(published && firstGuide ? "/owner/invite" : "/owner");
+  };
   const approveAll = useMutation({
     mutationFn: async () => {
       let failed = 0;
@@ -266,57 +350,70 @@ function ResultReview({
           setApprove((prev) => ({ ...prev, [card.card_id]: "done" }));
         } catch (error) {
           failed += 1;
-          setApprove((prev) => ({
-            ...prev,
-            [card.card_id]: { error: apiErrorMessage(error, "이 변경은 저장되지 않았어요.") },
-          }));
+          setApprove((prev) => ({ ...prev, [card.card_id]: { error: apiErrorMessage(error, "공개하지 못했어요.") } }));
         }
       }
       return failed;
     },
     onSettled: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
-        client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
-        client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-      ]),
+      Promise.all([refreshCards(), client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) })]),
     onSuccess: (failed) => {
-      if (failed === 0 && needsReview.length === 0) router.push(firstGuide ? "/owner/invite" : "/owner");
+      if (failed === 0) finish(true);
     },
   });
 
   const groups = new Map<string, CardListItem[]>();
-  for (const card of ready) {
+  for (const card of good) {
     const name = card.category?.name ?? "기타";
     groups.set(name, [...(groups.get(name) ?? []), card]);
   }
-  const sourceNames = job.sources.map((s) => s.filename).join(", ");
+  const failedSources = job.sources.filter((source) => source.status === "FAILED" && source.source_availability !== "DELETED");
   const noneSources = job.sources.filter(judgedNone);
-  const allDone = cards !== undefined && toApprove.length === 0;
+  const categoryItems = categories.data?.items ?? [];
+  const cardProps = (card: CardListItem) => {
+    const approveState = approve[card.card_id];
+    const approveError = typeof approveState === "object" ? `${approveState.error} 검수 완료를 다시 누르면 이 카드만 다시 해요.` : undefined;
+    return {
+      card,
+      categories: categoryItems,
+      error: cardErrors[card.card_id] ?? approveError,
+      onExclude: () => exclude.mutate(card.card_id),
+      onMove: (categoryId: number) => move.mutate({ card, categoryId }),
+    };
+  };
 
   return (
     <Screen
       footer={
         <>
           {retryBlock}
-          {allDone ? (
-            <ButtonLink href="/owner">오늘 매장으로</ButtonLink>
-          ) : (
-            <Button loading={approveAll.isPending} disabled={!cards || toApprove.length === 0} onClick={() => approveAll.mutate()}>
-              맞아요
-            </Button>
-          )}
-          <ButtonLink href="/owner" variant="secondary">
-            더 넣기
-          </ButtonLink>
+          <Button loading={approveAll.isPending} disabled={!cards} onClick={() => (toApprove.length ? approveAll.mutate() : finish(false))}>
+            검수 완료
+          </Button>
+          <TextButton
+            className="self-center"
+            onClick={() => {
+              markReplace();
+              router.replace("/owner");
+            }}
+          >
+            나중에 하기
+          </TextButton>
         </>
       }
     >
-      <BackButton href="/owner" label="오늘 매장" />
-      <PageHeader title="이렇게 나눴어요" description="다르면 눌러서 고치면 돼요" />
+      <BackButton parent="/owner" label="오늘 매장" />
+      <PageHeader title="카드가 준비됐어요! 검수 부탁드려요!" />
 
-      {job.status === "PARTIAL" && (
-        <ErrorInline message="준비된 카드와 처리하지 못한 자료가 있어요. 실패한 자료만 다시 시도할 수 있어요." onRetry={onRetryJob} retrying={retrying} />
+      {failedSources.length > 0 && (
+        <Banner tone="danger" action={{ label: "다시 시도", onClick: onRetryJob }}>
+          <p>처리하지 못한 자료가 있어요.</p>
+          {failedSources.map((source) => (
+            <p key={source.source_id} className="mt-0.5 text-[13px] font-normal">
+              {source.filename}: {source.error?.message ?? "이유를 알 수 없어요"}
+            </p>
+          ))}
+        </Banner>
       )}
       {cardsLoading && (
         <>
@@ -324,72 +421,54 @@ function ResultReview({
           <Skeleton className="h-28" />
         </>
       )}
-      {Boolean(cardsError) && (
-        <ErrorInline message={apiErrorMessage(cardsError, "카드를 불러오지 못했어요.")} onRetry={onRetryCards} />
-      )}
+      {Boolean(cardsError) && <ErrorInline message={apiErrorMessage(cardsError, "카드를 불러오지 못했어요.")} onRetry={onRetryCards} />}
 
       {needsReview.length > 0 && (
-        <>
-          <SectionTitle>하나씩 봐 주세요 · {needsReview.length}</SectionTitle>
-          {needsReview.map((card) => (
-            <ResultCard key={card.card_id} card={card} label={card.needs_review_reason ?? "내용이 확실하지 않아요"} tone="warn" />
-          ))}
-        </>
+        <section aria-labelledby="review-check" className="flex flex-col gap-3">
+          <SectionTitle>
+            <span id="review-check">맞는지 확인해 주세요!</span>
+            <CountBadge n={needsReview.length} />
+          </SectionTitle>
+          <Stagger>
+            {needsReview.map((card) => (
+              <ReviewCard key={card.card_id} tone="check" reason={card.needs_review_reason ?? checkReasons[card.card_id]} {...cardProps(card)} />
+            ))}
+          </Stagger>
+        </section>
       )}
 
-      {[...groups.entries()].map(([name, list]) => (
-        <section key={name} className="flex flex-col gap-3">
-          {list.map((card, index) => (
-            <ResultCard
-              key={card.card_id}
-              card={card}
-              label={index === 0 ? `${name} · ${list.length}` : name}
-              state={approve[card.card_id]}
-            />
+      {good.length > 0 && (
+        <section aria-labelledby="review-good" className="flex flex-col gap-3">
+          <div>
+            <SectionTitle>
+              <span id="review-good">잘 정리됐어요</span>
+            </SectionTitle>
+            <Caption>그대로 두셔도 돼요</Caption>
+          </div>
+          {[...groups.entries()].map(([name, list]) => (
+            <div key={name} className="flex flex-col gap-2">
+              <p className="text-[13px] font-bold text-ink-muted">{name}</p>
+              <Stagger>
+                {list.map((card) => (
+                  <ReviewCard key={card.card_id} tone="good" {...cardProps(card)} />
+                ))}
+              </Stagger>
+            </div>
           ))}
         </section>
-      ))}
+      )}
 
       {noneSources.length > 0 && (
         <section className="flex flex-col gap-3">
-          <SectionTitle>추출하지 않은 자료 · {noneSources.length}</SectionTitle>
+          <SectionTitle>
+            추출하지 않은 자료
+            <CountBadge n={noneSources.length} />
+          </SectionTitle>
           <SourceList job={job} sources={noneSources} />
         </section>
       )}
 
-      {sourceNames && <Caption>출처 · {sourceNames}</Caption>}
       <RefreshingHint active={approveAll.isPending} />
     </Screen>
-  );
-}
-
-/** Figma O4 Group: 칩 + 제목 17 Bold + 요약 14. 누르면 카드 상세에서 고친다. */
-function ResultCard({
-  card,
-  label,
-  tone = "brand",
-  state,
-}: {
-  card: CardListItem;
-  label: string;
-  tone?: "brand" | "warn";
-  state?: ApproveState[number];
-}) {
-  const published = card.review_status === "APPROVED" || state === "done";
-  const error = typeof state === "object" ? state.error : null;
-  return (
-    <Link
-      href={`/owner/cards/${card.card_id}`}
-      className={`flex w-full flex-col gap-1.5 rounded-[20px] bg-surface px-[18px] py-4 shadow-card ${focusRing}`}
-    >
-      <div className="flex items-center gap-2">
-        <Chip tone={tone}>{label}</Chip>
-        {published && <Chip size="sm" tone="neutral">공개됨</Chip>}
-        {state === "saving" && <Chip size="sm" tone="neutral">공개하는 중</Chip>}
-      </div>
-      <p className="text-[17px] font-bold leading-[1.45] tracking-[-0.34px] text-ink [word-break:keep-all]">{card.title}</p>
-      <p className="line-clamp-3 whitespace-pre-line text-[14px] leading-[1.45] tracking-[-0.14px] text-ink-muted">{card.content}</p>
-      {error && <p className="text-[12px] text-danger-700">{error} &lsquo;맞아요&rsquo;를 다시 누르면 이 카드만 다시 시도해요.</p>}
-    </Link>
   );
 }

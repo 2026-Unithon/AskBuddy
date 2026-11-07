@@ -32,7 +32,7 @@ export default function OwnerReportPage() {
 
   return (
     <Screen>
-      <BackButton href="/owner" />
+      <BackButton parent="/owner" />
       <PageHeader title="매장 리포트" description="알바생 질문이 사장님 손을 얼마나 덜 거쳤는지 보여줘요" />
       <div className="flex gap-2" aria-label="기간 선택">
         {([7, 30] as const).map((d) => (

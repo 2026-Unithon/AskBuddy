@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import {
   Button,
   Caption,
@@ -59,14 +58,8 @@ export function TodayTasksSection() {
       {items.map((task) => (
         <TaskRow key={task.task_id} task={task} />
       ))}
-      {/* 공통 Sheet 는 화면 본문 안에만 덮인다. 입력창·탭 위까지 덮도록 body 로 올린다 */}
-      {open &&
-        createPortal(
-          <div className="fixed inset-0 z-50">
-            <SendSheet onClose={() => setOpen(false)} />
-          </div>,
-          document.body,
-        )}
+      {/* 공통 Sheet 가 앱 틀(.app-mobile-frame)로 스스로 띄워 입력창·탭 위까지 덮는다(화면 개선 계획 2) */}
+      {open && <SendSheet onClose={() => setOpen(false)} />}
     </>
   );
 }

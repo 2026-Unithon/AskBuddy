@@ -1,9 +1,19 @@
 // 리브랜딩(Figma 4-1) 공통 컴포넌트. 새 화면은 components/ui 대신 여기서 가져온다.
 export { BuddyImage } from "@/components/kit/buddy";
-export { BackButton, Button, ButtonLink, SettingsButton, TextButton, focusRing } from "@/components/kit/buttons";
+export { BackButton } from "@/components/kit/back-button";
+export { Button, ButtonLink, TextButton, focusRing } from "@/components/kit/buttons";
 export { AnswerBubble, QuestionBubble } from "@/components/kit/chat";
 export { CheckRow } from "@/components/kit/checkbox";
 export { AskBar, Composer, ComposerTool } from "@/components/kit/composer";
+export { Banner, ConfirmDialog, CountBadge, FeedbackProvider, useFeedback } from "@/components/kit/feedback";
+export { Coachmark } from "@/components/kit/coachmark";
+export { Segmented } from "@/components/kit/segmented";
+export { Switch } from "@/components/kit/switch";
+export { SortableList } from "@/components/kit/sortable-list";
+export { TimeWheel } from "@/components/kit/time-wheel";
+export { Stagger } from "@/components/kit/stagger";
+export { SwipeRow, type SwipeAction } from "@/components/kit/swipe-row";
+export { HeaderActions } from "@/components/kit/header-actions";
 export { HeroCard, HeroClock, HeroProgress } from "@/components/kit/hero";
 export { Icon, type IconName } from "@/components/kit/icon";
 export { NumberedContent } from "@/components/kit/numbered-content";

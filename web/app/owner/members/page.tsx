@@ -1,105 +1,158 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, TopBar } from "@/components/ui";
+import {
+  BackButton,
+  Button,
+  ButtonLink,
+  ConfirmDialog,
+  Empty,
+  ErrorInline,
+  PageHeader,
+  Screen,
+  SectionTitle,
+  Skeleton,
+  Surface,
+  SwipeRow,
+  TextButton,
+  useFeedback,
+} from "@/components/kit";
 import { InviteLinkCard } from "@/components/invite-link-card";
 import { apiErrorMessage, approveJoin, rejectJoin, removeMember } from "@/lib/api";
-import { membersQuery, queryKeys, checklistKeys } from "@/lib/query";
+import { checklistKeys, membersQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 function kst(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+type Person = { id: number; name: string };
+
+/** 직원 관리(o15a~c). 초대, 합류 요청 승인·거절, 함께 일하는 직원 내보내기. */
 export default function OwnerMembersPage() {
   const { state } = useApp();
   const queryClient = useQueryClient();
+  const feedback = useFeedback();
   const members = useQuery(membersQuery(state.token, state.storeId));
-  const [removing, setRemoving] = useState<{ user_id: number; name: string } | null>(null);
+  const [rejecting, setRejecting] = useState<Person | null>(null);
+  const [removing, setRemoving] = useState<Person | null>(null);
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.members(state.storeId) }),
       queryClient.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) }),
     ]);
   };
-  const decide = useMutation({
-    mutationFn: ({ id, approve }: { id: number; approve: boolean }) =>
-      approve ? approveJoin(id, state.token!) : rejectJoin(id, state.token!),
+  const approve = useMutation({
+    mutationFn: (request: Person) => approveJoin(request.id, state.token!),
+    onSuccess: (_, request) => feedback.toast(`${request.name}님이 합류했어요`),
+    onSettled: invalidate,
+  });
+  const reject = useMutation({
+    mutationFn: (request: Person) => rejectJoin(request.id, state.token!),
+    onSuccess: () => {
+      setRejecting(null);
+      feedback.toast("거절했어요");
+    },
     onSettled: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (userId: number) => removeMember(userId, state.token!),
-    onSuccess: () => setRemoving(null),
+    mutationFn: (member: Person) => removeMember(member.id, state.token!),
+    onSuccess: (_, member) => {
+      setRemoving(null);
+      feedback.toast(`${member.name}님을 내보냈어요`);
+    },
     onSettled: invalidate,
   });
+  const staff = members.data?.active.filter((m) => m.role === "STAFF") ?? [];
+  const busy = approve.isPending || reject.isPending;
 
   return (
-    <>
-      <TopBar title="직원 관리" backHref="/owner/settings" />
-      <div className="flex-1 overflow-y-auto space-y-4 px-4 pb-8">
-        <InviteLinkCard />
-        <Link href="/owner/member-shifts" className="flex min-h-11 items-center font-bold text-primary">직원별 담당 근무조 정하기 →</Link>
-
-        <section className="rounded-2xl bg-surface p-4 shadow-sm">
-          <h2 className="text-sm font-bold">승인 대기 {members.data ? `(${members.data.pending.length})` : ""}</h2>
-          {members.isPending && <p role="status" className="mt-2 text-xs text-muted">불러오는 중…</p>}
-          {members.isError && (
-            <div className="mt-2 flex items-center gap-2">
-              <p role="alert" className="text-xs text-danger-500">{apiErrorMessage(members.error, "목록을 불러오지 못했어요.")}</p>
-              <Button onClick={() => void members.refetch()}>다시 시도</Button>
-            </div>
-          )}
-          {members.data?.pending.length === 0 && <p className="mt-2 text-xs text-muted">기다리는 요청이 없어요.</p>}
-          <ul className="mt-2 divide-y divide-border">
-            {members.data?.pending.map((r) => (
-              <li key={r.request_id} className="flex items-center gap-2 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{r.name}</p>
-                  <p className="text-xs text-muted">{kst(r.requested_at)} 요청</p>
-                </div>
-                <Button loading={decide.isPending && decide.variables?.id === r.request_id} loadingLabel="처리 중"
-                  onClick={() => decide.mutate({ id: r.request_id, approve: true })}>승인</Button>
-                <Button disabled={decide.isPending} onClick={() => decide.mutate({ id: r.request_id, approve: false })}>거절</Button>
+    <Screen>
+      <BackButton parent="/owner/settings" />
+      <PageHeader title="직원 관리" />
+      <InviteLinkCard />
+      <ButtonLink href="/owner/member-shifts" variant="secondary">
+        직원 담당 근무조
+      </ButtonLink>
+      {members.isPending && <Skeleton className="h-40" />}
+      {members.isError && (
+        <ErrorInline message={apiErrorMessage(members.error, "목록을 불러오지 못했어요.")} onRetry={() => void members.refetch()} retrying={members.isRefetching} />
+      )}
+      {members.data && members.data.pending.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <SectionTitle>합류 요청</SectionTitle>
+          <Surface as="section" className="px-[18px]">
+            <ul className="flex flex-col divide-y divide-background">
+              {members.data.pending.map((r) => (
+                <li key={r.request_id} data-join-request="" className="flex items-center gap-2 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[16px] font-bold text-ink">{r.name}</p>
+                    <p className="text-[13px] text-ink-muted">{kst(r.requested_at)} 요청</p>
+                  </div>
+                  <TextButton disabled={busy} onClick={() => setRejecting({ id: r.request_id, name: r.name })}>
+                    거절
+                  </TextButton>
+                  <Button
+                    className="min-h-10 w-auto! px-4 py-2!"
+                    loading={approve.isPending && approve.variables?.id === r.request_id}
+                    disabled={busy}
+                    onClick={() => approve.mutate({ id: r.request_id, name: r.name })}
+                  >
+                    승인
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Surface>
+          {approve.error && <ErrorInline message={apiErrorMessage(approve.error, "승인하지 못했어요.")} />}
+        </section>
+      )}
+      {members.data && (
+        <section className="flex flex-col gap-2">
+          <SectionTitle>함께 일하는 직원</SectionTitle>
+          {staff.length === 0 && <Empty title="아직 합류한 직원이 없어요" />}
+          <ul className="flex flex-col gap-2">
+            {staff.map((m) => (
+              <li key={m.user_id} data-member="">
+                <SwipeRow left={{ label: "내보내기", ariaLabel: `${m.name} 내보내기`, tone: "danger", onAction: () => setRemoving({ id: m.user_id, name: m.name }) }}>
+                  <div className="flex min-h-16 flex-col justify-center rounded-[20px] bg-surface px-[18px] py-3 shadow-card">
+                    <p className="truncate text-[16px] font-bold text-ink">{m.name}</p>
+                    <p className="text-[13px] text-ink-muted">{kst(m.joined_at)} 합류</p>
+                  </div>
+                </SwipeRow>
               </li>
             ))}
           </ul>
-          {decide.error && <p role="alert" className="text-xs text-danger-500">{apiErrorMessage(decide.error, "처리하지 못했어요.")}</p>}
         </section>
-
-        <section className="rounded-2xl bg-surface p-4 shadow-sm">
-          <h2 className="text-sm font-bold">함께 일하는 직원 {members.data ? `(${members.data.active.filter((m) => m.role === "STAFF").length})` : ""}</h2>
-          {members.data && members.data.active.filter((m) => m.role === "STAFF").length === 0 && (
-            <p className="mt-2 text-xs text-muted">아직 합류한 직원이 없어요. 초대 링크를 보내 보세요.</p>
-          )}
-          <ul className="mt-2 divide-y divide-border">
-            {members.data?.active.filter((m) => m.role === "STAFF").map((m) => (
-              <li key={m.user_id} className="flex items-center gap-2 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{m.name}</p>
-                  <p className="text-xs text-muted">{kst(m.joined_at)} 합류</p>
-                </div>
-                <button type="button" className="min-h-11 px-2 text-xs font-bold text-danger-500" onClick={() => setRemoving(m)}>내보내기</button>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {removing && (
-          <div role="dialog" aria-modal="true" className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-4">
-            <div className="w-full max-w-sm rounded-2xl bg-surface p-5">
-              <p className="text-sm font-bold">{removing.name}님을 내보낼까요?</p>
-              <p className="mt-1 text-xs text-muted">바로 앱을 쓸 수 없게 돼요. 질문·학습 기록은 남아요. 다시 초대하면 이어서 쓸 수 있어요.</p>
-              {remove.error && <p role="alert" className="mt-2 text-xs text-danger-500">{apiErrorMessage(remove.error, "내보내지 못했어요.")}</p>}
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <Button onClick={() => setRemoving(null)}>취소</Button>
-                <Button loading={remove.isPending} loadingLabel="처리 중" onClick={() => remove.mutate(removing.user_id)}>내보내기</Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </>
+      )}
+      <ConfirmDialog
+        open={Boolean(rejecting)}
+        title={`${rejecting?.name ?? ""}님 합류를 거절할까요?`}
+        confirmLabel="거절"
+        tone="danger"
+        loading={reject.isPending}
+        error={reject.error ? apiErrorMessage(reject.error, "거절하지 못했어요.") : null}
+        onConfirm={() => rejecting && reject.mutate(rejecting)}
+        onCancel={() => {
+          reject.reset();
+          setRejecting(null);
+        }}
+      />
+      <ConfirmDialog
+        open={Boolean(removing)}
+        title={`${removing?.name ?? ""}님을 내보낼까요?`}
+        description="질문과 기록은 남아요."
+        confirmLabel="내보내기"
+        tone="danger"
+        loading={remove.isPending}
+        error={remove.error ? apiErrorMessage(remove.error, "내보내지 못했어요.") : null}
+        onConfirm={() => removing && remove.mutate(removing)}
+        onCancel={() => {
+          remove.reset();
+          setRemoving(null);
+        }}
+      />
+    </Screen>
   );
 }

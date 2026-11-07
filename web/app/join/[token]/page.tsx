@@ -16,7 +16,7 @@ async function storeName(token: string): Promise<string | null> {
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
   const { token } = await params;
   const name = await storeName(token);
-  const title = name ? `${name}에서 초대했어요 · AskBuddy` : "AskBuddy 초대";
+  const title = name ? `${name}에서 초대했어요 | AskBuddy` : "AskBuddy 초대";
   const description = name ? "눌러서 매장에 합류하세요. 사장님이 승인하면 바로 시작해요." : "초대 링크를 확인해 주세요.";
   return {
     title,

@@ -5,6 +5,8 @@ import { useState, type ReactNode } from "react";
 import { AppProvider } from "@/lib/store";
 import { ApiError } from "@/lib/api";
 import { SessionExpiryHandler } from "@/components/session-expiry-handler";
+import { NavHistoryProvider } from "@/lib/nav-history";
+import { FeedbackProvider } from "@/components/kit/feedback";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -31,8 +33,12 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AppProvider>
-        <SessionExpiryHandler />
-        {children}
+        <NavHistoryProvider>
+          <FeedbackProvider>
+            <SessionExpiryHandler />
+            {children}
+          </FeedbackProvider>
+        </NavHistoryProvider>
       </AppProvider>
     </QueryClientProvider>
   );

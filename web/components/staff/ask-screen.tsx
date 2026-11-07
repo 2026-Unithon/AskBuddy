@@ -114,7 +114,7 @@ export function AskScreen() {
         </div>
       }
     >
-      <BackButton href="/staff" />
+      <BackButton parent="/staff" />
       <p className="text-[20px] font-black leading-[1.45] tracking-[-0.4px] text-ink">버디</p>
 
       {loading && (
@@ -136,7 +136,7 @@ export function AskScreen() {
         </Button>
       )}
       {!loading && !loadError && messages.length === 0 && !busy && (
-        <AnswerBubble>{"매장 카드에 있는 내용으로 답해 드려요.\n메뉴 이름과 HOT·ICE 같은 규격을 함께 물어보면 더 정확해요."}</AnswerBubble>
+        <AnswerBubble>{"매장 카드에 있는 내용으로 답해 드려요.\n메뉴 이름과 HOT, ICE 같은 규격을 함께 물어보면 더 정확해요."}</AnswerBubble>
       )}
 
       <ol className="flex flex-col gap-4" aria-live="polite">
@@ -218,7 +218,7 @@ function MessageView({
               broken={citation.source_availability !== "AVAILABLE"}
             />
           ))}
-          {response?.action === "ESCALATE" && response.pending_id && <Chip>확인 중 · 답 오면 알려드려요</Chip>}
+          {response?.action === "ESCALATE" && response.pending_id && <Chip>확인 중이에요. 답 오면 알려드려요</Chip>}
         </>
       }
       actions={
@@ -283,8 +283,8 @@ function CitationChip({ receipt, order, broken }: { receipt: string; order: numb
         onClick={() => setOpen((value) => !value)}
         className="self-start rounded-full bg-empty px-2.5 py-1.5 text-[12px] font-medium leading-[1.45] text-primary"
       >
-        {citation.data ? `카드 · ${citation.data.title}` : `근거 카드 ${order}`}
-        {broken && " · 인용 끊김"}
+        {citation.data ? `카드 ${citation.data.title}` : `근거 카드 ${order}`}
+        {broken && " (인용 끊김)"}
       </button>
       {open && (
         <div className="rounded-[14px] bg-background px-3 py-2 text-[13px] leading-[1.45] text-ink">

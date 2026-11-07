@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import asyncpg
 
+from app.notifications.destinations import OWNER_MEMBERS, STAFF_HOME, owner_job_cards, owner_question
 from app.config import get_settings
 from app.deps import get_pool
 
@@ -99,7 +100,7 @@ async def create_pending_question_notification(
         dedupe_key=f"pending-question:{store_id}:{question_id}",
         title="새 질문이 도착했어요",
         body=question_text,
-        destination=f"/owner/questions{'/v2' if contract_version=='v2' else ''}?question_id={question_id}",
+        destination=owner_question(question_id),
     )
 
 
@@ -124,7 +125,7 @@ async def create_ingest_completed_notification(
         dedupe_key=f"ingest-completed:{store_id}:{job_id}",
         title="자료 정리가 끝났어요",
         body=f"자료가 반영된 카드 {card_count}개를 확인해 주세요. 공개 여부는 카드에서 확인할 수 있어요.",
-        destination=f"/owner/cards/review?job_id={job_id}",
+        destination=owner_job_cards(job_id),
     )
 
 
@@ -367,7 +368,7 @@ async def create_join_request_notification(
         dedupe_key=f"join_request:{request_id}",
         title="새 직원이 합류를 요청했어요",
         body=f"{staff_name}님이 매장 합류 승인을 기다리고 있어요.",
-        destination="/owner/members",
+        destination=OWNER_MEMBERS,
     )
 
 async def create_join_approved_notification(
@@ -385,5 +386,5 @@ async def create_join_approved_notification(
         dedupe_key=f"join_approved:{request_id}",
         title="합류가 승인됐어요",
         body=f"{store_name}에서 바로 시작할 수 있어요.",
-        destination="/staff/roadmap",
+        destination=STAFF_HOME,
     )

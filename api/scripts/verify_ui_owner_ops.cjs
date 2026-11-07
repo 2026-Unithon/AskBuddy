@@ -39,6 +39,8 @@ function report(s, days) {
 
 async function open(browser, role, url, s, width = 390) {
   const ctx = await browser.newContext({ viewport: { width, height: 844 }, locale: "ko-KR" });
+  // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+  await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
   await ctx.addInitScript((role) => localStorage.setItem("askbuddy_state", JSON.stringify({
     v: 9, data: { token: "synthetic-ops-only", role, userId: role === "OWNER" ? 1 : 2, storeId: 1 },
   })), role);

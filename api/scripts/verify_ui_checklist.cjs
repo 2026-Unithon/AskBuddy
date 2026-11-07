@@ -17,6 +17,8 @@ const fs = require("node:fs");
   };
   async function setup(role = "STAFF", width = 390) {
     const ctx = await browser.newContext({ viewport: { width, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     const date = new Date().toLocaleDateString("sv-SE", {
       timeZone: "Asia/Seoul",
     });
@@ -169,6 +171,9 @@ const fs = require("node:fs");
           badges: {},
           default_destination: role === "OWNER" ? "/owner" : "/staff",
         };
+      // main cecca61: 직원 오늘 할 일 화면이 사장님이 보낸 오늘만 할 일도 부른다
+      else if (p === "/today-tasks/mine")
+        payload = { business_date: s.date, items: [] };
       else if (p === "/learn/v2/pending")
         payload = { questions: [], next_after: null };
       else if (p === "/checklist/today") {
@@ -501,13 +506,14 @@ const fs = require("node:fs");
         .getByRole("progressbar", { name: "매장 체크리스트 진행" })
         .waitFor();
       check(
-        "점주 현황 실제 개수",
-        await page.getByText("체크 0/2개").isVisible(),
+        "점주 현황 남은 수(화면 개선 o01b)",
+        await page.getByText("아침 2개 남았어요").isVisible(),
       );
       await page.goto(`${BASE}/owner/shifts`);
       await page.getByRole("heading", { name: "아침", exact: true }).waitFor();
       s.failShift = true;
-      await page.getByRole("button", { name: "근무조 추가" }).click();
+      // 화면 개선 계획 4b(o14b): 머리의 "추가" 버튼 하나
+      await page.getByRole("button", { name: "추가", exact: true }).click();
       await page.getByLabel("이름", { exact: true }).fill("저녁");
       await page
         .getByRole("dialog")
@@ -525,7 +531,9 @@ const fs = require("node:fs");
         .click();
       await page.getByRole("heading", { name: "저녁", exact: true }).waitFor();
       check("근무조 추가", s.shifts.length === 2);
-      await page.getByRole("button", { name: "저녁 위로" }).click();
+      // o14a: ↑↓ 대신 끌어서 순서, 손잡이에 포커스하고 위 키
+      await page.getByRole("button", { name: "저녁 옮기기" }).focus();
+      await page.keyboard.press("ArrowUp");
       await page.waitForFunction(
         () => document.querySelector("h2")?.textContent === "저녁",
       );
@@ -555,42 +563,38 @@ const fs = require("node:fs");
       );
       await page.goto(`${BASE}/owner/member-shifts`);
       await page.getByRole("heading", { name: "합성 알바" }).waitFor();
-      await page.getByRole("button", { name: "아침", exact: true }).click();
+      // 화면 개선 계획 4b(o16a): 직원 담당은 체크박스
+      await page.getByRole("checkbox", { name: "아침" }).click();
       await page.waitForFunction(() =>
-        document.querySelector("[aria-pressed=true]"),
+        document.querySelector("[role=checkbox][aria-checked=true]"),
       );
       check("직원 담당 저장", s.memberIds.includes(1));
       await page.goto(`${BASE}/owner/cards/1`);
       await page
         .getByRole("heading", { name: "어느 근무조 할 일인가요?" })
         .waitFor();
-      await page.getByRole("button", { name: "공통", exact: true }).click();
+      // 화면 개선 계획 3(o06e): 공통·근무조는 스위치
+      const common = page.getByRole("switch", { name: "공통", exact: true });
+      await common.click();
       await page.waitForFunction(
-        () =>
-          document.querySelector("button[aria-pressed=true]")?.textContent ===
-          "공통",
+        () => document.querySelector('[role=switch][aria-checked=true]')?.textContent?.startsWith("공통"),
       );
       check(
         "카드 공통 연결",
         s.links.checklist && s.links.shift_ids.length === 0,
       );
+      // 화면 개선 계획 4b(o13a·o13b): 첫 알바생이 기본, 날짜를 누르면 시트
       await page.goto(`${BASE}/owner/me`);
-      await page.getByLabel("기록 구성원").waitFor();
-      await page.getByLabel("기록 구성원").selectOption("2");
+      await page.getByRole("button", { name: /기록 볼 알바생, 지금 합성 알바/ }).waitFor();
       await page
         .getByRole("button", { name: `${s.date} 50%`, exact: true })
         .click();
-      await page.getByText("✓ 합성 청소").waitFor();
-      check("기록 상세 카드 제목 한 번만", (await page.getByText("합성 청소").count()) === 1);
+      const daySheet = page.getByRole("dialog");
+      await daySheet.getByText("✓ 합성 청소").waitFor();
+      check("기록 상세 카드 제목 한 번만", (await daySheet.getByText("합성 청소").count()) === 1);
       check("개인 달력 제출 퍼센트·한 일", true);
-      await page.getByRole("switch", { name: /내 기록 남기기/ }).click();
-      await page.waitForFunction(
-        () =>
-          document
-            .querySelector("[role=switch]")
-            ?.getAttribute("aria-checked") === "false",
-      );
-      check("내 기록 남기기 끄기", !s.personal);
+      await page.keyboard.press("Escape");
+      check("점주 기록에는 내 기록 남기기 없음", (await page.getByRole("switch", { name: /내 기록 남기기/ }).count()) === 0);
       await page.locator("main").evaluate((main) => main.scrollTo(0, 0));
       await page.screenshot({ path: `${artifactDir}/owner-records.png` });
       await page.goto(`${BASE}/owner/shifts`);
@@ -607,9 +611,23 @@ const fs = require("node:fs");
         .waitFor();
       check(
         "조회 꺼짐 구성원 선택 숨김",
-        (await page.getByLabel("기록 구성원").count()) === 0,
+        (await page.getByRole("button", { name: /기록 볼 알바생/ }).count()) === 0,
       );
       check("점주 화면 런타임 오류 없음", errors.length === 0);
+      await ctx.close();
+    }
+    {
+      // o13c: 내 기록 남기기 스위치는 직원 화면에만 남는다
+      const { ctx, page, s } = await setup("STAFF");
+      await page.goto(`${BASE}/staff/me`);
+      await page.getByRole("switch", { name: /내 기록 남기기/ }).click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("[role=switch]")
+            ?.getAttribute("aria-checked") === "false",
+      );
+      check("내 기록 남기기 끄기", !s.personal);
       await ctx.close();
     }
     {

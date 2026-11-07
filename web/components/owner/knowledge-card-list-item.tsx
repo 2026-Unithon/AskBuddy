@@ -56,7 +56,6 @@ export function KnowledgeCardListItem({
       <div className="flex items-center justify-between pt-1.5 border-t border-border/50 text-xs">
         <div className="flex items-center gap-2 text-xs text-muted truncate">
           <span>{card.source?.title ?? "매장 자료"}</span>
-          <span>·</span>
           <span>{formatDate(card.updated_at)}</span>
         </div>
 

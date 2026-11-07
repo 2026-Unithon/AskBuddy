@@ -62,7 +62,8 @@ export function HeroProgress({
       className="w-full overflow-hidden rounded-full bg-white/25"
       style={{ height }}
     >
-      <div className="h-full rounded-full bg-white transition-[width] duration-500" style={{ width: `${ratio * 100}%` }} />
+      {/* 처음 그릴 때 0에서 채워지고(o01b), 값이 바뀌면 이어서 움직인다 */}
+      <div className="h-full rounded-full bg-white transition-[width] duration-500 animate-[grow-from-zero_var(--dur-base)_var(--ease-out)]" style={{ width: `${ratio * 100}%` }} />
     </div>
   );
 }

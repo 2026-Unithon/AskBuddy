@@ -18,6 +18,8 @@ const message = (id, action, content) => ({ message_id: String(id), sender: 'BUD
     const state = { calls: 0, pending, messages: Array.from({ length: count }, (_, i) =>
       message(i+1, pending ? (i === 0 ? 'ESCALATE' : 'ANSWER') : (i === count-1 ? 'CLARIFY' : 'ANSWER'), `합성 기록 ${i+1}`)) };
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    // 화면 개선 계획 4a: 처음 한 번 뜨는 안내(코치마크)는 이 검사에서 본 것으로 둔다
+    await ctx.addInitScript(() => { try { for (const k of ['owner-home', 'staff-home', 'dev']) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {} });
     await ctx.route('**/*', async route => {
       const req = route.request(), url = new URL(req.url()), path = url.pathname;
       if (url.origin === 'http://127.0.0.1:3011') return route.continue();

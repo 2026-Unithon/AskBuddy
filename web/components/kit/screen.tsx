@@ -1,4 +1,9 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { usePathname } from "next/navigation";
+import { useNavHistory } from "@/lib/nav-history";
+import { PullIndicator, usePullToRefresh } from "@/components/kit/pull-to-refresh";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 // 화면 오른쪽 위의 흐린 초록 빛. Figma: 380px 원, 프레임 오른쪽 밖으로 160px, 위로 160px.
 export function Aurora() {
@@ -22,28 +27,124 @@ export function Screen({
   tabBar,
   aurora = true,
   className = "",
+  onRefresh,
+  hideFooterOnScroll = false,
 }: {
   children: ReactNode;
   footer?: ReactNode;
   tabBar?: ReactNode;
   aurora?: boolean;
   className?: string;
+  /** 주면 맨 위에서 아래로 당겨 새로고침한다 */
+  onRefresh?: () => Promise<unknown>;
+  /** 참이면 아래로 스크롤할 때 footer(입력창)를 숨기고 위로 올리면 다시 보인다(o01e) */
+  hideFooterOnScroll?: boolean;
 }) {
+  const main = useRef<HTMLElement>(null);
+  const { enter } = useNavHistory();
+  const refresh = usePullToRefresh(main, onRefresh);
+  const [footerHidden, setFooterHidden] = useState(false);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  // 숨는 입력창은 본문 위에 떠 있고(자리를 차지하지 않음), 본문 아래 여백을 그 높이만큼 둔다
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!hideFooterOnScroll || !el) return;
+    const observer = new ResizeObserver(() => setFooterHeight(el.getBoundingClientRect().height));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hideFooterOnScroll]);
+  useEffect(() => {
+    const el = main.current;
+    if (!hideFooterOnScroll || !el) return;
+    let last = el.scrollTop;
+    const onScroll = () => {
+      const top = el.scrollTop;
+      // 입력 중(포커스가 입력창 안)이면 숨기지 않는다. 폰 키보드가 열린 채 입력칸이 사라지면 안 된다
+      if (footerRef.current?.contains(document.activeElement)) {
+        last = top;
+        return;
+      }
+      const atBottom = top + el.clientHeight >= el.scrollHeight - 4;
+      if (atBottom || top < 8) setFooterHidden(false);
+      else if (top - last > 24) setFooterHidden(true);
+      else if (last - top > 24) setFooterHidden(false);
+      if (Math.abs(top - last) > 24) last = top;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [hideFooterOnScroll]);
+  // 탭 화면은 스크롤 위치를 기억해 탭을 오갈 때 되살린다(NAV-3).
+  const rememberScroll = Boolean(tabBar);
+  const pathname = usePathname();
+  useEffect(() => {
+    const el = main.current;
+    if (!rememberScroll || !el) return;
+    const key = `askbuddy:scroll:${pathname}`;
+    let saved = 0;
+    try {
+      saved = Number(sessionStorage.getItem(key)) || 0;
+    } catch {
+      // 저장소를 못 쓰면 맨 위에서 시작한다
+    }
+    // 데이터가 늦게 와 높이가 모자라면 잠깐(최대 1.5초) 다시 맞춰 본다. 사용자가 손대면 바로 멈춘다(끌고 가지 않게)
+    let restoring = 0;
+    const started = performance.now();
+    const stopRestore = () => cancelAnimationFrame(restoring);
+    const userInput = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    if (saved > 0) {
+      const restore = () => {
+        el.scrollTop = saved;
+        if (Math.abs(el.scrollTop - saved) > 1 && performance.now() - started < 1500) restoring = requestAnimationFrame(restore);
+      };
+      restore();
+      userInput.forEach((type) => el.addEventListener(type, stopRestore, { passive: true }));
+    }
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        try {
+          sessionStorage.setItem(key, String(Math.round(el.scrollTop)));
+        } catch {
+          // 저장 못 해도 화면 동작에는 영향 없다
+        }
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      stopRestore();
+      userInput.forEach((type) => el.removeEventListener(type, stopRestore));
+      cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [rememberScroll, pathname]);
   const gutter = "px-5 min-[375px]:px-6";
   const bottomSpace = tabBar
     ? "pb-[calc(108px+env(safe-area-inset-bottom,0px))]"
     : "pb-[max(40px,calc(env(safe-area-inset-bottom,0px)+6px))]";
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-ink">
+    <div data-enter={enter} className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-ink">
       {aurora && <Aurora />}
       <main
-        className={`relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-[calc(28px+env(safe-area-inset-top,0px))] ${gutter} ${
+        ref={main}
+        className={`relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto ${onRefresh ? "overscroll-y-contain" : ""} pt-[calc(28px+env(safe-area-inset-top,0px))] ${gutter} ${
           footer ? "pb-4" : bottomSpace
         } ${className}`}
+        style={hideFooterOnScroll && footer ? { paddingBottom: footerHeight + 16 } : undefined}
       >
+        {onRefresh && <PullIndicator pull={refresh.pull} refreshing={refresh.refreshing} threshold={refresh.threshold} />}
         {children}
       </main>
-      {footer && <div className={`relative flex flex-col gap-3 pt-2 ${gutter} ${bottomSpace}`}>{footer}</div>}
+      {footer && (
+        <div
+          ref={footerRef}
+          className={`${hideFooterOnScroll ? "absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background to-transparent" : "relative"} flex flex-col gap-3 pt-2 transition-transform duration-[var(--dur-base)] ease-[var(--ease-out)] ${gutter} ${bottomSpace}`}
+          style={footerHidden ? { transform: "translateY(110%)" } : undefined}
+        >
+          {footer}
+        </div>
+      )}
       {tabBar}
     </div>
   );
@@ -66,7 +167,7 @@ export function PageHeader({
       {eyebrow && (
         <p className="text-[14px] font-medium leading-[1.45] tracking-[-0.14px] text-ink-muted">{eyebrow}</p>
       )}
-      <h1 className="pr-12 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
+      <h1 className={`${action ? "pr-28" : ""} text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]`}>
         {title}
       </h1>
       {description && (

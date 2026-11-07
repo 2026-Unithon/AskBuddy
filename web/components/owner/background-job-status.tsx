@@ -16,7 +16,7 @@ interface BackgroundJobStatusProps {
 function jobStatusDescription(status: IngestJobStatus) {
   switch (status) {
     case "QUEUED":
-      return "서버 접수 완료 · 분석 대기 중";
+      return "접수했어요. 분석을 기다리는 중";
     case "EXTRACTING":
       return "AI가 자료에서 업무 내용을 추출하는 중…";
     case "CLASSIFYING":

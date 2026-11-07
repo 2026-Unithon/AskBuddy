@@ -1,9 +1,11 @@
 "use client";
 
-import { notFound, useSearchParams } from "next/navigation";
+import { notFound, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import {
   AnswerBubble,
+  Banner,
+  ConfirmDialog,
   AskBar,
   BackButton,
   Button,
@@ -11,10 +13,12 @@ import {
   CardLink,
   CheckRow,
   Chip,
+  Coachmark,
   Composer,
   ComposerTool,
   Empty,
   ErrorInline,
+  HeaderActions,
   HeroCard,
   HeroClock,
   HeroProgress,
@@ -25,12 +29,17 @@ import {
   QuestionBubble,
   Screen,
   SectionTitle,
-  SettingsButton,
   Sheet,
   Skeleton,
   STAFF_TABS,
+  Stagger,
+  SwipeRow,
+  Segmented,
+  Switch,
   TabBar,
+  useFeedback,
 } from "@/components/kit";
+import { useLongPress } from "@/lib/use-long-press";
 
 // 개발 전용: 공통 컴포넌트를 Figma 화면(O6·A2·A5·O9)과 나란히 비교하는 미리보기. ?s=o6|a2|a5|o9|states
 function Preview() {
@@ -39,10 +48,15 @@ function Preview() {
   const [checks, setChecks] = useState<boolean[]>([false, false, false]);
   const [sheet, setSheet] = useState(false);
 
+  if (screen === "feedback") return <FeedbackPreview />;
+  if (screen === "gestures") return <GesturesPreview />;
+  if (screen === "forms") return <FormsPreview />;
+  if (screen === "guide") return <GuidePreview />;
+
   if (screen === "a2") {
     return (
       <Screen tabBar={<TabBar tabs={STAFF_TABS} />}>
-        <PageHeader title="오늘 할 일" action={<SettingsButton href="/dev/kit" initial="더" />} />
+        <PageHeader title="오늘 할 일" action={<HeaderActions role="STAFF" />} />
         <HeroCard buddySize={80} className="gap-2">
           <HeroClock pill>미들조 · 14:00–18:00</HeroClock>
           <p className="text-[24px] font-bold tracking-[-0.48px]">{checks.filter((c) => !c).length}개 남았어요</p>
@@ -74,7 +88,7 @@ function Preview() {
   if (screen === "a5") {
     return (
       <Screen footer={<AskBar value={text} onChange={setText} onSubmit={() => setText("")} onVoice={() => undefined} />}>
-        <BackButton href="/dev/kit" />
+        <BackButton parent="/dev/kit" />
         <p className="text-[20px] font-black leading-[1.45] tracking-[-0.4px]">버디</p>
         <QuestionBubble>바닐라라떼 시럽 몇 번?</QuestionBubble>
         <AnswerBubble chips={<Chip>카드 · 바닐라라떼</Chip>}>2펌프예요.</AnswerBubble>
@@ -137,7 +151,7 @@ function Preview() {
         />
       }
     >
-      <PageHeader eyebrow="더카페 논현점" title="오늘 매장" action={<SettingsButton href="/dev/kit" initial="더카페" />} />
+      <PageHeader eyebrow="더카페 논현점" title="오늘 매장" action={<HeaderActions role="OWNER" />} />
       <HeroCard className="gap-3">
         <HeroClock>지금 · 미들 진행 중</HeroClock>
         <p className="text-[22px] font-bold tracking-[-0.44px]">영업 중이에요</p>
@@ -165,8 +179,111 @@ function Preview() {
   );
 }
 
+// ?s=guide: 코치마크·세그먼트·스크롤에 숨는 입력창 (계획 4a)
+function GuidePreview() {
+  const [seg, setSeg] = useState("a");
+  return (
+    <Screen hideFooterOnScroll footer={<Button>아래 입력창</Button>}>
+      <PageHeader title="안내" />
+      <Coachmark
+        id="dev"
+        steps={[
+          { target: "#coach-a", text: "첫 번째" },
+          { target: "#coach-missing", text: "없는 대상" },
+          { target: "#coach-b", text: "두 번째" },
+        ]}
+      />
+      <p id="coach-a">가 자리</p>
+      <Segmented label="예시 세그먼트" value={seg} onChange={setSeg} options={[{ value: "a", label: "가" }, { value: "b", label: "나" }]} />
+      <p id="coach-b">나 자리</p>
+      <div className="h-[1200px]" />
+    </Screen>
+  );
+}
+
+// ?s=forms: 스위치·당겨서 새로고침 (계획 3)
+function FormsPreview() {
+  const [on, setOn] = useState(false);
+  const [count, setCount] = useState(0);
+  return (
+    <Screen onRefresh={() => new Promise((resolve) => setTimeout(() => resolve(setCount((n) => n + 1)), 200))}>
+      <PageHeader title="입력" />
+      <Switch label="알림" checked={on} onChange={setOn} />
+      <p>새로고침 {count}번</p>
+    </Screen>
+  );
+}
+
+// ?s=gestures: 차례 등장·밀기·길게 누르기·이동해도 남는 토스트 (계획 2)
+function GesturesPreview() {
+  const { toast } = useFeedback();
+  const router = useRouter();
+  const [result, setResult] = useState("");
+  const longPress = useLongPress(() => setResult("길게 눌렀어요"));
+  return (
+    <Screen>
+      <PageHeader title="제스처" />
+      <Stagger>
+        <p>하나</p>
+        <p>둘</p>
+        <p>셋</p>
+      </Stagger>
+      <SwipeRow left={{ label: "빼기", tone: "danger", onAction: () => setResult("뺐어요") }}>
+        <div className="rounded-[20px] bg-surface px-4 py-5 shadow-card">밀어 보세요</div>
+      </SwipeRow>
+      <Button variant="secondary" {...longPress}>
+        꾹 눌러 보세요
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          toast("남아 있어요", { keepOnNavigate: true });
+          router.push("/dev/kit?s=o6");
+        }}
+      >
+        이동해도 남는 토스트
+      </Button>
+      {result && <p>{result}</p>}
+    </Screen>
+  );
+}
+
+// ?s=feedback: 토스트·스낵바·확인 창·배너 (G4)
+function FeedbackPreview() {
+  const { toast, snackbar } = useFeedback();
+  const [confirm, setConfirm] = useState(false);
+  const [result, setResult] = useState("");
+  return (
+    <Screen>
+      <PageHeader title="피드백" />
+      <Banner tone="danger" action={{ label: "다시 시도", onClick: () => setResult("다시 시도함") }}>
+        처리하지 못한 자료가 있어요.
+      </Banner>
+      <Button onClick={() => toast("저장했어요")}>토스트 보기</Button>
+      <Button variant="secondary" onClick={() => snackbar({ message: "지웠어요", actionLabel: "되돌리기", onAction: () => setResult("되돌렸어요") })}>
+        스낵바 보기
+      </Button>
+      <Button variant="secondary" onClick={() => setConfirm(true)}>
+        확인 창 보기
+      </Button>
+      {result && <p>{result}</p>}
+      <ConfirmDialog
+        open={confirm}
+        title="로그아웃할까요?"
+        confirmLabel="로그아웃"
+        onCancel={() => setConfirm(false)}
+        onConfirm={() => {
+          setConfirm(false);
+          setResult("확인함");
+        }}
+      />
+    </Screen>
+  );
+}
+
 export default function DevKitPage() {
-  if (process.env.NODE_ENV === "production") notFound();
+  // 배포 빌드에서는 막는다. CI 화면 검사 빌드만 NEXT_PUBLIC_DEV_KIT=1 로 연다
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEV_KIT !== "1") notFound();
   return (
     <div className="app-page">
       <div className="app-mobile-frame">

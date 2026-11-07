@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 
+from app.notifications.destinations import owner_job_cards
 from app.categories import repository as category_repo
 from app.categories.worker import process_reclassification_job
 from app.config import get_settings
@@ -402,7 +403,7 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
             )
             for row in sources
         ],
-        review_destination=f"/owner/cards/review?job_id={job_id}",
+        review_destination=owner_job_cards(job_id),
     )
 
 

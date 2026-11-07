@@ -14,21 +14,30 @@ import {
   Screen,
   Skeleton,
   Surface,
+  TextButton,
+  useFeedback,
 } from "@/components/kit";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { diffWords } from "@/lib/diff-words";
 import { apiErrorMessage, resolveKnowledgeProposal, type KnowledgeProposal } from "@/lib/api";
 import { proposalsQuery, queryKeys, rKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 // O10 지식 제안 검토: 점주 답이 기존 카드를 보완(SUPPLEMENT)하거나 충돌(CONFLICT)할 때.
 // 공개본은 점주가 고를 때까지 그대로다 (MVP §13-2).
-export default function ProposalsPage() {
+function ProposalsScreen() {
   const { state } = useApp();
+  const params = useSearchParams();
   const proposals = useQuery(proposalsQuery(state.token, state.storeId));
-  const items = proposals.data?.items ?? [];
+  // ?card_id= 로 오면 그 카드에 걸린 제안만(목록의 '다른 답이 있어요' 카드에서 들어올 때)
+  const rawCardId = params.get("card_id");
+  const cardId = rawCardId && /^\d+$/.test(rawCardId) ? Number(rawCardId) : null;
+  const items = (proposals.data?.items ?? []).filter((item) => cardId === null || item.target_card_id === cardId);
 
   return (
     <Screen>
-      <BackButton href="/owner/cards" label="카드" />
+      <BackButton parent="/owner/cards" label="카드" />
       <PageHeader title="답변의 카드 반영 확인" description="직원에게 전달한 답변에서 카드로 정리한 내용을 확인해 주세요." />
       {proposals.isLoading && (
         <>
@@ -50,22 +59,34 @@ export default function ProposalsPage() {
   );
 }
 
+export default function ProposalsPage() {
+  return (
+    <Suspense>
+      <ProposalsScreen />
+    </Suspense>
+  );
+}
+
 function ProposalCard({ proposal }: { proposal: KnowledgeProposal }) {
   const { state } = useApp();
   const client = useQueryClient();
+  const { toast } = useFeedback();
   const resolve = useMutation({
     mutationFn: (action: "approve" | "dismiss") => resolveKnowledgeProposal(proposal.proposal_id, action, state.token!),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (_result, action) => {
+      toast(action === "approve" ? "카드에 반영했어요" : "그대로 뒀어요");
+      return Promise.all([
         client.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),
         client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
         client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
         client.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
         client.invalidateQueries({ queryKey: rKeys.pending(state.storeId, state.userId) }),
         client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-      ]),
+      ]);
+    },
   });
   const conflict = proposal.relation_type === "CONFLICT";
+  const others = (proposal.affected_cards ?? []).filter((card) => card.card_id !== proposal.target_card_id).map((card) => card.title);
   const labels: Record<string, string> = { NEW: "새 대상의 카드", SUPPLEMENT: "기존 카드 변경", IDENTICAL: "이미 반영된 내용", CONFLICT: "다른 내용" };
   const blocked: Record<string, string> = {
     LEGACY: "예전 방식의 제안이라 공개할 사실 초안이 없어요. 카드에서 직접 고친 뒤 이 제안을 닫아 주세요.",
@@ -79,29 +100,37 @@ function ProposalCard({ proposal }: { proposal: KnowledgeProposal }) {
       <div className="flex items-center gap-2">
         <Chip tone={conflict || !proposal.can_approve ? "warn" : "brand"}>{blockedLabels[proposal.approval_block_reason ?? ""] ?? labels[proposal.relation_type] ?? "확인이 필요한 내용"}</Chip>
       </div>
-      <p className="text-[13px] leading-[1.45] text-ink-muted">직원 질문 · {proposal.question_text}</p>
-      <div className="flex flex-col gap-1 rounded-[14px] bg-background px-3.5 py-2.5">
-        <p className="text-[12px] font-bold text-ink-muted">지금 카드</p>
-        <p className="text-[15px] font-bold text-ink">{proposal.current_title ?? "—"}</p>
-        <p className="whitespace-pre-wrap text-[14px] leading-[1.5] text-ink">{proposal.current_content ?? ""}</p>
-      </div>
-      <div className="flex flex-col gap-1 rounded-[14px] bg-empty px-3.5 py-2.5">
-        <p className="text-[12px] font-bold text-primary">제안 내용</p>
-        <p className="text-[15px] font-bold text-ink">{proposal.proposed_title ?? proposal.current_title ?? "—"}</p>
-        <p className="whitespace-pre-wrap text-[14px] leading-[1.5] text-ink">{proposal.proposed_content ?? proposal.answer_text}</p>
+      <p className="text-[13px] leading-[1.45] text-ink-muted">직원 질문: {proposal.question_text}</p>
+      {/* o08a: 지금 카드와 제안을 따로 보이지 않고, 바뀐 낱말만 강조한 한 덩어리로 */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[16px] font-bold text-ink">{proposal.proposed_title ?? proposal.current_title ?? "카드"}</p>
+        <p className="whitespace-pre-wrap text-[15px] leading-[1.6] text-ink">
+          {diffWords(proposal.current_content ?? "", proposal.proposed_content ?? proposal.answer_text).map((part, i) =>
+            part.kind === "same" ? (
+              <span key={i} data-diff="same">{part.text}</span>
+            ) : part.kind === "del" ? (
+              <del key={i} data-diff="del" className="text-ink-muted">{part.text}</del>
+            ) : (
+              <ins key={i} data-diff="add" className="rounded-[4px] bg-brand-100 px-0.5 font-bold no-underline">{part.text}</ins>
+            ),
+          )}
+        </p>
       </div>
       {proposal.approval_block_reason && <Caption>{blocked[proposal.approval_block_reason] ?? blocked.NO_DRAFT}</Caption>}
-      {(proposal.affected_cards ?? []).map((card) => <ButtonLink key={card.card_id} href={`/owner/cards/${card.card_id}`} variant="secondary">{card.title} 확인</ButtonLink>)}
-      {proposal.can_approve && <Caption>승인하면 위에 연결된 카드의 현재 초안을 함께 공개해요. 각 카드 내용을 먼저 확인해 주세요.</Caption>}
+      {/* 승인하면 연결된 다른 카드의 지금 초안도 같이 공개된다. 사장님이 모르고 공개하지 않게 이름을 알린다 */}
+      {proposal.can_approve && others.length > 0 && <Caption>승인하면 {others.join(", ")}도 함께 공개돼요</Caption>}
       {resolve.error && (
         <ErrorInline message={apiErrorMessage(resolve.error, "이 변경은 저장되지 않았어요.")} onRetry={() => resolve.variables && resolve.mutate(resolve.variables)} retrying={resolve.isPending} />
       )}
-      {proposal.can_approve && <Button loading={resolve.isPending && resolve.variables === "approve"} disabled={resolve.isPending} onClick={() => resolve.mutate("approve")}>
-        확인한 카드 공개
-      </Button>}
-      <Button variant="secondary" disabled={resolve.isPending} onClick={() => resolve.mutate("dismiss")}>
-        공개하지 않고 제안 닫기
-      </Button>
+      {/* o08b: 주 버튼은 '수정 완료' 하나, 그대로 두기는 작은 글자 */}
+      {proposal.can_approve && (
+        <Button loading={resolve.isPending && resolve.variables === "approve"} disabled={resolve.isPending} onClick={() => resolve.mutate("approve")}>
+          수정 완료
+        </Button>
+      )}
+      <TextButton className="self-center" disabled={resolve.isPending} onClick={() => resolve.mutate("dismiss")}>
+        수정하지 않고 돌아가기
+      </TextButton>
     </Surface>
   );
 }

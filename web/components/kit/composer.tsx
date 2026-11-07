@@ -66,7 +66,7 @@ export function Composer({
   const ready = (canSubmit ?? value.trim().length > 0) && !submitting && !disabled;
   return (
     <form
-      className="flex w-full flex-col gap-3.5 rounded-[22px] bg-surface pb-3 pl-[18px] pr-3.5 pt-4 shadow-card"
+      className="flex w-full flex-col gap-3.5 rounded-[22px] bg-surface pb-3 pl-[18px] pr-3.5 pt-4 shadow-card transition-shadow duration-150 focus-within:ring-2 focus-within:ring-primary/40"
       onSubmit={(event) => {
         event.preventDefault();
         if (ready) onSubmit();
