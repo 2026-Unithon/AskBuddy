@@ -1,4 +1,5 @@
 from dataclasses import replace
+from uuid import uuid4
 from unittest.mock import AsyncMock
 import pytest
 
@@ -60,6 +61,27 @@ def test_unknown_menu_or_unretrieved_block_does_not_get_a_whole_card_answer():
     search=unitless_search()
     assert decide(search,store_id=1,question='말차라테 카드 원문 보여줘.').plan.action!='ANSWER'
     assert decide(replace(search,candidates=()),store_id=1,question='라테 카드 원문 보여줘.').plan.action!='ANSWER'
+
+
+@pytest.mark.parametrize('menu,first,reply',[
+    ('할메가커피','할메가커피','요금'),('딸기요거트스무디','금액','딸기요거트스무디')])
+def test_price_turn_order_names_the_menu_and_cites_its_approved_price(menu,first,reply):
+    search=fixtures.PlannerTest().search()
+    fact=search.snapshot.fact_revisions[0].model_copy(update={
+        'predicate':'금액','subject':menu,'quantity':None,'value_text':'3,000원',
+        'assertion':'금액=3,000원','original_assertion':'금액=3,000원'})
+    card=search.snapshot.cards[0].model_copy(update={'title':menu})
+    snapshot=search.snapshot.model_copy(update={'cards':(card,),'fact_revisions':(fact,)})
+    snapshot=snapshot.model_copy(update={'snapshot_hash':snapshot_digest(snapshot)})
+    search=replace(search,snapshot=snapshot)
+    offer=decide(search,store_id=1,question=first)
+    assert offer.plan.action=='CLARIFY'
+    slots={**offer.confirmed_slots,offer.plan.clarification_slot:reply}
+    result=decide(search,store_id=1,question=f'{first} {reply}',confirmed_slots=slots,
+                  context_id=uuid4(),context_verified=True,clarify_turns=1)
+    answer=render(result.plan,snapshot,store_id=1,request_id='two-turn-price',resolved=result.resolved)
+    assert answer.action=='ANSWER' and menu in answer.message and '3,000원' in answer.message
+    assert [c.fact_revision_id for c in answer.citations]==[fact.fact_revision_id]
 
 
 def test_model_evidence_keeps_revisions_variants_and_constraints():

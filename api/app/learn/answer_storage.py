@@ -134,11 +134,14 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                       resolved:ResolvedSelection,confirmed_slots:dict[str,str],
                       semantic_context:dict|None=None,choice:ContextChoice|None=None,
                       execution_metadata:dict|None=None,policy_receipt_id:str|None=None,
-                      history_head:int|None=None,failed_history_head:int|None=None) -> StoredReply:
+                      history_head:int|None=None,failed_history_head:int|None=None,
+                      typed_choice:ContextChoice|None=None) -> StoredReply:
     if (not 8<=len(request_id)<=80 or not question.strip() or len(question)>1000
-            or (choice is None and resolved.question!=question)):
+            or (choice is None and typed_choice is None and resolved.question!=question)
+            or (typed_choice is not None and (choice is not None or history_head is None))):
         raise ApiError(422,"INVALID_CONTRACT","질문과 요청 정보를 확인해 주세요.")
     body_hash=request_body_hash(session_id=session_id,question=question,choice=choice,policy_receipt_id=policy_receipt_id)
+    choice=choice or typed_choice
     execution_metadata=dict(execution_metadata or {})
     if 'policy_receipt_id' in execution_metadata:
         raise ApiError(422,'INVALID_CONTRACT','정책 연결은 전용 인자로 지정해야 합니다.')
@@ -187,7 +190,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             if choice is not None:
                 context=await accept_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                     context_id=choice.context_id,expected_state_revision=choice.state_revision,option=choice.option,
-                    knowledge_revision=int(snapshot.knowledge_revision))
+                    knowledge_revision=int(snapshot.knowledge_revision),reply_snapshot=snapshot if typed_choice else None)
                 validate_context_question(question=question,resolved=resolved,choice=choice,
                     original_question=context.context.original_question)
             if isinstance(semantic_context,dict) and 'version' in semantic_context:
@@ -230,7 +233,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                     pending_id=await conn.fetchval("""insert into pending_questions(store_id,member_id,message_id,
                         question_text,miss_reason,status,contract_version,semantic_key)
                         values($1,$2,$3,$4,'no_match','WAITING','v2',$5) returning question_id""",
-                        store_id,member_id,user_message,question[:500],key)
+                        store_id,member_id,user_message,resolved.question[:500],key)
                 await conn.execute("""insert into pending_question_occurrences(question_id,member_id,message_id)
                     values($1,$2,$3)""",pending_id,member_id,user_message)
                 # 앱 알림이 durable 전달 원장이다. 민감 원문을 preview에 복제하지 않는다.

@@ -118,8 +118,30 @@ async def load_context(conn, *, store_id: int, member_id: int, session_id: int,
     return _decode(row)
 
 
+async def latest_typed_selection(conn,*,store_id,member_id,session_id,question,snapshot,request_id):
+    """Only the current offer in this employee's conversation may bind a typed reply."""
+    from app.learn.menu_context import is_price_reply
+    row=await conn.fetchrow("""with last_turn as (
+        select receipt_id,response,context_snapshot,created_at from r_answer_receipts
+        where store_id=$1 and member_id=$2 and session_id=$3 order by receipt_id desc limit 1)
+        select c.*,r.receipt_id from last_turn r join r_question_contexts c
+        on c.store_id=$1 and c.member_id=$2 and c.chat_session_id=$3
+        and c.context_id=(r.response->>'context_id')::uuid
+        and c.state_revision=(r.context_snapshot->>'state_revision')::bigint
+        where r.response->>'action'='CLARIFY' and c.offered_slot is not null
+        and c.expires_at>clock_timestamp() and c.knowledge_revision=$4
+        and not exists(select 1 from r_failed_user_turns f where f.store_id=$1 and f.member_id=$2
+        and f.session_id=$3 and f.created_at>r.created_at and f.request_id<>$5)""",
+        store_id,member_id,session_id,int(snapshot.knowledge_revision),request_id)
+    if row:
+        stored=_decode(row)
+        if question in stored.offered_options or is_price_reply(snapshot,stored,question):
+            return stored,row['receipt_id']
+    return None
+
+
 def accept_selection(stored: StoredContext, *, option: str, expected_state_revision: int,
-                     knowledge_revision: int, now: datetime) -> StoredContext:
+                     knowledge_revision: int, now: datetime, reply_snapshot=None) -> StoredContext:
     """사용자 선택만 확정한다. 같은 offer를 두 번 소비하거나 임의 값을 넣지 못한다."""
     _revision(knowledge_revision)
     if stored.context.expires_at <= now:
@@ -128,7 +150,9 @@ def accept_selection(stored: StoredContext, *, option: str, expected_state_revis
         raise ApiError(409, "STALE_KNOWLEDGE", "공개 내용이 변경됐습니다. 다시 확인해 주세요.", retryable=True)
     if stored.state_revision != expected_state_revision:
         raise ApiError(422, "INVALID_CONTRACT", "문맥이 변경됐습니다. 현재 선택지를 확인해 주세요.")
-    if stored.offered_slot is None or option not in stored.offered_options:
+    from app.learn.menu_context import is_price_reply
+    if stored.offered_slot is None or (option not in stored.offered_options and
+            not (reply_snapshot is not None and is_price_reply(reply_snapshot,stored,option))):
         raise ApiError(422, "INVALID_CONTRACT", "현재 제시된 선택지에서 골라 주세요.")
     confirmed = dict(stored.context.confirmed_slots)
     confirmed[stored.offered_slot] = option
@@ -149,11 +173,11 @@ def accept_selection(stored: StoredContext, *, option: str, expected_state_revis
 
 async def accept_context(conn, *, store_id: int, member_id: int, session_id: int,
                          context_id: UUID, expected_state_revision: int,
-                         option: str, knowledge_revision: int) -> StoredContext:
+                         option: str, knowledge_revision: int, reply_snapshot=None) -> StoredContext:
     stored = await load_context(conn, store_id=store_id, member_id=member_id,
                                 session_id=session_id, context_id=context_id)
     accepted = accept_selection(stored, option=option, expected_state_revision=expected_state_revision,
-        knowledge_revision=knowledge_revision, now=await conn.fetchval("select clock_timestamp()"))
+        knowledge_revision=knowledge_revision, now=await conn.fetchval("select clock_timestamp()"),reply_snapshot=reply_snapshot)
     await conn.execute("""
         update r_question_contexts set confirmed_slots=$5::jsonb, proposed_slots=$6::jsonb,
           knowledge_revision=$7, state_revision=$8, offered_slot=null,

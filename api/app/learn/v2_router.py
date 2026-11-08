@@ -29,7 +29,7 @@ from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION
-from app.learn.question_contexts import load_context,accept_selection
+from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection
 from app.learn.dialogue_history import load_history,retrieval_question
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
@@ -466,6 +466,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         await ensure_initial_publication(pool, store_id=store_id,
                             member_id=member_id, user_id=user_id)
                     for requery in range(2):
+                        effective_choice=choice
+                        typed_choice=None
+                        typed_head=None
                         usage=None
                         retrieval_mode='NOT_REQUIRED'
                         retrieval_failure=None
@@ -477,17 +480,26 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
+                                if choice is None and req.policy_receipt_id is None and not policy_action(req.question):
+                                    typed=await latest_typed_selection(conn,store_id=store_id,member_id=member_id,
+                                        session_id=int(req.session_id),question=req.question.strip(),snapshot=snapshot,
+                                        request_id=req.request_id)
+                                    if typed:
+                                        stored,typed_head=typed
+                                        typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
+                                        effective_choice=typed_choice
                                 if (getattr(settings,'r_general_semantics_enabled',False)
-                                        and req.policy_receipt_id is None and choice is None
+                                        and req.policy_receipt_id is None and effective_choice is None
                                         and not policy_action(req.question)):
                                     history=await load_history(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
                                     recover_question=True
-                                if choice:
-                                    stored=await load_context(conn,store_id=store_id,member_id=member_id,
-                                        session_id=int(req.session_id),context_id=choice.context_id)
-                                    context=accept_selection(stored,option=choice.option,
-                                        expected_state_revision=choice.state_revision,
+                                if effective_choice:
+                                    if not typed_choice:
+                                        stored=await load_context(conn,store_id=store_id,member_id=member_id,
+                                            session_id=int(req.session_id),context_id=effective_choice.context_id)
+                                    context=accept_selection(stored,option=effective_choice.option,
+                                        expected_state_revision=effective_choice.state_revision,reply_snapshot=snapshot if typed_choice else None,
                                         knowledge_revision=int(snapshot.knowledge_revision),
                                         now=await conn.fetchval("select clock_timestamp()"))
                         question=req.question
@@ -534,7 +546,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 except UsageWriteError as exc:
                                     raise ApiError(503,'USAGE_UNAVAILABLE','재정렬 계측을 시작하지 못했습니다.',retryable=True) from exc
                         decision=decide(search,store_id=store_id,question=question,confirmed_slots=slots,
-                            context_id=choice.context_id if choice else None,
+                            context_id=effective_choice.context_id if effective_choice else None,
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
                         if context and 'case' in slots and not policy_action(question):
@@ -553,7 +565,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             decision,semantic_approval=product_decision(search,settings=settings,
                                 store_id=store_id,question=question,baseline=decision,
                                 user_turns=(context.context.original_question,req.question) if context else (),
-                                context_id=choice.context_id if choice else None,context_verified=context is not None,
+                                context_id=effective_choice.context_id if effective_choice else None,context_verified=context is not None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
                         from app.learn.general_semantics import product_general_decision as general_decision
                         general_audit=None
@@ -564,7 +576,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
                                     model_window-(loop.time()-start))),
-                                context_verified=context is not None or history is not None,context_id=choice.context_id if choice else None,
+                                context_verified=context is not None or history is not None,context_id=effective_choice.context_id if effective_choice else None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
@@ -578,9 +590,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             completed=await save_answer(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                                 request_id=req.request_id,question=req.question,snapshot=search.snapshot,plan=decision.plan,
                                 resolved=decision.resolved,confirmed_slots=decision.confirmed_slots,
-                                semantic_context=decision.semantic_context,choice=choice,
+                                semantic_context=decision.semantic_context,choice=choice,typed_choice=typed_choice,
                                 policy_receipt_id=req.policy_receipt_id,
-                                history_head=history.head if history is not None else None,
+                                history_head=history.head if history is not None else typed_head,
                                 failed_history_head=history.failed_head if history is not None else None,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
                                     dialogue_receipt_ids=history.receipt_ids if history is not None else (),
