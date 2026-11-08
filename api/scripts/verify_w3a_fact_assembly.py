@@ -118,6 +118,18 @@ async def _l1(db, pool):
     check("디카페인 판은 held — VARIANT_UNRESOLVED",
           [(h.fact_revision_id, h.reason) for h in loaded.held]
           == [(decaf["head_revision_id"], fact_assembly.REASON_VARIANT_UNRESOLVED)])
+    extra = await _new_source(db, w.store, w.user, "SCAN")
+    null_fact = _fact("n", "환불 기준", "원거래 확인", "앱 주문번호", variant="NULL")
+    mixed = _fact("m", "환불 기준", "특수 조건", "점주 확인", variant="HOT NULL")
+    check("새 추출의 문자 NULL만 규격 없음",
+          ExtractedAssertion.model_validate(null_fact).as_variant() is None
+          and ExtractedAssertion.model_validate(mixed).as_variant()=="HOT NULL")
+    with patch.object(ExtractedAssertion,"as_variant",lambda a:a.variant.strip().upper() or None):
+        await _process(db,pool,w.store,w.user,extra,[("원거래 확인", [null_fact,mixed])],run_tag=7029)
+    entity_ids=await fact_assembly.entities_for_source(db,w.store,extra)
+    legacy=await fact_assembly.load_entity_groups(db,w.store,entity_ids)
+    check("기존 NULL 원장 근거가 있는 사실만 복원", [f.predicate for g in legacy.groups for f in g.facts]==["원거래 확인"]
+          and len(legacy.held)==1 and legacy.held[0].reason==fact_assembly.REASON_VARIANT_UNRESOLVED)
     return w, group
 
 
