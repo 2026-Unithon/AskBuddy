@@ -3,9 +3,51 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import json
+from datetime import datetime,timedelta,timezone
+from app.contracts.hashing import digest
 from app.config import get_settings
 from app.errors import ApiError
 from app.learn.general_semantics import settings_for_chat_store, product_general_decision
+
+@pytest.mark.asyncio
+async def test_demo_enrolls_multiple_stores_only_for_their_own_snapshot(tmp_path):
+    hashes={8:'sha256:'+'8'*64,9:'sha256:'+'9'*64}
+    releases={str(sid):dict(store_id=str(sid),snapshot_hash=h,source_hash='sha256:'+'a'*64,model='demo',
+        approved_by='test',acceptance_reference='synthetic test',valid_until=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),
+        max_input_tokens=10000,max_output_tokens=2000,max_prompt_bytes=30000) for sid,h in hashes.items()}
+    bundle=dict(schema_version='r-demo-release-set/v1',releases=releases)
+    path=tmp_path/'releases.json'; path.write_text(json.dumps(bundle))
+    settings=get_settings().model_copy(update=dict(r_general_semantics_enabled=True,r_general_semantics_demo_enabled=True,
+        r_general_semantics_store_id=None,gemini_model='demo',r_general_semantics_path=str(path),r_general_semantics_hash=digest(bundle)))
+    async def eligible(sid,snapshot_hash):
+        @asynccontextmanager
+        async def acquire(): yield NS(fetchval=AsyncMock(return_value=snapshot_hash))
+        return (await settings_for_chat_store(settings,sid,NS(acquire=acquire))).r_general_semantics_enabled
+    with patch('app.learn.general_semantics.source_hash',return_value='sha256:'+'a'*64):
+        assert await eligible(8,hashes[8]) and await eligible(9,hashes[9])
+        assert not await eligible(9,hashes[8])  # same set, wrong store's snapshot
+        assert not await eligible(17,hashes[9]) and not await eligible(12,None)
+        bundle['releases']['9']['approved_by']='changed'
+        path.write_text(json.dumps(bundle))
+        assert not await eligible(9,hashes[9])
+
+@pytest.mark.asyncio
+async def test_demo_bundle_preparation_covers_every_store_with_approved_cards(capsys):
+    from scripts import chat_gemini_pilot as script
+    from unittest.mock import MagicMock
+    db=MagicMock(); db.execute=AsyncMock(); db.close=AsyncMock()
+    db.fetch=AsyncMock(return_value=[{'store_id':8},{'store_id':17}])
+    async def read(conn,*,store_id):
+        return NS(snapshot_hash='sha256:'+str(store_id).zfill(64),cards=[object()]),1,1
+    settings=get_settings().model_copy(update=dict(r_v2_enabled=True,r_general_semantics_enabled=False,
+        r_reranker_enabled=False,gemini_api_key='synthetic'))
+    with patch.object(script,'get_settings',return_value=settings), patch.object(script.asyncpg,'connect',AsyncMock(return_value=db)), \
+         patch.object(script,'read_current_index',read), patch.object(script,'source_hash',return_value='sha256:'+'a'*64):
+        await script.main('prepare-demo')
+    result=json.loads(capsys.readouterr().out)
+    assert result['pin']==digest(result['release'])
+    assert set(result['release']['releases'])=={'8','17'}
 
 def pilot():
     return get_settings().model_copy(update=dict(r_general_semantics_enabled=True,r_general_semantics_store_id=9))

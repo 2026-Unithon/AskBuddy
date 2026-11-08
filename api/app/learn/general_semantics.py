@@ -130,11 +130,20 @@ class GeneralProposal(SemanticProposal):
 
 
 def load_release(settings,search,store_id):
+    demo=getattr(settings,'r_general_semantics_demo_enabled',False)
+    limit=512000 if demo else 16000
     with Path(settings.r_general_semantics_path).open('rb') as stream:
-        data=stream.read(16001)
-    if len(data)>16000:raise ValueError('release too large')
+        data=stream.read(limit+1)
+    if len(data)>limit:raise ValueError('release too large')
     raw=json.loads(data)
     if digest(raw)!=settings.r_general_semantics_hash:raise ValueError('release pin mismatch')
+    if demo:
+        if not isinstance(raw,dict) or raw.get('schema_version')!='r-demo-release-set/v1':
+            raise ValueError('expected a pinned demo release set')
+        releases=raw.get('releases')
+        if not isinstance(releases,dict) or str(store_id) not in releases:
+            raise ValueError('demo store not in release set')
+        raw=releases[str(store_id)]
     release=Release.model_validate(raw)
     if (release.store_id!=str(store_id) or release.snapshot_hash!=search.snapshot.snapshot_hash
             or release.source_hash!=source_hash() or release.model!=settings.gemini_model
@@ -147,9 +156,10 @@ def load_release(settings,search,store_id):
 async def settings_for_chat_store(settings,store_id,pool):
     """Apply a pilot only to its enrolled store, before recovery/history/choices."""
     pilot=getattr(settings,'r_general_semantics_store_id',None)
-    if not getattr(settings,'r_general_semantics_enabled',False) or pilot is None:
+    demo=getattr(settings,'r_general_semantics_demo_enabled',False)
+    if not getattr(settings,'r_general_semantics_enabled',False) or (pilot is None and not demo):
         return settings
-    if pilot==store_id:
+    if demo or pilot==store_id:
         from types import SimpleNamespace
         async with pool.acquire() as conn:
             current=await conn.fetchval("""select s.snapshot_hash from knowledge_publications p
@@ -169,7 +179,8 @@ async def product_general_decision(search, **kwargs):
     try:
         return await general_decision(search,**kwargs)
     except ApiError as exc:
-        if (getattr(kwargs['settings'],'r_general_semantics_store_id',None)!=kwargs['store_id']
+        if ((not getattr(kwargs['settings'],'r_general_semantics_demo_enabled',False)
+                and getattr(kwargs['settings'],'r_general_semantics_store_id',None)!=kwargs['store_id'])
                 or exc.code not in {'GENERAL_RELEASE_UNAVAILABLE','GENERAL_MODEL_UNAVAILABLE',
                                     'GENERAL_INVALID_PROPOSAL','GENERAL_DEADLINE'}):
             raise
