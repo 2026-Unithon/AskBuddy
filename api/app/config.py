@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     r_reviewed_semantics_path: str = ''
     r_reviewed_semantics_hash: str = ''
     r_general_semantics_enabled: bool = False
+    r_general_semantics_store_id: int | None = Field(default=None, gt=0)
     r_general_semantics_path: str = ''
     r_general_semantics_hash: str = ''
     # C0 §6: 조정 가능한 초기값. 프로세스마다 별도 카운터를 두지 않는다.

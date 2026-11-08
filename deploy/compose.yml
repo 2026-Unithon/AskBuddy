@@ -6,6 +6,8 @@ services:
   api:
     build: ../api
     env_file: ${ASKBUDDY_ENV_FILE:-/home/ubuntu/askbuddy.env}
+    volumes:
+      - /home/ubuntu/askbuddy-releases:/run/askbuddy/releases:ro
     environment:
       PORT: "8000"
     restart: unless-stopped
