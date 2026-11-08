@@ -33,6 +33,19 @@ async def test_unitless_candidate_does_not_block_provider_dispatch(tmp_path,monk
     assert provider.await_args.kwargs['calculation_fact_ids']==()
     assert caught.value.details==dict(phase='proposal_provider',error_type='ProviderReached')
 
+@pytest.mark.asyncio
+async def test_preparation_error_keeps_its_phase(tmp_path,monkeypatch):
+    from app.errors import ApiError
+    search,_,kwargs,_=setup(tmp_path)
+    provider=AsyncMock()
+    def fail(*args,**kwargs):
+        raise AttributeError('test preparation error')
+    monkeypatch.setattr('app.learn.general_semantics.proposal_input',fail)
+    with pytest.raises(ApiError) as caught:
+        await general_decision(search,**kwargs,provider=provider)
+    provider.assert_not_awaited()
+    assert caught.value.details==dict(phase='proposal_input',error_type='AttributeError')
+
 def test_unitless_fact_can_be_read_verbatim_but_not_invented_as_operand():
     search=unitless_search()
     decision=decide(search,store_id=1,question='라테 카드 원문 보여줘.')

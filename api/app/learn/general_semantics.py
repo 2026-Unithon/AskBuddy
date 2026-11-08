@@ -206,7 +206,6 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     # Explicitly supplied slots come from accepted server context, not from the
     # planner's guesses while processing the current question.
     trusted_slots=dict(baseline.confirmed_slots if confirmed_slots is None else confirmed_slots)
-    phase='proposal_input'
     base=SemanticProposal.model_validate(proposal.model_dump(exclude={'interpretation','obligations','parts','calculations','unsupported_calculation','case_options','conclusions','case_requirements'}))
     validate_proposal(base,search,payload)
     if proposal.equivalent_question_ids:raise ValueError('model cannot merge questions')
@@ -343,6 +342,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     context=UsageContext.model_validate(context.model_dump())
     if context.store_id!=str(store_id) or context.stage!='ANSWER':raise ValueError('trusted ANSWER context required')
     trusted_slots=dict(baseline.confirmed_slots if confirmed_slots is None else confirmed_slots)
+    phase='proposal_input'
     try:
         async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
             payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns)
