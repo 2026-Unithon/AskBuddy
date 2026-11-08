@@ -71,6 +71,8 @@ async def verify(pool,admin,seed):
                 repeat=await price_turn(1)
                 check('typed reply replays after context consumption',repeat.headers['x-answer-replayed']=='true')
             original=await chat('api-approved-original',title+' 승인 원문 보여줘')
+            from scripts.verify_free_reply import verify as verify_free_reply
+            await verify_free_reply(client,headers,admin,check)
             check('explicit approved original request returns exact RAW',original.status_code==200 and
                 original.json()['action']=='ANSWER' and original.json()['message']==seed['snapshot'].raw_spans[0].text)
             question=f"{first.variant.temperature} {title} 물 얼마나?"

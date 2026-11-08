@@ -1,12 +1,13 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 from uuid import uuid4
 
 from app.contracts.chat import QuestionContext
 from app.errors import ApiError
 from app.learn.question_contexts import (
-    StoredContext, accept_selection, create_context, load_context,
+    StoredContext, accept_selection, create_context, load_context, reply_kind,
 )
 
 
@@ -52,6 +53,17 @@ class ContextTest(unittest.TestCase):
         self.stored = self.accept()
         with self.assertRaises(ApiError):
             self.accept(expected_state_revision=2)
+
+    def test_typed_detail_preserves_slots_without_confirming_a_guess(self):
+        snap=SimpleNamespace(cards=())
+        result=self.accept(option='온도는 잘 모르겠어요',reply_snapshot=snap)
+        self.assertEqual(result.context.confirmed_slots,{'entity':'라테'})
+        self.assertEqual(result.context.clarify_turns,1)
+        self.assertIsNone(result.offered_slot)
+        self.assertEqual(result.state_revision,2)
+        for text,expected in [('영수증이 없는데요','detail'),('배달앱인 경우에는 어떻게 해?','detail'),
+                              ('다른 질문인데 오픈 준비는?','new'),('시재 점검 순서 알려줘','new')]:
+            self.assertEqual(reply_kind(snap,self.stored,text),expected)
 
     def test_old_publication_cannot_replace_current_context(self):
         with self.assertRaises(ApiError) as caught:

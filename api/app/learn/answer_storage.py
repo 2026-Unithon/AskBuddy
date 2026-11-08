@@ -197,8 +197,9 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 context=await accept_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                     context_id=choice.context_id,expected_state_revision=choice.state_revision,option=choice.option,
                     knowledge_revision=int(snapshot.knowledge_revision),reply_snapshot=snapshot if typed_choice else None)
+                from app.learn.question_contexts import question_prefix
                 validate_context_question(question=question,resolved=resolved,choice=choice,
-                    original_question=context.context.original_question)
+                    original_question=question_prefix(context))
             if isinstance(semantic_context,dict) and 'version' in semantic_context:
                 if semantic_context['version'] == REVIEWED_VERSION:
                     expected_context=reviewed_context(snapshot, evidence=resolved.grouping_evidence, question=resolved.question)
@@ -216,7 +217,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                         raise ApiError(422,"INVALID_CONTRACT","문맥 식별값이 다릅니다.")
                     context=await offer_next_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                         context_id=choice.context_id,slot=plan.clarification_slot,options=plan.allowed_options,
-                        proposed_slots=case_data)
+                        proposed_slots=case_data,staff_reply=question)
                 else:
                     context=await create_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                         original_question=question,confirmed_slots=confirmed_slots,proposed_slots=case_data,
@@ -254,6 +255,8 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                                   store_id,source_ids)
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
                 pending_id=str(pending_id) if pending_id else None,resolved=resolved,
+                clarification_detail=(question_prefix(context),question) if typed_choice and context
+                    and execution_metadata.get('clarification_reply')=='detail' else None,
                 availability={str(r["source_id"]):r["source_availability"] for r in rows})
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",

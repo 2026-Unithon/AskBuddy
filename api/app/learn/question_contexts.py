@@ -7,6 +7,7 @@ DB 연결이나 잠금을 보유한 상태로 외부 모델을 호출하지 않�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
@@ -118,9 +119,40 @@ async def load_context(conn, *, store_id: int, member_id: int, session_id: int,
     return _decode(row)
 
 
+_PRIOR_REPLY = '_previous_staff_reply'
+
+
+def question_prefix(stored):
+    prior = stored.context.proposed_slots.get(_PRIOR_REPLY)
+    return stored.context.original_question + (' ' + prior if prior else '')
+
+
+def reply_kind(snapshot, stored, text):
+    """Classify only the relationship to the last offer, never the truth of a reply."""
+    from app.learn.menu_context import is_price_reply
+    from app.reg.hybrid import normalize_query
+    if text in stored.offered_options or is_price_reply(snapshot, stored, text):
+        return 'selection'
+    q = normalize_query(text)
+    if re.match(r'^(?:그건\s*(?:됐|말고)|다른\s*질문|별개로|주제(?:를)?\s*바꿔|이번엔|이번에는)', q):
+        return 'new'
+    previous = normalize_query(question_prefix(stored))
+    related = any(word in q for word in re.findall(r'[가-힣a-z0-9]{2,}', previous)
+                  if word not in {'어떻게','알려줘','뭐야','있어','어느','먼저'})
+    refers = (re.match(r'^(?:그럼|그러면|그중|그건|그거|아까|앞에서|둘\s*중|첫\s*번째|두\s*번째|선택지)', q)
+              or re.search(r'(?:라면|다면|경우에?는|한\s*건은)', q))
+    # A self-contained request about a different subject starts fresh. A
+    # description ("영수증은 없어요") is useful even with no vocabulary overlap.
+    asks = re.search(r'(?:알려\s*줘|보여\s*줘|어떻게|어디|뭐부터|뭐야|방법|순서.*[?？])', q)
+    new_title = any(normalize_query(c.title) in q and normalize_query(c.title) not in previous
+                    for c in snapshot.cards if c.title.strip())
+    if not refers and not related and (asks or (new_title and stored.offered_slot != 'entity')):
+        return 'new'
+    return 'detail'
+
+
 async def latest_typed_selection(conn,*,store_id,member_id,session_id,question,snapshot,request_id):
     """Only the current offer in this employee's conversation may bind a typed reply."""
-    from app.learn.menu_context import is_price_reply
     row=await conn.fetchrow("""with last_turn as (
         select receipt_id,response,context_snapshot,created_at from r_answer_receipts
         where store_id=$1 and member_id=$2 and session_id=$3 order by receipt_id desc limit 1)
@@ -135,8 +167,7 @@ async def latest_typed_selection(conn,*,store_id,member_id,session_id,question,s
         store_id,member_id,session_id,int(snapshot.knowledge_revision),request_id)
     if row:
         stored=_decode(row)
-        if question in stored.offered_options or is_price_reply(snapshot,stored,question):
-            return stored,row['receipt_id']
+        return stored,row['receipt_id'],reply_kind(snapshot,stored,question)
     return None
 
 
@@ -150,12 +181,13 @@ def accept_selection(stored: StoredContext, *, option: str, expected_state_revis
         raise ApiError(409, "STALE_KNOWLEDGE", "공개 내용이 변경됐습니다. 다시 확인해 주세요.", retryable=True)
     if stored.state_revision != expected_state_revision:
         raise ApiError(422, "INVALID_CONTRACT", "문맥이 변경됐습니다. 현재 선택지를 확인해 주세요.")
-    from app.learn.menu_context import is_price_reply
-    if stored.offered_slot is None or (option not in stored.offered_options and
-            not (reply_snapshot is not None and is_price_reply(reply_snapshot,stored,option))):
+    kind = (reply_kind(reply_snapshot,stored,option) if reply_snapshot is not None else
+            'selection' if option in stored.offered_options else 'new')
+    if stored.offered_slot is None or kind=='new':
         raise ApiError(422, "INVALID_CONTRACT", "현재 제시된 선택지에서 골라 주세요.")
     confirmed = dict(stored.context.confirmed_slots)
-    confirmed[stored.offered_slot] = option
+    if kind=='selection':
+        confirmed[stored.offered_slot] = option
     proposed = (dict(stored.context.proposed_slots)
                 if knowledge_revision == stored.knowledge_revision else {})
     # User-authored case provenance survives a knowledge refresh; it is not a
@@ -163,6 +195,8 @@ def accept_selection(stored: StoredContext, *, option: str, expected_state_revis
     from app.learn.case_clarification import CONTEXT_KEY
     if CONTEXT_KEY in stored.context.proposed_slots:
         proposed[CONTEXT_KEY]=stored.context.proposed_slots[CONTEXT_KEY]
+    if _PRIOR_REPLY in stored.context.proposed_slots:
+        proposed[_PRIOR_REPLY]=stored.context.proposed_slots[_PRIOR_REPLY]
     proposed.pop(stored.offered_slot, None)
     values = stored.context.model_dump()
     values.update(confirmed_slots=confirmed, proposed_slots=proposed,
@@ -191,7 +225,7 @@ async def accept_context(conn, *, store_id: int, member_id: int, session_id: int
 
 async def offer_next_context(conn, *, store_id: int, member_id: int, session_id: int,
                              context_id: UUID, slot: str, options: tuple[str, ...],
-                             proposed_slots: dict[str,str] | None = None) -> StoredContext:
+                             proposed_slots: dict[str,str] | None = None, staff_reply: str | None = None) -> StoredContext:
     _offer(slot, options)
     stored = await load_context(conn, store_id=store_id, member_id=member_id,
                                 session_id=session_id, context_id=context_id)
@@ -204,5 +238,6 @@ async def offer_next_context(conn, *, store_id: int, member_id: int, session_id:
           clarify_turns=clarify_turns+1, state_revision=state_revision+1, proposed_slots=$7::jsonb
         where store_id=$1 and member_id=$2 and chat_session_id=$3 and context_id=$4 returning *
         """, store_id, member_id, session_id, context_id, slot, json.dumps(options),
-        json.dumps({**stored.context.proposed_slots,**(proposed_slots or {})}))
+        json.dumps({**stored.context.proposed_slots,**(proposed_slots or {}),
+                    **({_PRIOR_REPLY: staff_reply} if staff_reply is not None else {})}))
     return _decode(row)
