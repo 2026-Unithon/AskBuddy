@@ -1,4 +1,4 @@
-"""원본 파일 버킷 생성. 각자 로컬에서 최초 1회 실행한다.
+"""원본 파일·프로필 사진 버킷 생성. 각자 로컬에서 최초 1회 실행한다.
 
     python scripts/init_storage.py
 
@@ -37,22 +37,26 @@ async def main() -> int:
         return 2
 
     headers = {"Authorization": f"Bearer {s.supabase_service_key}"}
+    # (버킷, 최대 크기, 받는 형식). avatars 는 프로필 사진(2026-11-08)
+    buckets = [
+        (s.storage_bucket, MAX_FILE_SIZE, None),
+        (s.avatar_bucket, s.avatar_max_bytes, ["image/jpeg", "image/png", "image/webp"]),
+    ]
     async with httpx.AsyncClient(timeout=30) as c:
-        res = await c.post(
-            f"{s.supabase_url}/storage/v1/bucket",
-            headers=headers,
-            json={"name": s.storage_bucket, "id": s.storage_bucket,
-                  "public": False, "file_size_limit": MAX_FILE_SIZE},
-        )
-        if res.status_code in (200, 201):
-            print(f"버킷 '{s.storage_bucket}' 생성 완료 (비공개, 최대 500MB)")
-        elif _already_exists(res):
-            # Storage 는 중복일 때 HTTP 400 에 본문으로 409 를 담아 보낸다.
-            # HTTP 코드만 보면 실패로 오인한다
-            print(f"버킷 '{s.storage_bucket}' 이미 존재 — 넘어간다")
-        else:
-            print(f"생성 실패 {res.status_code}: {res.text[:300]}", file=sys.stderr)
-            return 1
+        for name, limit, mimes in buckets:
+            body = {"name": name, "id": name, "public": False, "file_size_limit": limit}
+            if mimes:
+                body["allowed_mime_types"] = mimes
+            res = await c.post(f"{s.supabase_url}/storage/v1/bucket", headers=headers, json=body)
+            if res.status_code in (200, 201):
+                print(f"버킷 '{name}' 생성 완료 (비공개, 최대 {limit // (1024 * 1024)}MB)")
+            elif _already_exists(res):
+                # Storage 는 중복일 때 HTTP 400 에 본문으로 409 를 담아 보낸다.
+                # HTTP 코드만 보면 실패로 오인한다
+                print(f"버킷 '{name}' 이미 존재 — 넘어간다")
+            else:
+                print(f"생성 실패 {res.status_code}: {res.text[:300]}", file=sys.stderr)
+                return 1
 
         listed = await c.get(f"{s.supabase_url}/storage/v1/bucket", headers=headers)
         names = [b["name"] for b in listed.json()] if listed.status_code == 200 else []

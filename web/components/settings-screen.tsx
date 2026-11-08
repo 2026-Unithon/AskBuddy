@@ -19,8 +19,21 @@ import {
   TextButton,
   focusRing,
 } from "@/components/kit";
-import { apiErrorMessage, logoutSession, renameMe, renameStore } from "@/lib/api";
-import { bootstrapQuery, membersQuery, notificationsQuery, queryKeys } from "@/lib/query";
+import {
+  apiErrorMessage,
+  logoutSession,
+  putToStorage,
+  renameMe,
+  renameStore,
+  requestAvatarUpload,
+  setAvatar,
+} from "@/lib/api";
+import {
+  bootstrapQuery,
+  membersQuery,
+  notificationsQuery,
+  queryKeys,
+} from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 type Row = { title: string; href: string; badge?: number };
@@ -29,21 +42,32 @@ type Row = { title: string; href: string; badge?: number };
 export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   const { state } = useApp();
   const owner = role === "OWNER";
-  const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
+  const bootstrap = useQuery(
+    bootstrapQuery(state.token, state.userId, state.storeId),
+  );
   // 뱃지: 합류 요청 수(사장님만), 읽지 않은 알림 수. 못 불러와도 줄은 그대로 보인다
-  const members = useQuery({ ...membersQuery(state.token, state.storeId), enabled: owner && Boolean(state.token && state.storeId) });
-  const notifications = useQuery(notificationsQuery(state.token, state.storeId));
+  const members = useQuery({
+    ...membersQuery(state.token, state.storeId),
+    enabled: owner && Boolean(state.token && state.storeId),
+  });
+  const notifications = useQuery(
+    notificationsQuery(state.token, state.storeId),
+  );
   const unread = notifications.data?.unread_count ?? 0;
   const user = bootstrap.data?.user;
   const store = bootstrap.data?.store;
   const [confirming, setConfirming] = useState(false);
-  // 이름 고치기 시트(o12a, 계획 7 Task 9). 화면 상태
-  const [renaming, setRenaming] = useState<"me" | "store" | null>(null);
+  // 프로필 고치기 시트(o12a). 화면 상태
+  const [editing, setEditing] = useState(false);
 
   const rows: Row[] = owner
     ? [
         { title: "근무조", href: "/owner/shifts" },
-        { title: "직원 관리", href: "/owner/members", badge: members.data?.pending.length },
+        {
+          title: "직원 관리",
+          href: "/owner/members",
+          badge: members.data?.pending.length,
+        },
         { title: "알바생 기록", href: "/owner/me" },
         { title: "카테고리", href: "/owner/categories" },
         { title: "알림", href: "/owner/notifications", badge: unread },
@@ -65,52 +89,87 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
       <PageHeader title="설정" />
       {bootstrap.isLoading && <Skeleton className="h-60" />}
       {bootstrap.error && (
-        <ErrorInline message={apiErrorMessage(bootstrap.error, "계정 정보를 불러오지 못했어요.")} onRetry={() => void bootstrap.refetch()} retrying={bootstrap.isRefetching} />
+        <ErrorInline
+          message={apiErrorMessage(
+            bootstrap.error,
+            "계정 정보를 불러오지 못했어요.",
+          )}
+          onRetry={() => void bootstrap.refetch()}
+          retrying={bootstrap.isRefetching}
+        />
       )}
       {bootstrap.data && (
         <>
-          <Surface as="section" className="flex items-center gap-4 p-5">
-            <div data-profile="" className="contents">
-              <span aria-hidden className="flex size-14 shrink-0 items-center justify-center rounded-full bg-empty text-[22px] font-bold text-primary">
-                {user?.name?.slice(0, 1) ?? "?"}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div data-profile="">
+            <Surface
+              as="section"
+              className="relative flex items-center gap-4 p-5"
+            >
+              <Avatar name={user?.name} url={user?.avatar_url ?? null} />
+              <div className="flex min-w-0 flex-1 flex-col gap-1 pr-8">
                 <div className="flex items-center gap-2">
-                  <p className="truncate text-[20px] font-bold leading-[1.4] text-ink">{user?.name}</p>
+                  <p className="truncate text-[20px] font-bold leading-[1.4] text-ink">
+                    {user?.name}
+                  </p>
                   <Chip size="sm">{owner ? "사장님" : "알바생"}</Chip>
-                  <PencilButton label="내 이름 고치기" onClick={() => setRenaming("me")} />
                 </div>
                 {store?.store_name && (
-                  <div className="flex items-center gap-1">
-                    <p className="truncate text-[14px] text-ink-muted">{store.store_name}</p>
-                    {owner && <PencilButton label="매장 이름 고치기" onClick={() => setRenaming("store")} />}
-                  </div>
+                  <p className="truncate text-[14px] text-ink-muted">
+                    {store.store_name}
+                  </p>
                 )}
               </div>
-            </div>
-          </Surface>
+              {/* 연필 하나로 사진·이름·매장 이름(2026-11-08 사용자) */}
+              <button
+                type="button"
+                aria-label="프로필 고치기"
+                onClick={() => setEditing(true)}
+                className={`absolute right-2 top-2 flex size-11 items-center justify-center rounded-full text-ink-muted ${focusRing}`}
+              >
+                <span aria-hidden className="text-[17px]">
+                  ✎
+                </span>
+              </button>
+            </Surface>
+          </div>
           <ListGroup>
             {rows.map((row) => (
               <ListRow
                 key={row.title}
                 title={row.title}
                 href={row.href}
-                badge={row.badge ? <CountBadge n={row.badge} tone="danger" /> : undefined}
+                badge={
+                  row.badge ? (
+                    <CountBadge n={row.badge} tone="danger" />
+                  ) : undefined
+                }
               />
             ))}
           </ListGroup>
         </>
       )}
       <div className="mt-auto pt-6">
-        {logout.error && <ErrorInline message={apiErrorMessage(logout.error, "로그아웃하지 못했어요.")} onRetry={() => logout.mutate()} retrying={logout.isPending} />}
-        <TextButton disabled={logout.isPending} onClick={() => setConfirming(true)}>로그아웃</TextButton>
+        {logout.error && (
+          <ErrorInline
+            message={apiErrorMessage(logout.error, "로그아웃하지 못했어요.")}
+            onRetry={() => logout.mutate()}
+            retrying={logout.isPending}
+          />
+        )}
+        <TextButton
+          disabled={logout.isPending}
+          onClick={() => setConfirming(true)}
+        >
+          로그아웃
+        </TextButton>
       </div>
-      {renaming && (
-        <RenameSheet
-          title={renaming === "me" ? "내 이름 고치기" : "매장 이름 고치기"}
-          initial={(renaming === "me" ? user?.name : store?.store_name) ?? ""}
-          save={(name) => (renaming === "me" ? renameMe(name, state.token!) : renameStore(name, state.token!))}
-          onClose={() => setRenaming(null)}
+      {editing && user && (
+        <ProfileSheet
+          owner={owner}
+          initialName={user.name}
+          initialStore={store?.store_name ?? ""}
+          avatarUrl={user.avatar_url ?? null}
+          onClose={() => setEditing(false)}
         />
       )}
       <ConfirmDialog
@@ -129,48 +188,160 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   );
 }
 
-
-function PencilButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button type="button" aria-label={label} onClick={onClick} className={`flex size-9 shrink-0 items-center justify-center rounded-full text-ink-muted ${focusRing}`}>
-      <span aria-hidden className="text-[15px]">✎</span>
-    </button>
+/** 프로필 사진. 없으면 이름 첫 글자 */
+function Avatar({
+  name,
+  url,
+  size = 56,
+  label = "프로필 사진",
+}: {
+  name?: string;
+  url: string | null;
+  size?: number;
+  label?: string;
+}) {
+  const style = { width: size, height: size };
+  return url ? (
+    // 비공개 버킷의 잠깐 읽는 URL 이라 next/image 최적화(서버 캐시)를 거치지 않고 배경으로 그린다
+    <span
+      role="img"
+      aria-label={label}
+      style={{ ...style, backgroundImage: `url("${url}")` }}
+      className="shrink-0 rounded-full bg-empty bg-cover bg-center"
+    />
+  ) : (
+    <span
+      aria-hidden
+      style={style}
+      className="flex shrink-0 items-center justify-center rounded-full bg-empty text-[22px] font-bold text-primary"
+    >
+      {name?.slice(0, 1) ?? "?"}
+    </span>
   );
 }
 
-/** 이름 하나를 고치는 시트. 저장하면 계정 정보(bootstrap)를 다시 받는다. */
-function RenameSheet({ title, initial, save, onClose }: { title: string; initial: string; save: (name: string) => Promise<unknown>; onClose: () => void }) {
+/**
+ * 사진·이름·매장 이름을 한 시트에서(2026-11-08). 바꾼 것만 보낸다.
+ * 사진은 서명 URL 로 직접 올린 뒤 경로를 내 사진으로 정한다(불변식 7). 실패하면 입력은 그대로 두고 이유를 보인다.
+ */
+function ProfileSheet({
+  owner,
+  initialName,
+  initialStore,
+  avatarUrl,
+  onClose,
+}: {
+  owner: boolean;
+  initialName: string;
+  initialStore: string;
+  avatarUrl: string | null;
+  onClose: () => void;
+}) {
   const { state } = useApp();
   const client = useQueryClient();
   // 입력 초안(서버 값 아님)
-  const [name, setName] = useState(initial);
+  const [name, setName] = useState(initialName);
+  const [storeName, setStoreName] = useState(initialStore);
+  const [photo, setPhoto] = useState<{ file: File; preview: string } | null>(
+    null,
+  );
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const mutation = useMutation({
-    mutationFn: () => save(name.trim()),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) });
-      onClose();
+    mutationFn: async () => {
+      if (photo) {
+        const { upload_url, path } = await requestAvatarUpload(
+          photo.file,
+          state.token!,
+        );
+        await putToStorage(upload_url, photo.file);
+        await setAvatar(path, state.token!);
+      }
+      if (name.trim() !== initialName)
+        await renameMe(name.trim(), state.token!);
+      if (owner && storeName.trim() && storeName.trim() !== initialStore)
+        await renameStore(storeName.trim(), state.token!);
     },
+    // 일부만 저장됐어도 화면은 서버 값으로 맞춘다
+    onSettled: () =>
+      client.invalidateQueries({
+        queryKey: queryKeys.bootstrap(state.userId, state.storeId),
+      }),
+    onSuccess: onClose,
   });
+  const pick = (file: File | undefined) => {
+    setPhotoError(null);
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+      return setPhotoError("사진은 JPG, PNG, WEBP 만 올릴 수 있어요.");
+    if (file.size > 5 * 1024 * 1024)
+      return setPhotoError("사진이 너무 커요. 5MB 아래로 골라 주세요.");
+    setPhoto({ file, preview: URL.createObjectURL(file) });
+  };
+  const field = `min-h-12 rounded-[14px] bg-surface px-4 text-[16px] text-ink shadow-card outline-none ${focusRing}`;
   return (
-    <Sheet open onClose={() => !mutation.isPending && onClose()} title={title}>
+    <Sheet
+      open
+      onClose={() => !mutation.isPending && onClose()}
+      title="프로필 고치기"
+    >
       <form
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (name.trim() && !mutation.isPending) mutation.mutate();
         }}
       >
+        <label className="flex cursor-pointer items-center gap-4 self-start">
+          <Avatar
+            name={name}
+            url={photo?.preview ?? avatarUrl}
+            size={64}
+            label={photo ? "새 사진" : "프로필 사진"}
+          />
+          <span className="text-[15px] font-bold text-primary">
+            사진 바꾸기
+          </span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            onChange={(event) => pick(event.target.files?.[0])}
+          />
+        </label>
+        {photoError && <ErrorInline message={photoError} />}
         <label className="flex flex-col gap-1.5">
           <span className="text-[14px] font-bold text-ink">이름</span>
           <input
             value={name}
             maxLength={50}
             onChange={(event) => setName(event.target.value)}
-            className={`min-h-12 rounded-[14px] bg-surface px-4 text-[16px] text-ink shadow-card outline-none ${focusRing}`}
+            className={field}
           />
         </label>
-        {mutation.error && <ErrorInline message={apiErrorMessage(mutation.error, "이름을 바꾸지 못했어요.")} />}
-        <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>
+        {owner && (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[14px] font-bold text-ink">매장 이름</span>
+            <input
+              value={storeName}
+              maxLength={50}
+              onChange={(event) => setStoreName(event.target.value)}
+              className={field}
+            />
+          </label>
+        )}
+        {mutation.error && (
+          <ErrorInline
+            message={apiErrorMessage(
+              mutation.error,
+              "저장하지 못했어요. 다시 눌러 주세요.",
+            )}
+          />
+        )}
+        <Button
+          type="submit"
+          loading={mutation.isPending}
+          disabled={!name.trim()}
+        >
           저장
         </Button>
       </form>

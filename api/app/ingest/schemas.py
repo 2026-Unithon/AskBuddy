@@ -29,7 +29,9 @@ class ExtractedAssertion(BaseModel):
     """자료에서 확인된 사실 하나. 한 주장 = 한 건이다."""
 
     local_ref: str                      # 이 출력 안에서만 쓰는 이름표 (f1, f2…)
-    original_assertion: str             # 원문 그대로. 값은 이것의 해석이다
+    original_assertion: str             # 근거 원문 그대로. 값은 이것의 해석이다
+    # 사람이 읽기 좋게 정리한 문장(2026-11-08). 서버가 숫자를 원문과 맞춰 본 뒤에만 보이는 문장으로 쓴다
+    assertion: str = ""
     subject: str
     attribute: str
     value: str

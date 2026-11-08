@@ -45,7 +45,8 @@ def test_located_evidence_has_page_and_line_with_zero_defaults():
 
 def test_default_schemas_unchanged_by_locator_hints():
     # HEAD(630db77) 의 schemas.py 로 잰 값. 기본(위치 힌트 없음) 요청 스키마가 바뀌지 않았음을 못 박는다
-    assert schema_version(FactExtractionResult) == "FactExtractionResult/286f526e798a"
+    # 2026-11-08: 정리한 문장(assertion) 칸을 더해 지문을 새로 쟀다(사용자 결정: '원문 그대로' 규칙 제거)
+    assert schema_version(FactExtractionResult) == "FactExtractionResult/4ec377592d09"
     assert set(Evidence.model_fields) == {"source_id", "timestamp_sec"}
 
 
@@ -557,7 +558,7 @@ def test_removed_requires_is_recorded_in_check_flags():
 
 def test_check_flags_are_not_part_of_the_model_schema():
     assert "check_flags" not in ExtractedAssertion.model_json_schema()["properties"]
-    assert schema_version(FactExtractionResult) == "FactExtractionResult/286f526e798a"
+    assert schema_version(FactExtractionResult) == "FactExtractionResult/4ec377592d09"
 
 
 def test_check_flags_survive_deep_copy():

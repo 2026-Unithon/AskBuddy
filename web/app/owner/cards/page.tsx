@@ -175,7 +175,8 @@ function CardsScreen() {
     },
   });
 
-  const proposalItems = (proposals.data?.items ?? []).filter((p) => p.target_card_id !== null);
+  // 삭제된 카드에 걸린 제안은 보이지 않는다(카드가 어디에도 없다, 2026-11-08)
+  const proposalItems = (proposals.data?.items ?? []).filter((p) => p.target_card_id !== null && p.target_review_status !== "EXCLUDED");
   const proposalCards = new Set(proposalItems.map((p) => p.target_card_id!));
   const items = cards.data?.pages.flatMap((page) => page.items) ?? [];
   // 삭제한 카드는 어떤 탭에서도 보이지 않는다

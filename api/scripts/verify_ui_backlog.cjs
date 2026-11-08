@@ -43,16 +43,11 @@ test('KIT-3 차례 등장은 자식 key 를 쓴다', async (b) => {
 
 // ── Task 4 문구 ──
 async function startEdit(page) { await page.getByRole('button', { name: '수정하기' }).click(); await page.getByRole('button', { name: '수정 완료' }).waitFor(); }
-async function longPress(page, locator) {
-  await locator.scrollIntoViewIfNeeded();
-  const box = await locator.boundingBox();
-  await page.mouse.move(box.x + 30, box.y + 12); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
-}
 test('COPY-1 사실 고치기의 하지 않음은 스위치 줄', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await longPress(page, page.locator('[data-testid="fact-row"]').filter({ hasText: '뚜껑을 닫는다.' }));
-  await page.getByRole('dialog', { name: /뚜껑을 닫는다/ }).getByRole('button', { name: '고치기' }).click();
+  // 수정 화면에서 줄을 누르면 고치는 시트(2026-11-08, 길게 누르기 메뉴 없앰)
+  await page.locator('[data-testid="fact-row"]').filter({ hasText: '뚜껑을 닫는다.' }).getByRole('button', { name: /^고치기: / }).click();
   const sheet = page.getByRole('dialog', { name: '이 사실 고치기' });
   const toggle = sheet.getByRole('switch', { name: '하지 않는 일이에요' });
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');

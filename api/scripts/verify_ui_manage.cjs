@@ -9,7 +9,7 @@ test('o12a 설정 위는 프로필, 아래는 관리 항목과 뱃지', async (b
   const { page, ctx } = await open(b, 'OWNER', '/owner/settings');
   const profile = page.locator('[data-profile]');
   await profile.getByText('김사장', { exact: true }).waitFor();
-  assert.ok(await profile.getByText('골목커피 연남점', { exact: true }).isVisible());
+  assert.ok(await profile.getByText('버디 카페 1호점', { exact: true }).isVisible());
   for (const name of ['근무조', '직원 관리', '알바생 기록', '카테고리', '알림']) await page.getByRole('link', { name: new RegExp(`^${name}`) }).waitFor();
   await page.getByRole('link', { name: /^직원 관리/ }).getByText('1', { exact: true }).waitFor();
   await page.getByRole('link', { name: /^알림/ }).getByText('3', { exact: true }).waitFor();

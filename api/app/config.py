@@ -221,6 +221,10 @@ class Settings(BaseSettings):
     intake_single_call_small: bool = False
 
     storage_bucket: str = "sources"      # 원본 파일 버킷. 비공개
+    # 프로필 사진 버킷(비공개, 2026-11-08). 경로 {store_id}/{user_id}/{uuid}.{ext}, 서명 URL 로만
+    avatar_bucket: str = "avatars"
+    avatar_max_bytes: int = 5 * 1024 * 1024
+    avatar_read_seconds: int = 3600
     supabase_url: str = ""
     supabase_service_key: str = ""
     supabase_db_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"

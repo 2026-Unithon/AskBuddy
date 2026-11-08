@@ -6,6 +6,9 @@ import { rangeSelect } from "@/lib/drag-select";
 
 // 손가락이 이만큼 움직이면 어느 쪽 끌기인지 정한다. 가로로 먼저 움직이면 고르기, 세로면 스크롤
 const DECIDE_PX = 8;
+// 고르며 끄는 손가락이 스크롤 영역 위·아래 끝에서 이만큼 안이면 그쪽으로 저절로 스크롤한다(사진 앱처럼)
+const EDGE_PX = 72;
+const SCROLL_STEP = 12;
 
 type Drag = { anchor: number; x: number; y: number; base: Set<number>; mode: "undecided" | "select" | "scroll" };
 
@@ -18,6 +21,13 @@ export function useCardSelection(order: number[]) {
   const drag = useRef<Drag | null>(null);
   // 끌기로 고른 직후 손을 뗄 때 생기는 click 이 마지막 카드를 다시 뒤집지 않게 한 번 막는다
   const swallowClick = useRef(false);
+  // 가장자리 자동 스크롤: 손가락 위치와 스크롤 영역, 돌고 있는 프레임
+  const edge = useRef<{ x: number; y: number; scroller: HTMLElement | null; frame: number | null }>({ x: 0, y: 0, scroller: null, frame: null });
+
+  const stopEdge = () => {
+    if (edge.current.frame !== null) cancelAnimationFrame(edge.current.frame);
+    edge.current.frame = null;
+  };
 
   const cardAt = (x: number, y: number) => {
     const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-card-id]");
@@ -43,13 +53,35 @@ export function useCardSelection(order: number[]) {
       }
       const over = cardAt(event.clientX, event.clientY);
       if (over !== null) setSelected(rangeSelect(order, current.anchor, over, current.base));
+      // 위·아래 끝 가까이면 손가락을 멈춰도 계속 스크롤하며 그 아래 카드까지 고른다
+      const scroller = edge.current.scroller ?? event.currentTarget.closest("main");
+      edge.current = { ...edge.current, x: event.clientX, y: event.clientY, scroller };
+      if (edge.current.frame === null && scroller) {
+        const tick = () => {
+          const box = scroller.getBoundingClientRect();
+          const { x, y } = edge.current;
+          const dir = y > box.bottom - EDGE_PX ? 1 : y < box.top + EDGE_PX ? -1 : 0;
+          const live = drag.current;
+          if (dir === 0 || !live || live.mode !== "select") {
+            edge.current.frame = null;
+            return;
+          }
+          scroller.scrollTop += dir * SCROLL_STEP;
+          const under = cardAt(x, y);
+          if (under !== null) setSelected(rangeSelect(order, live.anchor, under, live.base));
+          edge.current.frame = requestAnimationFrame(tick);
+        };
+        edge.current.frame = requestAnimationFrame(tick);
+      }
     },
     onPointerUp: () => {
       if (drag.current?.mode === "select") swallowClick.current = true;
       drag.current = null;
+      stopEdge();
     },
     onPointerCancel: () => {
       drag.current = null;
+      stopEdge();
     },
   };
 

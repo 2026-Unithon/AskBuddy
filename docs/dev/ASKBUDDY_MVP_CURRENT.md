@@ -1296,6 +1296,10 @@ REFUSE/SAFE_ROUTE는 별도 고정 정책 안내다. 생성 모델은 기존 Gem
 - 서버가 source/segment/attempt ID, content hash, 페이지·bbox·시각·전사 span, 입력 모드, 모델/프롬프트/schema 버전, 토큰·지연·오류를 저장한다. locator는 자료 유형에 맞게 요구한다.
 - 모델의 local_ref는 출력 내 참조이지 DB ID 발급 권한이 아니다. schema 검증 후 서버가 ID를 부여한다.
 - 카드 요약 대신 original_assertion을 보존한다. 선택적 typed 속성은 subject/entity, predicate, variant, value/unit, polarity, conditions, exceptions, order/dependencies다. 없는 속성은 null/미확정이며 생성해서 채우지 않는다.
+- 2026-11-08 사용자 결정(사람이 읽기 좋은 카드): `original_assertion` 은 근거 원문으로 그대로 보존하고 화면에는 보이지 않는다. 모델은 같은 사실의 `assertion` 을 사장님·알바생이 읽기 좋은 짧은 업무 문장(해요체)으로 함께 낸다. 서버(`app.ingest.friendly`)는 정리한 문장의 숫자가 모두 원문에 있고 사실 값의 숫자가 남아 있을 때만 그 문장을 사실 판의 `assertion` 으로 쓰고, 아니면 원문을 쓴다(지어내기 막기). 카드 본문(`render_card`)과 사장님 카드 화면은 `assertion` 을 보인다. 표 레시피 한눈에 보기는 '이름=값' 구조가 필요해 원문을 쓴다. 같은 대상은 같은 subject 로 묶도록 추출 프롬프트에 적었다. 실제 모델로는 아직 측정하지 않았다(D16).
+- 2026-11-08 같은 말 충돌: 두 사실의 원문이 띄어쓰기만 빼고 같거나, 부정 여부가 같고 값(수치·단위 또는 서술값)이 같으면 충돌을 열지 않는다(`fact_ledger.same_statement`). 이미 열린 그런 충돌은 migration `20261108120400_same_statement_conflicts` 가 OBSOLETE 로 닫는다. 검수 '맞는 것을 골라 주세요'는 같은 이름·같은 두 값의 질문을 한 번만 보이고, 하나를 고르면 같은 자리의 고르지 않은 값과 같은 글의 다른 사실도 함께 틀린 값(`fact_rejections`)으로 둔다.
+- 2026-11-08 프로필 사진: 비공개 버킷 `avatars`(설정 `avatar_bucket`, 5MB, JPG·PNG·WEBP, `scripts/init_storage.py` 가 만든다). 경로 `avatars/{store_id}/{user_id}/{uuid}.{ext}`. `POST /app/me/avatar/upload-url` 이 서명 업로드 URL 을 주고(불변식 7), `PUT /app/me/avatar {path}` 는 JWT 의 매장·본인 몫 경로만 받는다(null 이면 뺀다). `GET /app/bootstrap` 의 `user.avatar_url` 은 1시간짜리 읽기 URL, 못 만들면 null. migration `20261108120500_user_avatar`(`users.avatar_path`).
+- 2026-11-08 직원 오늘 할 일: '오늘 할 일 끝났어요' 카드는 제출했고 남은 체크가 없을 때만. 남기고 제출했거나 제출 뒤 체크를 풀면 남은 개수와 '제출했어요' 표시.
 - 수치는 decimal string과 unit을 함께 보존한다. 단위 변환은 명시된 규칙·원래 값·반올림 이력을 갖고 테스트한다.
 - alias는 이름 정규화이지 HOT/ICE·사이즈 결합 규칙이 아니다. unknown variant는 wildcard가 아니며 여러 규격이 가능하면 보류·명확화한다.
 - 추출 원문·값은 불변이다. 수정은 새 fact_revision이며 이전 revision과 수정자·이유를 연결한다.

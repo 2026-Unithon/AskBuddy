@@ -316,7 +316,11 @@ async function handle(route) {
     // ── 편집: 고치기 시트 + 다시 분석(MODIFY_SPLIT 안내)
     await page.getByRole("button", { name: "수정하기", exact: true }).click();
     await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor();
-    check("편집 전에는 저장 버튼 꺼짐", await page.getByRole("button", { name: "수정 완료", exact: true }).isDisabled());
+    // 고친 게 없으면 수정 완료는 저장 없이 읽는 화면으로(2026-11-08). 다시 들어간다
+    await page.getByRole("button", { name: "수정 완료", exact: true }).click();
+    await page.getByRole("button", { name: "수정하기", exact: true }).click();
+    await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor();
+    check("편집 전 수정 완료는 저장 요청 없음", state.saveBodies.length === 0);
     await page.getByRole("button", { name: /^고치기: 음료Z ICE 물은/ }).click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
@@ -439,7 +443,7 @@ async function handle(route) {
     await page.getByText("음료Z ICE 시럽은 10g 넣는다.", { exact: true }).waitFor();
     check("최신 내용 불러오기: 카드 상세도 다시 읽음", await (async () => { for (let k = 0; k < 20 && !(state.cardCalls[1] > cardBefore); k++) await sleep(100); return state.cardCalls[1] > cardBefore; })());
     check("최신 내용 불러오기: 다시 읽고 편집을 새로 시작", state.factsCalls[1] > callsBefore
-      && await page.getByTestId("fact-conflict").count() === 0 && await page.getByRole("button", { name: "수정 완료", exact: true }).isDisabled());
+      && await page.getByTestId("fact-conflict").count() === 0 && await text("고침").count() === 0);
     await leaveEdit();
     await page.getByRole("button", { name: "수정하기", exact: true }).waitFor();
 

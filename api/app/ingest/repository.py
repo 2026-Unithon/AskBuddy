@@ -314,10 +314,10 @@ async def insert_source_facts(
               store_id, source_id, subject, variant, attribute, value,
               confidence, locator_type, locator, content_hash, extract_version,
               original_assertion, unit, polarity, conditions, exceptions,
-              step_order, requires, local_ref, segment_id, assembly_state, ext
+              step_order, requires, local_ref, segment_id, assembly_state, assertion, ext
             )
             values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,
-                    $12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20,$21,$22::jsonb)
+                    $12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20,$21,$22,$23::jsonb)
             on conflict (source_id, content_hash) do nothing
             returning fact_id
             """,
@@ -334,6 +334,7 @@ async def insert_source_facts(
             json.dumps(f.get("requires") or [], ensure_ascii=False),
             f.get("local_ref"), f.get("segment_id"),
             f.get("assembly_state") or "PENDING",
+            f.get("assertion"),
             json.dumps(f["ext"], ensure_ascii=False) if f.get("ext") else None,
         )
         if fact_id is None:

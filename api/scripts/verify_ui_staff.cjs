@@ -27,7 +27,7 @@ test('s01d 볼 수 없는 레시피면 시트에 안내', async (b) => {
   await page.getByRole('dialog', { name: '우유 발주' }).getByText('이 레시피를 볼 수 없어요').waitFor();
   await ctx.close();
 });
-test('s01e 남았는데 끝내면 확인 창, 끝나면 축하', async (b) => {
+test('s01e 남았는데 끝내면 확인 창, 남기고 끝내면 축하 대신 제출했어요', async (b) => {
   const { page, ctx, api } = await open(b, 'STAFF', '/staff');
   await page.getByTestId('checklist-submit').click();
   const dialog = page.getByRole('dialog', { name: /남았어요. 그래도 끝낼까요\?/ });
@@ -35,8 +35,10 @@ test('s01e 남았는데 끝내면 확인 창, 끝나면 축하', async (b) => {
   assert.equal(api.calls.filter((c) => c.path === '/checklist/submissions').length, 0);
   await page.getByTestId('checklist-submit').click();
   await dialog.getByRole('button', { name: '그래도 끝내기' }).click();
-  await page.getByText('오늘 할 일 끝났어요').waitFor();
-  assert.ok(await page.locator('[data-celebrate]').isVisible());
+  // 축하(끝 카드)는 다 체크했을 때만(2026-11-08 사용자: 체크 전에 끝났다고 했다)
+  await page.getByText('제출했어요', { exact: true }).waitFor();
+  assert.equal(await page.getByText('오늘 할 일 끝났어요').count(), 0);
+  assert.equal(await page.locator('[data-celebrate]').count(), 0);
   await ctx.close();
 });
 test('s01f 추천 질문 칩을 누르면 버디에서 바로 보낸다(계획 7 결정 12)', async (b) => {

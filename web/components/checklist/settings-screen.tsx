@@ -54,10 +54,14 @@ export function ShiftSettingsScreen() {
     mutationFn: () => checklistApi.preset(state.token!),
     onSuccess: refresh,
   });
+  // 순서 저장은 줄 세워 하나씩 보낸다(scope). 저장 중에도 계속 옮길 수 있고, 마지막 저장이 끝나야 서버 순서로 맞춘다
+  const orderKey = ["shift-order", state.storeId] as const;
   const order = useMutation({
+    mutationKey: orderKey,
+    scope: { id: `shift-order-${state.storeId}` },
     mutationFn: (ids: number[]) => checklistApi.order(state.token!, ids),
-    // 실패하면 서버 순서로 되돌린다(낙관 순서 버림)
-    onSettled: refresh,
+    // 실패하면 서버 순서로 되돌린다(낙관 순서 버림). 뒤에 기다리는 저장이 있으면 그 순서를 덮지 않게 기다린다
+    onSettled: () => (client.isMutating({ mutationKey: orderKey }) <= 1 ? refresh() : undefined),
   });
   // 끄는 동안의 순서는 캐시에 바로 반영하고(낙관), 놓을 때 한 번만 저장한다. 끌기 전 순서를 기억해 바뀌었을 때만 보낸다
   const dragStart = useRef<number[] | null>(null);
@@ -116,7 +120,7 @@ export function ShiftSettingsScreen() {
       {items.length > 0 && (
         <SortableList
           items={items.map((s) => ({ ...s, key: String(s.shift_id), label: s.name }))}
-          canMove={() => !order.isPending}
+          canMove={() => true}
           onMove={moveShift}
           onEnd={saveOrder}
           renderItem={(shift) => (

@@ -236,13 +236,23 @@ class ReviewOption(BaseModel):
 
 
 class ReviewItem(BaseModel):
-    """검수 필요 카드에서 사장님이 바로 고를 항목(계획 7 Task 6). 지금은 충돌 고르기(CHOOSE)만 있다."""
+    """검수 필요 카드에서 사장님이 바로 할 항목. CHOOSE: 충돌한 두 값 중 고르기(계획 7 Task 6).
+    WRITE: 근거를 확인할 수 없는 사실을 그 자리에서 고쳐 적기(2026-11-08). 적으면 사장님 입력이 근거가 된다."""
 
     item_id: str
-    kind: Literal["CHOOSE"] = "CHOOSE"
-    conflict_id: int
+    kind: Literal["CHOOSE", "WRITE"] = "CHOOSE"
+    conflict_id: int | None = None
     label: str | None = None
-    options: list[ReviewOption]
+    options: list[ReviewOption] = Field(default_factory=list)
+    fact_revision_id: int | None = None
+    text: str | None = None
+
+
+class ReviewWriteRequest(BaseModel):
+    fact_revision_id: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=2000)
+    expected_version_id: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=80)
 
 
 class RevertRequest(BaseModel):

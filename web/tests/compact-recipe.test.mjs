@@ -51,3 +51,15 @@ test("원문 각주 표시 '*'와 표 구분자 '//'는 정리한다", () => {
   const recipe = compactRecipe([block("QUANTITIES", null, [f("*재료=쿠키베이스 100ml // 컵 바닥 쿠키분태 2레들"), f("컵=20")]), block("STEPS", null, [f("제조순서=컵 → 재료", 1)])]);
   assert.deepEqual(recipe.sections[0].steps, [{ text: "컵", note: "20온즈" }, { text: "쿠키베이스 100ml, 컵 바닥 쿠키분태 2레들", note: null }]);
 });
+
+test("단계에 괄호 설명이 붙어 있으면 같은 이름 칸 값으로 바꾸지 않는다(블랜더=3번 사례)", () => {
+  const got = compactRecipe([
+    block("QUANTITIES", "ICE", [f("컵=20"), f("블랜더=3번"), f("액상=우유 100ml")]),
+    steps("ICE", "제조순서=블랜더(액상,재료,얼음) → 믹싱 → 컵", ["블랜더(액상,재료,얼음)", "믹싱", "컵"]),
+  ]);
+  const texts = got.sections[0].steps.map((s) => s.text);
+  assert.equal(texts[0], "블랜더(액상,재료,얼음)");
+  assert.ok(!texts.includes("3번"));
+  // 쓰지 않은 블랜더 값은 아래 따로 남는다
+  assert.ok(got.sections[0].extras.some((e) => e.value === "3번"));
+});

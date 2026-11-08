@@ -1,7 +1,7 @@
 """검수 고르기 항목(계획 7 Task 6). 충돌한 두 사실을 '맞는 것을 골라 주세요!' 의 두 버튼으로 바꾼다."""
 from __future__ import annotations
 
-from app.cards.fact_edit_schemas import ReviewItem, ReviewOption
+from app.cards.fact_edit_schemas import CardFactsView, ReviewItem, ReviewOption
 
 
 def _split(sentence: str) -> tuple[str | None, str]:
@@ -40,5 +40,31 @@ async def load_review_items(conn, store_id: int, fact_ids: list[int]) -> list[Re
         "and (c.fact_id_low = any($2::bigint[]) or c.fact_id_high = any($2::bigint[])) "
         "order by c.conflict_id",
         store_id, fact_ids)
-    return [review_item_from_conflict(r["conflict_id"], r["fact_id_low"], r["low_text"],
-                                      r["fact_id_high"], r["high_text"]) for r in rows]
+    items: list[ReviewItem] = []
+    asked: set[tuple] = set()
+    for r in rows:
+        item = review_item_from_conflict(r["conflict_id"], r["fact_id_low"], r["low_text"],
+                                         r["fact_id_high"], r["high_text"])
+        texts = frozenset(_squash(o.text) for o in item.options)
+        # 띄어쓰기만 다른 두 값은 고를 게 없고, 같은 질문(같은 이름·같은 두 값)은 한 번만 묻는다
+        if len(texts) < 2 or (item.label, texts) in asked:
+            continue
+        asked.add((item.label, texts))
+        items.append(item)
+    return items
+
+
+def _squash(text: str) -> str:
+    return "".join(text.split())
+
+
+WRITE_LABEL = "근거 자료를 확인할 수 없어요. 맞게 고쳐 적어 주세요."
+
+
+def write_items(view: CardFactsView) -> list[ReviewItem]:
+    """근거(출처)가 없는 사실마다 그 자리 글 입력칸. 사장님이 적으면 사장님 입력 자료가 근거가 된다."""
+    return [
+        ReviewItem(item_id=f"write-{f.fact_revision_id}", kind="WRITE", label=WRITE_LABEL,
+                   fact_revision_id=f.fact_revision_id, text=f.assertion or f.sentence)
+        for block in view.blocks for f in block.facts if not f.origins
+    ]
