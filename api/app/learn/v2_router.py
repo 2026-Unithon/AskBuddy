@@ -519,7 +519,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 logical_call_id="v2:"+digest(dict(member_id=member_id,request_id=req.request_id))[7:]+f":q{requery}")
                             try:
                                 search,retrieval_mode,retrieval_failure=await retrieve(pool,store_id=store_id,question=search_question,
-                                    embed=lambda:recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
+                                    embed=lambda:recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id),**({'demo_query':True} if demo else {})),
                                     timeout=min(2.5 if demo else settings.search_deadline_seconds,remaining),allow_fallback=demo,search_fn=hybrid_search)
                             except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:

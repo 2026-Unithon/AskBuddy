@@ -85,7 +85,7 @@ def embed_texts(texts: list[str], *, recording=None, timeout_seconds: float | No
     return vectors
 
 
-async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: UsageSink):
+async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: UsageSink, demo_query: bool=False):
     """비동기 계측 adapter. 공급자 호출은 기존 embed_texts 한 곳에서만 수행한다."""
     context = UsageContext.model_validate(context.model_dump())
     if context.stage not in ("EMBED", "QUERY") or sink is None or isinstance(sink, NullSink):
@@ -113,10 +113,11 @@ async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: 
             settings = get_settings()
             # W 등록 준비와 R 질문 검색의 시간 예산을 섞지 않는다.
             timeout = settings.query_embedding_timeout_seconds if context.stage == "QUERY" else settings.embedding_timeout_seconds
-            if (context.stage=='QUERY' and context.cost_purpose=='PRODUCT'
+            pooled=context.stage=='QUERY' and context.cost_purpose=='PRODUCT'
+            if (pooled and demo_query
                     and getattr(settings,'r_general_semantics_demo_enabled',False) and settings.r_general_semantics_enabled):
                 timeout=max(timeout,2.)
-            options=dict(query=True) if context.stage=='QUERY' else {}
+            options=dict(query=True) if pooled else {}
             return await asyncio.to_thread(embed_texts, texts, recording=rec, timeout_seconds=timeout, **options)
     finally:
         if reservation is not None:
