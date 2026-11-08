@@ -8,9 +8,9 @@ from app.learn.planner import Decision
 
 async def verify(client, headers, db, check):
     for prefix,turns,slots in (
-        ('refund',('환불하려는데 어떻게 처리해?', '영수증은 없어요'),('entity','entity')),
+        ('refund',('환불하려는데 어떻게 처리해?', '영수증은 없어요'),('predicate','predicate')),
         ('opening',('오픈 준비를 어디부터 시작해?', '혼자 근무해요', '현금 시재는 아직 안 셌어요'),
-         ('entity','predicate','size')),
+         ('predicate','size','temperature')),
     ):
         sid=(await client.post('/learn/v2/sessions',headers=headers,
             json={'request_id':'free-test-session-'+prefix})).json()['session_id']

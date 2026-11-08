@@ -110,3 +110,36 @@ def test_model_evidence_keeps_revisions_variants_and_constraints():
     assert 'source_content_hash' not in visible['provenance'][0]
     fact['original_assertion']='다르게 적힌 원문'
     assert model_evidence(payload)['candidates'][0]['facts'][0]['original_assertion']==fact['original_assertion']
+
+
+def test_dense_evidence_keeps_every_row_and_constraint_with_one_column_header():
+    from copy import deepcopy
+    from app.learn.general_semantics import model_evidence
+    from app.learn.semantic_proposals import proposal_input
+    p=proposal_input(unitless_search(),store_id=1,question='오픈 준비')
+    f=p['candidates'][0]['facts'][0]
+    f.update(conditions=['영업 전'],exceptions=['휴무일 제외'],requires=['2'])
+    one=model_evidence(p)['candidates'][0]['facts'][0]
+    p['candidates'][0]['facts']=[dict(deepcopy(f),fact_revision_id=str(i)) for i in range(1,51)]
+    dense=model_evidence(p)
+    rows=[dict(zip(dense['fact_columns'],r,strict=True)) for r in dense['candidates'][0]['fact_rows']]
+    assert rows==[dict(one,fact_revision_id=str(i)) for i in range(1,51)]
+
+
+@pytest.mark.asyncio
+async def test_prompt_limit_is_reported_before_sdk_and_not_as_an_invalid_model_proposal(tmp_path,monkeypatch):
+    from app.errors import ApiError
+    from app.learn.general_provider import generate
+    from app.learn.general_semantics import Release
+    search,_,kw,raw=setup(tmp_path)
+    kw['context']=kw['context'].model_copy(update={'cost_purpose':'PRODUCT','evaluation_run_id':None})
+    release=Release.model_validate(dict(raw,max_prompt_bytes=500))
+    monkeypatch.setattr('app.learn.general_semantics.load_release',lambda *_:release)
+    monkeypatch.setattr('app.learn.general_provider.get_settings',lambda:type('Settings',(),{'gemini_model':release.model})())
+    client=AsyncMock()
+    monkeypatch.setattr('google.genai.Client',client)
+    with pytest.raises(ApiError) as caught:
+        await general_decision(search,**kw,provider=generate)
+    assert caught.value.code=='GENERAL_INPUT_LIMIT'
+    assert caught.value.details==dict(phase='proposal_provider',error_type='InputByteLimitExceeded')
+    client.assert_not_called()

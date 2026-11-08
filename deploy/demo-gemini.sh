@@ -14,10 +14,10 @@ case "${1:-status}" in
     target=$(curl -fsS --max-time 2 -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id) || { echo 'Demo rollout skipped: instance identity unavailable'; exit 0; }
     [[ "$target" = i-0a83bc49c38c9f36c ]] || { echo 'Demo rollout skipped: different instance'; exit 0; }
     if [[ -e "$marker" ]]; then
-      if [[ ! -e "$marker.free-clarification-v1" ]]; then
+      if [[ ! -e "$marker.operations-scope-v1" ]]; then
         state=$(docker compose exec -T api python -m scripts.chat_gemini_pilot repair-state)
         if [[ "$state" = REBIND ]]; then bash store9-gemini.sh rebind-demo; fi
-        touch "$marker.free-clarification-v1"
+        touch "$marker.operations-scope-v1"
       fi
       echo 'Demo rollout already handled'; exit 0
     fi

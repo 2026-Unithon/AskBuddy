@@ -45,6 +45,12 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
             from app.learn.entity_names import entity_label
             subject=entity_label(snapshot,resolved.entity_id)
             return ChatResponse(**fields,message=f'{subject}에 대한 질문을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.',pending_id=pending_id)
+        if plan.escalation_reason=='NO_RELEVANT_TASK_OPTION' and resolved:
+            from app.learn.operations_scope import task_patterns, REFUND
+            tasks=task_patterns(resolved.question)
+            topic='·'.join('환불' if task is REFUND else '오픈 준비' for task in tasks)
+            return ChatResponse(**fields,message=f'이 상황에 적용할 {topic} 기준을 승인 자료에서 확인하기 어려워 사장님께 확인을 요청했어요.',
+                                pending_id=pending_id)
         title=price_menu(snapshot,resolved.question) if resolved else None
         message=(f'{title} 가격을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.' if title else
                  '확인된 자료만으로 답하기 어려워 사장님께 확인을 요청했어요.')

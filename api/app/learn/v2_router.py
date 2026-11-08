@@ -31,6 +31,7 @@ from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision
 from app.learn.procedure_scope import procedure_scope, first_step_reference
 from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection,question_prefix
+from app.learn.operations_scope import relevant_entity_offer, REFUND_DETAIL, OPENING_DETAIL
 from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback,requested_subjects,respects_subjects
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
@@ -483,7 +484,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
                                 semantics_enabled=getattr(settings,'r_general_semantics_enabled',False)
-                                if ((semantics_enabled or first_step_reference(req.question))
+                                if ((semantics_enabled or first_step_reference(req.question)
+                                        or REFUND_DETAIL.search(req.question) or OPENING_DETAIL.search(req.question))
                                         and req.policy_receipt_id is None and not policy_action(req.question)):
                                     # load_history locks this session. Read its latest offer
                                     # under that same lock, before accepting a typed reply.
@@ -609,6 +611,10 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 decision=known_subject_fallback
                                 semantic_approval=None
                                 general_audit=dict(general_audit or {},status='KNOWN_SUBJECT_FALLBACK')
+                        scoped=relevant_entity_offer(decision,search,question)
+                        if scoped is not decision and general_audit is not None:
+                            general_audit=dict(general_audit,task_scope_action=scoped.plan.action)
+                        decision=scoped
                         # Neither the planner nor a model may restart the same
                         # offer, even with reordered options or a new context ID.
                         if context and decision.plan.action=='CLARIFY' and (

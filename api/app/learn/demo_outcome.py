@@ -28,6 +28,7 @@ async def outcome(conn, *, store_id, user_id, request_id):
     return dict(store_id=store_id,session_id=r['session_id'] if r else None,receipt_id=r['receipt_id'] if r else None,
         action=r['action'] if r else None,answer_source=r['answer_source'] if r else None,
         clarification_reply=meta.get('clarification_reply'),clarification_parent=meta.get('clarification_parent'),
+        task_detail_parent=meta.get('task_detail_parent'),
         semantic_status=semantic.get('status'),reason=semantic.get('reason') or semantic.get('reason_code'),
         semantic_phase=semantic.get('phase'),semantic_error_type=semantic.get('error_type'),
         retrieval_mode=meta.get('retrieval_mode'),calls=[dict(row) for row in calls])

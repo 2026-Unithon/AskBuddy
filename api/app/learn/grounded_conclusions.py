@@ -254,9 +254,15 @@ def reference_scopes(search):
     one conclusion may cite evidence validated in several independent scopes.
     """
     groups={}
-    for ref in candidate_references(search):
-        entity=search.snapshot.card(ref.card_id).entity_id
-        groups.setdefault(entity,[]).append(ref.model_dump(mode='json'))
+    for candidate in search.candidates:
+        card=search.snapshot.card(candidate.card_id)
+        block=next(b for b in card.blocks if b.block_id==candidate.block_id)
+        # List the address once per block. Verification still checks coverage
+        # for every individual revision, including multiple facts in one block.
+        ref=SelectedBlock(card_id=card.card_id,card_version_id=card.card_version_id,
+            block_id=block.block_id,raw_span_id=block.raw_span_id,
+            fact_revision_ids=() if block.raw_span_id else block.fact_revision_ids)
+        groups.setdefault(card.entity_id,[]).append(ref.model_dump(mode='json',exclude_none=True))
     return [dict(entity_id=entity,references=refs) for entity,refs in groups.items()]
 
 

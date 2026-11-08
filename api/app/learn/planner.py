@@ -18,6 +18,7 @@ from app.learn.conditional_scope import conditional_core, prerequisite_closure, 
 from app.learn.raw_quantity import raw_answer_reference
 from app.learn.entity_names import entity_names, entity_label
 from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
+from app.learn.operations_scope import relevant_entity_offer
 
 PLANNER_VERSION="r-explicit-slots/v8"
 PREDICATES={
@@ -121,8 +122,9 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
                 if action=="CLARIFY" else {"escalation_reason":reason} if action=="ESCALATE" else {})
         semantic = explicit_context(snapshot, question=question, entity=entity, predicate=predicate,
             variants=variants, has_context=(bool(confirmed_slots) or context_id is not None) and not context_verified) if action=="ESCALATE" else None
-        return Decision(AnswerPlan(**base,action=action,**kwargs),
-                        ResolvedSelection(entity,predicate,variants,question=question),slots,semantic)
+        decision=Decision(AnswerPlan(**base,action=action,**kwargs),
+                          ResolvedSelection(entity,predicate,variants,question=question),slots,semantic)
+        return relevant_entity_offer(decision,search,question)
     policy=policy_action(question)
     if policy:
         return finish(policy)
