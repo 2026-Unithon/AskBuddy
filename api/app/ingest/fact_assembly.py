@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from app.ingest import batching
 from app.ingest.card_plan import (EntityGroup, PlanFact, ProposedBlock, ProposedCard,
-                                  fact_sort_key, variant_label)
+                                  fact_sort_key, normalize_step_orders, variant_label)
 from app.ingest.entities import _follow_merged
 from app.ingest.schemas import CardPlanBatch
 
@@ -146,7 +146,8 @@ async def load_entity_groups(conn, store_id: int, entity_ids: Sequence[int]) -> 
 
     groups = tuple(
         EntityGroup(entity_id=eid, canonical_name=names.get(eid) or "",
-                    facts=tuple(sorted(by_entity[eid], key=fact_sort_key)))
+                    # 계획 6: 단계가 아닌 사실에 붙은 번호는 조립·렌더에서 뗀다(저장 판은 그대로)
+                    facts=tuple(sorted(normalize_step_orders(by_entity[eid]), key=fact_sort_key)))
         for eid in sorted(by_entity))
     return AssemblyInput(groups=groups, held=tuple(held))
 

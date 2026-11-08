@@ -112,9 +112,26 @@ export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: 
             {group.stepOrder}
           </span>
         )}
-        <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
-          {steps.size > 1 ? first.sentence : withValues(first.sentence, group.fields)}
-        </p>
+        {group.segments ? (
+          // 한 문장에 이어진 단계는 1·2·3 줄로 펼친다(계획 6)
+          <div className="min-w-0 flex-1">
+            {group.label && <p className="text-[14px] font-bold text-ink-muted">{group.label}</p>}
+            <ol className="mt-1 flex flex-col gap-1.5">
+              {group.segments.map((segment, i) => (
+                <li key={i} className="flex items-start gap-2 text-[16px] leading-[1.5] text-ink [word-break:keep-all]">
+                  <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{segment}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : (
+          <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
+            {steps.size > 1 ? first.sentence : withValues(first.sentence, group.fields)}
+          </p>
+        )}
       </div>
       {conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {conditions.join(" / ")}</p>}
       {exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {exceptions.join(" / ")}</p>}
