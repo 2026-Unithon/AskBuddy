@@ -325,6 +325,26 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     return Decision(plan,resolved,dict(slots),None)
 
 
+def model_evidence(payload):
+    """Keep every candidate and assertion. Storage hashes and empty locator fields are server-owned."""
+    candidates=[]
+    for candidate in payload['candidates']:
+        facts=[]
+        for fact in candidate['facts']:
+            record=dict(fact)
+            if record['original_assertion']==record['assertion']:
+                del record['original_assertion']
+            origins=[]
+            for origin in record['provenance']:
+                locator={key:value for key,value in origin['locator'].items() if value is not None}
+                origins.append(dict(locator=locator,**{k:origin[k] for k in ('source_id','owner_answer_id')
+                    if origin[k] is not None}))
+            record['provenance']=origins
+            facts.append(record)
+        candidates.append(dict(candidate,facts=facts))
+    return dict(payload,candidates=candidates)
+
+
 async def general_decision(search,*,settings,store_id,question,user_turns,baseline,context,sink,
                            timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None):
     if (not getattr(settings,'r_general_semantics_enabled',False)
@@ -352,11 +372,12 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
             quotes=tuple(dict.fromkeys((question,*user_turns)))
             dialogue_turns=[dict(turn_id=i,role='user',current=i==len(user_turns),text=text)
                 for i,text in enumerate((*user_turns,question))]
+            visible_payload=model_evidence(payload)
             prompt=((Path(__file__).resolve().parents[2]/'prompts/r_general_proposal.txt').read_text(encoding='utf-8').strip()+'\n'
-                +json.dumps(dict(input=payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,
+                +json.dumps(dict(input=visible_payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,
                     capabilities=dict(calculation_fact_ids=quantity_ids,slot_quote_choices=quotes,response_style=release.response_style,
                         reference_scopes=reference_scopes(search),
-                        max_answer_chars=ChatResponse.model_json_schema()['properties']['message']['maxLength'])),ensure_ascii=False))
+                        max_answer_chars=ChatResponse.model_json_schema()['properties']['message']['maxLength'])),ensure_ascii=False,separators=(',',':')))
             proposal_started=perf_counter()
             phase='proposal_provider'
             wire_proposal=await provider(prompt,schema=GeneralProposal,release=release,
@@ -380,7 +401,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
             if decision is baseline:return baseline,dict(audit,status='UNRESOLVED')
             refs=validate_answer_references(decision.plan,search.snapshot,store_id=str(store_id))
             rules=selected_rules(decision.plan,search.snapshot) if proposal.conclusions else []
-            review=dict(input=payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,proposal=proposal.model_dump(mode='json'),
+            review=dict(input=visible_payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,proposal=proposal.model_dump(mode='json'),
                 selected_reference_check=dict(checked_fact_ids=list(refs.fact_ids),checked_raw_blocks=[list(r) for r in refs.raw_blocks]),
                 selected_rules=rules,
                 conclusion_units=conclusion_units(proposal.conclusions),
@@ -394,7 +415,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
             phase='verification_provider'
             wire_verdict=await provider(
                 (Path(__file__).resolve().parents[2]/'prompts/r_general_verification.txt').read_text(encoding='utf-8').strip()
-                +'\n'+json.dumps(review,ensure_ascii=False),
+                +'\n'+json.dumps(review,ensure_ascii=False,separators=(',',':')),
                 schema=Verification,release=release,context=context.model_copy(update={
                     'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='verify'))[7:]}),sink=sink)
             phase='verification_validation'
