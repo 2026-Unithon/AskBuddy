@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 import asyncpg
 from app.config import get_settings
@@ -14,6 +15,27 @@ STORE=9
 
 async def main(mode):
     s=get_settings()
+    old_expiry=None
+    if mode in ('repair-state','rebind-demo'):
+        if not (s.r_general_semantics_enabled and s.r_general_semantics_demo_enabled):
+            if mode=='repair-state':print('OFF');return
+            raise ValueError('demo disabled')
+        data=Path(s.r_general_semantics_path).read_bytes()
+        if len(data)>512000:raise ValueError('invalid existing release')
+        old=json.loads(data)
+        if digest(old)!=s.r_general_semantics_hash or old.get('schema_version')!='r-demo-release-set/v1':
+            raise ValueError('existing release pin mismatch')
+        release_map={k:Release.model_validate(v) for k,v in old['releases'].items()}
+        if not release_map or any(k!=v.store_id for k,v in release_map.items()):raise ValueError('invalid scope')
+        expired=any(rel.valid_until<=datetime.now(timezone.utc) for rel in release_map.values())
+        current=source_hash()
+        if mode=='repair-state':
+            print('EXPIRED' if expired else 'CURRENT' if all(r.source_hash==current for r in release_map.values()) else 'REBIND')
+            return
+        if expired:raise ValueError('will not extend expired demo')
+        # Re-check current approved publications just as for a demo refresh, without extending the trial.
+        old_expiry=min(rel.valid_until for rel in release_map.values())
+        mode='prepare-demo'
     demo=mode.endswith('-demo')
     op=mode.removesuffix('-demo')
     if op not in ('prepare','verify'): raise ValueError('unknown operation')
@@ -46,7 +68,7 @@ async def main(mode):
         return
     if s.r_general_semantics_enabled and not (demo and s.r_general_semantics_demo_enabled):
         raise ValueError('existing different rollout active; disable before replacing')
-    expiry=datetime.now(timezone.utc)+timedelta(days=7 if demo else 1)
+    expiry=old_expiry or datetime.now(timezone.utc)+timedelta(days=7 if demo else 1)
     version=source_hash()
     common=dict(source_hash=version,model=s.gemini_model,approved_by='Operator executing the authenticated demo activation' if demo else 'Operator executing the authenticated store-9 activation',
         acceptance_reference=('Explicit 2026-11-08 request for Gemini for every employee tester in the AskBuddy demo; not a production quality signoff.' if demo else

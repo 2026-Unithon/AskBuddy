@@ -30,7 +30,8 @@ async def request_lease(pool, store_id: int, user_id: int):
             await db.execute("""
                 insert into r_request_leases(request_id,store_id,user_id,expires_at)
                 values($1,$2,$3,clock_timestamp()+$4*interval '1 second')
-            """, request_id, store_id, user_id, settings.chat_deadline_seconds)
+            """, request_id, store_id, user_id, 30 if (getattr(settings,'r_general_semantics_demo_enabled',False)
+                 and settings.r_general_semantics_enabled) else settings.chat_deadline_seconds)
     try:
         yield str(request_id)
     finally:
