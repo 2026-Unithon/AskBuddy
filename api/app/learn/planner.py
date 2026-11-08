@@ -112,6 +112,9 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
         return finish("CLARIFY",slot="entity",options=options)
     if slots.get("entity") and (context_verified or not matches):
         matches={c.entity_id for c in cards if slots["entity"] in entity_names(snapshot,c.entity_id)}
+    named_price=price_menu(snapshot,question)
+    if named_price and not any(c.entity_id in matches and c.title==named_price for c in snapshot.cards):
+        return finish("ESCALATE","MISSING_MENU_PRICE_CANDIDATE")
     if not matches:
         alias_options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
             if any(n in search.alias_terms for n in entity_names(snapshot,c.entity_id))))
@@ -172,14 +175,14 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
             or any(word in q for word in ("오래","기한","언제","보관","온도"))):
         matched.difference_update(("milk_amount","water_amount"))
     matched.update(p for p in available if mentioned(q,p))
-    if price_menu(snapshot,question):
+    if named_price:
         matched.update(available.intersection(PRICE_WORDS))
     # Condition vocabulary (e.g. 온도) is not the requested attribute. Only a
     # full approved-condition + supported-question parse may override this guard.
     scoped_predicates={f.predicate for f in facts if conditional_core(question,snapshot=snapshot,fact=f,
         titles=names,sizes=tuple(sorted({x.variant.size for x in facts if x.variant.size}))) is not None}
     if scoped_predicates:matched=scoped_predicates
-    if not matched and price_menu(snapshot,question):return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
+    if not matched and named_price:return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     if not matched and slots.get("predicate"):
         matched={p for p in available if slots["predicate"] in (p,PREDICATES.get(p,(p,()))[0])}
     if len(matched)!=1:
@@ -211,7 +214,7 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     if len(temperatures)>1 and not any(w in q for w in ("비교","각각","둘 다","차이")):
         return finish("CLARIFY",slot="temperature",options=("HOT","ICE"))
     if len(temperatures)>1:slots.pop("temperature",None)
-    if not temperatures and price_menu(snapshot,question) and all(f.variant.temperature and not f.variant.size for f in facts):
+    if not temperatures and named_price and all(f.variant.temperature and not f.variant.size for f in facts):
         # Quote each approved price with its own temperature heading.
         temperatures={f.variant.temperature for f in facts}
     if not temperatures and any(f.variant.temperature for f in facts):

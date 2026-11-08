@@ -353,7 +353,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     if (not getattr(settings,'r_general_semantics_enabled',False)
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
         return baseline,None
-    from app.learn.menu_context import PRICE_WORDS,menu_title
+    from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
     if baseline.plan.action=='CLARIFY' and (
             (baseline.plan.clarification_slot=='entity' and question.strip() in PRICE_WORDS) or
             (baseline.plan.clarification_slot=='predicate' and menu_title(search.snapshot,question))):
@@ -363,6 +363,13 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
         release=load_release(settings,search,store_id)
     except (ValueError,OSError,AttributeError) as exc:
         raise ApiError(503,'GENERAL_RELEASE_UNAVAILABLE','의미 해석의 검증 설정을 확인하지 못했습니다.',retryable=False) from exc
+    title=price_menu(search.snapshot,question)
+    if title:
+        # A complete, single-menu price request has one named knowledge entity.
+        # Keep every retrieved block of that entity, including its conditions.
+        entity_ids={card.entity_id for card in search.snapshot.cards if card.title==title}
+        search=replace(search,candidates=tuple(c for c in search.candidates
+            if search.snapshot.card(c.card_id).entity_id in entity_ids))
     if not search.candidates:return baseline,None
     if timeout<=0:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 부족합니다.',retryable=True)
     from app.learn.general_provider import generate

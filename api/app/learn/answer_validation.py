@@ -177,12 +177,16 @@ def validate_answer_for_question(
     if allowed != set(validated.fact_ids):
         raise AnswerReferenceError("INVALID_REFERENCE")
     target_variants = set()
+    from app.learn.menu_context import price_menu,states_menu_price
+    menu=price_menu(snapshot,query.question)
     for fid in validated.fact_ids:
         fact = facts[fid]
         if fact.entity_id != query.entity_id:
             raise AnswerReferenceError("INVALID_REFERENCE")
         if fid in targets and fact.predicate is not None and fact.predicate != query.predicate:
             raise AnswerReferenceError("INVALID_REFERENCE")
+        if menu and fid in targets and not states_menu_price(fact,menu):
+            raise AnswerReferenceError("UNVERIFIED_PRICE")
         check = checks.get(fid)
         if assessment is not None and check is None:
             raise AnswerReferenceError("UNRESOLVED_CONTEXT")
