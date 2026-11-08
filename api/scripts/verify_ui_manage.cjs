@@ -170,7 +170,12 @@ test('o14a 끌어서 순서, 할 일 담기는 초록 버튼', async (b) => {
   const box = await handle.boundingBox();
   const rowHeight = await handle.evaluate((el) => el.closest('li').getBoundingClientRect().height);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + rowHeight * 0.8, { steps: 10 }); await page.mouse.up();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + rowHeight * 0.8, { steps: 10 });
+  const [saved] = await Promise.all([
+    page.waitForResponse((res) => res.request().method() === 'PUT' && new URL(res.url()).pathname.endsWith('/checklist/shifts/order')),
+    page.mouse.up(),
+  ]);
+  assert.ok(saved.ok());
   await page.waitForFunction(() => document.querySelector('main h2')?.textContent === '미들');
   assert.deepEqual(api.state.shifts.map((s) => s.name), ['미들', '오픈', '마감']);
   // Verify the saved drag order before testing the independent keyboard move.
