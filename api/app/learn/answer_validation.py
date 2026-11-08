@@ -13,6 +13,7 @@ from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.hashing import verify_snapshot_hash
 from app.learn.grounded_calculations import Calculation, calculate
 from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions
+from app.learn.procedure_scope import Step, approved_first_steps, procedure_scope, step_refs
 
 
 class AnswerReferenceError(ValueError):
@@ -63,6 +64,8 @@ class ResolvedSelection:
     conclusion_user_turns: tuple[str,...] = ()
     conclusions_verified: bool = False
     literal_card_id: str | None = None
+    procedure_steps: tuple[Step,...] = ()
+    procedure_previous: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,15 @@ def validate_answer_for_question(
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    if query.procedure_steps:
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        scope=procedure_scope(snapshot,query.question,query.procedure_previous)
+        if (not scope or query.procedure_steps!=approved_first_steps(snapshot,scope)
+                or plan.selected_blocks!=step_refs(snapshot,query.procedure_steps)
+                or query.predicate!='approved_first_step' or query.conclusions or query.parts or query.calculations):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        return plan
     if query.literal_card_id is not None:
         from app.learn.card_read import requested_card,whole_card_refs
         try:verify_snapshot_hash(snapshot)

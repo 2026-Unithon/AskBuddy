@@ -167,6 +167,12 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 from app.learn.dialogue_history import validate_history_head
                 await validate_history_head(conn,store_id=store_id,member_id=member_id,
                     session_id=session_id,expected_head=history_head)
+            if resolved.procedure_previous is not None:
+                from app.learn.dialogue_history import load_history
+                recent=await load_history(conn,store_id=store_id,member_id=member_id,session_id=session_id,
+                    include_failed=True,exclude_request_id=request_id)
+                if not recent.user_turns or recent.user_turns[-1]!=resolved.procedure_previous:
+                    raise ApiError(409,'STALE_DIALOGUE','대화가 변경됐습니다. 다시 질문해 주세요.',retryable=True)
             if policy_receipt_id is not None:
                 if choice is not None or plan.action!='ESCALATE':
                     raise ApiError(422,'INVALID_CONTRACT','안전 확인 요청은 별도 이관이어야 합니다.')
@@ -264,6 +270,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                                 calculations=[c.model_dump(mode='json') for c in resolved.calculations],
                                 conclusions=[c.model_dump(mode='json') for c in resolved.conclusions],
                                 conclusion_user_turns=resolved.conclusion_user_turns,
+                                procedure_fact_ids=[s.ref.fact_revision_ids[0] for s in resolved.procedure_steps],
                                 parts=[dict(plan=p.plan.model_dump(mode='json'),entity=p.resolved.entity_id,
                                     predicate=p.resolved.predicate,variants=p.resolved.variants)
                                     for p in resolved.parts])),

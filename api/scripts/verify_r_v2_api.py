@@ -345,6 +345,19 @@ async def verify(pool,admin,seed):
                 invalid=await chat('api-reviewed-invalid','새로운 질문')
                 check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
                 settings.r_reviewed_semantics_enabled=False
+            # A deterministic ordinal lookup needs the prior receipt even in a
+            # store where no Gemini release is enabled.
+            scoped_session=(await client.post('/learn/v2/sessions',headers=headers,json={
+                'request_id':'procedure-history-session'})).json()['session_id']
+            async def scoped_chat(key,text):
+                return await client.post('/learn/v2/chat',headers=headers,json={
+                    'request_id':key,'session_id':scoped_session,'question':text})
+            prior=await scoped_chat('procedure-history-original',title+' 승인 원문 보여줘')
+            follow=await scoped_chat('procedure-history-follow','그럼 두 번째 메뉴는 뭐부터 시작해?')
+            check('ordinal followup without Gemini uses its own session history',follow.status_code==200 and
+                await admin.fetchval("""select execution_metadata->'dialogue_receipt_ids'=to_jsonb(array[$2::bigint])
+                    from r_answer_receipts where receipt_id=$1""",int(follow.headers['x-answer-receipt-id']),
+                    int(prior.headers['x-answer-receipt-id'])))
             from verify_r_general_api import verify as verify_general
             await verify_general(chat,client,headers,pool,admin,seed,settings,title)
             from app.team.evaluation_budget import BudgetDenied

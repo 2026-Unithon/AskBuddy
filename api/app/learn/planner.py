@@ -73,6 +73,28 @@ class Decision:
     semantic_context:dict|None
 
 
+def procedure_decision(snapshot,question,previous,scope,baseline):
+    """Answer a bounded question from named cards in the current publication."""
+    from app.learn.approved_renderer import render
+    from app.learn.procedure_scope import approved_first_steps, step_refs
+    base=dict(snapshot_id=snapshot.snapshot_id,knowledge_revision=snapshot.knowledge_revision)
+    steps=approved_first_steps(snapshot,scope)
+    if steps:
+        resolved=ResolvedSelection('', 'approved_first_step', (), question=question,procedure_steps=steps,
+            procedure_previous=previous if len(scope.subjects)==1 else None)
+        try:
+            plan=AnswerPlan(**base,action='ANSWER',selected_blocks=step_refs(snapshot,steps))
+            render(plan,snapshot,store_id=int(snapshot.store_id),request_id='procedure-fit',resolved=resolved)
+        except ValueError:
+            pass  # Output bounds and source validation still apply.
+        else:
+            return Decision(plan,resolved,{},None)
+    if baseline.plan.action=='CLARIFY' and baseline.plan.clarification_slot=='entity':
+        return Decision(AnswerPlan(**base,action='ESCALATE',escalation_reason='UNRESOLVED_PROCEDURE'),
+            ResolvedSelection('', '', (), question=question),{},None)
+    return baseline
+
+
 def policy_action(question:str):
     q=normalize_query(question)
     if any(x in q for x in ("집 주소","집주소","개인 연락처","주민등록번호","개인정보")):

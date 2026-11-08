@@ -28,9 +28,10 @@ from app.learn.answer_storage import ContextChoice,save_answer,saved_reply,curre
 from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
-from app.learn.planner import decide,policy_action,PLANNER_VERSION
+from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision
+from app.learn.procedure_scope import procedure_scope, first_step_reference
 from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection
-from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback
+from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback,requested_subjects,respects_subjects
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
@@ -480,7 +481,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
-                                if (getattr(settings,'r_general_semantics_enabled',False)
+                                semantics_enabled=getattr(settings,'r_general_semantics_enabled',False)
+                                if ((semantics_enabled or first_step_reference(req.question))
                                         and req.policy_receipt_id is None and not policy_action(req.question)):
                                     # load_history locks this session. Read its latest offer
                                     # under that same lock, before accepting a typed reply.
@@ -494,7 +496,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         stored,typed_head=typed
                                         typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
                                         effective_choice=typed_choice
-                                recover_question=history is not None and effective_choice is None
+                                recover_question=semantics_enabled and history is not None and effective_choice is None
                                 if effective_choice:
                                     if not typed_choice:
                                         stored=await load_context(conn,store_id=store_id,member_id=member_id,
@@ -558,8 +560,16 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             context_id=effective_choice.context_id if effective_choice else None,
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
+                        required_subjects=()
                         if history and context is None and req.policy_receipt_id is None:
-                            decision=scoped_fallback(decision,req.question,history,snapshot)
+                            decision=scoped_fallback(decision,req.question,history,search.snapshot)
+                            required_subjects=requested_subjects(req.question,history,search.snapshot)
+                        previous=user_turns[-1] if user_turns else None
+                        named_scope=(procedure_scope(search.snapshot,question,previous)
+                            if context is None and req.policy_receipt_id is None and not policy_action(question) else None)
+                        if named_scope:
+                            required_subjects=named_scope.subjects
+                            decision=procedure_decision(search.snapshot,question,previous,named_scope,decision)
                         if context and 'case' in slots and not policy_action(question):
                             # A rule-only planner cannot decide which user case
                             # was chosen. Keep this path under semantic review.
@@ -570,6 +580,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
                                 knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
+                        known_subject_fallback=decision
                         from app.learn.reviewed_semantics import product_decision
                         semantic_approval=None
                         if req.policy_receipt_id is None and not (context and 'case' in slots):
@@ -583,13 +594,17 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
                                 store_id=store_id,question=question,user_turns=user_turns,
-                                previous_replies=replies,current_utterance=req.question,
+                                previous_replies=replies,current_utterance=req.question,required_subjects=required_subjects,
                                 baseline=decision,confirmed_slots=slots,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
                                     model_window-(loop.time()-start))),
                                 context_verified=context is not None or history is not None,context_id=effective_choice.context_id if effective_choice else None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
+                            if not respects_subjects(decision,required_subjects,search.snapshot):
+                                decision=known_subject_fallback
+                                semantic_approval=None
+                                general_audit=dict(general_audit or {},status='KNOWN_SUBJECT_FALLBACK')
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
                         from app.team.semantic_shadow import observe_decision
