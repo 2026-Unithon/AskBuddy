@@ -185,8 +185,8 @@ export function AnswerAttachmentRows({ files }: { files: AnswerAttachments }) {
   );
 }
 
-/** 파일을 하나라도 붙였을 때만 종류 칩을 보인다(o10b). 고른 종류는 그 뒤에 붙이는 파일부터 쓴다. */
+/** 파일을 하나라도 붙였을 때만 종류 칩을 보인다(o10b). 고른 종류는 그 뒤에 붙이는 파일부터 쓴다(이미 붙인 파일은 그대로). */
 export function AnswerAttachmentHints({ files }: { files: AnswerAttachments }) {
   if (files.attachments.length === 0) return null;
-  return <IntakeHintChips value={files.hints} onChange={files.setHints} />;
+  return <IntakeHintChips value={files.hints} onChange={files.setHints} label="다음에 붙일 파일 종류" />;
 }

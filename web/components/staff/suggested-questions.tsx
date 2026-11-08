@@ -12,10 +12,11 @@ import { useApp } from "@/lib/store";
 export function SuggestedQuestions({ cardId, limit = 3, onPick }: { cardId?: number; limit?: number; onPick: (question: string) => void }) {
   const { state } = useApp();
   const faqs = useQuery(faqsQuery(state.token, state.storeId));
-  const items = (faqs.data?.items ?? [])
+  const sorted = (faqs.data?.items ?? [])
     .filter((item) => cardId === undefined || item.card_id === cardId)
-    .sort((a, b) => b.question_count - a.question_count)
-    .slice(0, limit);
+    .sort((a, b) => b.question_count - a.question_count);
+  // 같은 질문이 여러 카드에 걸려 있으면 한 번만(칩 key 도 질문 글이다)
+  const items = sorted.filter((item, i) => sorted.findIndex((x) => x.question === item.question) === i).slice(0, limit);
   if (items.length === 0) return null;
   return (
     <div aria-label="추천 질문" className="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">

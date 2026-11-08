@@ -26,10 +26,10 @@ test('키트 코치마크 대상이 없으면 건너뛴다', async (b) => {
 });
 test('키트 세그먼트는 하나만 선택된다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/dev/kit?s=guide');
-  const seg = page.getByRole('tablist', { name: '예시 세그먼트' });
-  await seg.getByRole('tab', { name: '나' }).click();
-  assert.equal(await seg.getByRole('tab', { name: '나' }).getAttribute('aria-selected'), 'true');
-  assert.equal(await seg.getByRole('tab', { name: '가' }).getAttribute('aria-selected'), 'false');
+  const seg = page.getByRole('group', { name: '예시 세그먼트' });
+  await seg.getByRole('button', { name: '나' }).click();
+  assert.equal(await seg.getByRole('button', { name: '나' }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await seg.getByRole('button', { name: '가' }).getAttribute('aria-pressed'), 'false');
   await ctx.close();
 });
 
@@ -75,7 +75,7 @@ test('o01f 카드 탭에 검수 필요 빨간 뱃지, 탭 알약은 하나', asy
 
 test('o01d 질문을 누르면 시트로 바로 답하고, 보내면 목록에서 빠진다', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner');
-  await page.getByRole('button', { name: /디카페인 원두는 어디 있어요\?/ }).click();
+  await page.getByRole('button', { name: /^디카페인 원두는 어디 있어요\?(?! 나중에$)/ }).click();
   const sheet = page.getByRole('dialog', { name: '디카페인 원두는 어디 있어요?' });
   await sheet.getByText('한 번 답하면 다음 알바는 이걸 안 물어봐요').waitFor();
   await sheet.getByLabel('직원에게 보낼 답').fill('창고 오른쪽 맨 위 칸에 있어요');
@@ -84,12 +84,12 @@ test('o01d 질문을 누르면 시트로 바로 답하고, 보내면 목록에�
   await sheet.waitFor({ state: 'hidden' });
   assert.equal(here(page), '/owner');
   assert.ok(api.calls.some((c) => c.method === 'POST' && c.path === '/learn/v2/pending/101/answers'));
-  await page.getByRole('button', { name: /디카페인 원두는 어디 있어요\?/ }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: /^디카페인 원두는 어디 있어요\?(?! 나중에$)/ }).waitFor({ state: 'hidden' });
   await ctx.close();
 });
 test('o01d 보내기를 연타해도 한 번만', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner');
-  await page.getByRole('button', { name: /디카페인/ }).click();
+  await page.getByRole('button', { name: /^디카페인(?!.*나중에$)/ }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('직원에게 보낼 답').fill('창고 오른쪽');
   await sheet.getByRole('button', { name: '넣기' }).dblclick();
@@ -100,7 +100,7 @@ test('o01d 보내기를 연타해도 한 번만', async (b) => {
 });
 test('o01d 시트 답하기 충돌이면 입력이 남는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner', { overrides: { answerConflict: true } });
-  await page.getByRole('button', { name: /디카페인/ }).click();
+  await page.getByRole('button', { name: /^디카페인(?!.*나중에$)/ }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('직원에게 보낼 답').fill('창고 오른쪽');
   await sheet.getByRole('button', { name: '넣기' }).click();
@@ -110,9 +110,9 @@ test('o01d 시트 답하기 충돌이면 입력이 남는다', async (b) => {
 });
 test('o01d 밀어서 나중에는 목록 끝으로', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner');
-  const order = async () => page.locator('main').getByRole('button', { name: /어디 있어요\?|2펌프인가요\?/ }).allInnerTexts();
+  const order = async () => page.locator('main').getByRole('button', { name: /(어디 있어요\?|2펌프인가요\?)(?! 나중에$)/ }).allInnerTexts();
   assert.ok((await order())[0].includes('디카페인'));
-  await page.getByRole('button', { name: '나중에' }).first().press('Enter');
+  await page.getByRole('button', { name: /나중에$/ }).first().press('Enter');
   await page.waitForTimeout(300);
   const after = await order();
   assert.ok(after.at(-1).includes('디카페인') && after.length === 2);
@@ -120,10 +120,10 @@ test('o01d 밀어서 나중에는 목록 끝으로', async (b) => {
 });
 test('o09 답변 대기 전체는 세그먼트, 카드를 누르면 시트', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/questions');
-  const seg = page.getByRole('tablist', { name: '질문 보기' });
-  assert.equal((await seg.getByRole('tab', { name: /답변 대기/ }).innerText()).replace(/\D/g, ''), '2');
+  const seg = page.getByRole('group', { name: '질문 보기' });
+  assert.equal((await seg.getByRole('button', { name: /답변 대기/ }).innerText()).replace(/\D/g, ''), '2');
   assert.equal(await page.getByRole('link', { name: '답변하기' }).count(), 0);
-  await page.getByRole('button', { name: /오트밀크 라떼도 시럽 2펌프인가요\?/ }).click();
+  await page.getByRole('button', { name: /^오트밀크 라떼도 시럽 2펌프인가요\?(?! 나중에$)/ }).click();
   await page.getByRole('dialog', { name: '오트밀크 라떼도 시럽 2펌프인가요?' }).waitFor();
   await ctx.close();
 });
@@ -138,9 +138,9 @@ test('o10a 여러 번 물어봤으면 물어본 말을 펼쳐 본다', async (b)
 test('o10b 첨부는 입력창의 파일 도구, 종류 칩은 붙인 뒤에만', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/questions/101');
   assert.equal(await page.getByTestId('attach-area').count(), 0);
-  assert.equal(await page.getByRole('group', { name: '자료 종류' }).count(), 0);
+  assert.equal(await page.getByRole('group', { name: '다음에 붙일 파일 종류' }).count(), 0);
   await page.getByTestId('attach-input').setInputFiles({ name: '창고.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('jpg') });
-  await page.getByRole('group', { name: '자료 종류' }).waitFor();
+  await page.getByRole('group', { name: '다음에 붙일 파일 종류' }).waitFor();
   await page.getByRole('listitem').filter({ hasText: '창고.jpg' }).waitFor();
   await ctx.close();
 });
@@ -183,11 +183,11 @@ test('검토 1 입력창이 숨으면 그 자리에 내용이 보이고, 입력 
 });
 test('검토 2 앞 질문의 늦은 저장이 다음 질문 시트를 닫지 않는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner', { overrides: { answerDelayMs: 1200 } });
-  await page.getByRole('button', { name: /디카페인/ }).click();
+  await page.getByRole('button', { name: /^디카페인(?!.*나중에$)/ }).click();
   await page.getByRole('dialog').getByLabel('직원에게 보낼 답').fill('창고 오른쪽');
   await page.getByRole('dialog').getByRole('button', { name: '넣기' }).click();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: /오트밀크/ }).click();
+  await page.getByRole('button', { name: /^오트밀크(?!.*나중에$)/ }).click();
   const second = page.getByRole('dialog', { name: '오트밀크 라떼도 시럽 2펌프인가요?' });
   await second.getByLabel('직원에게 보낼 답').fill('네 2펌프');
   await page.waitForTimeout(1800);

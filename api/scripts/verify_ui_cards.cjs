@@ -30,16 +30,16 @@ test('o05a 필터는 전체 공개 검수 필요 미공개, 지운 카드는 어
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards');
   api.state.cards.push({ card_id: 7, review_status: 'EXCLUDED', title: '지운 레시피', content: '-', category_id: 10 });
   await page.reload({ waitUntil: 'networkidle' });
-  const tabs = page.getByRole('tablist', { name: '카드 상태' }).getByRole('tab');
+  const tabs = page.getByRole('group', { name: '카드 상태' }).getByRole('button');
   assert.deepEqual((await tabs.allInnerTexts()).map((t) => t.replace(/\d+/g, '').trim()), ['전체', '공개', '검수 필요', '미공개']);
   assert.equal(await page.getByText('지운 레시피').count(), 0);
   await ctx.close();
 });
 test('o05a 빨간 뱃지는 검수 필요에만, 제안 걸린 카드도 센다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
-  const review = page.getByRole('tab', { name: /검수 필요/ });
+  const review = page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: /검수 필요/ });
   assert.equal((await review.innerText()).replace(/\D/g, ''), '2'); // 마감 머신 청소 + 제안 걸린 바닐라 라떼
-  for (const name of ['전체', '공개', '미공개']) assert.equal((await page.getByRole('tab', { name, exact: true }).innerText()).replace(/\D/g, ''), '', name);
+  for (const name of ['전체', '공개', '미공개']) assert.equal((await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name, exact: true }).innerText()).replace(/\D/g, ''), '', name);
   await ctx.close();
 });
 test('o05a 검색은 칠 때마다 걸러지고 마지막 글자 기준', async (b) => {
@@ -84,7 +84,7 @@ test('o05c 상태는 글자가 아니라 모양으로', async (b) => {
 });
 test('o05c 미공개 카드는 오른쪽으로 밀면 공개', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards?status=pending');
-  await page.getByRole('button', { name: '공개' }).first().press('Enter');
+  await page.getByRole('button', { name: / 공개$/ }).first().press('Enter');
   await page.getByRole('status').getByText('공개했어요').waitFor();
   assert.ok(api.calls.some((c) => c.method === 'POST' && c.path === '/cards/4/approve'));
   await ctx.close();
@@ -159,16 +159,13 @@ test('o06c 근거 자료는 맨 아래 작은 회색 한 줄', async (b) => {
   assert.ok((await line.innerText()).includes('지난 메모.jpg (원본 지워짐)'));
   await ctx.close();
 });
-test('o06e 공통과 근무조는 스위치, 공통을 켜면 근무조가 꺼진다', async (b) => {
-  const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/2', { overrides: { cardLinks: { 2: { checklist: true, shift_ids: [1] } } } });
-  const common = page.getByRole('switch', { name: '공통' });
-  const open1 = page.getByRole('switch', { name: '오픈' });
-  assert.equal(await open1.getAttribute('aria-checked'), 'true');
-  assert.equal(await common.getAttribute('aria-checked'), 'false');
-  await common.click(); await page.waitForTimeout(300);
-  assert.deepEqual(api.calls.filter((c) => c.path === '/checklist/cards/2' && c.method === 'PUT').at(-1).body, { checklist: true, shift_ids: [] });
-  assert.equal(await page.getByText(/공통은 모두에게 보여요/).count(), 0);
-  assert.equal(await page.getByText(/켜짐|꺼짐/).count(), 0);
+// 2026-11-08 사용자: 레시피는 근무조와 상관없이 모두에게 보인다. 할 일 카드의 근무조 스위치는 ui-backlog SHIFT-1
+test('o06e 레시피 카테고리 카드는 근무조를 묻지 않는다', async (b) => {
+  const { page, ctx } = await open(b, 'OWNER', '/owner/cards/2', { overrides: { cardLinks: { 2: { checklist: true, shift_ids: [1] } } } });
+  await page.getByRole('heading', { name: '아메리카노' }).waitFor();
+  await page.waitForTimeout(300);
+  assert.equal(await page.getByText('어느 근무조 할 일인가요?').count(), 0);
+  assert.equal(await page.getByRole('switch').count(), 0);
   await ctx.close();
 });
 test('o07a 검수 필요 사유는 확인해 주세요 상자, 근거 보기 없음', async (b) => {
@@ -220,7 +217,7 @@ test('o06d 보기 모드에는 손잡이가 없고 수정 모드에만 있다', 
 test('o06d 손잡이를 끌어 순서를 바꾸고 수정 완료하면 저장, 수정 완료 토스트', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  const handle = page.getByRole('button', { name: '물을 붓는다. 옮기기' });
+  const handle = page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' });
   await handle.scrollIntoViewIfNeeded(); await page.waitForTimeout(200);
   const box = await handle.boundingBox();
   // 수정 모드 줄은 근거·버튼까지 있어 높다. 한 줄 높이의 3/4 만큼 끌면 한 칸 옮겨진다
@@ -238,7 +235,7 @@ test('o06d 손잡이를 끌어 순서를 바꾸고 수정 완료하면 저장, �
 test('o06d 손잡이는 키보드 화살표로도 옮긴다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await page.getByRole('button', { name: '물을 붓는다. 옮기기' }).press('ArrowUp');
+  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' }).press('ArrowUp');
   const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
   assert.ok(order.findIndex((t) => t.includes('물을 붓는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
   await ctx.close();
@@ -246,7 +243,7 @@ test('o06d 손잡이는 키보드 화살표로도 옮긴다', async (b) => {
 test('o06d 선행 단계 앞으로는 끌어도 안 옮겨진다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await page.getByRole('button', { name: '샷을 붓는다. 옮기기' }).press('ArrowUp'); // 샷은 1번(얼음) 뒤여야 한다
+  await page.getByRole('button', { name: '2번 샷을 붓는다. 옮기기' }).press('ArrowUp'); // 샷은 1번(얼음) 뒤여야 한다
   const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
   assert.ok(order.findIndex((t) => t.includes('컵에 얼음을 담는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
   await ctx.close();
@@ -266,7 +263,7 @@ test('o06d 수정 모드에서 줄을 길게 누르면 고치기 빼기 시트',
 test('o06f 돌아가기는 저장하지 않는다', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await page.getByRole('button', { name: '물을 붓는다. 옮기기' }).press('ArrowUp');
+  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' }).press('ArrowUp');
   await page.getByRole('button', { name: '돌아가기' }).click();
   await page.getByRole('dialog', { name: '고친 내용을 버릴까요?' }).getByRole('button', { name: '버리기' }).click();
   await page.getByRole('button', { name: '수정하기' }).waitFor();
@@ -283,10 +280,10 @@ test('o08a 바뀐 부분만 강조, 지금 카드 제안 내용 상자 없음', 
   for (const gone of ['지금 카드', '제안 내용']) assert.equal(await page.getByText(gone, { exact: true }).count(), 0, gone);
   await ctx.close();
 });
-test('o08b 수정 완료 하나와 작은 돌아가기, 카드 확인 버튼 없음', async (b) => {
+test('o08b 수정 완료 하나와 작은 쓰지 않기, 카드 확인 버튼 없음', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/proposals?card_id=1');
   assert.equal(await page.getByRole('link', { name: /확인$/ }).count(), 0);
-  const back = page.getByRole('button', { name: '수정하지 않고 돌아가기' });
+  const back = page.getByRole('button', { name: '이 답은 쓰지 않기' });
   assert.ok(parseFloat(await back.evaluate((e) => getComputedStyle(e).fontSize)) <= 14);
   await page.getByRole('button', { name: '수정 완료' }).click();
   await page.getByRole('status').getByText('카드에 반영했어요').waitFor();
@@ -318,7 +315,7 @@ test('검토 2 손가락으로 맨 위에서 당기면 새로고침된다', asyn
 test('검토 3 손잡이를 아래로 두 줄 끌면 두 칸 옮겨진다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await page.getByRole('button', { name: '수정하기' }).click(); await page.getByRole('button', { name: '수정 완료' }).waitFor();
-  const handle = page.getByRole('button', { name: '바닐라 라떼 ICE 우 옮기기' });
+  const handle = page.getByRole('button', { name: '바닐라 라떼 ICE 우유는 225ml 넣는다. 옮기기' });
   await handle.scrollIntoViewIfNeeded(); await page.waitForTimeout(200);
   const box = await handle.boundingBox();
   const rowHeight = await handle.evaluate((el) => el.closest('li').getBoundingClientRect().height);
@@ -338,7 +335,7 @@ test('검토 4 검수 필요 카드에 걸린 제안은 뱃지를 두 번 세지
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards?status=approved');
   api.state.proposals[0].target_card_id = 3;
   await page.reload({ waitUntil: 'networkidle' });
-  assert.equal((await page.getByRole('tab', { name: /검수 필요/ }).innerText()).replace(/\D/g, ''), '1');
+  assert.equal((await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: /검수 필요/ }).innerText()).replace(/\D/g, ''), '1');
   await ctx.close();
 });
 test('검토 5 승인하면 함께 공개되는 다른 카드를 알려 준다', async (b) => {
@@ -366,7 +363,7 @@ test('실화면 1 밀지 않은 카드 뒤 동작 버튼은 보이지 않는다'
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
   await page.getByRole('link', { name: /원두 보관 위치/ }).waitFor();
   const hidden = await page.locator('main').evaluate((main) => [...main.querySelectorAll('button[aria-label]')]
-    .filter((el) => /^(공개|미공개|삭제|빼기)/.test(el.getAttribute('aria-label') ?? '') && el.className.includes('absolute'))
+    .filter((el) => /(^|\s)(공개|미공개|삭제|빼기)$/.test(el.getAttribute('aria-label') ?? '') && el.className.includes('absolute'))
     .map((el) => getComputedStyle(el).opacity));
   assert.ok(hidden.length > 0, '밀기 버튼이 있어야 한다');
   assert.ok(hidden.every((o) => o === '0'), JSON.stringify(hidden));
@@ -374,7 +371,7 @@ test('실화면 1 밀지 않은 카드 뒤 동작 버튼은 보이지 않는다'
 });
 test('실화면 2 상태 칩 줄이 눌리지 않고 다 보인다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards');
-  const bar = page.getByRole('tablist', { name: '카드 상태' });
+  const bar = page.getByRole('group', { name: '카드 상태' });
   await bar.waitFor();
   assert.ok((await bar.boundingBox()).height >= 36);
   await ctx.close();

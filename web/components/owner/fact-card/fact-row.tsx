@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { Chip, focusRing } from "@/components/kit";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
-import type { FactGroup } from "./fact-group";
+import { groupNotes, valueSpans, type FactGroup } from "./fact-group";
 export { groupFacts, type FactGroup } from "./fact-group";
 
 const BLOCK_NAME: Record<EditBlockKind | "RAW", string> = { QUANTITIES: "수치", STEPS: "순서", NOTES: "목록", RAW: "내용" };
@@ -68,26 +68,8 @@ export function FactViewRow({ fields }: { fields: FactFields }) {
 
 /** 문장 안의 여러 값을 모두 굵게(겹치지 않게 앞에서부터). */
 function withValues(sentence: string, values: { value: string | null; unit: string | null }[]) {
-  const spans: [number, number][] = [];
-  for (const { value, unit } of values) {
-    if (!value) continue;
-    const needle = [`${value}${unit ?? ""}`, value].find((n) => sentence.includes(n));
-    if (!needle) continue;
-    let from = 0;
-    // 이미 굵게 한 자리와 겹치지 않는 다음 자리를 찾는다
-    for (;;) {
-      const at = sentence.indexOf(needle, from);
-      if (at < 0) break;
-      const end = at + needle.length;
-      if (!spans.some(([a, b]) => at < b && end > a)) {
-        spans.push([at, end]);
-        break;
-      }
-      from = at + 1;
-    }
-  }
+  const spans = valueSpans(sentence, values);
   if (spans.length === 0) return sentence;
-  spans.sort((a, b) => a[0] - b[0]);
   const parts: ReactNode[] = [];
   let cursor = 0;
   spans.forEach(([a, b], i) => {
@@ -102,8 +84,7 @@ function withValues(sentence: string, values: { value: string | null; unit: stri
 export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: boolean }) {
   const first = group.fields[0];
   const steps = new Set(group.fields.map((f) => f.step_order).filter((o) => o !== null));
-  const conditions = [...new Set(group.fields.flatMap((f) => f.conditions))];
-  const exceptions = [...new Set(group.fields.flatMap((f) => f.exceptions))];
+  const { conditions, exceptions } = groupNotes(group.fields);
   return (
     <li data-testid="fact-row" className="flex flex-col gap-1 border-b border-background py-3 last:border-b-0">
       <div className="flex items-start gap-2">

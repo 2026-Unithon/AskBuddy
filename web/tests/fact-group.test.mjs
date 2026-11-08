@@ -42,3 +42,25 @@ test("한 문장 값 나열에 붙은 1·2번은 한 줄, 번호 없음", () => 
   assert.equal(groups[0].segments, null);
   assert.equal(numbered, false);
 });
+
+import { valueSpans } from "../components/owner/fact-card/fact-group.ts";
+const at = (s, spans) => spans.map(([a, b]) => s.slice(a, b));
+test("값 굵게는 값+단위를 먼저, 단위 없으면 마지막 자리", () => {
+  const s = "2번째 컵에 시럽 2펌프";
+  assert.deepEqual(at(s, valueSpans(s, [{ value: "2", unit: "펌프" }])), ["2펌프"]);
+  assert.deepEqual(at(s, valueSpans(s, [{ value: "2", unit: null }])), ["2"]);
+  assert.deepEqual(valueSpans(s, [{ value: "2", unit: null }]), [[10, 11]]);
+});
+test("숫자 값은 더 큰 숫자 안에서 찾지 않는다", () => {
+  assert.deepEqual(valueSpans("12시에 마감", [{ value: "2", unit: null }]), []);
+});
+
+import { groupNotes } from "../components/owner/fact-card/fact-group.ts";
+const nf = (value, conditions = [], exceptions = []) => ({ sentence: "s", step_order: null, value, unit: null, conditions, exceptions });
+test("묶은 줄의 조건은 어느 값 것인지 붙인다", () => {
+  assert.deepEqual(groupNotes([nf("휘핑", ["손님 요청 시"]), nf("쿠키분태")]), { conditions: ["휘핑: 손님 요청 시"], exceptions: [] });
+});
+test("값이 하나거나 모든 값에 같은 조건이면 그대로", () => {
+  assert.deepEqual(groupNotes([nf("2", ["HOT"])]), { conditions: ["HOT"], exceptions: [] });
+  assert.deepEqual(groupNotes([nf("a", ["매장"]), nf("b", ["매장"])]), { conditions: ["매장"], exceptions: [] });
+});

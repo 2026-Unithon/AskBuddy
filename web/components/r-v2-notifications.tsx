@@ -16,7 +16,7 @@ import {
 } from "@/components/kit";
 import { apiErrorMessage } from "@/lib/api";
 import { useApp } from "@/lib/store";
-import { rKeys, rNotificationsQuery } from "@/lib/query";
+import { queryKeys, rKeys, rNotificationsQuery } from "@/lib/query";
 import { rReadNotification, type RNotification } from "@/lib/r-v2-api";
 
 // 알림 본문의 임의 주소를 실행하지 않는다. 서버가 발행하는 직원 대화 경로(옛 /staff/chat/v2, 새 /staff/ask)만 연다.
@@ -34,11 +34,18 @@ export default function RV2Notifications() {
   const read = useMutation({
     mutationFn: (notice: RNotification) => rReadNotification(state.token!, notice.notification_id),
     onSuccess: async (_data, notice) => {
-      await client.invalidateQueries({ queryKey: rKeys.notifications(state.storeId, state.userId) });
+      // 설정·머리 뱃지는 알림 목록 조회(notificationsQuery)의 안 읽은 수를 쓴다. 같이 다시 받는다
+      await Promise.all([
+        client.invalidateQueries({ queryKey: rKeys.notifications(state.storeId, state.userId) }),
+        client.invalidateQueries({ queryKey: queryKeys.notificationsRoot(state.storeId) }),
+      ]);
       const session = chatSession(notice.destination);
       if (session) {
         await client.invalidateQueries({ queryKey: rKeys.history(state.storeId, state.userId, session) });
         router.push(`/staff/ask?session_id=${session}`);
+      } else if (/^\/staff\/(?:chat\/v2|chat|ask)\/?$/.test(notice.destination)) {
+        // 세션 없는 옛 알림(v1)은 묻기 화면으로(눌러도 아무 데도 안 가지 않게)
+        router.push("/staff/ask");
       }
     },
   });
@@ -86,7 +93,7 @@ export default function RV2Notifications() {
                 onClick={() => read.mutate(notice)}
                 className={`flex w-full items-start gap-3 rounded-[20px] bg-surface p-4 text-left shadow-card transition-transform duration-[var(--dur-base)] ease-[var(--ease-out)] ${
                   opening ? "scale-[1.02]" : ""
-                } ${notice.read ? "opacity-60" : ""} ${focusRing}`}
+                } ${focusRing}`}
               >
                 {!notice.read && <span className="mt-2 size-2 shrink-0 rounded-full bg-primary" aria-label="읽지 않음" />}
                 <span className="flex min-w-0 flex-1 flex-col gap-1">

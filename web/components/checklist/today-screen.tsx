@@ -304,7 +304,11 @@ export function TodayScreen() {
         loading={submit.isPending}
         error={submit.error ? apiErrorMessage(submit.error, "제출하지 못했어요.") : null}
         onConfirm={() => data && submit.mutate(data.business_date)}
-        onCancel={() => setConfirm(false)}
+        onCancel={() => {
+          // 닫으면 지난 제출 실패도 지운다(다시 열 때 옛 오류가 남지 않게)
+          submit.reset();
+          setConfirm(false);
+        }}
       />
       <RecipeSheet preview={preview} onClose={() => setPreview(null)} />
       {yesterday && (

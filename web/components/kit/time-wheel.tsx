@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, type KeyboardEvent } from "react";
 import { focusRing } from "@/components/kit/buttons";
 
 const ITEM = 44;
@@ -10,6 +10,7 @@ const MINUTES = Array.from({ length: 12 }, (_, i) => pad(i * 5));
 
 /** 한 열 휠. 스크롤 스냅으로 굴리고 멈추면 가운데 칸을 고른다. 칸을 누르거나 위·아래 키로도 고른다. */
 function Column({ label, options, value, onChange }: { label: string; options: string[]; value: string; onChange: (v: string) => void }) {
+  const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 휠을 코드로 움직이는 중에는 스크롤 끝 판정을 하지 않는다(누른 값이 지나가는 칸으로 바뀌지 않게)
@@ -67,6 +68,8 @@ function Column({ label, options, value, onChange }: { label: string; options: s
         ref={ref}
         role="listbox"
         aria-label={label}
+        // 위아래 키로 바꾼 값을 화면낭독기가 읽게 지금 값을 가리킨다
+        aria-activedescendant={`${id}-${value}`}
         tabIndex={0}
         onScroll={onScroll}
         onKeyDown={onKeyDown}
@@ -75,6 +78,7 @@ function Column({ label, options, value, onChange }: { label: string; options: s
         {options.map((option) => (
           <div
             key={option}
+            id={`${id}-${option}`}
             role="option"
             aria-selected={option === value}
             onClick={() => onChange(option)}

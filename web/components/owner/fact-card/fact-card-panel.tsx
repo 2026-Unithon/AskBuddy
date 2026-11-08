@@ -256,7 +256,8 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
               <Surface key={block.key} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
                 <h3 className="text-[15px] font-bold text-ink">{blockHeading(block.kind, block.variant)}</h3>
                 <SortableList
-                  items={block.rows.map((row) => ({ ...row, label: row.fields.sentence }))}
+                  // 손잡이 이름: 순서 블록은 번호와 문장 전체(메뉴 이름으로 시작하는 줄끼리 같아지지 않게)
+                  items={block.rows.map((row, i) => ({ ...row, label: steps ? `${i + 1}번 ${row.fields.sentence}` : row.fields.sentence }))}
                   canMove={(from, to) => !locked && canSwap(block, from, to)}
                   onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
                   renderItem={(row, i) => (

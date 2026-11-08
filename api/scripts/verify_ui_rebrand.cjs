@@ -177,8 +177,9 @@ const BASE = 'http://127.0.0.1:3011';
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
     check('proposal failure shown in place', state.proposals.length === 1);
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
-    await page.getByText('확인할 제안이 없어요', { exact: true }).waitFor();
-    check('proposal resolved empties list', true);
+    // 백로그 일괄 처리: 제안을 정리하면 검수 필요 카드 목록으로 돌아간다
+    await page.waitForURL((u) => u.pathname === '/owner/cards' && u.searchParams.get('status') === 'needs_review');
+    check('proposal resolved returns to review list', state.proposals.length === 0);
 
     // 카드 상세: 자유 편집 없음, 지우기 시트, 다시 살리기, 카테고리 이동, 인용 끊김
     await page.goto(`${BASE}/owner/cards/1`);
@@ -189,9 +190,9 @@ const BASE = 'http://127.0.0.1:3011';
     // Phase A — 자유 본문 편집이 없어졌다. 사실 카드가 아닌 카드는 읽기만 한다
     check('legacy card has no free-text edit', await page.getByRole('button', { name: '고치기', exact: true }).count() === 0
       && await page.locator('textarea').count() === 0);
-    await page.getByRole('button', { name: /카테고리 음료/ }).click();
+    await page.getByRole('button', { name: /^카테고리 바꾸기, 지금 음료/ }).click();
     await page.getByRole('button', { name: '재고 · 위치' }).click();
-    await page.getByRole('button', { name: /카테고리 재고 · 위치/ }).waitFor();
+    await page.getByRole('button', { name: /^카테고리 바꾸기, 지금 재고 · 위치/ }).waitFor();
     check('category move updates card', state.cards[0].category.category_id === 11);
     // 상세에는 지우기·다시 살리기가 없다(삭제는 목록 미공개 탭에서 밀기, 되돌리기는 5초 스낵바만)
     check('detail has no delete or restore buttons', await page.getByRole('button', { name: /^(지우기|다시 살리기)$/ }).count() === 0);

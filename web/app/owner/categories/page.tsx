@@ -56,7 +56,8 @@ export default function CategoriesPage() {
   });
   const reclass = categories.data?.reclassification;
   const trimmed = name.trim();
-  const duplicate = Boolean(trimmed) && Boolean(categories.data?.items.some((c) => c.name.trim() === trimmed));
+  // 'Coffee'·'coffee' 처럼 대소문자만 다른 이름도 같은 이름으로 본다
+  const duplicate = Boolean(trimmed) && Boolean(categories.data?.items.some((c) => c.name.trim().toLowerCase() === trimmed.toLowerCase()));
   const fieldError = duplicate ? "이미 있는 카테고리예요" : create.error ? apiErrorMessage(create.error, "카테고리를 추가하지 못했어요.") : null;
 
   function submit(event: FormEvent) {

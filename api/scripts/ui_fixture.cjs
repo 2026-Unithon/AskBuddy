@@ -136,7 +136,7 @@ function syntheticApi(role, overrides = {}) {
     assignment_type: 'AUTOMATIC', job_id: 7, source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null },
     has_evidence: true, needs_review_reason: c.needs_review_reason ?? null, updated_at: NOW });
   const version = (c) => ({ version_id: c.card_id * 10, version_no: 1, title: c.title, content: c.content, change_source: 'EXTRACT', created_at: NOW });
-  const detail = (c) => ({ ...listItem(c), fact_card: c.card_id === 1, draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
+  const detail = (c) => ({ ...listItem(c), fact_card: c.card_id === 1 || (state.singleFactCard && c.card_id === 5), draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
     evidence: [{ evidence_id: 1, locator_type: 'PAGE', locator: {}, excerpt: c.content.split('\n')[0], source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null, source_availability: 'AVAILABLE' } }] });
   const roadmapItems = state.cards.filter((c) => c.review_status === 'APPROVED').map((c) => ({ item_id: c.card_id + 10, card_id: c.card_id, published_version_id: c.card_id * 10, title: c.title, status: 'NOT_STARTED', category_id: c.category_id }));
   const checklistToday = () => ({
@@ -182,6 +182,7 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/app/bootstrap') payload = { user: { ...user, role }, store: STORE, badges: { waiting_questions: state.pending.length, pending_cards: 2 },
       default_destination: role === 'OWNER' ? '/owner' : '/staff' };
     // 알림: 사장(/notifications 목록)과 직원(R 읽음 표시)이 같은 경로를 쓴다
+    else if (p === '/notifications' && m === 'GET' && state.slowNotificationRefetchMs && (state.notificationGets = (state.notificationGets ?? 0) + 1) > 1 && await new Promise((r) => setTimeout(r, state.slowNotificationRefetchMs))) payload = null;
     else if (p === '/notifications' && m === 'GET') payload = { items: state.notifications, unread_count: state.unreadCount, next_cursor: null,
       notifications: state.notifications.map((n) => ({ notification_id: String(n.notification_id), title: n.title, body: n.body, destination: n.destination, read: Boolean(n.read_at) })), next_after: null };
     else if (/^\/notifications\/\w+\/read$/.test(p)) {
@@ -233,6 +234,7 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(id));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
       if (action === 'restore' && state.failRestore) return reply({ error: { message: '되돌리기 저장 실패' } }, 503);
+      if (action === 'approve' && state.approveDelayMs) await new Promise((r) => setTimeout(r, state.approveDelayMs));
       if (action === 'approve' && state.failApprove?.includes(c.card_id)) return reply({ error: { message: '공개 실패' } }, 409);
       // 서버(api/app/cards/router.py)처럼 restore 는 공개 전 카드를 빼기 전 상태(검수 필요면 검수 필요)로 되돌린다
       if (action === 'exclude') c.beforeExclude = c.review_status;
@@ -246,6 +248,11 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/cards/1/facts' && m === 'PUT') {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
+    } else if (p === '/cards/5/facts' && m === 'GET' && state.singleFactCard) {
+      // 사실이 하나뿐인 카드: 그 줄을 빼면 카드 지우기로 간다
+      payload = { ...factCardView(50, state.cards[4].review_status), card_id: 5, title: '원두 보관 위치', published_version_id: null,
+        blocks: [{ block_id: 's1', kind: 'NOTES', order: 1, variant: { temperature: null, size: null }, facts: [
+          factRow({ fact_revision_id: 501, fact_id: 51, position: 1, sentence: '원두는 창고 왼쪽 선반에 둔다.', origins: [memo(1)] })] }] };
     } else if (/^\/cards\/\d+\/facts$/.test(p)) payload = { card_id: Number(p.split('/')[2]), blocks: [], facts: [] };
     else if (p === '/categories' && m === 'GET') payload = { version: 1, reclassification: state.reclassification, items: state.categories };
     else if (p === '/categories' && m === 'POST') {
@@ -281,16 +288,22 @@ function syntheticApi(role, overrides = {}) {
     else if (/^\/learn\/v2\/notifications\/\w+\/read$/.test(p) && m === 'POST') {
       if (state.failRRead) return reply({ error: { message: '읽음 저장 실패' } }, 409);
       const n = state.rNotifications.find((x) => x.notification_id === p.split('/')[4]);
-      if (n) n.read = true;
+      if (n && !n.read) { n.read = true; state.unreadCount = Math.max(0, state.unreadCount - 1); }
       payload = { notification_id: p.split('/')[4], read: true };
     }
+    else if (p === '/checklist/submissions' && m === 'POST' && state.failSubmit) return reply({ error: { message: '제출 실패' } }, 503);
     else if (p === '/checklist/submissions' && m === 'POST') { state.submitted = { done_lines: 1, total_lines: 2, submitted_at: NOW }; payload = { submission: state.submitted }; }
     else if (p === '/learn/v2/sessions' && m === 'GET') {
       if (state.sessionsDelayMs) await new Promise((r) => setTimeout(r, state.sessionsDelayMs));
+      if (state.failSessions > 0) { state.failSessions -= 1; return reply({ error: { message: '대화 목록 실패' } }, 503); }
       payload = { sessions: state.sessions };
     }
     else if (p === '/learn/v2/sessions' && m === 'POST') { state.sessions = [{ session_id: '1' }]; payload = { session_id: '1' }; }
-    else if (/^\/learn\/v2\/sessions\/\w+\/history$/.test(p)) payload = { messages: state.messages, next_before: null, has_pending_updates: false };
+    else if (/^\/learn\/v2\/sessions\/\w+\/history$/.test(p)) {
+      // olderMessages 가 있으면 첫 쪽은 '이전 대화 보기'를 남기고, before 로 부르면 그 앞 쪽을 준다
+      if (url.searchParams.get('before')) payload = { messages: state.olderMessages ?? [], next_before: null, has_pending_updates: false };
+      else payload = { messages: state.messages, next_before: state.olderMessages ? 'b1' : null, has_pending_updates: false };
+    }
     else if (p === '/learn/v2/chat' && m === 'POST') {
       if (state.chatDelayMs) await new Promise((r) => setTimeout(r, state.chatDelayMs));
       payload = state.chatEscalate

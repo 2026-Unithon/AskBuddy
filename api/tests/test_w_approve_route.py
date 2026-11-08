@@ -91,6 +91,22 @@ class ApproveRouteTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.card_id, CARD)
         self.assertEqual(result.review_status, "APPROVED")
 
+    async def test_first_publish_puts_task_card_on_every_shift(self):
+        self._patches(publish_result=PublishCardsResult(
+            status="PUBLISHED", snapshot_id=12, knowledge_revision=4))
+        db = FakeDb(_expected_row(published_version_id=None), MEMBER)
+        with patch(f"{MOD}.checklist_repo.add_default_link", new=AsyncMock()) as add:
+            await approve_card(CARD, db, _claims())
+        add.assert_awaited_once_with(db, STORE, CARD)
+
+    async def test_republish_keeps_owner_shift_choice(self):
+        self._patches(publish_result=PublishCardsResult(
+            status="PUBLISHED", snapshot_id=12, knowledge_revision=4))
+        db = FakeDb(_expected_row(published_version_id=DRAFT_VERSION - 1), MEMBER)
+        with patch(f"{MOD}.checklist_repo.add_default_link", new=AsyncMock()) as add:
+            await approve_card(CARD, db, _claims())
+        add.assert_not_awaited()
+
     async def test_already_applied_returns_mutation_row(self):
         self._patches(publish_result=PublishCardsResult(
             status="ALREADY_APPLIED", snapshot_id=12, knowledge_revision=4))

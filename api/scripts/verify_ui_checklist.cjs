@@ -577,12 +577,15 @@ const fs = require("node:fs");
       await page
         .getByRole("heading", { name: "어느 근무조 할 일인가요?" })
         .waitFor();
-      // 화면 개선 계획 3(o06e): 공통·근무조는 스위치
-      const common = page.getByRole("switch", { name: "공통", exact: true });
-      await common.click();
-      await page.waitForFunction(
-        () => document.querySelector('[role=switch][aria-checked=true]')?.textContent?.startsWith("공통"),
-      );
+      // 2026-11-08 사용자: 공통 스위치 없이 근무조 스위치만. 모두 켜면 공통(모든 근무조)으로 저장된다
+      const switches = page.getByRole("group", { name: "어느 근무조 할 일인가요?" }).getByRole("switch");
+      for (let i = 0; i < (await switches.count()); i++) {
+        const sw = switches.nth(i);
+        if ((await sw.getAttribute("aria-checked")) !== "true") {
+          await sw.click();
+          await page.waitForFunction((index) => document.querySelectorAll("[role=group] [role=switch]")[index]?.getAttribute("aria-checked") === "true", i);
+        }
+      }
       check(
         "카드 공통 연결",
         s.links.checklist && s.links.shift_ids.length === 0,

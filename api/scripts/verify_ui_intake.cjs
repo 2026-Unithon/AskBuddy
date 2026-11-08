@@ -33,7 +33,7 @@ test('키트 왼쪽으로 밀면 동작, 조금만 밀면 제자리', async (b) 
 });
 test('키트 밀기 동작은 키보드로도 된다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/dev/kit?s=gestures');
-  await page.getByRole('button', { name: '빼기' }).focus(); await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: '빼기', exact: true }).focus(); await page.keyboard.press('Enter');
   await page.getByText('뺐어요').waitFor();
   await ctx.close();
 });

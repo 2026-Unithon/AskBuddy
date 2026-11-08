@@ -139,7 +139,7 @@ const path = require('node:path');
     const answerBox = () => ownerPage.getByLabel('직원에게 보낼 답');
     await ownerPage.goto('http://127.0.0.1:3011/owner');
     // 화면 개선 계획 4a: 오늘 매장 질문은 시트로 열리고, 상세는 '자세히 보기'
-    await ownerPage.getByRole('button', { name: /미확인 업무/ }).click();
+    await ownerPage.getByRole('button', { name: /미확인 업무(?!.* 나중에$)/ }).click();
     await ownerPage.getByRole('link', { name: '자세히 보기' }).click();
     await ownerPage.waitForURL('**/owner/questions/1');
     await answerBox().waitFor();

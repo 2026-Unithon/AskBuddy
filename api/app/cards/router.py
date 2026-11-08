@@ -11,6 +11,7 @@ from app.cards import fact_edit
 from app.cards import fact_edit_repo as fact_repo
 from app.cards import fact_parse
 from app.cards import repository as repo
+from app.checklist import repository as checklist_repo
 from app.cards.fact_edit_plan import CardFactState, EditError
 from app.cards.fact_edit_schemas import (
     CardFactsView,
@@ -300,6 +301,8 @@ async def approve_card(
         )
 
         if result.status in ("PUBLISHED", "ALREADY_APPLIED"):
+            if expected["published_version_id"] is None:
+                await _default_checklist_link(db, store_id, card_id)
             return _mutation(await repo.mutation_row(db, store_id, card_id))
         if result.status == "NO_PROVENANCE":
             raise ApiError(
@@ -429,6 +432,14 @@ async def exclude_card(
             db, store_id=store_id, user_id=user_id, card_id=card_id,
             kind="exclude", event_id=event_id)
     return _mutation(row, undo_until=undo_until)
+
+
+async def _default_checklist_link(db, store_id: int, card_id: int) -> None:
+    """처음 공개한 할 일 카드를 모든 근무조에 켠다. 실패해도 공개는 이미 끝났으므로 요청은 성공이다."""
+    try:
+        await checklist_repo.add_default_link(db, store_id, card_id)
+    except Exception:  # noqa: BLE001 — 기본 연결은 부가 동작
+        logger.exception("default checklist link failed card=%s store=%s", card_id, store_id)
 
 
 @router.post("/{card_id}/restore", response_model=CardMutationResult)

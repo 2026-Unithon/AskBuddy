@@ -28,6 +28,7 @@ import { useApp } from "@/lib/store";
 import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
 import { evidenceNames } from "@/components/owner/fact-card/fact-row";
 import { compactRecipe } from "@/components/owner/fact-card/fact-group";
+import { isRecipeCategory } from "@/lib/recipe-category";
 import { pressable } from "@/components/kit/buttons";
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
@@ -68,7 +69,11 @@ export default function OwnerCardPage() {
       }
       await refresh();
     },
-    onError: onConflict,
+    onError: async (error, action) => {
+      // 삭제한 뒤엔 삭제 안내 화면이라 아래 오류 줄이 안 보인다. 되돌리기 실패는 스낵바로 '다시'
+      if (action === "restore") snackbar({ message: "되돌리지 못했어요", actionLabel: "다시", onAction: () => status.mutate("restore") });
+      await onConflict(error);
+    },
   });
 
   if (!cardId) {
@@ -159,7 +164,8 @@ export default function OwnerCardPage() {
       }
     >
       <div className="flex items-center justify-between gap-2">
-        <BackButton parent="/owner/cards" label="카드" />
+        {/* 수정 중에는 하단 '돌아가기'(버릴지 묻는다)로만 나간다. 뒤로 버튼은 묻지 않고 떠나므로 숨긴다 */}
+        {factEditor.editing ? <span /> : <BackButton parent="/owner/cards" label="카드" />}
         {card.fact_card && factEditor.canEdit && !factEditor.editing && (
           <button
             type="button"
@@ -173,7 +179,7 @@ export default function OwnerCardPage() {
       <button
         type="button"
         onClick={() => setMoving(true)}
-        aria-label={`카테고리 ${card.category?.name ?? "기타"}, 옮기기`}
+        aria-label={`카테고리 바꾸기, 지금 ${card.category?.name ?? "기타"}`}
         className={`inline-flex min-h-8 items-center gap-1 self-start rounded-full bg-empty px-3 text-[13px] font-bold text-primary ${pressable} ${focusRing}`}
       >
         {card.category?.name ?? "기타"}
@@ -205,7 +211,7 @@ export default function OwnerCardPage() {
         </Surface>
       )}
       {/* 레시피는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자) */}
-      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !price && !recipe && <CardAssignment cardId={cardId} />}
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !recipe && !isRecipeCategory(card.category?.name ?? "") && <CardAssignment cardId={cardId} />}
       {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>

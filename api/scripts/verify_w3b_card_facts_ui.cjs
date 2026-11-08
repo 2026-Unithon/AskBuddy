@@ -279,7 +279,8 @@ async function handle(route) {
     check("사실 목록 오류 뒤 다시 시도로 복구", state.factsCalls[5] >= 2);
 
     // 화면 개선 계획 3: 순서는 줄 오른쪽 손잡이(키보드 화살표)로, 막힌 이동은 눌러도 순서가 그대로다
-    const moveHandle = (sentence) => page.getByRole("button", { name: `${sentence.slice(0, 12)} 옮기기`, exact: true });
+    // 손잡이 이름은 '{n}번 {문장} 옮기기'(순서 블록) 또는 '{문장} 옮기기'(백로그 일괄 처리)
+    const moveHandle = (sentence) => page.getByRole("button", { name: new RegExp(`^(\\d+번 )?${sentence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} 옮기기$`) });
     const sentences = async () => (await page.getByTestId("fact-row").allInnerTexts()).map((t) => t.split("\n").map((x) => x.trim()).filter(Boolean).find((x) => !/^\d+$/.test(x)));
     const press = async (sentence, key) => { await moveHandle(sentence).press(key); await page.waitForTimeout(50); };
     const blocked = async (sentence, key) => { const before = JSON.stringify(await sentences()); await press(sentence, key); return JSON.stringify(await sentences()) === before; };

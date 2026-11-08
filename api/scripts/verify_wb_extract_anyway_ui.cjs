@@ -117,8 +117,8 @@ function advance() {
 
     // 1. 섞인 작업(SUCCEEDED): 무관 자료 행에만 버튼
     await page.goto(`${BASE}/owner/jobs/31`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { name: "이렇게 나눴어요" }).waitFor({ timeout: 8000 });
-    check("SUCCEEDED 섞인 작업에 추출하지 않은 자료 구역이 보인다", await page.getByText("추출하지 않은 자료 · 1").isVisible());
+    await page.getByRole("heading", { name: "카드가 준비됐어요! 검수 부탁드려요!" }).waitFor({ timeout: 8000 });
+    check("SUCCEEDED 섞인 작업에 추출하지 않은 자료 구역이 보인다", await page.getByText("추출하지 않은 자료").isVisible());
     check("버튼은 하나 — 무관 자료(chat.docx) 행에만", (await anyway.count()) === 1 && (await row("chat.docx").getByRole("button", { name: "그래도 추출하기" }).count()) === 1);
     check("카드 나온 자료·분류 아닌 무결과·지워진 무관 자료에는 버튼이 없다",
       (await row("recipe.docx").count()) === 0 && (await row("empty.docx").count()) === 0 && (await row("gone.docx").count()) === 0);
@@ -129,7 +129,7 @@ function advance() {
     await page.getByRole("heading", { name: "정리하고 있어요" }).waitFor({ timeout: 8000 });
     check("누르면 그 자료 경로만 호출한다", JSON.stringify(state.posts) === JSON.stringify(["/ingest/jobs/31/sources/302/extract-anyway"]));
     await shot("2-processing");
-    await page.getByRole("heading", { name: "이렇게 나눴어요" }).waitFor({ timeout: 10000 });
+    await page.getByRole("heading", { name: "카드가 준비됐어요! 검수 부탁드려요!" }).waitFor({ timeout: 10000 });
     check("처리가 끝나면 폴링이 따라와 버튼이 사라진다", (await anyway.count()) === 0);
     await shot("3-after");
 

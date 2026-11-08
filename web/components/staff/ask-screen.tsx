@@ -86,7 +86,8 @@ export function AskScreen() {
   // 처음 불러온 대화는 '이미 본 것'. 그 뒤 새로 생긴 버디 답만 타이핑으로 보인다(s04c).
   // 서버 데이터 복사가 아니라 화면 연출용 표시(어떤 id 를 처음 봤는지)만 둔다
   const [known, setKnown] = useState<Set<string> | null>(null);
-  const firstReady = !sessions.isLoading && (!session || Boolean(history.data));
+  // 목록·기록을 실제로 받은 뒤에만 '처음 본 것'을 정한다(실패 뒤 다시 받아 온 옛 대화가 새 답처럼 타이핑되지 않게)
+  const firstReady = !sessions.isLoading && !sessions.error && !history.error && (!session || Boolean(history.data));
   if (known === null && firstReady) setKnown(new Set(messages.map((m) => m.message_id)));
   const loading = sessions.isLoading || (Boolean(session) && history.isLoading);
   const loadError = sessions.error ?? history.error;
@@ -154,7 +155,7 @@ export function AskScreen() {
             <MessageView
               message={message}
               isLast={message.message_id === lastId}
-              animate={known !== null && !known.has(message.message_id)}
+              animate={known !== null && !known.has(message.message_id) && message.message_id === lastId}
               busy={busy}
               onOption={(option, context) =>
                 ask.mutate({
@@ -306,9 +307,11 @@ function Typewriter({ text }: { text: string }) {
   }, [text]);
   if (shown >= text.length) return <>{text}</>;
   return (
+    // 화면낭독기는 조각이 아니라 전체 답을 한 번에 읽는다. 글자가 늘어나는 보이는 글은 CSS 로만 그려
+    // 문서 글(복사·검색·textContent)에는 전체 답이 한 번만 있다
     <span data-typing="">
-      {text.slice(0, shown)}
-      <span className="sr-only">{text.slice(shown)}</span>
+      <span aria-hidden="true" data-shown={text.slice(0, shown)} className="before:content-[attr(data-shown)]" />
+      <span className="sr-only">{text}</span>
     </span>
   );
 }

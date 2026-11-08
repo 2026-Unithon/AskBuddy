@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { cardQuery } from "@/lib/query";
+import { useApp } from "@/lib/store";
 import { navigateWithSharedTitle } from "@/lib/shared-title";
 import { focusRing, pressable } from "@/components/kit/buttons";
 import { SwipeRow, type SwipeAction } from "@/components/kit/swipe-row";
@@ -41,6 +44,8 @@ export function CardTile({
   right?: SwipeAction;
 }) {
   const router = useRouter();
+  const client = useQueryClient();
+  const { state } = useApp();
   const title = useRef<HTMLSpanElement>(null);
   const dot = DOT_CLASS[status];
   const href = proposal ? `/owner/cards/proposals?card_id=${card.card_id}` : `/owner/cards/${card.card_id}`;
@@ -55,7 +60,11 @@ export function CardTile({
         navigateWithSharedTitle(() => router.push(href), title.current, `card-title-${card.card_id}`);
       }}
       data-status={status}
-      aria-label={`${card.title}, ${STATUS_WORD[status]}`}
+      aria-label={`${card.title}, ${STATUS_WORD[status]}${proposal ? ", 다른 답이 있어요" : ""}`}
+      // 누르는 순간 상세를 미리 받아 둔다(제목이 이어 움직이는 동안 기다리지 않게)
+      onPointerDown={() => {
+        if (!proposal) void client.prefetchQuery(cardQuery(state.token, state.storeId, card.card_id));
+      }}
       className={`relative flex min-h-[72px] flex-col justify-between gap-2 rounded-[18px] px-3.5 py-3 ${STATUS_CLASS[status]} ${pressable} ${focusRing}`}
     >
       {dot && <span aria-hidden className={`absolute left-2.5 top-2.5 size-2 rounded-full ${dot}`} />}

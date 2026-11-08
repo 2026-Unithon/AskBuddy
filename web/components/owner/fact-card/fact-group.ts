@@ -156,3 +156,50 @@ export function compactRecipe(blocks: RecipeBlock[]): CompactRecipe | null {
   }
   return { price, sections };
 }
+
+/**
+ * 문장에서 굵게 할 값 자리. 값+단위가 문장에 있으면 그 자리(앞에서부터), 단위 없이 값만 있으면 마지막 자리.
+ * 숫자 값은 더 큰 숫자 안('12시'의 2)에서 찾지 않는다. 이미 잡은 자리와 겹치지 않는다.
+ */
+export function valueSpans(sentence: string, values: { value: string | null; unit: string | null }[]): [number, number][] {
+  const spans: [number, number][] = [];
+  const overlaps = (a: number, b: number) => spans.some(([x, y]) => a < y && b > x);
+  const isDigit = (ch: string | undefined) => ch !== undefined && /[0-9]/.test(ch);
+  const places = (needle: string) => {
+    const found: number[] = [];
+    const numeric = /^[0-9]/.test(needle);
+    for (let at = sentence.indexOf(needle); at >= 0; at = sentence.indexOf(needle, at + 1)) {
+      const end = at + needle.length;
+      if (numeric && (isDigit(sentence[at - 1]) || (/[0-9]$/.test(needle) && isDigit(sentence[end])))) continue;
+      if (!overlaps(at, end)) found.push(at);
+    }
+    return found;
+  };
+  for (const { value, unit } of values) {
+    if (!value) continue;
+    const withUnit = unit ? places(`${value}${unit}`) : [];
+    if (withUnit.length) {
+      spans.push([withUnit[0], withUnit[0] + value.length + unit!.length]);
+      continue;
+    }
+    const bare = places(value);
+    if (bare.length) spans.push([bare.at(-1)!, bare.at(-1)! + value.length]);
+  }
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * 묶은 줄의 조건·예외. 모든 값에 같은 조건이면 한 번, 일부 값에만 붙은 조건은 '값: 조건'으로 어느 값 것인지 남긴다.
+ */
+export function groupNotes(fields: Pick<FactFields, "value" | "conditions" | "exceptions">[]): { conditions: string[]; exceptions: string[] } {
+  const notes = (pick: (f: (typeof fields)[number]) => string[]) => {
+    const all = [...new Set(fields.flatMap(pick))];
+    if (fields.length <= 1) return all;
+    return all.flatMap((note) => {
+      const owners = fields.filter((f) => pick(f).includes(note));
+      if (owners.length === fields.length || owners.every((f) => !f.value)) return [note];
+      return owners.filter((f) => f.value).map((f) => `${f.value}: ${note}`);
+    });
+  };
+  return { conditions: notes((f) => f.conditions), exceptions: notes((f) => f.exceptions) };
+}
