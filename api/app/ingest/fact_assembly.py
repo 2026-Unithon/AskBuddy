@@ -99,12 +99,14 @@ async def load_entity_groups(conn, store_id: int, entity_ids: Sequence[int]) -> 
         "r.original_assertion, r.assertion, "
         # Old extractor outputs sometimes used the literal string NULL as a
         # missing value. Require every attached original ledger row to agree.
-        # A mixed/unknown qualifier, a real typed variant or an unlinked edit stays held.
+        # A RELINK copies the previous shape and keeps the ledger on the fact.
+        # A mixed qualifier, a real typed variant or an unlinked edit stays held.
         "case when m.variant_other='null' and r.variant_temperature is null and r.variant_size is null "
         "and (select bool_and(coalesce(upper(trim(sf.variant))='NULL', false)) "
         "     from source_fact_revision_links l join source_facts sf "
         "       on sf.store_id=l.store_id and sf.fact_id=l.source_fact_id "
-        "     where l.store_id=r.store_id and l.fact_revision_id=r.fact_revision_id) "
+        "     where l.store_id=r.store_id and l.fact_id=r.fact_id "
+        "       and (l.fact_revision_id=r.fact_revision_id or m.change_kind='RELINK')) "
         "then null else m.variant_other end as variant_other "
         "from knowledge_facts k "
         "join fact_revisions r on r.store_id = k.store_id "
