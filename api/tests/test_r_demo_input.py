@@ -60,3 +60,22 @@ def test_unknown_menu_or_unretrieved_block_does_not_get_a_whole_card_answer():
     search=unitless_search()
     assert decide(search,store_id=1,question='말차라테 카드 원문 보여줘.').plan.action!='ANSWER'
     assert decide(replace(search,candidates=()),store_id=1,question='라테 카드 원문 보여줘.').plan.action!='ANSWER'
+
+
+def test_model_evidence_keeps_revisions_variants_and_constraints():
+    from copy import deepcopy
+    from app.learn.general_semantics import model_evidence
+    from app.learn.semantic_proposals import proposal_input
+    payload=proposal_input(unitless_search(),store_id=1,question='라테 원문')
+    fact=payload['candidates'][0]['facts'][0]
+    fact.update(conditions=['HOT만'],exceptions=['마감 제외'],requires=['2'])
+    original=deepcopy(payload)
+    wire=model_evidence(payload)
+    visible=wire['candidates'][0]['facts'][0]
+    assert payload==original and wire['input_hash']==payload['input_hash']
+    for key in ('fact_revision_id','assertion','variant','quantity','conditions','exceptions','requires'):
+        assert visible[key]==fact[key]
+    assert visible['provenance'][0]['source_id']==fact['provenance'][0]['source_id']
+    assert 'source_content_hash' not in visible['provenance'][0]
+    fact['original_assertion']='다르게 적힌 원문'
+    assert model_evidence(payload)['candidates'][0]['facts'][0]['original_assertion']==fact['original_assertion']

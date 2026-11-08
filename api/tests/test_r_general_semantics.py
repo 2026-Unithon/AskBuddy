@@ -302,6 +302,12 @@ async def test_exact_token_count_is_asked_only_near_the_limit(tmp_path,monkeypat
             await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
     sdk.aio.models.generate_content.assert_not_awaited()
 
+    budget,sdk,sink=harness(100,counted_tokens=None)
+    from app.learn.general_provider import InputTokenCountUnavailable
+    with evaluation_budget_scope(budget), pytest.raises(InputTokenCountUnavailable):
+        await generate('q',schema=GeneralProposal,release=release,context=ctx,sink=sink)
+    sdk.aio.models.generate_content.assert_not_awaited()
+
 
 @pytest.mark.asyncio
 async def test_provider_requires_eval_budget_and_honors_token_caps(tmp_path,monkeypatch):
