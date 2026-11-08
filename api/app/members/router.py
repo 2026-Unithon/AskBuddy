@@ -59,6 +59,18 @@ async def approve_request(request_id: int, db: Db, store_id: OwnerStoreId, owner
         background.add_task(deliver_notification, store_id, notification_id)
 
 
+@router.post("/requests/{request_id}/undo-approve", status_code=204)
+async def undo_approve_request(request_id: int, db: Db, store_id: OwnerStoreId, owner_id: CurrentUserId):
+    """방금 한 합류 승인 되돌리기(계획 7 Task 9, o15b). 10분 안에만."""
+    try:
+        user_id = await repository.undo_approve(db, store_id=store_id, request_id=request_id, owner_id=owner_id)
+    except LookupError as exc:
+        raise ApiError(404, "NOT_FOUND", "요청을 찾을 수 없어요.") from exc
+    except repository.AlreadyDecided as exc:
+        raise ApiError(409, "UNDO_NOT_POSSIBLE", "이제는 되돌릴 수 없어요. 직원 목록에서 내보내 주세요.") from exc
+    await revoke_user_sessions(db, user_id=user_id)
+
+
 @router.post("/requests/{request_id}/reject", status_code=204)
 async def reject_request(request_id: int, db: Db, store_id: OwnerStoreId, owner_id: CurrentUserId):
     try:

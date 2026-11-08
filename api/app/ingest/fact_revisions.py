@@ -30,7 +30,7 @@ from app.ingest.fact_ledger import _record_conflicts
 log = logging.getLogger(__name__)
 
 __all__ = ["FactChange", "StaleFactRevision", "revise_fact", "import_legacy_correction",
-           "dismiss_conflict"]
+           "dismiss_conflict", "choose_conflict"]
 
 _REVISE_KINDS = ("OWNER_CORRECTION", "OWNER_ANSWER")
 _POLARITIES = ("AFFIRM", "NEGATE")
@@ -377,3 +377,47 @@ async def dismiss_conflict(conn: asyncpg.Connection, store_id: int, conflict_id:
             "resolution = $4::jsonb "
             "where store_id = $1 and conflict_id = $2 and status = 'OPEN'",
             store_id, conflict_id, actor_id, _json(resolution))
+
+
+async def choose_conflict(conn: asyncpg.Connection, store_id: int, conflict_id: int, *,
+                          keep_fact_id: int, actor_id: int) -> int:
+    """점주가 충돌에서 맞는 값을 고른다(계획 7 Task 6). 고르지 않은 사실의 id 를 돌려준다.
+
+    충돌은 RESOLVED, 고르지 않은 사실은 지우지 않고 fact_rejections('틀린 값')에 기억한다.
+    없는 충돌·다른 매장이면 LookupError, OPEN 이 아니거나 고른 사실이 이 충돌 쌍이 아니면 ValueError.
+    """
+    async with conn.transaction():
+        await lock_store_knowledge(conn, store_id)
+        row = await conn.fetchrow(
+            "select c.status, c.fact_id_low, c.fact_id_high from fact_conflicts c "
+            "where c.store_id = $1 and c.conflict_id = $2 for update",
+            store_id, conflict_id)
+        if row is None:
+            raise LookupError(f"충돌이 없다 (store={store_id}, conflict={conflict_id})")
+        if row["status"] != "OPEN":
+            raise ValueError(f"OPEN 충돌만 고른다 (conflict={conflict_id}, 상태 {row['status']})")
+        pair = (row["fact_id_low"], row["fact_id_high"])
+        if keep_fact_id not in pair:
+            raise ValueError(f"고른 사실이 이 충돌 쌍이 아니다 (conflict={conflict_id}, fact={keep_fact_id})")
+        rejected = pair[1] if keep_fact_id == pair[0] else pair[0]
+        rejected_head = await conn.fetchval(
+            "select head_revision_id from knowledge_facts where store_id = $1 and fact_id = $2",
+            store_id, rejected)
+        await conn.execute(
+            "insert into fact_rejections (store_id, fact_id, rejected_revision_id, conflict_id, rejected_by) "
+            "values ($1, $2, $3, $4, $5) on conflict (store_id, fact_id) do update set "
+            "rejected_revision_id = excluded.rejected_revision_id, conflict_id = excluded.conflict_id, "
+            "rejected_by = excluded.rejected_by, rejected_at = now()",
+            store_id, rejected, rejected_head, conflict_id, actor_id)
+        await conn.execute(
+            "update fact_conflicts set status = 'RESOLVED', decided_by = $3, decided_at = now(), "
+            "resolution = $4::jsonb where store_id = $1 and conflict_id = $2 and status = 'OPEN'",
+            store_id, conflict_id, actor_id,
+            _json({"by": "OWNER_PICK", "kept_fact_id": keep_fact_id, "rejected_fact_id": rejected}))
+        # 틀린 값이 낀 다른 OPEN 충돌도 더는 물을 일이 없다
+        await conn.execute(
+            "update fact_conflicts set status = 'OBSOLETE', decided_by = $2, decided_at = now(), "
+            "resolution = $3::jsonb where store_id = $1 and status = 'OPEN' "
+            "and $4 in (fact_id_low, fact_id_high)",
+            store_id, actor_id, _json({"by": "OWNER_PICK", "rejected_fact_id": rejected}), rejected)
+    return rejected

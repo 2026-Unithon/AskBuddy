@@ -8,3 +8,11 @@ export function jobStepIndex(status: string): 0 | 1 | 2 | 3 {
   if (status === "CLASSIFYING") return 2;
   return 3;
 }
+
+// 끝난 단계는 과거형으로(2026-11-08 사용자). 지금·남은 단계는 JOB_STEPS 그대로
+const DONE_STEPS = ["올렸어요", "읽었어요", "카드 만들었어요"] as const;
+
+/** 단계 index 의 이름. current 는 지금 단계(jobStepIndex), 그보다 앞이면 끝난 단계 */
+export function jobStepLabel(index: number, current: number): string {
+  return index < current ? DONE_STEPS[index] : JOB_STEPS[index];
+}

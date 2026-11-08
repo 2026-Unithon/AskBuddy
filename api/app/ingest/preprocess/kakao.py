@@ -48,6 +48,26 @@ def _ts(m: re.Match, day: tuple[int, int, int] | None = None) -> datetime:
     return datetime(y, mo, d, _hour(m), int(m.group("mi")), tzinfo=KST)
 
 
+class NotKakaoExport(RuntimeError):
+    """카카오톡 '대화 내용 내보내기' 형식이 아니다(일반 메모 txt 등)."""
+
+
+def parse_or_plain(raw: str, *, message_numbers: bool = False) -> dict:
+    """카톡 내보내기면 대화로, 아니면 일반 글로 읽는다(2026-11-08: 일반 메모 .txt 가 실패하던 문제).
+
+    글이 아예 없으면 NotKakaoExport 를 그대로 올린다.
+    """
+    try:
+        return parse(raw, message_numbers=message_numbers)
+    except NotKakaoExport:
+        text = raw.strip()
+        if not text:
+            raise
+        logger.info("카톡 형식이 아니라 일반 글로 읽는다 (%d자)", len(text))
+        return {"room_name": None, "participants": [], "message_count": 0,
+                "period_start": None, "period_end": None, "parsed_text": text}
+
+
 def parse(raw: str, *, message_numbers: bool = False) -> dict:
     """반환: room_name, participants, message_count, period_start/end, parsed_text
 
@@ -93,7 +113,7 @@ def parse(raw: str, *, message_numbers: bool = False) -> dict:
         messages.append((_ts(m), m.group("who").strip(), text))
 
     if not messages:
-        raise RuntimeError(
+        raise NotKakaoExport(
             "카카오톡 대화를 한 건도 파싱하지 못했다. "
             "'대화 내용 내보내기' 로 받은 txt 인지 확인하라"
         )

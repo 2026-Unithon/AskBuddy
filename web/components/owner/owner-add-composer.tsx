@@ -182,11 +182,8 @@ export function OwnerAddComposer({
           {overLimit ? `${maxChars.toLocaleString()}자까지 넣을 수 있어요` : `${(maxChars - text.length).toLocaleString()}자 남았어요`}
         </p>
       )}
-      <IntakeHintChips
-        value={hints}
-        onChange={setHints}
-        disabled={submit.isPending}
-      />
+      {/* 자료 종류 칩은 글이나 파일을 넣었을 때만(2026-11-08 사용자) */}
+      {(hasText || files.length > 0) && <IntakeHintChips value={hints} onChange={setHints} disabled={submit.isPending} />}
       {hasText && !textEnabled && caps.isSuccess && (
         <Caption>글로 넣기는 곧 열려요. 지금은 사진이나 파일로 넣어 주세요.</Caption>
       )}

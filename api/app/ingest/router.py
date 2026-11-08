@@ -343,6 +343,7 @@ async def list_ingest_jobs(
     limit: int = Query(default=20, ge=1, le=100),
 ) -> IngestJobList:
     _, store_id = _job_identity(claims)
+    await job_repo.fail_stalled_jobs(db, store_id, minutes=get_settings().ingest_job_stall_minutes)
     rows = await job_repo.list_jobs(
         db, store_id, job_status=status_filter, cursor=cursor, limit=limit + 1
     )
@@ -410,6 +411,17 @@ async def _job_detail(db, store_id: int, job_id: int) -> IngestJobDetail:
 @router.get("/jobs/{job_id}", response_model=IngestJobDetail)
 async def get_ingest_job(job_id: int, db: Db, claims: ApiClaims) -> IngestJobDetail:
     _, store_id = _job_identity(claims)
+    # 멈춘 작업은 열 때 실패로 바꿔 '다시 시도'를 보이게 한다(계속 도는 화면 방지)
+    await job_repo.fail_stalled_jobs(db, store_id, minutes=get_settings().ingest_job_stall_minutes)
+    return await _job_detail(db, store_id, job_id)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=IngestJobDetail)
+async def cancel_ingest_job(job_id: int, db: Db, claims: ApiClaims) -> IngestJobDetail:
+    """정리 취소(2026-11-08 사용자). 진행 중일 때만. 뒤에서 돌던 처리는 결과를 덮어쓰지 않는다."""
+    _, store_id = _job_identity(claims)
+    if not await job_repo.cancel_job(db, store_id, job_id):
+        raise ApiError(409, "JOB_NOT_ACTIVE", "이미 끝난 정리는 취소할 수 없어요.")
     return await _job_detail(db, store_id, job_id)
 
 

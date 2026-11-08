@@ -740,7 +740,8 @@ async def _preprocess_kakao(
 
     raw = path.read_text(encoding="utf-8", errors="replace")
     # 번호 표지는 W1-4 플래그를 켰을 때만. 끄면 이전과 같은 글이다
-    parsed = kakao.parse(
+    # 카톡 내보내기가 아닌 일반 메모 txt 도 실패시키지 않고 일반 글로 읽는다
+    parsed = kakao.parse_or_plain(
         raw, message_numbers=bool(getattr(get_settings(), "extract_locator_hints", False)))
 
     async with pool.acquire() as conn:

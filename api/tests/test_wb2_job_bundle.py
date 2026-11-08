@@ -175,6 +175,8 @@ async def _run_job(rows, *, bundle):
 
     async def fetchval(sql, *args):
         # 대역의 fetchval 은 자료 3만 받는다 — 이 테스트는 자료가 여럿이라 여기서만 바꾼다
+        if "error_code = 'JOB_CANCELED'" in sql:  # 계획 7: 정리 취소 확인
+            return False
         if "returning started_at" in sql:
             return None
         if "from fact_occurrences" in sql:

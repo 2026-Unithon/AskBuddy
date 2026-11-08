@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 import asyncpg
 
+from app.categories import repository as categories_repo
 from app.ingest import card_plan
 from app.ingest import repository as repo
 from app.ingest.card_plan import EntityGroup, EntityPlanResult, PlanFact, ValidatedCard
@@ -651,6 +652,8 @@ async def write_entity_cards(conn: asyncpg.Connection, store_id: int, *, source_
             store_id, card_id, "NEEDS_REVIEW" if reason else "PENDING", reason)
 
         card_ids.append(card_id)
+        # 카테고리 종류가 비어 있으면 이 카드 자료의 입구 분류(AI)로 채운다(계획 7 Task 2)
+        await categories_repo.fill_kind_from_card(conn, store_id, card_id)
         for b in card.blocks:
             for r in b.fact_revision_ids:
                 placement.setdefault(facts[r].fact_id, (card_id, b.block_id))

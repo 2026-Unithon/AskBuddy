@@ -23,6 +23,7 @@ from app.contracts.hashing import digest
 from app.contracts.usage import UsageContext
 from app.deps import Claims,CurrentUserId,get_pool,get_store_id
 from app.errors import ApiError
+from app.learn.sessions import list_member_sessions
 from app.learn.answer_storage import ContextChoice,save_answer,saved_reply,current_source_overlay,validate_policy_confirmation
 from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
@@ -107,15 +108,15 @@ async def citation_detail(receipt_id:EntityId,order:int,claims:Claims,user_id:Cu
 
 
 @router.get('/v2/sessions')
-async def sessions(claims:Claims,user_id:CurrentUserId):
+async def sessions(claims:Claims,user_id:CurrentUserId,q:str|None=Query(default=None,max_length=100)):
+    # 지난 대화 목록(계획 7 Task 8): 제목(첫 질문)·마지막 시각, q 로 내 질문 검색. 최근 대화가 먼저
     enabled()
     pool=get_pool()
     store_id,member_id=await scope(pool,claims,user_id)
     async with pool.acquire() as conn:
-        rows=await conn.fetch("""select s.session_id from chat_sessions s join store_members m
-            on m.store_id=s.store_id and m.member_id=s.member_id where s.store_id=$1 and s.member_id=$2
-            and s.contract_version='v2' order by s.session_id desc limit 100""",store_id,member_id)
-        return dict(contract_version='v2',sessions=[dict(session_id=str(r['session_id'])) for r in rows])
+        rows=await list_member_sessions(conn,store_id,member_id,(q or '').strip() or None)
+        return dict(contract_version='v2',sessions=[dict(session_id=str(r['session_id']),title=r['title'],
+            last_at=r['last_at'].isoformat() if r['last_at'] else None) for r in rows])
 
 
 @router.get('/v2/pending')

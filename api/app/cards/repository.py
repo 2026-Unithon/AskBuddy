@@ -58,7 +58,7 @@ async def list_cards(
         f"""
         select k.card_id, k.review_status, v.title, v.content,
                k.assignment_type, k.origin_job_id, k.needs_review_reason,
-               k.updated_at, c.category_id, c.category_name,
+               k.updated_at, c.category_id, c.category_name, c.kind as category_kind,
                s.source_id, s.source_type,
                coalesce(s.original_filename, s.title) as source_title,
                s.source_availability,
@@ -127,7 +127,7 @@ async def count_cards(
 async def get_card(conn: asyncpg.Connection, store_id: int, card_id: int):
     return await conn.fetchrow(
         """
-        select k.*, c.category_name,
+        select k.*, c.category_name, c.kind as category_kind,
                s.source_type, coalesce(s.original_filename, s.title) as source_title,
                s.file_url, s.source_availability
         from knowledge_cards k

@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     ingest_source_concurrency: int = Field(default=2, ge=1)
     ingest_model_concurrency: int = Field(default=4, ge=1)
     ingest_db_timeout_seconds: float = Field(default=10.0, gt=0)
+    # 진행 중 작업이 이만큼 갱신이 없으면 '멈춤'으로 실패 처리한다(서버 재시작으로 사라진 백그라운드 처리, 2026-11-08)
+    ingest_job_stall_minutes: int = Field(default=30, ge=5)
     stt_model: str = "whisper-1"
 
     # 영상 입력 실험 (이관경계_실험설계.md 4절 E4).

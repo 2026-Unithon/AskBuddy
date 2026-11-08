@@ -469,14 +469,23 @@ RECIPE_CATEGORY_PATTERN = "레시피|음료|메뉴|제조|제작"
 
 
 async def add_default_link(db, store_id: int, card_id: int) -> None:
-    """처음 공개한 할 일 카드는 모든 근무조(공통)에 켠다. 레시피 카드와 이미 연결된 카드는 건드리지 않는다."""
+    """처음 공개한 할 일 카드는 모든 근무조(공통)에 켠다. 할 일 종류(없으면 이름 규칙으로 레시피가 아닌 것)만. 레시피·정보 카드와 이미 연결된 카드는 건드리지 않는다."""
     await db.execute(
         """insert into checklist_cards (store_id, card_id)
            select k.store_id, k.card_id
              from knowledge_cards k
              left join task_categories c on c.store_id = k.store_id and c.category_id = k.category_id
             where k.store_id = $1 and k.card_id = $2
-              and coalesce(c.category_name, '') !~ $3
+              and coalesce(c.kind, case when coalesce(c.category_name, '') ~ $3 then 'RECIPE' end, 'TASK') = 'TASK'
            on conflict do nothing""",
         store_id, card_id, RECIPE_CATEGORY_PATTERN,
+    )
+
+
+async def update_submission_counts(db, store_id: int, business_date, user_id: int, *, total: int, done: int) -> None:
+    """제출한 날의 체크가 바뀌면 제출 기록의 개수를 지금 체크에 맞춘다(기록 달력 퍼센트도 따라간다)."""
+    await db.execute(
+        """update checklist_submissions set total_lines = $4, done_lines = $5
+            where store_id = $1 and business_date = $2 and user_id = $3""",
+        store_id, business_date, user_id, total, done,
     )

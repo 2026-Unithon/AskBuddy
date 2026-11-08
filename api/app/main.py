@@ -23,6 +23,7 @@ from app.categories.router import (
 from app.config import get_settings
 from app.deps import close_pool, init_pool, get_pool
 from app.errors import install_error_handlers
+from app.ingest.job_repository import fail_stalled_jobs
 from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
 from app.learn.metadata_retention import retention_loop
@@ -50,6 +51,12 @@ logging.getLogger("app").setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    # 서버가 꺼지면 백그라운드 정리가 사라진다. 시작할 때 오래 멈춘 작업을 실패로 바꿔 '다시 시도'를 보이게 한다
+    try:
+        async with get_pool().acquire() as conn:
+            await fail_stalled_jobs(conn, None, minutes=get_settings().ingest_job_stall_minutes)
+    except Exception:
+        logging.getLogger(__name__).exception("멈춘 정리 작업 확인 실패 — 작업 화면을 열 때 다시 확인한다")
     retention = asyncio.create_task(retention_loop(get_pool()))
     # 점주 답변 반영 worker 는 플래그가 켜졌을 때만 돈다
     owner_worker_stop = asyncio.Event()

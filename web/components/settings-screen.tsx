@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BackButton,
+  Button,
   Chip,
   ConfirmDialog,
   CountBadge,
@@ -12,12 +13,14 @@ import {
   ListRow,
   PageHeader,
   Screen,
+  Sheet,
   Skeleton,
   Surface,
   TextButton,
+  focusRing,
 } from "@/components/kit";
-import { apiErrorMessage, logoutSession } from "@/lib/api";
-import { bootstrapQuery, membersQuery, notificationsQuery } from "@/lib/query";
+import { apiErrorMessage, logoutSession, renameMe, renameStore } from "@/lib/api";
+import { bootstrapQuery, membersQuery, notificationsQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 type Row = { title: string; href: string; badge?: number };
@@ -34,6 +37,8 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   const user = bootstrap.data?.user;
   const store = bootstrap.data?.store;
   const [confirming, setConfirming] = useState(false);
+  // 이름 고치기 시트(o12a, 계획 7 Task 9). 화면 상태
+  const [renaming, setRenaming] = useState<"me" | "store" | null>(null);
 
   const rows: Row[] = owner
     ? [
@@ -73,8 +78,14 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
                 <div className="flex items-center gap-2">
                   <p className="truncate text-[20px] font-bold leading-[1.4] text-ink">{user?.name}</p>
                   <Chip size="sm">{owner ? "사장님" : "알바생"}</Chip>
+                  <PencilButton label="내 이름 고치기" onClick={() => setRenaming("me")} />
                 </div>
-                {store?.store_name && <p className="truncate text-[14px] text-ink-muted">{store.store_name}</p>}
+                {store?.store_name && (
+                  <div className="flex items-center gap-1">
+                    <p className="truncate text-[14px] text-ink-muted">{store.store_name}</p>
+                    {owner && <PencilButton label="매장 이름 고치기" onClick={() => setRenaming("store")} />}
+                  </div>
+                )}
               </div>
             </div>
           </Surface>
@@ -94,6 +105,14 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
         {logout.error && <ErrorInline message={apiErrorMessage(logout.error, "로그아웃하지 못했어요.")} onRetry={() => logout.mutate()} retrying={logout.isPending} />}
         <TextButton disabled={logout.isPending} onClick={() => setConfirming(true)}>로그아웃</TextButton>
       </div>
+      {renaming && (
+        <RenameSheet
+          title={renaming === "me" ? "내 이름 고치기" : "매장 이름 고치기"}
+          initial={(renaming === "me" ? user?.name : store?.store_name) ?? ""}
+          save={(name) => (renaming === "me" ? renameMe(name, state.token!) : renameStore(name, state.token!))}
+          onClose={() => setRenaming(null)}
+        />
+      )}
       <ConfirmDialog
         open={confirming}
         title="로그아웃할까요?"
@@ -107,5 +126,54 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
         onCancel={() => setConfirming(false)}
       />
     </Screen>
+  );
+}
+
+
+function PencilButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" aria-label={label} onClick={onClick} className={`flex size-9 shrink-0 items-center justify-center rounded-full text-ink-muted ${focusRing}`}>
+      <span aria-hidden className="text-[15px]">✎</span>
+    </button>
+  );
+}
+
+/** 이름 하나를 고치는 시트. 저장하면 계정 정보(bootstrap)를 다시 받는다. */
+function RenameSheet({ title, initial, save, onClose }: { title: string; initial: string; save: (name: string) => Promise<unknown>; onClose: () => void }) {
+  const { state } = useApp();
+  const client = useQueryClient();
+  // 입력 초안(서버 값 아님)
+  const [name, setName] = useState(initial);
+  const mutation = useMutation({
+    mutationFn: () => save(name.trim()),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) });
+      onClose();
+    },
+  });
+  return (
+    <Sheet open onClose={() => !mutation.isPending && onClose()} title={title}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (name.trim() && !mutation.isPending) mutation.mutate();
+        }}
+      >
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[14px] font-bold text-ink">이름</span>
+          <input
+            value={name}
+            maxLength={50}
+            onChange={(event) => setName(event.target.value)}
+            className={`min-h-12 rounded-[14px] bg-surface px-4 text-[16px] text-ink shadow-card outline-none ${focusRing}`}
+          />
+        </label>
+        {mutation.error && <ErrorInline message={apiErrorMessage(mutation.error, "이름을 바꾸지 못했어요.")} />}
+        <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>
+          저장
+        </Button>
+      </form>
+    </Sheet>
   );
 }

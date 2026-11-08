@@ -104,6 +104,16 @@ class BuildTodayTest(unittest.TestCase):
         self.assertEqual([g["name"] for g in today["groups"]], ["공통", "오픈"])
         self.assertEqual(today["view"], {"total": 4, "done": 1})
 
+    def test_other_shifts_are_listed_read_only(self):
+        # 2026-11-08 사용자: 다른 근무조를 대신 서는 직원이 '다른 근무조 할 일 보기'로 볼 수 있다
+        self.cards.append(card(4, 40, ["마감 정산"], shifts={2}))
+        today = self.build(scope=Scope(False, (1,)))
+        self.assertEqual(today["other_groups"], [{"shift_id": 2, "name": "마감", "cards": [
+            {"card_id": 3, "title": "카드3", "item_id": None}, {"card_id": 4, "title": "카드4", "item_id": None}]}])
+
+    def test_no_other_shifts_when_scope_is_all(self):
+        self.assertEqual(self.build()["other_groups"], [])
+
     def test_scope_counts_unique_lines(self):
         today = self.build()
         self.assertEqual(today["scope_counts"], {"total": 4, "done": 1})

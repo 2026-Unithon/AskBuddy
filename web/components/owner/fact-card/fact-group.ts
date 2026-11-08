@@ -84,14 +84,23 @@ const STEP_LABEL = /순서|방법/;
 const NUMBER_UNIT: Record<string, string> = { 컵: "온즈" };
 
 const norm = (label: string) => label.replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
-function split(sentence: string): { label: string; text: string } | null {
+/** 원문 표시 정리: 앞의 각주 표시(*, ※, •)를 떼고 표 구분자 '//' 는 쉼표로. 원장 문장은 그대로 두고 보이는 글만 */
+export function tidy(text: string): string {
+  return text.replace(/^\s*[*※•·]+\s*/, "").replace(/\s*\/\/\s*/g, ", ").trim();
+}
+
+function split(raw: string): { label: string; text: string } | null {
+  const sentence = tidy(raw);
   const eq = sentence.indexOf("=");
   if (eq <= 0) return null;
   return { label: sentence.slice(0, eq).trim(), text: sentence.slice(eq + 1).trim() };
 }
 
 /** 이름=값 사실이 대부분인 카드면 한눈에 보기, 아니면 null(원래 보기). */
-export function compactRecipe(blocks: RecipeBlock[]): CompactRecipe | null {
+/** pending: 아직 고르지 않은 칸 이름(검수 고르기). 그 칸은 값을 보이지 않고 '골라 주세요'로 둔다 */
+export const PICK_NOTE = "골라 주세요";
+export function compactRecipe(blocks: RecipeBlock[], pending: Set<string> = new Set()): CompactRecipe | null {
+  const waiting = new Set([...pending].map(norm));
   type Attr = { label: string; text: string };
   const order: string[] = [];
   const headingOf = new Map<string, string | null>();
@@ -141,6 +150,10 @@ export function compactRecipe(blocks: RecipeBlock[]): CompactRecipe | null {
       ? (split(arrow.sentence)?.text ?? arrow.sentence).split(SEQUENCE).map((s) => s.trim()).filter(Boolean)
       : [...new Map([...rows].sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0)).map((row) => [row.sentence, split(row.sentence)?.text ?? row.sentence])).values()];
     const steps = raw.map((step): CompactStep => {
+      if (waiting.has(norm(step))) {
+        used.add(norm(step));
+        return { text: step, note: PICK_NOTE };
+      }
       const attr = own.get(norm(step));
       if (!attr || EMPTY_VALUE.test(attr.text)) return { text: step, note: null };
       used.add(norm(step));
@@ -151,7 +164,7 @@ export function compactRecipe(blocks: RecipeBlock[]): CompactRecipe | null {
     });
     const extras = [...own.entries()]
       .filter(([label, a]) => !used.has(label) && !PRICE.test(label) && !DROP_LABEL.test(label) && !EMPTY_VALUE.test(a.text))
-      .map(([label, a]) => ({ label, value: a.text }));
+      .map(([label, a]) => ({ label, value: waiting.has(label) ? PICK_NOTE : a.text }));
     if (steps.length || extras.length) sections.push({ heading: headingOf.get(key) ?? null, steps, extras });
   }
   return { price, sections };

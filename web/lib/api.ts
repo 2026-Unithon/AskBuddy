@@ -1,3 +1,4 @@
+import type { CardKind } from "@/lib/card-kind";
 // FastAPI 호출 래퍼. Supabase는 절대 직접 호출하지 않는다 (CLAUDE.md 불변식 1).
 // 실패를 조용히 삼키지 않고 종류와 복구 가능 여부를 보존해 올린다.
 
@@ -409,6 +410,8 @@ export type LearnItemDetail = {
   category: { category_id: number; name: string };
   evidence: CardEvidenceDto[];
   return_to: { path: string; item_id: number };
+  /** 사실 카드면 공개 판 사실 묶음(한눈에 보기용, 계획 7 Task 12) */
+  fact_blocks?: { kind: string; variant: { temperature: "HOT" | "ICE" | null; size: string | null }; facts: { sentence: string; step_order: number | null }[] }[] | null;
 };
 
 export async function getLearnItem(itemId: number, token: string, signal?: AbortSignal) {
@@ -445,7 +448,7 @@ export type CardListItem = {
   review_status: CardReviewStatus;
   title: string;
   content: string;
-  category: { category_id: number; name: string } | null;
+  category: { category_id: number; name: string; kind?: CardKind | null } | null;
   assignment_type: "AUTOMATIC" | "MANUAL";
   source: CardSourceDto | null;
   job_id: number | null;
@@ -528,11 +531,24 @@ export type CardMutationResult = {
   undo_until: string | null;
 };
 
-export async function mutateProductCard(cardId: number, action: "approve" | "exclude" | "restore", token: string) {
+export async function mutateProductCard(cardId: number, action: "approve" | "exclude" | "restore" | "unpublish", token: string) {
   return fetchJson<CardMutationResult>(`/cards/${cardId}/${action}`, {
     method: "POST",
     headers: authHeader(token),
     timeoutMs: action === "approve" ? 30_000 : TIMEOUT_MS,
+  });
+}
+
+export type BulkAction = "approve" | "unpublish" | "exclude" | "restore" | "move";
+export type BulkResult = { results: { card_id: number; ok: boolean; review_status?: string | null; error?: { code: string; message: string } | null }[] };
+
+/** 카드 여러 장 한 번에(계획 7 Task 4). 카드마다 성공·실패가 온다. */
+export async function bulkCards(body: { action: BulkAction; card_ids: number[]; category_id?: number }, token: string) {
+  return fetchJson<BulkResult>("/cards/bulk", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+    timeoutMs: body.action === "approve" ? 60_000 : TIMEOUT_MS,
   });
 }
 
@@ -643,7 +659,29 @@ export type CardFactsView = {
   editable: boolean;
   entity_problem: "MIXED_ENTITY" | "MERGED_ENTITY" | null;
   blocks: FactBlockView[];
+  /** 들어가자마자 고를 항목(계획 7 Task 6). 옛 서버면 없다 */
+  review_items?: ReviewItem[];
 };
+
+export type ReviewItem = { item_id: string; kind: "CHOOSE"; conflict_id: number; label: string | null; options: { fact_id: number; text: string }[] };
+
+/** 수정 되돌리기(계획 7 Task 7): 가장 최근 수정을 직전 판 내용으로 되돌린다 */
+export async function revertFactEdit(cardId: number, editId: number, token: string) {
+  return fetchJson<FactEditResult>(`/cards/${cardId}/facts/edits/${editId}/revert`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ idempotency_key: `revert-${editId}-${crypto.randomUUID().slice(0, 8)}` }),
+  });
+}
+
+/** 검수 고르기: 맞는 값을 남기고 고르지 않은 값은 '틀린 값'으로 카드에서 뺀다. */
+export async function chooseReviewValue(cardId: number, conflictId: number, body: { keep_fact_id: number; expected_version_id: number; idempotency_key: string }, token: string) {
+  return fetchJson<{ card_id: number; review_status: CardReviewStatus }>(`/cards/${cardId}/conflicts/${conflictId}/choose`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+  });
+}
 
 export type FactRevisionResult = {
   op: "MODIFY" | "ADD";
@@ -690,7 +728,7 @@ export async function moveProductCard(cardId: number, categoryId: number, expect
   });
 }
 
-export type ProductCategory = { category_id: number; name: string; is_system: boolean; sort_order: number };
+export type ProductCategory = { category_id: number; name: string; is_system: boolean; sort_order: number; kind?: CardKind | null };
 export type ProductCategoryList = {
   version: number;
   items: ProductCategory[];
@@ -707,6 +745,20 @@ export async function createProductCategory(name: string, sortOrder: number, tok
     headers: authHeader(token),
     body: JSON.stringify({ name, sort_order: sortOrder }),
   });
+}
+
+/** 카테고리 종류를 사장님이 고친다(계획 7 Task 2). 분류 판은 그대로라 다시 나누지 않는다. */
+export async function updateProductCategory(categoryId: number, patch: { kind?: CardKind; name?: string }, token: string) {
+  return fetchJson<{ category: ProductCategory; version: number; reclass_job_id: number | null }>(`/categories/${categoryId}`, {
+    method: "PATCH",
+    headers: authHeader(token),
+    body: JSON.stringify(patch),
+  });
+}
+
+/** 끌어서 바꾼 카테고리 순서(계획 7 Task 9) */
+export async function orderProductCategories(ids: number[], token: string) {
+  return fetchJson<void>("/categories/order", { method: "PUT", headers: authHeader(token), body: JSON.stringify({ ids }) });
 }
 
 export async function deleteProductCategory(categoryId: number, token: string) {
@@ -882,6 +934,11 @@ export async function deleteIngestSource(sourceId: number, token: string) {
 
 /** 서버 ingest_job_sources.error_code — 입구 분류가 업무 자료 아님(NONE)으로 보고 추출하지 않은 자료. */
 export const INTAKE_NONE_CODE = "INTAKE_NONE";
+
+/** 정리 취소(2026-11-08). 진행 중일 때만 */
+export async function cancelIngestJob(jobId: number, token: string) {
+  return fetchJson<IngestJobDetail>(`/ingest/jobs/${jobId}/cancel`, { method: "POST", headers: authHeader(token) });
+}
 
 export async function retryIngestJob(jobId: number, token: string) {
   return fetchJson<{ job_id: number; status: IngestJobStatus }>(
@@ -1415,6 +1472,17 @@ export async function rotateInviteLink(token: string) {
 }
 export async function listMembers(token: string, signal?: AbortSignal) {
   return fetchJson<MembersResponse>("/members", { headers: authHeader(token), signal });
+}
+/** 방금 한 합류 승인 되돌리기(계획 7 Task 9). 10분 안에만 */
+export async function undoApproveJoin(requestId: number, token: string) {
+  return fetchJson<void>(`/members/requests/${requestId}/undo-approve`, { method: "POST", headers: authHeader(token) });
+}
+/** 내 이름·매장 이름 고치기(계획 7 Task 9) */
+export async function renameMe(name: string, token: string) {
+  return fetchJson<void>("/app/me", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });
+}
+export async function renameStore(name: string, token: string) {
+  return fetchJson<void>("/app/store", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });
 }
 export async function approveJoin(requestId: number, token: string) {
   return fetchJson<void>(`/members/requests/${requestId}/approve`, { method: "POST", headers: authHeader(token) });

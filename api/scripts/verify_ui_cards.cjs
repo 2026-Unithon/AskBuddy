@@ -227,7 +227,7 @@ test('o06d 손잡이를 끌어 순서를 바꾸고 수정 완료하면 저장, �
   const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
   assert.ok(order.findIndex((t) => t.includes('물을 붓는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
   await page.getByRole('button', { name: '수정 완료' }).click();
-  await page.getByRole('status').getByText('수정 완료').waitFor();
+  await page.getByRole('status').getByText('수정했어요').waitFor();
   assert.ok(api.calls.some((c) => c.method === 'PUT' && c.path === '/cards/1/facts'));
   await page.getByRole('button', { name: '수정하기' }).waitFor();
   await ctx.close();

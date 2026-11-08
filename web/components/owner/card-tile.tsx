@@ -36,19 +36,53 @@ export function CardTile({
   proposal = false,
   left,
   right,
+  select,
 }: {
   card: CardListItem;
   status: TileStatus;
   proposal?: boolean;
   left?: SwipeAction;
   right?: SwipeAction;
+  /** 선택 모드(계획 7 Task 5): 누르면 고르기, 상세로 가지 않고 밀기도 없다 */
+  select?: { selected: boolean; onToggle: () => void };
 }) {
   const router = useRouter();
   const client = useQueryClient();
   const { state } = useApp();
   const title = useRef<HTMLSpanElement>(null);
-  const dot = DOT_CLASS[status];
   const href = proposal ? `/owner/cards/proposals?card_id=${card.card_id}` : `/owner/cards/${card.card_id}`;
+  const dot = DOT_CLASS[status];
+  if (select) {
+    return (
+      <button
+        type="button"
+        data-card-tile=""
+        data-card-id={card.card_id}
+        aria-pressed={select.selected}
+        aria-label={`${card.title}, ${STATUS_WORD[status]}`}
+        onClick={select.onToggle}
+        className={`relative flex min-h-[72px] w-full touch-pan-y select-none flex-col justify-between gap-2 rounded-[18px] px-3.5 py-3 text-left ${STATUS_CLASS[status]} ${
+          select.selected ? "outline-2 outline-solid outline-primary -outline-offset-2" : ""
+        } ${focusRing}`}
+      >
+        {dot && <span aria-hidden className={`absolute left-2.5 top-2.5 size-2 rounded-full ${dot}`} />}
+        <span className="flex items-start gap-2 pl-2">
+          <span className={`line-clamp-2 min-w-0 flex-1 text-[15px] font-bold leading-[1.4] [word-break:keep-all] ${status === "pending" ? "text-ink-muted" : "text-ink"}`}>
+            {card.title}
+          </span>
+          {/* 사진 앱처럼 오른쪽 위 동그라미에 체크 */}
+          <span
+            aria-hidden
+            className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border-2 text-[12px] font-bold ${
+              select.selected ? "border-primary bg-primary text-white" : "border-ink-muted/40 bg-surface"
+            }`}
+          >
+            {select.selected ? "✓" : ""}
+          </span>
+        </span>
+      </button>
+    );
+  }
   const tile = (
     <Link
       href={href}
@@ -60,6 +94,8 @@ export function CardTile({
         navigateWithSharedTitle(() => router.push(href), title.current, `card-title-${card.card_id}`);
       }}
       data-status={status}
+      data-card-tile=""
+      data-card-id={card.card_id}
       aria-label={`${card.title}, ${STATUS_WORD[status]}${proposal ? ", 다른 답이 있어요" : ""}`}
       // 누르는 순간 상세를 미리 받아 둔다(제목이 이어 움직이는 동안 기다리지 않게)
       onPointerDown={() => {

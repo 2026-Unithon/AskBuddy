@@ -15,7 +15,7 @@ async def get_store_for_update(conn: asyncpg.Connection, store_id: int):
 async def list_current(conn: asyncpg.Connection, store_id: int):
     return await conn.fetch(
         """
-        select category_id, category_name, is_system, sort_order
+        select category_id, category_name, is_system, sort_order, kind
         from task_categories
         where store_id = $1 and deleted_at is null and is_enabled = true
         order by sort_order, category_id
@@ -65,7 +65,7 @@ async def create_category(
                 is_system = false, created_version = $5,
                 deleted_version = null, deleted_at = null, updated_at = now()
             where store_id = $1 and category_id = $2
-            returning category_id, category_name, is_system, sort_order
+            returning category_id, category_name, is_system, sort_order, kind
             """,
             store_id,
             int(existing["category_id"]),
@@ -80,7 +80,7 @@ async def create_category(
           created_version, updated_at
         )
         values ($1, $2, true, $3, false, $4, now())
-        returning category_id, category_name, is_system, sort_order
+        returning category_id, category_name, is_system, sort_order, kind
         """,
         store_id,
         name,
@@ -94,7 +94,7 @@ async def get_category_for_update(
 ):
     return await conn.fetchrow(
         """
-        select category_id, category_name, is_system, sort_order
+        select category_id, category_name, is_system, sort_order, kind
         from task_categories
         where store_id = $1 and category_id = $2 and deleted_at is null
         for update
@@ -237,4 +237,78 @@ async def get_job(conn: asyncpg.Connection, store_id: int, job_id: int):
         """,
         store_id,
         job_id,
+    )
+
+
+async def fill_kind_from_card(conn, store_id: int, card_id: int) -> None:
+    """카드가 들어간 카테고리에 종류가 비어 있으면 그 카드 자료의 입구 분류(AI)로 채운다.
+
+    RECIPE → RECIPE, PROCEDURE → TASK, 그 밖(규칙·정보·공지) → INFO. 입구 분류가 없으면 비워 둔다.
+    사장님이 정한 종류(kind_source='OWNER')나 이미 채운 종류는 덮지 않는다.
+    """
+    await conn.execute(
+        """
+        update task_categories t
+           set kind = case d.source_logic when 'RECIPE' then 'RECIPE'
+                                          when 'PROCEDURE' then 'TASK'
+                                          else 'INFO' end,
+               kind_source = 'AI'
+          from knowledge_cards k
+          join lateral (
+                select source_logic from intake_route_decisions
+                 where store_id = k.store_id and source_id = k.source_id
+                 order by decision_id desc limit 1
+               ) d on true
+         where t.store_id = $1 and k.store_id = $1 and k.card_id = $2
+           and t.category_id = k.category_id
+           and t.kind is null and d.source_logic <> 'NONE'
+        """,
+        store_id, card_id,
+    )
+
+
+async def set_kind(conn, store_id: int, category_id: int, kind: str):
+    """사장님이 정한 종류. 이후 분류(AI)는 덮지 않는다."""
+    return await conn.fetchrow(
+        """
+        update task_categories set kind = $3, kind_source = 'OWNER'
+         where store_id = $1 and category_id = $2 and deleted_at is null
+        returning category_id, category_name, is_system, sort_order, kind
+        """,
+        store_id, category_id, kind,
+    )
+
+
+
+class NameTaken(Exception):
+    """같은 매장에 같은 이름(대소문자 무시) 카테고리가 이미 있다."""
+
+
+async def set_order(conn, store_id: int, category_ids: list[int]) -> None:
+    """끌어서 바꾼 순서(계획 7 Task 9). 이 매장 카테고리만, 받은 순서대로 sort_order 0.. 을 준다."""
+    await conn.execute(
+        """
+        update task_categories t set sort_order = o.position - 1
+          from unnest($2::bigint[]) with ordinality as o(category_id, position)
+         where t.store_id = $1 and t.category_id = o.category_id and t.deleted_at is null
+        """,
+        store_id, category_ids,
+    )
+
+
+async def rename(conn, store_id: int, category_id: int, name: str):
+    """카테고리 이름 고치기. 시스템('기타')은 고치지 않는다. 없으면 None, 같은 이름이 있으면 NameTaken."""
+    taken = await conn.fetchval(
+        "select 1 from task_categories where store_id = $1 and category_id <> $2 "
+        "and deleted_at is null and lower(category_name) = lower($3)",
+        store_id, category_id, name)
+    if taken:
+        raise NameTaken(name)
+    return await conn.fetchrow(
+        """
+        update task_categories set category_name = $3
+         where store_id = $1 and category_id = $2 and deleted_at is null and is_system = false
+        returning category_id, category_name, is_system, sort_order, kind
+        """,
+        store_id, category_id, name,
     )

@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from app.categories.classifier import classify_cards
+from app.categories.repository import fill_kind_from_card
 from app.deps import get_pool
 from app.db_session import ShortSession
 from app.contracts.usage import UsageContext
@@ -120,6 +121,7 @@ async def process_reclassification_job(store_id: int, job_id: int) -> None:
                         conn, store_id, job_id, row["card_id"], "SKIPPED_NEWER_EDIT"
                     )
                 else:
+                    await fill_kind_from_card(conn, store_id, int(row["card_id"]))
                     await conn.execute(
                         """
                         update reclassification_results

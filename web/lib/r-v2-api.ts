@@ -59,8 +59,9 @@ async function request<T>(path: string, token: string, signal?: AbortSignal, bod
   } finally { clearTimeout(timer); }
 }
 
-export const rSessions = (token: string, signal?: AbortSignal) =>
-  request<{ sessions: { session_id: string }[] }>("/sessions", token, signal);
+export type RSession = { session_id: string; title?: string | null; last_at?: string | null };
+export const rSessions = (token: string, signal?: AbortSignal, q?: string) =>
+  request<{ sessions: RSession[] }>(q ? `/sessions?q=${encodeURIComponent(q)}` : "/sessions", token, signal);
 export const rCreateSession = (token: string, request_id: string) =>
   request<{ session_id: string }>("/sessions", token, undefined, { request_id });
 export const rAsk = (token: string, body: RChatInput) => request<RAnswer>("/chat", token, undefined, body);

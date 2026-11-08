@@ -15,6 +15,8 @@ import {
   TextButton,
 } from "@/components/kit";
 import { SuggestedQuestions } from "@/components/staff/suggested-questions";
+import { compactRecipe } from "@/components/owner/fact-card/fact-group";
+import { RecipeView } from "@/components/owner/fact-card/recipe-view";
 import { ApiError, apiErrorMessage, setLearnItemCompletion } from "@/lib/api";
 import { learnItemQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
@@ -106,6 +108,7 @@ export default function StaffRecipePage() {
   const done = data.status === "DONE";
   const reconfirm = data.status === "RECONFIRM_REQUIRED";
   const parts = splitVariants(data.content);
+  const recipe = data.fact_blocks ? compactRecipe(data.fact_blocks) : null;
   const askWith = (text: string) => router.push(`/staff/ask?q=${encodeURIComponent(text)}`);
 
   return (
@@ -140,15 +143,19 @@ export default function StaffRecipePage() {
             >
               이 레시피에 대해 물어보기
             </button>
-            <SuggestedQuestions cardId={data.card_id} limit={2} onPick={askWith} />
+            <SuggestedQuestions cardId={data.card_id} limit={2} onPick={(question) => router.push(`/staff/ask?q=${encodeURIComponent(question)}&send=1`)} />
           </div>
         </>
       }
     >
       <BackButton parent="/staff/recipes" label="레시피" />
       <p className="text-[13px] font-bold text-primary">{data.category.name}</p>
-      <h1 className="text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{data.title}</h1>
-      {parts.map((part, i) =>
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="min-w-0 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">{data.title}</h1>
+        {recipe?.price && <p className="shrink-0 text-[17px] font-bold text-ink">{recipe.price}</p>}
+      </div>
+      {/* 사실 카드면 사장님 화면과 같은 한눈에 보기(계획 7 Task 12), 아니면 본문 그대로 */}
+      {recipe ? <RecipeView recipe={recipe} /> : parts.map((part, i) =>
         part.label ? (
           <section key={i} className="flex flex-col gap-2">
             <h2 className="px-1 text-[18px] font-bold text-ink">{part.label}</h2>

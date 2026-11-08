@@ -296,6 +296,8 @@ def _worker_pool(queued_rows, *, source_status="DONE", card_count=3,
 
     async def fetchval(sql, *args):
         # 자료 시작 시각 — 실행 표지를 여기서 만든다
+        if "error_code = 'JOB_CANCELED'" in sql:  # 계획 7: 정리 취소 확인
+            return False
         if "returning started_at" in sql:
             return STARTED_AT
         return card_count

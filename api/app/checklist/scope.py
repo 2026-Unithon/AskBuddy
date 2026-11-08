@@ -121,6 +121,17 @@ def build_today(
             groups.append({"shift_id": shift_id, "name": by_id[shift_id].name, "cards": [_card_view(c, checked) for c in own]})
         view_cards.extend(own)
 
+    # 범위 밖 근무조의 할 일(읽기만). 다른 근무조를 대신 서는 직원이 펼쳐 본다(2026-11-08 사용자)
+    other_groups: list[dict[str, Any]] = []
+    if not scope.all:
+        for shift in shifts:
+            if shift.shift_id in scope.shift_ids:
+                continue
+            own = [c for c in cards if shift.shift_id in c.shift_ids]
+            if own:
+                other_groups.append({"shift_id": shift.shift_id, "name": shift.name,
+                                     "cards": [{"card_id": c.card_id, "title": c.title, "item_id": c.item_id} for c in own]})
+
     return {
         "business_date": business_date.isoformat(),
         "previous_business_date": previous_business_date.isoformat(),
@@ -133,4 +144,5 @@ def build_today(
         "view": _counts(view_cards, checked),
         "scope_counts": _counts(scoped, checked),
         "my_submission": my_submission,
+        "other_groups": other_groups,
     }

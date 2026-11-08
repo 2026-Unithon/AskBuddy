@@ -329,3 +329,59 @@ async def source_in_progress(conn: asyncpg.Connection, store_id: int, source_id:
         store_id,
         source_id,
     ))
+
+
+_ACTIVE = ("QUEUED", "EXTRACTING", "CLASSIFYING")
+CANCELED_MESSAGE = "정리를 취소했어요."
+STALLED_MESSAGE = "정리가 오래 멈춰 있어 중단했어요. 다시 시도해 주세요."
+
+
+async def cancel_job(conn, store_id: int, job_id: int) -> bool:
+    """정리 중인 작업 취소(2026-11-08 사용자). 진행 중이 아니거나 다른 매장이면 False.
+
+    뒤에서 돌던 처리는 error_code 가 JOB_CANCELED 인 작업·자료를 덮어쓰지 않는다(job_worker).
+    """
+    async with conn.transaction():
+        updated = await conn.fetchval(
+            """
+            update ingest_jobs set status = 'FAILED', error_code = 'JOB_CANCELED', error_message = $3,
+                   completed_at = now(), updated_at = now()
+             where store_id = $1 and job_id = $2 and status = any($4::varchar[])
+            returning job_id
+            """,
+            store_id, job_id, CANCELED_MESSAGE, list(_ACTIVE))
+        if updated is None:
+            return False
+        await conn.execute(
+            """
+            update ingest_job_sources set status = 'FAILED', error_code = 'JOB_CANCELED', error_message = $3,
+                   completed_at = now(), updated_at = now()
+             where store_id = $1 and job_id = $2 and status in ('QUEUED', 'EXTRACTING')
+            """,
+            store_id, job_id, CANCELED_MESSAGE)
+    return True
+
+
+async def fail_stalled_jobs(conn, store_id: int | None, *, minutes: int) -> int:
+    """오래 갱신이 없는 진행 중 작업을 '멈춤'으로 실패 처리한다. 서버가 꺼지면 백그라운드 처리가 사라져
+    작업이 '읽는 중'에 영원히 남던 문제(2026-11-08). store_id 가 None 이면 서버 시작 때 모든 매장.
+    """
+    # store-isolation-ok: 서버 시작 때(store_id None)는 매장 구분 없이 고아 작업만 정리한다
+    rows = await conn.fetch(
+        """
+        update ingest_jobs set status = 'FAILED', error_code = 'JOB_STALLED', error_message = $3,
+               completed_at = now(), updated_at = now()
+         where ($1::bigint is null or store_id = $1) and status = any($4::varchar[])
+           and updated_at < now() - make_interval(mins => $2)
+        returning store_id, job_id
+        """,
+        store_id, minutes, STALLED_MESSAGE, list(_ACTIVE))
+    for row in rows:
+        await conn.execute(
+            """
+            update ingest_job_sources set status = 'FAILED', error_code = 'JOB_STALLED', error_message = $3,
+                   completed_at = now(), updated_at = now()
+             where store_id = $1 and job_id = $2 and status in ('QUEUED', 'EXTRACTING')
+            """,
+            row["store_id"], row["job_id"], STALLED_MESSAGE)
+    return len(rows)

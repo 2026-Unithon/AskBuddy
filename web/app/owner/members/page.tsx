@@ -19,7 +19,7 @@ import {
   useFeedback,
 } from "@/components/kit";
 import { InviteLinkCard } from "@/components/invite-link-card";
-import { apiErrorMessage, approveJoin, rejectJoin, removeMember } from "@/lib/api";
+import { apiErrorMessage, approveJoin, rejectJoin, removeMember, undoApproveJoin } from "@/lib/api";
 import { checklistKeys, membersQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
@@ -45,7 +45,9 @@ export default function OwnerMembersPage() {
   };
   const approve = useMutation({
     mutationFn: (request: Person) => approveJoin(request.id, state.token!),
-    onSuccess: (_, request) => feedback.toast(`${request.name}님이 합류했어요`),
+    // 5초 안에 '되돌리기'로 승인을 취소한다(o15b, 계획 7 Task 9)
+    onSuccess: (_, request) =>
+      feedback.snackbar({ message: `${request.name}님이 합류했어요`, actionLabel: "되돌리기", onAction: () => undo.mutate(request) }),
     onSettled: invalidate,
   });
   const reject = useMutation({
@@ -65,7 +67,13 @@ export default function OwnerMembersPage() {
     onSettled: invalidate,
   });
   const staff = members.data?.active.filter((m) => m.role === "STAFF") ?? [];
-  const busy = approve.isPending || reject.isPending;
+  const undo = useMutation({
+    mutationFn: (request: Person) => undoApproveJoin(request.id, state.token!),
+    onSuccess: (_, request) => feedback.toast(`${request.name}님 합류를 되돌렸어요`),
+    onError: (error) => feedback.toast(apiErrorMessage(error, "되돌리지 못했어요."), { durationMs: 5000 }),
+    onSettled: invalidate,
+  });
+  const busy = approve.isPending || reject.isPending || undo.isPending;
 
   return (
     <Screen>
