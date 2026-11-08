@@ -29,7 +29,7 @@ from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision
-from app.learn.procedure_scope import procedure_scope
+from app.learn.procedure_scope import procedure_scope, first_step_reference
 from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection
 from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback,requested_subjects,respects_subjects
 from app.learn.request_limits import request_lease
@@ -481,7 +481,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
-                                if (getattr(settings,'r_general_semantics_enabled',False)
+                                semantics_enabled=getattr(settings,'r_general_semantics_enabled',False)
+                                if ((semantics_enabled or first_step_reference(req.question))
                                         and req.policy_receipt_id is None and not policy_action(req.question)):
                                     # load_history locks this session. Read its latest offer
                                     # under that same lock, before accepting a typed reply.
@@ -495,7 +496,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         stored,typed_head=typed
                                         typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
                                         effective_choice=typed_choice
-                                recover_question=history is not None and effective_choice is None
+                                recover_question=semantics_enabled and history is not None and effective_choice is None
                                 if effective_choice:
                                     if not typed_choice:
                                         stored=await load_context(conn,store_id=store_id,member_id=member_id,

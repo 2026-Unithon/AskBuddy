@@ -51,16 +51,19 @@ def _temperature(label):
     return {'핫':'HOT','hot':'HOT','아이스':'ICE','ice':'ICE'}.get(label)
 
 
+def first_step_reference(question):
+    return re.fullmatch(r'(?:그럼|그러면)?\s*(첫|두)\s*번째\s*(?:음료|메뉴|제품|것)(?:만|를|을|는|은)?\s*'
+        r'(?:(hot|ice|아이스|핫)\s*(?:기준으로\s*)?)?(?:만들\s*때(?:는)?\s*)?'
+        r'(?:뭘\s*먼저\s*해야\s*(?:해|하나요)|뭐부터\s*(?:시작해|시작하나요|해)|'
+        r'첫\s*단계(?:는|가)?\s*(?:뭐야|뭔가요)?)[?.!]*',normalize_query(question))
+
+
 def procedure_scope(snapshot,question,previous=None):
     compare=_comparison(question,snapshot)
     if compare or previous is None:return compare
     prior=_comparison(previous,snapshot)
     if not prior:return None
-    followup=re.fullmatch(r'(?:그럼|그러면)?\s*(첫|두)\s*번째\s*(?:음료|메뉴|제품|것)(?:만|를|을|는|은)?\s*'
-        r'(?:(hot|ice|아이스|핫)\s*(?:기준으로\s*)?)?(?:만들\s*때(?:는)?\s*)?'
-        r'(?:뭘\s*먼저\s*해야\s*(?:해|하나요)|뭐부터\s*(?:시작해|시작하나요|해)|'
-        r'첫\s*단계(?:는|가)?\s*(?:뭐야|뭔가요)?)[?.!]*',
-        normalize_query(question))
+    followup=first_step_reference(question)
     if not followup:return None
     title=prior.subjects[0 if followup[1]=='첫' else 1]
     return ProcedureScope((title,),_temperature(followup[2]) or prior.temperature)
