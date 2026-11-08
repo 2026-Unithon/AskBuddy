@@ -26,6 +26,7 @@ from app.learn.grounded_calculations import Calculation, calculate
 from app.learn.planner import Decision, policy_action, PREDICATES
 from app.learn.semantic_proposals import SemanticProposal, SlotProposal, proposal_input, validate_proposal
 from app.learn.general_wire import parse_proposal
+from app.learn.general_provider import InputByteLimitExceeded, InputTokenLimitExceeded
 from app.learn.general_verification import Verification, rejection_decision
 from app.learn.case_clarification import CaseOption, validate_case_options
 from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions, candidate_references, missing_required_evidence,selected_rules,missing_conclusion_rules,missing_case_actions,reference_scopes,conclusion_units,unsupported_situations
@@ -42,6 +43,8 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py','learn/procedure_scope.py','learn/operating_guidance.py',
+    'learn/semantic_grouping.py','learn/operations_scope.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
 
@@ -182,9 +185,10 @@ async def product_general_decision(search, **kwargs):
         if ((not getattr(kwargs['settings'],'r_general_semantics_demo_enabled',False)
                 and getattr(kwargs['settings'],'r_general_semantics_store_id',None)!=kwargs['store_id'])
                 or exc.code not in {'GENERAL_RELEASE_UNAVAILABLE','GENERAL_MODEL_UNAVAILABLE',
-                                    'GENERAL_INVALID_PROPOSAL','GENERAL_DEADLINE'}):
+                                    'GENERAL_INVALID_PROPOSAL','GENERAL_INPUT_LIMIT','GENERAL_DEADLINE'}):
             raise
-        return kwargs['baseline'],dict(status='PILOT_BASELINE',reason=exc.code)
+        return kwargs['baseline'],dict(status='PILOT_BASELINE',reason=exc.code,
+            **{k:exc.details[k] for k in ('phase','error_type') if k in (exc.details or {})})
 
 
 def validate_interpretation(search,*,payload,proposal,baseline,context_id=None,clarify_turns=0,confirmed_slots=None):
@@ -220,9 +224,9 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
             case_options=proposal.case_options,case_user_turns=tuple(payload['user_turns'])),trusted_slots,None)
     if proposal.case_options:raise ValueError('case options require case clarification')
     if proposal.unsupported_calculation:
-        from app.learn.grounded_calculations import UNITS
+        from app.learn.grounded_calculations import calculable_unit
         if (proposal.plan.action!='ESCALATE' or not proposal.unresolved or proposal.calculations or proposal.parts
-                or any(f.quantity and f.polarity=='AFFIRM' and f.quantity.unit.lower() in UNITS
+                or any(f.quantity and f.polarity=='AFFIRM' and calculable_unit(f.quantity.unit)
                     for c in search.candidates for b in search.snapshot.card(c.card_id).blocks if b.block_id==c.block_id
                     for fid in b.fact_revision_ids for f in (search.snapshot.fact(fid),))):
             raise ValueError('unsupported calculation requires escalation without eligible retrieved quantities')
@@ -274,7 +278,9 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     # Check prior server/user-confirmed context; model slots never become confirmed slots.
     slots=trusted_slots
     if slots.get('entity') and slots['entity'] not in entity_names(snap,query.entity_id):raise ValueError('entity contradicts context')
-    if slots.get('predicate') and slots['predicate'] not in (query.predicate,PREDICATES.get(query.predicate,(query.predicate,()))[0]):
+    from app.learn.menu_context import PRICE_WORDS
+    if (slots.get('predicate') and slots['predicate'] not in (query.predicate,PREDICATES.get(query.predicate,(query.predicate,()))[0])
+            and not (query.predicate in PRICE_WORDS and slots['predicate'] in PRICE_WORDS)):
         raise ValueError('predicate contradicts context')
     for key,position in (('temperature',0),('size',1)):
         if slots.get(key) and any(v[position]!=slots[key] for v in query.variants):raise ValueError('variant contradicts context')
@@ -305,7 +311,7 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     supplied=[(o.fact_revision_id,o.kind,o.statement) for o in proposal.obligations]
     if set(supplied)!=expected or len(supplied)!=len(set(supplied)):
         raise ValueError('condition/exception omitted or invented')
-    if any(not any(o.question_quote in turn for turn in (payload['question'],*payload['user_turns'])) for o in proposal.obligations):
+    if any(not any(o.question_quote in turn for turn in (payload.get('current_utterance',payload['question']),*payload['user_turns'])) for o in proposal.obligations):
         raise ValueError('condition/exception lacks user evidence')
     for temperature,size in query.variants:
         for key,value in (('temperature',temperature),('size',size)):
@@ -323,16 +329,65 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     return Decision(plan,resolved,dict(slots),None)
 
 
+def model_evidence(payload):
+    """Keep every candidate and assertion. Storage hashes and empty locator fields are server-owned."""
+    candidates=[]
+    for candidate in payload['candidates']:
+        facts=[]
+        for fact in candidate['facts']:
+            record=dict(fact)
+            if record['original_assertion']==record['assertion']:
+                del record['original_assertion']
+            origins=[]
+            for origin in record['provenance']:
+                locator={key:value for key,value in origin['locator'].items() if value is not None}
+                origins.append(dict(locator=locator,**{k:origin[k] for k in ('source_id','owner_answer_id')
+                    if origin[k] is not None}))
+            record['provenance']=origins
+            facts.append(record)
+        candidates.append(dict(candidate,facts=facts))
+    visible=dict(payload,candidates=candidates)
+    # On dense publications send repeated field names once. Each row still
+    # represents a distinct approved fact, including all case conditions,
+    # prerequisites, original wording and origin. The full payload is hashed.
+    if sum(len(c['facts']) for c in candidates)>=32:
+        for candidate in candidates:
+            if len(candidate['facts'])<2:
+                continue
+            facts=candidate.pop('facts')
+            keys=list(dict.fromkeys(key for fact in facts for key in fact))
+            common={key:facts[0].get(key) for key in keys
+                    if all(fact.get(key)==facts[0].get(key) for fact in facts)}
+            columns=[key for key in keys if key not in common]
+            candidate['fact_defaults']=common
+            candidate['fact_columns']=columns
+            candidate['fact_rows']=[[fact.get(key) for key in columns] for fact in facts]
+    return visible
+
+
 async def general_decision(search,*,settings,store_id,question,user_turns,baseline,context,sink,
-                           timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None):
+                           timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None,
+                           previous_replies=(),current_utterance=None,required_subjects=()):
     if (not getattr(settings,'r_general_semantics_enabled',False)
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
         return baseline,None
-    if (user_turns or context_id is not None) and not context_verified:return baseline,None
+    from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
+    if not user_turns and baseline.plan.action=='CLARIFY' and (
+            (baseline.plan.clarification_slot=='entity' and question.strip() in PRICE_WORDS) or
+            (baseline.plan.clarification_slot=='predicate' and menu_title(search.snapshot,question))):
+        return baseline,None
+    if (user_turns or previous_replies or context_id is not None) and not context_verified:return baseline,None
     try:
         release=load_release(settings,search,store_id)
     except (ValueError,OSError,AttributeError) as exc:
         raise ApiError(503,'GENERAL_RELEASE_UNAVAILABLE','의미 해석의 검증 설정을 확인하지 못했습니다.',retryable=False) from exc
+    title=price_menu(search.snapshot,question)
+    if title:
+        # A complete, single-menu price request has one named knowledge entity.
+        # Keep every retrieved block of that entity, including its conditions.
+        entity_ids={card.entity_id for card in search.snapshot.cards if card.title==title}
+        search=replace(search,candidates=tuple(c for c in search.candidates
+            if search.snapshot.card(c.card_id).entity_id in entity_ids))
     if not search.candidates:return baseline,None
     if timeout<=0:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 부족합니다.',retryable=True)
     from app.learn.general_provider import generate
@@ -340,24 +395,32 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     context=UsageContext.model_validate(context.model_dump())
     if context.store_id!=str(store_id) or context.stage!='ANSWER':raise ValueError('trusted ANSWER context required')
     trusted_slots=dict(baseline.confirmed_slots if confirmed_slots is None else confirmed_slots)
+    phase='proposal_input'
     try:
-        async with asyncio.timeout(min(timeout,3.0)):
-            payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns)
-            from app.learn.grounded_calculations import UNITS
+        async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
+            payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns,
+                previous_replies=previous_replies,current_utterance=current_utterance,model_view=model_evidence,
+                required_subjects=required_subjects)
+            from app.learn.grounded_calculations import calculable_unit
             quantity_ids=tuple(dict.fromkeys(f['fact_revision_id'] for c in payload['candidates'] for f in c['facts']
-                if f.get('quantity') and f.get('polarity')=='AFFIRM' and f['quantity']['unit'].lower() in UNITS))
-            quotes=tuple(dict.fromkeys((question,*user_turns)))
+                if f.get('quantity') and f.get('polarity')=='AFFIRM' and calculable_unit(f['quantity'].get('unit'))))
+            utterance=payload.get('current_utterance',question)
+            quotes=tuple(dict.fromkeys((utterance,*user_turns)))
             dialogue_turns=[dict(turn_id=i,role='user',current=i==len(user_turns),text=text)
-                for i,text in enumerate((*user_turns,question))]
+                for i,text in enumerate((*user_turns,utterance))]
+            visible_payload=model_evidence(payload)
             prompt=((Path(__file__).resolve().parents[2]/'prompts/r_general_proposal.txt').read_text(encoding='utf-8').strip()+'\n'
-                +json.dumps(dict(input=payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,
+                +json.dumps(dict(input=visible_payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,
                     capabilities=dict(calculation_fact_ids=quantity_ids,slot_quote_choices=quotes,response_style=release.response_style,
                         reference_scopes=reference_scopes(search),
-                        max_answer_chars=ChatResponse.model_json_schema()['properties']['message']['maxLength'])),ensure_ascii=False))
+                        max_answer_chars=ChatResponse.model_json_schema()['properties']['message']['maxLength'])),ensure_ascii=False,separators=(',',':')))
             proposal_started=perf_counter()
-            proposal=parse_proposal(await provider(prompt,schema=GeneralProposal,release=release,
+            phase='proposal_provider'
+            wire_proposal=await provider(prompt,schema=GeneralProposal,release=release,
                 calculation_fact_ids=quantity_ids,question_quotes=quotes,
-                context=context.model_copy(update={'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='proposal'))[7:]}),sink=sink))
+                context=context.model_copy(update={'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='proposal'))[7:]}),sink=sink)
+            phase='proposal_validation'
+            proposal=parse_proposal(wire_proposal)
             decision=validate_interpretation(search,payload=payload,proposal=proposal,baseline=baseline,
                 context_id=context_id,clarify_turns=clarify_turns,confirmed_slots=trusted_slots)
             if release.response_style=='approved_original' and proposal.conclusions:
@@ -374,7 +437,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
             if decision is baseline:return baseline,dict(audit,status='UNRESOLVED')
             refs=validate_answer_references(decision.plan,search.snapshot,store_id=str(store_id))
             rules=selected_rules(decision.plan,search.snapshot) if proposal.conclusions else []
-            review=dict(input=payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,proposal=proposal.model_dump(mode='json'),
+            review=dict(input=visible_payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,proposal=proposal.model_dump(mode='json'),
                 selected_reference_check=dict(checked_fact_ids=list(refs.fact_ids),checked_raw_blocks=[list(r) for r in refs.raw_blocks]),
                 selected_rules=rules,
                 conclusion_units=conclusion_units(proposal.conclusions),
@@ -385,11 +448,14 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                     store_id=store_id,question=question,user_turns=user_turns))
             review['request_hash']=digest(review)
             verification_started=perf_counter()
-            verdict=Verification.model_validate(await provider(
+            phase='verification_provider'
+            wire_verdict=await provider(
                 (Path(__file__).resolve().parents[2]/'prompts/r_general_verification.txt').read_text(encoding='utf-8').strip()
-                +'\n'+json.dumps(review,ensure_ascii=False),
+                +'\n'+json.dumps(review,ensure_ascii=False,separators=(',',':')),
                 schema=Verification,release=release,context=context.model_copy(update={
-                    'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='verify'))[7:]}),sink=sink))
+                    'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='verify'))[7:]}),sink=sink)
+            phase='verification_validation'
+            verdict=Verification.model_validate(wire_verdict)
             if (verdict.request_hash!=review['request_hash'] or set(verdict.checked_fact_ids)!=set(refs.fact_ids)
                     or len(verdict.checked_fact_ids)!=len(set(verdict.checked_fact_ids))
                     or set(verdict.checked_raw_blocks)!=set(refs.raw_blocks)
@@ -454,6 +520,10 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     except ApiError:raise
     except UsageWriteError as exc:raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
     except TimeoutError as exc:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 초과되었습니다.',retryable=True) from exc
+    except (InputByteLimitExceeded,InputTokenLimitExceeded) as exc:
+        logger.warning('general_input_limit phase=%s detail=%s',phase,exc)
+        raise ApiError(503,'GENERAL_INPUT_LIMIT','의미 해석 요청의 입력 한도를 초과했습니다.',
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc
     except (ValueError,KeyError,StopIteration) as exc:
         # 사유를 남기지 않으면 유료 실행에서 무엇이 막았는지 알 수 없다(2026-10-15 진단).
         # 코드가 쓴 상수 문구만 싣는다 — 계약 위반 상세는 **위치·종류만** 남기고
@@ -463,5 +533,9 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                                   for e in errors()}))[:300] if callable(errors)
                 else f'{type(exc).__name__}: {exc}'[:300])
         logger.warning('general_proposal_rejected detail=%s',detail)
-        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
-    except Exception as exc:raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True) from exc
+        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False,
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc
+    except Exception as exc:
+        logger.warning('general_failure phase=%s error_type=%s',phase,type(exc).__name__)
+        raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True,
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc

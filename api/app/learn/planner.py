@@ -17,13 +17,15 @@ from app.learn.semantic_grouping import explicit_context, supported_question
 from app.learn.conditional_scope import conditional_core, prerequisite_closure, exclusive_conditions
 from app.learn.raw_quantity import raw_answer_reference
 from app.learn.entity_names import entity_names, entity_label
+from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
+from app.learn.operations_scope import relevant_entity_offer
 
 PLANNER_VERSION="r-explicit-slots/v8"
 PREDICATES={
     "milk_amount":("우유 양",("우유","milk")),
     "water_amount":("물 양",("물","water")),
     "location":("보관 위치",("어디","위치")),
-    "price":("가격",("가격","얼마","price")),
+    "price":("가격",(*PRICE_WORDS,"얼마")),
     "quantity":("수량",("수량","몇 개","몇개")),
 }
 
@@ -34,6 +36,21 @@ def mentioned(query:str,term:str)->bool:
         r"(?:은|는|이|가|의|을|를|에|에서|로|랑|와|과)?(?![가-힣a-z0-9_])",query))
 
 
+def shared_terms(query:str,names:tuple[str,...])->bool:
+    """질문과 대상 이름이 두 글자 이상의 낱말을 공유하는가.
+
+    대상 '확정'이 아니라 되묻기 선택지를 좁히는 데만 쓴다. 글자가 하나도 겹치지
+    않는 후보까지 전부 나열하면 직원이 무관한 메뉴 중에서 고르게 된다.
+    """
+    words=[w for w in re.split(r'[^0-9A-Za-z가-힣]+',normalize_query(query)) if len(w)>=2]
+    if not words:return False
+    for name in names:
+        for part in re.split(r'[^0-9A-Za-z가-힣]+',normalize_query(name)):
+            if len(part)>=2 and any(part in word or word in part for word in words):
+                return True
+    return False
+
+
 def atomic_quantity_agrees(fact)->bool:
     """수치 속성은 승인 문장과 구조화 수치/단위가 같은 원자 사실이어야 한다."""
     if fact.quantity is None:return False
@@ -41,7 +58,7 @@ def atomic_quantity_agrees(fact)->bool:
            "g":("mass",Decimal(1)),"kg":("mass",Decimal(1000)),
            "개":("count",Decimal(1)),"샷":("shot",Decimal(1))}
     def quantity(value,unit):
-        item=units.get(unit.lower())
+        item=units.get(unit.lower()) if isinstance(unit,str) else None
         return (item[0],Decimal(value)*item[1]) if item else None
     expected=quantity(fact.quantity.value,fact.quantity.unit)
     observed={quantity(value,unit) for value,unit in re.findall(
@@ -55,6 +72,44 @@ class Decision:
     resolved:ResolvedSelection
     confirmed_slots:dict[str,str]
     semantic_context:dict|None
+
+
+def operating_decision(snapshot, question, previous, baseline):
+    from app.learn.approved_renderer import render
+    from app.learn.operating_guidance import resolve_guidance
+    guidance = resolve_guidance(snapshot, question, previous)
+    if guidance is None:
+        return baseline
+    resolved = ResolvedSelection('', 'operating_steps', (), question, operating_guidance=guidance)
+    try:
+        plan = AnswerPlan(snapshot_id=snapshot.snapshot_id, knowledge_revision=snapshot.knowledge_revision,
+                          action='ANSWER', selected_blocks=guidance.refs)
+        render(plan, snapshot, store_id=int(snapshot.store_id), request_id='operating-fit', resolved=resolved)
+    except ValueError:
+        return baseline
+    return Decision(plan, resolved, {}, None)
+
+
+def procedure_decision(snapshot,question,previous,scope,baseline):
+    """Answer a bounded question from named cards in the current publication."""
+    from app.learn.approved_renderer import render
+    from app.learn.procedure_scope import approved_first_steps, step_refs
+    base=dict(snapshot_id=snapshot.snapshot_id,knowledge_revision=snapshot.knowledge_revision)
+    steps=approved_first_steps(snapshot,scope)
+    if steps:
+        resolved=ResolvedSelection('', 'approved_first_step', (), question=question,procedure_steps=steps,
+            procedure_previous=previous if len(scope.subjects)==1 else None)
+        try:
+            plan=AnswerPlan(**base,action='ANSWER',selected_blocks=step_refs(snapshot,steps))
+            render(plan,snapshot,store_id=int(snapshot.store_id),request_id='procedure-fit',resolved=resolved)
+        except ValueError:
+            pass  # Output bounds and source validation still apply.
+        else:
+            return Decision(plan,resolved,{},None)
+    if baseline.plan.action=='CLARIFY' and baseline.plan.clarification_slot=='entity':
+        return Decision(AnswerPlan(**base,action='ESCALATE',escalation_reason='UNRESOLVED_PROCEDURE'),
+            ResolvedSelection('', '', (), question=question),{},None)
+    return baseline
 
 
 def policy_action(question:str):
@@ -83,27 +138,52 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
                 if action=="CLARIFY" else {"escalation_reason":reason} if action=="ESCALATE" else {})
         semantic = explicit_context(snapshot, question=question, entity=entity, predicate=predicate,
             variants=variants, has_context=(bool(confirmed_slots) or context_id is not None) and not context_verified) if action=="ESCALATE" else None
-        return Decision(AnswerPlan(**base,action=action,**kwargs),
-                        ResolvedSelection(entity,predicate,variants,question=question),slots,semantic)
+        decision=Decision(AnswerPlan(**base,action=action,**kwargs),
+                          ResolvedSelection(entity,predicate,variants,question=question),slots,semantic)
+        return relevant_entity_offer(decision,search,question)
     policy=policy_action(question)
     if policy:
         return finish(policy)
     if any(word in q for word in ("수정","변경","바꿔","아니야","않아","말아")):
         return finish("ESCALATE","UNSUPPORTED_QUESTION_INTENT")
     candidates={(c.card_id,c.card_version_id,c.block_id) for c in search.candidates}
+    if not confirmed_slots and context_id is None:
+        from app.learn.card_read import requested_card,whole_card_refs
+        card=requested_card(snapshot,question)
+        if card and card.blocks and all((card.card_id,card.card_version_id,b.block_id) in candidates for b in card.blocks):
+            from app.learn.approved_renderer import render
+            literal=ResolvedSelection(card.entity_id,'card_read',(),question=question,literal_card_id=card.card_id)
+            try:
+                plan=AnswerPlan(**base,action='ANSWER',selected_blocks=whole_card_refs(card))
+                render(plan,snapshot,store_id=store_id,request_id='card-read-size-check',resolved=literal)
+            except ValueError:pass  # Whole card does not fit or references are incomplete: use ordinary planning.
+            else:return Decision(plan,literal,slots,None)
     cards=[c for c in snapshot.cards if any(key[0]==c.card_id for key in candidates)]
     if not cards:
         return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     matches={c.entity_id for c in cards if any(mentioned(q,n) for n in entity_names(snapshot,c.entity_id))}
-    if not matches and slots.get("entity"):
+    if q in PRICE_WORDS and not slots:
+        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards))[:10]
+        return finish("CLARIFY",slot="entity",options=options)
+    if slots.get("entity") and (context_verified or not matches):
         matches={c.entity_id for c in cards if slots["entity"] in entity_names(snapshot,c.entity_id)}
+    named_price=price_menu(snapshot,question)
+    if named_price and not any(c.entity_id in matches and c.title==named_price for c in snapshot.cards):
+        return finish("ESCALATE","MISSING_MENU_PRICE_CANDIDATE")
     if not matches:
         alias_options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
             if any(n in search.alias_terms for n in entity_names(snapshot,c.entity_id))))
         if 0<len(alias_options)<=10:
             return finish('CLARIFY',slot='entity',options=alias_options)
+        shared=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
+            if shared_terms(q,entity_names(snapshot,c.entity_id))))
+        if 0<len(shared)<=10:
+            return finish('CLARIFY',slot='entity',options=shared)
+        # 질문이 어떤 승인 대상도 가리키지 않는다. 후보 전체를 선택지로 내밀면
+        # 근거 없는 추측을 직원에게 떠넘기는 것이다. 되묻지 않고 점주에게 넘긴다 (불변식 5).
+        return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     if len(matches)!=1:
-        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards))
+        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards if not matches or c.entity_id in matches))
         if len(options)>10 or len(options)<2:
             return finish("ESCALATE","UNRESOLVED_CONTEXT")
         return finish("CLARIFY",slot="entity",options=options)
@@ -148,16 +228,23 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     slots["entity"]=next((n for n in names if mentioned(q,n)),slots.get("entity",names[0]))
     facts=[f for f in snapshot.fact_revisions if f.entity_id==entity]
     available={f.predicate for f in facts if f.predicate}
+    if menu_title(snapshot,q) and not slots.get("predicate"):
+        options=list(dict.fromkeys(PREDICATES.get(p,(p,()))[0] for p in sorted(available)))
+        options.sort(key=lambda name:name not in PRICE_WORDS)
+        if options:return finish("CLARIFY",slot="predicate",options=tuple(options[:10]))
     matched={p for p,(label,words) in PREDICATES.items() if p in available and any(mentioned(q,w) for w in words)}
     if (not re.search(r"얼마나|몇\s*(?:ml|밀리리터|g|그램|리터)|(?:우유|물)(?:의)?\s*양|용량",q)
             or any(word in q for word in ("오래","기한","언제","보관","온도"))):
         matched.difference_update(("milk_amount","water_amount"))
     matched.update(p for p in available if mentioned(q,p))
+    if named_price:
+        matched.update(available.intersection(PRICE_WORDS))
     # Condition vocabulary (e.g. 온도) is not the requested attribute. Only a
     # full approved-condition + supported-question parse may override this guard.
     scoped_predicates={f.predicate for f in facts if conditional_core(question,snapshot=snapshot,fact=f,
         titles=names,sizes=tuple(sorted({x.variant.size for x in facts if x.variant.size}))) is not None}
     if scoped_predicates:matched=scoped_predicates
+    if not matched and named_price:return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     if not matched and slots.get("predicate"):
         matched={p for p in available if slots["predicate"] in (p,PREDICATES.get(p,(p,()))[0])}
     if len(matched)!=1:
@@ -189,6 +276,9 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     if len(temperatures)>1 and not any(w in q for w in ("비교","각각","둘 다","차이")):
         return finish("CLARIFY",slot="temperature",options=("HOT","ICE"))
     if len(temperatures)>1:slots.pop("temperature",None)
+    if not temperatures and named_price and all(f.variant.temperature and not f.variant.size for f in facts):
+        # Quote each approved price with its own temperature heading.
+        temperatures={f.variant.temperature for f in facts}
     if not temperatures and any(f.variant.temperature for f in facts):
         return finish("CLARIFY",slot="temperature",options=tuple(sorted({f.variant.temperature for f in facts if f.variant.temperature})))
     sizes={f.variant.size for f in facts if f.variant.size}

@@ -134,6 +134,19 @@ async def verify(pool,admin,seed):
     unknown1=await save("m3-pending-unknown1",action="ESCALATE")
     unknown2=await save("m3-pending-unknown2",action="ESCALATE")
     check("unresolved context not merged",unknown1.response.pending_id!=unknown2.response.pending_id)
+    q='두 주문 중 한 건을 환불하려면 어떻게 처리해?'
+    task_plan=AnswerPlan(**base,action='ESCALATE',escalation_reason='NO_RELEVANT_TASK_OPTION')
+    first_task=await save('m3-refund-task',question=q,plan=task_plan)
+    detail='배달앱으로 결제한 주문이고 영수증은 없어.'
+    follow=await save('m3-refund-details',action='ESCALATE',question=detail,history_head=int(first_task.receipt_id))
+    check('task followup reaches the same waiting owner request',first_task.response.pending_id==follow.response.pending_id
+        and q in follow.response.message and detail in follow.response.message)
+    check('owner sees both turns',await admin.fetchval('select question_text from pending_questions where question_id=$1',
+        int(follow.response.pending_id))==q+' '+detail)
+    other_task=await save('m3-new-refund-task',question=q,plan=task_plan)
+    new=await save('m3-separate-refund-task',action='ESCALATE',question='다른 주문도 영수증이 없어요.',
+        history_head=int(other_task.receipt_id))
+    check('different order stays separate',new.response.pending_id!=other_task.response.pending_id)
     before=await admin.fetchval("select count(*) from pending_questions where store_id=$1",sid)
     try:
         with patch("app.learn.answer_storage.render",side_effect=ValueError("synthetic render failure")):

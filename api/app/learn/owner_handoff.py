@@ -45,29 +45,40 @@ async def _terminal(conn,*,store_id:int,event_id:int,owner_answer_id:int,reason:
             destination=OWNER_QUESTIONS)
 
 
-async def claim_owner_event(pool, *, store_id:int) -> dict|None:
+async def claim_owner_event(pool, *, store_id:int, event_id:int|None=None) -> dict|None:
     async with pool.acquire() as conn:
         async with conn.transaction():
-            event=await conn.fetchrow("""select e.event_id,e.owner_answer_id,r.question_id,r.revision_no,
-                    coalesce(l.attempts,0) as attempts,l.leased_by
+            event=await conn.fetchrow("""select e.event_id,e.owner_answer_id,r.question_id,r.revision_no
                 from outbox_events e join r_owner_answer_revisions r
                   on r.store_id=e.store_id and r.owner_answer_id=e.owner_answer_id
                 left join outbox_consumptions c on c.store_id=e.store_id and c.event_id=e.event_id and c.consumer=$2
                 left join outbox_leases l on l.store_id=e.store_id and l.event_id=e.event_id and l.consumer=$2
                 where e.store_id=$1 and e.event_type='OWNER_ANSWER_SUBMITTED' and c.event_id is null
+                  and ($3::bigint is null or e.event_id=$3)
                   and (l.event_id is null or l.leased_until<=clock_timestamp())
                   and (l.last_error is null or l.last_error not like 'TERMINAL:%')
-                order by e.event_id for update of e skip locked limit 1""",store_id,CONSUMER)
+                order by e.event_id for update of e skip locked limit 1""",store_id,CONSUMER,event_id)
             if event is None:return None
+            # The join that selected e may predate another worker's lease or
+            # consumption. Read them again after acquiring the event row lock.
+            current=await conn.fetchrow("""select coalesce(l.attempts,0) as attempts,l.leased_by
+                from outbox_events e
+                left join outbox_consumptions c on c.store_id=e.store_id and c.event_id=e.event_id and c.consumer=$2
+                left join outbox_leases l on l.store_id=e.store_id and l.event_id=e.event_id and l.consumer=$2
+                where e.store_id=$1 and e.event_id=$3 and c.event_id is null
+                  and (l.event_id is null or l.leased_until<=clock_timestamp())
+                  and (l.last_error is null or l.last_error not like 'TERMINAL:%')""",
+                store_id,CONSUMER,event['event_id'])
+            if current is None:return None
             latest=await conn.fetchval("""select max(revision_no) from r_owner_answer_revisions
                 where store_id=$1 and question_id=$2""",store_id,event['question_id'])
             if latest!=event['revision_no']:
                 await conn.execute("""insert into outbox_consumptions(store_id,consumer,event_id,result)
                     values($1,$2,$3,'STALE')""",store_id,CONSUMER,event['event_id'])
                 return dict(event_id=str(event['event_id']),owner_answer_id=str(event['owner_answer_id']),stale=True)
-            if event['attempts']>=MAX_ATTEMPTS:
+            if current['attempts']>=MAX_ATTEMPTS:
                 await _terminal(conn,store_id=store_id,event_id=event['event_id'],
-                    owner_answer_id=event['owner_answer_id'],reason='RETRY_EXHAUSTED',failure_key=event['leased_by'])
+                    owner_answer_id=event['owner_answer_id'],reason='RETRY_EXHAUSTED',failure_key=current['leased_by'])
                 return None
             token=uuid4().hex
             attempts=await conn.fetchval("""insert into outbox_leases

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+from threading import Lock
 
 from openai import OpenAI
 
@@ -15,9 +16,25 @@ from app.usage import UsageSink, NullSink, attempt
 from app.team.evaluation_budget import BudgetDenied, provider_budget
 
 logger = logging.getLogger(__name__)
+_query_lock = Lock()
+_query_client = None
+
+def _pooled_query_client(settings):
+    global _query_client
+    with _query_lock:
+        if _query_client is None:
+            _query_client = OpenAI(api_key=settings.openai_api_key, max_retries=0)
+        return _query_client
+
+def close_query_client():
+    global _query_client
+    with _query_lock:
+        client, _query_client = _query_client, None
+    if client is not None:
+        client.close()
 
 
-def embed_texts(texts: list[str], *, recording=None, timeout_seconds: float | None = None) -> list[list[float]]:
+def embed_texts(texts: list[str], *, recording=None, timeout_seconds: float | None = None, query: bool = False) -> list[list[float]]:
     """text-embedding-3-small / 1536. 빈 입력이면 빈 리스트."""
     if not texts:
         return []
@@ -27,13 +44,13 @@ def embed_texts(texts: list[str], *, recording=None, timeout_seconds: float | No
     timeout = s.embedding_timeout_seconds if timeout_seconds is None else timeout_seconds
     if not 0 < timeout <= 30:
         raise ValueError("embedding timeout must be between 0 and 30 seconds")
-    client = OpenAI(api_key=s.openai_api_key, max_retries=0, timeout=timeout)
+    client = _pooled_query_client(s) if query else OpenAI(api_key=s.openai_api_key, max_retries=0, timeout=timeout)
     t0 = time.perf_counter()
     try:
-        resp = client.embeddings.create(model=s.embedding_model, input=texts)
+        resp = client.embeddings.create(model=s.embedding_model, input=texts, **({'timeout':timeout} if query else {}))
     finally:
         try:
-            client.close()
+            if not query: client.close()
         except Exception as exc:
             # 정리 오류로 이미 수신한 응답/usage 또는 원래 공급자 오류를 덮지 않는다.
             logger.warning("embedding client cleanup failed type=%s", type(exc).__name__)
@@ -68,7 +85,7 @@ def embed_texts(texts: list[str], *, recording=None, timeout_seconds: float | No
     return vectors
 
 
-async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: UsageSink):
+async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: UsageSink, demo_query: bool=False):
     """비동기 계측 adapter. 공급자 호출은 기존 embed_texts 한 곳에서만 수행한다."""
     context = UsageContext.model_validate(context.model_dump())
     if context.stage not in ("EMBED", "QUERY") or sink is None or isinstance(sink, NullSink):
@@ -96,7 +113,12 @@ async def recorded_embeddings(texts: list[str], *, context: UsageContext, sink: 
             settings = get_settings()
             # W 등록 준비와 R 질문 검색의 시간 예산을 섞지 않는다.
             timeout = settings.query_embedding_timeout_seconds if context.stage == "QUERY" else settings.embedding_timeout_seconds
-            return await asyncio.to_thread(embed_texts, texts, recording=rec, timeout_seconds=timeout)
+            pooled=context.stage=='QUERY' and context.cost_purpose=='PRODUCT'
+            if (pooled and demo_query
+                    and getattr(settings,'r_general_semantics_demo_enabled',False) and settings.r_general_semantics_enabled):
+                timeout=max(timeout,2.)
+            options=dict(query=True) if pooled else {}
+            return await asyncio.to_thread(embed_texts, texts, recording=rec, timeout_seconds=timeout, **options)
     finally:
         if reservation is not None:
             await asyncio.wait_for(budget.finish(reservation,

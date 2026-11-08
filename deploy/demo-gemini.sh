@@ -10,10 +10,17 @@ case "${1:-status}" in
   apply-once)
     # A later deployment must not enable an old experiment or undo a manual stop.
     if [[ "$(date -u +%Y%m%d)" != 20261108 && "$(date -u +%Y%m%d)" != 20261109 ]]; then exit 0; fi
-    if [[ -e "$marker" ]]; then echo 'Demo rollout already handled'; exit 0; fi
     token=$(curl -fsS --max-time 2 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') || { echo 'Demo rollout skipped: no EC2 metadata'; exit 0; }
     target=$(curl -fsS --max-time 2 -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id) || { echo 'Demo rollout skipped: instance identity unavailable'; exit 0; }
     [[ "$target" = i-0a83bc49c38c9f36c ]] || { echo 'Demo rollout skipped: different instance'; exit 0; }
+    if [[ -e "$marker" ]]; then
+      if [[ ! -e "$marker.operating-steps-v1" ]]; then
+        state=$(docker compose exec -T api python -m scripts.chat_gemini_pilot repair-state)
+        if [[ "$state" = REBIND ]]; then bash store9-gemini.sh rebind-demo; fi
+        touch "$marker.operating-steps-v1"
+      fi
+      echo 'Demo rollout already handled'; exit 0
+    fi
     bash store9-gemini.sh enable-demo
     touch "$marker"
     ;;

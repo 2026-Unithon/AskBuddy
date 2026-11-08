@@ -52,7 +52,27 @@ async def verify(pool,admin,seed):
                     session_id=session,request_id=key,question=question,**kwargs))
             first=seed["snapshot"].fact_revisions[0]
             title=next(c.title for c in seed["snapshot"].cards if c.entity_id==first.entity_id)
+            # Plain text replies, including one absent from the offered chips, must
+            # carry the immediately preceding menu/attribute through to the owner.
+            for i,turns in enumerate(((title,'요금'),('금액',title))):
+                price_session=(await client.post('/learn/v2/sessions',headers=headers,json={
+                    'request_id':f'price-session-{i}'})).json()['session_id']
+                async def price_turn(n):
+                    return await client.post('/learn/v2/chat',headers=headers,json={
+                        'session_id':price_session,'request_id':f'price-reply-{i}-{n}','question':turns[n]})
+                offer=await price_turn(0)
+                check('clarification asks for the missing slot',offer.json()['clarification_slot']==('predicate','entity')[i])
+                reply=await price_turn(1)
+                check('price handoff names the selected menu',reply.status_code==200 and
+                    reply.json()['action']=='ESCALATE' and title in reply.json()['message'])
+                saved=await admin.fetchval('select question_text from pending_questions where question_id=$1',
+                    int(reply.json()['pending_id']))
+                check('owner receives both turns',saved==' '.join(turns))
+                repeat=await price_turn(1)
+                check('typed reply replays after context consumption',repeat.headers['x-answer-replayed']=='true')
             original=await chat('api-approved-original',title+' 승인 원문 보여줘')
+            from scripts.verify_free_reply import verify as verify_free_reply
+            await verify_free_reply(client,headers,admin,check)
             check('explicit approved original request returns exact RAW',original.status_code==200 and
                 original.json()['action']=='ANSWER' and original.json()['message']==seed['snapshot'].raw_spans[0].text)
             question=f"{first.variant.temperature} {title} 물 얼마나?"
@@ -124,9 +144,16 @@ async def verify(pool,admin,seed):
             payload=clarify.json()
             restored=await client.get(f'/learn/v2/sessions/{session}/history',headers=headers)
             check('history restores clarification revision',restored.json()['messages'][-1]['context_revision']==int(clarify.headers['x-context-revision']))
-            selected=await chat("api-clarify-selection",first.variant.temperature,context_id=payload["context_id"],
-                context_revision=int(clarify.headers["x-context-revision"]),option=first.variant.temperature)
+            # Clicking an option keeps the previous turns as well as the verified slot.
+            with patch.object(settings,'r_general_semantics_enabled',True,create=True):
+                selected=await chat("api-clarify-selection",first.variant.temperature,context_id=payload["context_id"],
+                    context_revision=int(clarify.headers["x-context-revision"]),option=first.variant.temperature)
             check("clarification choice reaches ANSWER",selected.status_code==200 and selected.json()["action"]=="ANSWER")
+            previous=await admin.fetchval("select execution_metadata->'dialogue_receipt_ids' from r_answer_receipts where receipt_id=$1",
+                int(selected.headers['x-answer-receipt-id']))
+            previous=json.loads(previous) if isinstance(previous,str) else previous
+            check('choice keeps conversation before the offer',int(receipt) in previous and
+                previous[-1]==int(clarify.headers['x-answer-receipt-id']))
             escalate=await chat("api-unknown-key","존재하지 않는 업무의 위치 알려줘")
             check("default planner ESCALATE persisted",escalate.status_code==200 and escalate.json()["action"]=="ESCALATE"
                   and bool(escalate.json()["pending_id"]))
@@ -320,6 +347,19 @@ async def verify(pool,admin,seed):
                 invalid=await chat('api-reviewed-invalid','새로운 질문')
                 check('invalid catalog cannot save answer',invalid.status_code==503 and not await admin.fetchval("select exists(select 1 from r_answer_receipts where request_id='api-reviewed-invalid')"))
                 settings.r_reviewed_semantics_enabled=False
+            # A deterministic ordinal lookup needs the prior receipt even in a
+            # store where no Gemini release is enabled.
+            scoped_session=(await client.post('/learn/v2/sessions',headers=headers,json={
+                'request_id':'procedure-history-session'})).json()['session_id']
+            async def scoped_chat(key,text):
+                return await client.post('/learn/v2/chat',headers=headers,json={
+                    'request_id':key,'session_id':scoped_session,'question':text})
+            prior=await scoped_chat('procedure-history-original',title+' 승인 원문 보여줘')
+            follow=await scoped_chat('procedure-history-follow','그럼 두 번째 메뉴는 뭐부터 시작해?')
+            check('ordinal followup without Gemini uses its own session history',follow.status_code==200 and
+                await admin.fetchval("""select execution_metadata->'dialogue_receipt_ids'=to_jsonb(array[$2::bigint])
+                    from r_answer_receipts where receipt_id=$1""",int(follow.headers['x-answer-receipt-id']),
+                    int(prior.headers['x-answer-receipt-id'])))
             from verify_r_general_api import verify as verify_general
             await verify_general(chat,client,headers,pool,admin,seed,settings,title)
             from app.team.evaluation_budget import BudgetDenied

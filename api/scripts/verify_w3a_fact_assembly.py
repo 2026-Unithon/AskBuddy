@@ -33,7 +33,7 @@ from app.ingest import repository as repo
 from app.ingest.card_plan import ProposedBlock, ProposedCard, fact_sort_key
 from app.ingest.fact_revisions import FactChange, revise_fact
 from app.ingest.entities import find_entity_by_alias
-from app.ingest.entity_admin import merge_entities
+from app.ingest.entity_admin import merge_entities, relink_fact
 from app.ingest.entity_names import normalize_alias
 from app.ingest.extract import gemini, mock
 from app.ingest.raw_responses import DbRawResponseSink
@@ -118,6 +118,23 @@ async def _l1(db, pool):
     check("디카페인 판은 held — VARIANT_UNRESOLVED",
           [(h.fact_revision_id, h.reason) for h in loaded.held]
           == [(decaf["head_revision_id"], fact_assembly.REASON_VARIANT_UNRESOLVED)])
+    extra = await _new_source(db, w.store, w.user, "SCAN")
+    null_fact = _fact("n", "환불 기준", "원거래 확인", "앱 주문번호", variant="NULL")
+    mixed = _fact("m", "환불 기준", "특수 조건", "점주 확인", variant="HOT NULL")
+    check("새 추출의 문자 NULL만 규격 없음",
+          ExtractedAssertion.model_validate(null_fact).as_variant() is None
+          and ExtractedAssertion.model_validate(mixed).as_variant()=="HOT NULL")
+    with patch.object(ExtractedAssertion,"as_variant",lambda a:a.variant.strip().upper() or None):
+        await _process(db,pool,w.store,w.user,extra,[("원거래 확인", [null_fact,mixed])],run_tag=7029)
+    entity_ids=await fact_assembly.entities_for_source(db,w.store,extra)
+    legacy=await fact_assembly.load_entity_groups(db,w.store,entity_ids)
+    check("기존 NULL 원장 근거가 있는 사실만 복원", [f.predicate for g in legacy.groups for f in g.facts]==["원거래 확인"]
+          and len(legacy.held)==1 and legacy.held[0].reason==fact_assembly.REASON_VARIANT_UNRESOLVED)
+    f=legacy.groups[0].facts[0]
+    rid=await relink_fact(db,w.store,fact_id=f.fact_id,expected_head_revision_id=f.fact_revision_id,
+                          to_entity_id=w.z,actor_id=w.user,reason="합성 검수에서 대상 정정")
+    after=await fact_assembly.load_entity_groups(db,w.store,[w.z])
+    check("재연결 판도 같은 원장을 보존",any(p.fact_revision_id==rid for g in after.groups for p in g.facts))
     return w, group
 
 

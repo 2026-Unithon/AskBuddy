@@ -73,7 +73,8 @@ class ExtractedAssertion(BaseModel):
         return self._check_flags
 
     def as_variant(self) -> str | None:
-        return self.variant.strip().upper() or None
+        value = self.variant.strip().upper()
+        return None if value in ("", "NULL") else value
 
     def as_order(self) -> int | None:
         return self.order if self.order and self.order >= 1 else None

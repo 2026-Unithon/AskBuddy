@@ -4,12 +4,14 @@ from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse, Citation, POLICY_MESSAGES
 from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.validate import validate_answer_references
+from app.learn.menu_context import PRICE_WORDS,price_menu
 
 RENDERER_VERSION = "r-approved/v2"
 
 
 def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: int,
-           request_id: str, pending_id: str | None = None, availability=None, resolved=None) -> ChatResponse:
+           request_id: str, pending_id: str | None = None, availability=None, resolved=None,
+           clarification_detail: tuple[str,str] | None = None, owner_sources=None) -> ChatResponse:
     if snapshot.renderer_version not in ("r-approved/v1",RENDERER_VERSION):
         raise ValueError("unsupported approved renderer version")
     validate_answer_references(plan,snapshot,store_id=str(store_id))
@@ -18,11 +20,41 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
     if plan.action in POLICY_MESSAGES:
         return ChatResponse(**fields,message=POLICY_MESSAGES[plan.action])
     if plan.action=="CLARIFY":
-        message="어느 건을 말씀하시는지 선택해 주세요." if plan.clarification_slot=='case' else "어느 경우인지 선택해 주세요."
+        prompts={'case':'어느 건을 말씀하시는지 선택해 주세요.',
+            'entity':'어떤 대상에 대해 궁금하세요?', 'predicate':'어떤 정보가 궁금하세요?',
+            'temperature':'어떤 온도를 기준으로 볼까요?', 'size':'어떤 사이즈가 궁금하세요?'}
+        message=prompts.get(plan.clarification_slot,'어느 경우인지 선택해 주세요.')
+        if resolved and plan.clarification_slot=='predicate' and resolved.entity_id:
+            from app.learn.entity_names import entity_label
+            message=f'{entity_label(snapshot,resolved.entity_id)}의 어떤 정보가 궁금하세요?'
+        if resolved and plan.clarification_slot=='entity' and resolved.question.strip() in PRICE_WORDS:
+            message='어떤 메뉴의 가격이 궁금하세요?'
+        if resolved and plan.clarification_slot in ('temperature','size'):
+            title=price_menu(snapshot,resolved.question)
+            if title:message=f'{title} 가격을 확인하고 있어요. {message}'
         return ChatResponse(**fields,message=message,context_id=plan.context_id,
                             clarification_slot=plan.clarification_slot,allowed_options=plan.allowed_options)
     if plan.action=="ESCALATE":
-        return ChatResponse(**fields,message="확인된 자료만으로 답하기 어려워 사장님께 확인을 요청했어요.",pending_id=pending_id)
+        if clarification_detail:
+            def excerpt(text):
+                return text if len(text)<=160 else text[:159]+'…'
+            original,detail=map(excerpt,clarification_detail)
+            return ChatResponse(**fields,message=f'“{original}”에 덧붙인 “{detail}”까지 함께 사장님께 확인을 요청했어요.',
+                                pending_id=pending_id)
+        if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED' and resolved:
+            from app.learn.entity_names import entity_label
+            subject=entity_label(snapshot,resolved.entity_id)
+            return ChatResponse(**fields,message=f'{subject}에 대한 질문을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.',pending_id=pending_id)
+        if plan.escalation_reason=='NO_RELEVANT_TASK_OPTION' and resolved:
+            from app.learn.operations_scope import task_patterns, REFUND
+            tasks=task_patterns(resolved.question)
+            topic='·'.join('환불' if task is REFUND else '오픈 준비' for task in tasks)
+            return ChatResponse(**fields,message=f'이 상황에 적용할 {topic} 기준을 승인 자료에서 확인하기 어려워 사장님께 확인을 요청했어요.',
+                                pending_id=pending_id)
+        title=price_menu(snapshot,resolved.question) if resolved else None
+        message=(f'{title} 가격을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.' if title else
+                 '확인된 자료만으로 답하기 어려워 사장님께 확인을 요청했어요.')
+        return ChatResponse(**fields,message=message,pending_id=pending_id)
     lines,citations=[],[]
     previous_heading = None
     availability=availability or {}
@@ -64,6 +96,12 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         from app.learn.answer_validation import validate_answer_for_question
         from app.learn.grounded_calculations import calculate
         validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
+        if resolved.operating_guidance:
+            from app.learn.operating_guidance import guidance_lines
+            lines=guidance_lines(resolved.operating_guidance,snapshot,citations,owner_sources)
+        if resolved.procedure_steps:
+            from app.learn.procedure_scope import step_lines
+            lines=step_lines(resolved.procedure_steps,citations)
         lines.extend(calculate(resolved.calculations,plan=plan,snapshot=snapshot,store_id=store_id,
             question=resolved.question,user_turns=resolved.calculation_user_turns))
         if resolved.conclusions:

@@ -13,6 +13,8 @@ from app.contracts.snapshot import PublishedKnowledgeSnapshot
 from app.contracts.hashing import verify_snapshot_hash
 from app.learn.grounded_calculations import Calculation, calculate
 from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions
+from app.learn.procedure_scope import Step, approved_first_steps, procedure_scope, step_refs
+from app.learn.operating_guidance import Guidance, resolve_guidance
 
 
 class AnswerReferenceError(ValueError):
@@ -62,6 +64,10 @@ class ResolvedSelection:
     conclusions: tuple[GroundedConclusion,...] = ()
     conclusion_user_turns: tuple[str,...] = ()
     conclusions_verified: bool = False
+    literal_card_id: str | None = None
+    procedure_steps: tuple[Step,...] = ()
+    procedure_previous: str | None = None
+    operating_guidance: Guidance | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,36 @@ def validate_answer_for_question(
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    if query.operating_guidance is not None:
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        guidance = resolve_guidance(snapshot, query.question, query.operating_guidance.previous)
+        if (guidance is None or guidance != query.operating_guidance or plan.selected_blocks != guidance.refs
+                or query.predicate != 'operating_steps' or query.procedure_steps or query.parts
+                or query.calculations or query.conclusions or query.literal_card_id is not None):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        return plan
+    if query.procedure_steps:
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        scope=procedure_scope(snapshot,query.question,query.procedure_previous)
+        if (not scope or query.procedure_steps!=approved_first_steps(snapshot,scope)
+                or plan.selected_blocks!=step_refs(snapshot,query.procedure_steps)
+                or query.predicate!='approved_first_step' or query.conclusions or query.parts or query.calculations):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        return plan
+    if query.literal_card_id is not None:
+        from app.learn.card_read import requested_card,whole_card_refs
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        card=requested_card(snapshot,query.question)
+        if (not card or card.card_id!=query.literal_card_id or card.entity_id!=query.entity_id
+                or query.predicate!='card_read' or query.calculations or query.conclusions or query.parts
+                or tuple(plan.selected_blocks)!=whole_card_refs(card)):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        # Whole-card display makes no quantity, variant, or applicability inference.
+        # The common reference/closure/order checks above still apply.
+        return plan
     if query.conclusions:
         if not query.conclusions_verified:raise AnswerReferenceError('UNVERIFIED_CONCLUSION')
         validate_conclusions(query.conclusions,plan=plan,question=query.question,user_turns=query.conclusion_user_turns)
@@ -164,12 +200,16 @@ def validate_answer_for_question(
     if allowed != set(validated.fact_ids):
         raise AnswerReferenceError("INVALID_REFERENCE")
     target_variants = set()
+    from app.learn.menu_context import price_menu,states_menu_price
+    menu=price_menu(snapshot,query.question)
     for fid in validated.fact_ids:
         fact = facts[fid]
         if fact.entity_id != query.entity_id:
             raise AnswerReferenceError("INVALID_REFERENCE")
         if fid in targets and fact.predicate is not None and fact.predicate != query.predicate:
             raise AnswerReferenceError("INVALID_REFERENCE")
+        if menu and fid in targets and not states_menu_price(fact,menu):
+            raise AnswerReferenceError("UNVERIFIED_PRICE")
         check = checks.get(fid)
         if assessment is not None and check is None:
             raise AnswerReferenceError("UNRESOLVED_CONTEXT")

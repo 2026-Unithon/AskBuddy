@@ -14,6 +14,14 @@ from app.usage.recorder import attempt, NullSink
 class IncompleteModelOutput(ValueError):
     """Usage is still recorded, but an incomplete generation is never parsed/repaired."""
 
+class InputTokenCountUnavailable(ValueError):
+    """The provider could not establish an upper bound for this request."""
+
+class InputTokenLimitExceeded(ValueError):
+    """The measured input, including headroom, exceeds the accepted release."""
+
+class InputByteLimitExceeded(ValueError):
+    """The serialized prompt and its response schema exceed the release byte cap."""
 
 def usage_tokens(meta):
     """Omitted zero thoughts are known only when the reported total reconciles.
@@ -56,7 +64,8 @@ async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=Non
     # usage is checked again and overages halt the evaluation budget.
     counted_prompt=prompt+'\nJSON schema:\n'+schema_text
     prompt_bytes=len(counted_prompt.encode('utf-8'))
-    if prompt_bytes>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
+    if prompt_bytes>max_bytes:
+        raise InputByteLimitExceeded(f'prompt exceeds accepted byte limit; bytes={prompt_bytes}, limit={max_bytes}')
     config=types.GenerateContentConfig(response_mime_type='application/json',response_json_schema=wire_schema,
         temperature=0,max_output_tokens=max_output,
         thinking_config=types.ThinkingConfig(thinking_level=release.thinking_level),
@@ -80,9 +89,11 @@ async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=Non
             # 실제 사용량은 응답을 받은 뒤 다시 검사한다.
             if prompt_bytes+max(32,(prompt_bytes+9)//10)>max_input:
                 counted=await client.aio.models.count_tokens(model=release.model,contents=counted_prompt)
-                if (type(counted.total_tokens) is not int or counted.total_tokens<0
-                        or counted.total_tokens+max(32,(counted.total_tokens+9)//10)>max_input):
-                    raise ValueError('input tokens exceed accepted limit or are unknown')
+                total=counted.total_tokens
+                if type(total) is not int or total<0:
+                    raise InputTokenCountUnavailable(f'input token count unavailable; bytes={prompt_bytes}, limit={max_input}')
+                if total+max(32,(total+9)//10)>max_input:
+                    raise InputTokenLimitExceeded(f'input tokens exceed accepted limit; tokens={total}, bytes={prompt_bytes}, limit={max_input}')
             response=await client.aio.models.generate_content(model=release.model,contents=prompt,
                 config=config)
             observe_answer(rec,response)

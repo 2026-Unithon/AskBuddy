@@ -134,11 +134,14 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                       resolved:ResolvedSelection,confirmed_slots:dict[str,str],
                       semantic_context:dict|None=None,choice:ContextChoice|None=None,
                       execution_metadata:dict|None=None,policy_receipt_id:str|None=None,
-                      history_head:int|None=None,failed_history_head:int|None=None) -> StoredReply:
+                      history_head:int|None=None,failed_history_head:int|None=None,
+                      typed_choice:ContextChoice|None=None) -> StoredReply:
     if (not 8<=len(request_id)<=80 or not question.strip() or len(question)>1000
-            or (choice is None and resolved.question!=question)):
+            or (choice is None and typed_choice is None and resolved.question!=question)
+            or (typed_choice is not None and (choice is not None or history_head is None))):
         raise ApiError(422,"INVALID_CONTRACT","질문과 요청 정보를 확인해 주세요.")
     body_hash=request_body_hash(session_id=session_id,question=question,choice=choice,policy_receipt_id=policy_receipt_id)
+    choice=choice or typed_choice
     execution_metadata=dict(execution_metadata or {})
     if 'policy_receipt_id' in execution_metadata:
         raise ApiError(422,'INVALID_CONTRACT','정책 연결은 전용 인자로 지정해야 합니다.')
@@ -164,6 +167,16 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 from app.learn.dialogue_history import validate_history_head
                 await validate_history_head(conn,store_id=store_id,member_id=member_id,
                     session_id=session_id,expected_head=history_head)
+            expected_previous = (resolved.operating_guidance.previous if resolved.operating_guidance
+                                 else resolved.procedure_previous)
+            if resolved.operating_guidance and resolved.question != question:
+                raise ApiError(422,'INVALID_CONTRACT','운영 절차의 원문 질문이 일치하지 않습니다.')
+            if expected_previous is not None:
+                from app.learn.dialogue_history import load_history
+                recent=await load_history(conn,store_id=store_id,member_id=member_id,session_id=session_id,
+                    include_failed=True,exclude_request_id=request_id)
+                if not recent.user_turns or recent.user_turns[-1]!=expected_previous:
+                    raise ApiError(409,'STALE_DIALOGUE','대화가 변경됐습니다. 다시 질문해 주세요.',retryable=True)
             if policy_receipt_id is not None:
                 if choice is not None or plan.action!='ESCALATE':
                     raise ApiError(422,'INVALID_CONTRACT','안전 확인 요청은 별도 이관이어야 합니다.')
@@ -187,9 +200,10 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             if choice is not None:
                 context=await accept_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                     context_id=choice.context_id,expected_state_revision=choice.state_revision,option=choice.option,
-                    knowledge_revision=int(snapshot.knowledge_revision))
+                    knowledge_revision=int(snapshot.knowledge_revision),reply_snapshot=snapshot if typed_choice else None)
+                from app.learn.question_contexts import question_prefix
                 validate_context_question(question=question,resolved=resolved,choice=choice,
-                    original_question=context.context.original_question)
+                    original_question=question_prefix(context))
             if isinstance(semantic_context,dict) and 'version' in semantic_context:
                 if semantic_context['version'] == REVIEWED_VERSION:
                     expected_context=reviewed_context(snapshot, evidence=resolved.grouping_evidence, question=resolved.question)
@@ -207,7 +221,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                         raise ApiError(422,"INVALID_CONTRACT","문맥 식별값이 다릅니다.")
                     context=await offer_next_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                         context_id=choice.context_id,slot=plan.clarification_slot,options=plan.allowed_options,
-                        proposed_slots=case_data)
+                        proposed_slots=case_data,staff_reply=question)
                 else:
                     context=await create_context(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                         original_question=question,confirmed_slots=confirmed_slots,proposed_slots=case_data,
@@ -221,27 +235,63 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             await conn.execute("""insert into access_logs(store_id,user_id,action_type)
                 select store_id,user_id,'QUERY' from store_members where store_id=$1 and member_id=$2""",store_id,member_id)
             pending_id=None
+            detail_pair=None
             if plan.action=="ESCALATE":
+                if plan.escalation_reason=='NO_RELEVANT_TASK_OPTION':
+                    execution_metadata['task_handoff']=True
+                if history_head and not choice and not policy_receipt_id:
+                    from app.learn.operations_scope import handoff_detail
+                    prior=await conn.fetchrow("""select r.original_question,q.question_id
+                        from r_answer_receipts r join pending_questions q on q.question_id=r.pending_id
+                          and q.store_id=r.store_id and q.member_id=r.member_id
+                        where r.store_id=$1 and r.member_id=$2 and r.session_id=$3 and r.receipt_id=$4
+                          and r.snapshot_id=$5 and r.execution_metadata->>'task_handoff'='true'
+                          and r.created_at>clock_timestamp()-interval '10 minutes'
+                          and q.status='WAITING' and q.contract_version='v2'
+                          and q.question_text=r.original_question
+                          and not exists(select 1 from r_failed_user_turns f where f.store_id=r.store_id
+                            and f.member_id=r.member_id and f.session_id=r.session_id and f.created_at>r.created_at
+                            and f.request_id<>$6) for update of q""",
+                        store_id,member_id,session_id,history_head,int(snapshot.snapshot_id),request_id)
+                    if prior and handoff_detail(prior['original_question'],question):
+                        combined=prior['original_question']+' '+question
+                        if len(combined)<=500:
+                            pending_id=prior['question_id']
+                            detail_pair=(prior['original_question'],question)
+                            await conn.execute("update pending_questions set question_text=$2 where question_id=$1",
+                                               pending_id,combined)
+                            execution_metadata['task_detail_parent']=history_head
+                            execution_metadata.pop('task_handoff',None)
                 key=pending_key(store_id=store_id,semantic_context=semantic_context)
-                await conn.execute("select pg_advisory_xact_lock(hashtextextended($1,0))",f"r:pending:{key}")
-                pending_id=await conn.fetchval("""select question_id from pending_questions
-                    where store_id=$1 and semantic_key=$2 and contract_version='v2' and status='WAITING' for update""",store_id,key)
                 if pending_id is None:
+                    await conn.execute("select pg_advisory_xact_lock(hashtextextended($1,0))",f"r:pending:{key}")
+                    pending_id=await conn.fetchval("""select question_id from pending_questions
+                        where store_id=$1 and semantic_key=$2 and contract_version='v2' and status='WAITING' for update""",store_id,key)
+                if pending_id is None:
+                    owner_question=resolved.question
+                    if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED':
+                        from app.learn.entity_names import entity_label
+                        owner_question=f'{entity_label(snapshot,resolved.entity_id)} — {question}'
                     pending_id=await conn.fetchval("""insert into pending_questions(store_id,member_id,message_id,
                         question_text,miss_reason,status,contract_version,semantic_key)
                         values($1,$2,$3,$4,'no_match','WAITING','v2',$5) returning question_id""",
-                        store_id,member_id,user_message,question[:500],key)
+                        store_id,member_id,user_message,owner_question[:500],key)
                 await conn.execute("""insert into pending_question_occurrences(question_id,member_id,message_id)
                     values($1,$2,$3)""",pending_id,member_id,user_message)
                 # 앱 알림이 durable 전달 원장이다. 민감 원문을 preview에 복제하지 않는다.
                 await create_pending_question_notification(conn,store_id,pending_id,"업무 질문의 확인 요청이 도착했습니다.",contract_version='v2')
             source_ids=sorted({int(p.source_id) for f in snapshot.fact_revisions for p in f.provenance if p.source_id is not None}
                               | {int(r.source_id) for r in snapshot.raw_spans if r.source_id is not None})
-            rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",
+            rows=await conn.fetch("""select s.source_id,s.source_availability,o.owner_answer_id
+                from sources s left join owner_answer_sources o on o.store_id=s.store_id and o.source_id=s.source_id
+                where s.store_id=$1 and s.source_id=any($2::bigint[])""",
                                   store_id,source_ids)
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
                 pending_id=str(pending_id) if pending_id else None,resolved=resolved,
-                availability={str(r["source_id"]):r["source_availability"] for r in rows})
+                clarification_detail=(question_prefix(context),question) if typed_choice and context
+                    and execution_metadata.get('clarification_reply')=='detail' else detail_pair,
+                availability={str(r["source_id"]):r["source_availability"] for r in rows},
+                owner_sources={str(r["source_id"]):str(r["owner_answer_id"]) for r in rows if r["owner_answer_id"]})
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",
                 session_id,response.message,"ANSWERED" if plan.action=="ANSWER" else "NO_ANSWER",
@@ -257,6 +307,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                                 calculations=[c.model_dump(mode='json') for c in resolved.calculations],
                                 conclusions=[c.model_dump(mode='json') for c in resolved.conclusions],
                                 conclusion_user_turns=resolved.conclusion_user_turns,
+                                procedure_fact_ids=[s.ref.fact_revision_ids[0] for s in resolved.procedure_steps],
                                 parts=[dict(plan=p.plan.model_dump(mode='json'),entity=p.resolved.entity_id,
                                     predicate=p.resolved.predicate,variants=p.resolved.variants)
                                     for p in resolved.parts])),

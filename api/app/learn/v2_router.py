@@ -28,9 +28,12 @@ from app.learn.answer_storage import ContextChoice,save_answer,saved_reply,curre
 from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
-from app.learn.planner import decide,policy_action,PLANNER_VERSION
-from app.learn.question_contexts import load_context,accept_selection
-from app.learn.dialogue_history import load_history,retrieval_question
+from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision,operating_decision
+from app.learn.operating_guidance import CHANNEL_DETAIL,compact
+from app.learn.procedure_scope import procedure_scope, first_step_reference
+from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection,question_prefix
+from app.learn.operations_scope import relevant_entity_offer, REFUND_DETAIL, OPENING_DETAIL
+from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback,requested_subjects,respects_subjects
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
@@ -391,6 +394,19 @@ async def scope(pool,claims,user_id):
     return store_id,member_id
 
 
+@router.get("/v2/demo/requests/{request_id}/outcome")
+async def demo_request_outcome(request_id:str,claims:Claims,user_id:CurrentUserId):
+    if not get_settings().r_general_semantics_demo_enabled or not 8<=len(request_id)<=80:
+        raise ApiError(404,'NOT_FOUND','이 요청의 기록이 없습니다.')
+    enabled()
+    from app.learn.demo_outcome import outcome
+    async with get_pool().acquire() as conn:
+        async with conn.transaction(isolation='repeatable_read',readonly=True):
+            store_id=await get_store_id(claims,conn)
+            result=await outcome(conn,store_id=store_id,user_id=user_id,request_id=request_id)
+    return JSONResponse(content=result,headers={'Cache-Control':'private, no-store'})
+
+
 @router.post("/v2/sessions")
 async def create_session(req:SessionRequest,request:Request,claims:Claims,user_id:CurrentUserId):
     request.state.r_request_id=req.request_id
@@ -437,16 +453,22 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
     pool=get_pool()
     settings=get_settings()
     loop=asyncio.get_running_loop()
-    deadline=loop.time()+settings.chat_deadline_seconds
+    from app.learn.demo_retrieval import demo_active,retrieve
+    start=loop.time()
+    deadline=start+(30 if demo_active(settings) else settings.chat_deadline_seconds)
     stale=False
     completed=None
     recover_question=False
     choice=ContextChoice(req.context_id,req.context_revision,req.option) if req.context_id else None
     try:
-        async with asyncio.timeout_at(deadline):
+        async with asyncio.timeout_at(deadline) as timer:
             store_id,member_id=await scope(pool,claims,user_id)
             from app.learn.general_semantics import settings_for_chat_store
             settings=await settings_for_chat_store(settings,store_id,pool)
+            demo=demo_active(settings)
+            deadline=start+(30 if demo else settings.chat_deadline_seconds)
+            timer.reschedule(deadline)
+            model_window=25 if demo else settings.llm_total_budget_seconds
             async with request_lease(pool,store_id,user_id):
                 completed=await saved_reply(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                     request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id,
@@ -457,7 +479,13 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         await ensure_initial_publication(pool, store_id=store_id,
                             member_id=member_id, user_id=user_id)
                     for requery in range(2):
+                        effective_choice=choice
+                        typed_choice=None
+                        typed_head=None
+                        typed_kind=None
                         usage=None
+                        retrieval_mode='NOT_REQUIRED'
+                        retrieval_failure=None
                         history=None
                         async with pool.acquire() as conn:
                             async with conn.transaction():
@@ -466,26 +494,43 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
-                                if (getattr(settings,'r_general_semantics_enabled',False)
-                                        and req.policy_receipt_id is None and choice is None
-                                        and not policy_action(req.question)):
+                                semantics_enabled=getattr(settings,'r_general_semantics_enabled',False)
+                                if ((semantics_enabled or first_step_reference(req.question)
+                                        or REFUND_DETAIL.search(req.question) or OPENING_DETAIL.search(req.question)
+                                        or CHANNEL_DETAIL.fullmatch(compact(req.question)))
+                                        and req.policy_receipt_id is None and not policy_action(req.question)):
+                                    # load_history locks this session. Read its latest offer
+                                    # under that same lock, before accepting a typed reply.
                                     history=await load_history(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
-                                    recover_question=True
-                                if choice:
-                                    stored=await load_context(conn,store_id=store_id,member_id=member_id,
-                                        session_id=int(req.session_id),context_id=choice.context_id)
-                                    context=accept_selection(stored,option=choice.option,
-                                        expected_state_revision=choice.state_revision,
+                                if choice is None and req.policy_receipt_id is None and not policy_action(req.question):
+                                    typed=await latest_typed_selection(conn,store_id=store_id,member_id=member_id,
+                                        session_id=int(req.session_id),question=req.question.strip(),snapshot=snapshot,
+                                        request_id=req.request_id)
+                                    if typed:
+                                        stored,typed_head,typed_kind=typed
+                                        if typed_kind!='new':
+                                            typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
+                                            effective_choice=typed_choice
+                                recover_question=semantics_enabled and history is not None and effective_choice is None
+                                if effective_choice:
+                                    if not typed_choice:
+                                        stored=await load_context(conn,store_id=store_id,member_id=member_id,
+                                            session_id=int(req.session_id),context_id=effective_choice.context_id)
+                                    context=accept_selection(stored,option=effective_choice.option,
+                                        expected_state_revision=effective_choice.state_revision,reply_snapshot=snapshot if typed_choice else None,
                                         knowledge_revision=int(snapshot.knowledge_revision),
                                         now=await conn.fetchval("select clock_timestamp()"))
                         question=req.question
                         slots={}
                         if context:
                             slots=context.context.confirmed_slots
-                            question=context.context.original_question+" "+req.question
-                        user_turns=((context.context.original_question,req.question) if context else
-                                    history.user_turns if history is not None else ())
+                            question=question_prefix(context)+" "+req.question
+                        user_turns=(history.user_turns if history is not None else
+                            (context.context.original_question,req.question) if context else ())
+                        replies=reply_context(history,snapshot) if history else ()
+                        if typed_kind=='new':
+                            user_turns,replies=(),()
                         if context and 'case' in slots:
                             from app.learn.case_clarification import case_context_turns
                             if not getattr(settings,'r_general_semantics_enabled',False):
@@ -493,7 +538,14 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             try:user_turns=case_context_turns(context.context)
                             except (ValueError,KeyError,TypeError) as exc:
                                 raise ApiError(422,'INVALID_CONTRACT','사건 선택의 원문 문맥을 확인하지 못했습니다.') from exc
-                        search_question=retrieval_question(question,history) if history is not None else question
+                            # The case record covers the dialogue *before* the offer.
+                            # Include the question that triggered it as a separate
+                            # user turn; rebuild the offer against these local IDs.
+                            user_turns=(*user_turns,context.context.original_question)[-10:]
+                            replies=[dict(after_user_turn=len(user_turns)-1,action='CLARIFY',
+                                asked_for='case',displayed_options=list(stored.offered_options))]
+                        search_question=retrieval_question(question,history,snapshot=snapshot,
+                            continuing_choice=context is not None) if history is not None and typed_kind!='new' else question
                         if context and 'case' in slots:
                             from app.learn.dialogue_history import DialogueHistory
                             search_question=retrieval_question(question,DialogueHistory(user_turns=user_turns))
@@ -501,23 +553,21 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             search=SearchResult(snapshot,index_revision,(),question)
                         else:
                             remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))
+                                model_window-(loop.time()-start))
                             if remaining<=0:raise TimeoutError()
                             usage=UsageContext(store_id=str(store_id),cost_phase="OPERATING",stage="QUERY",
                                 operation_id=digest(dict(member_id=member_id,request_id=req.request_id)),
                                 logical_call_id="v2:"+digest(dict(member_id=member_id,request_id=req.request_id))[7:]+f":q{requery}")
                             try:
-                                vectors=await asyncio.wait_for(recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
-                                    timeout=min(settings.search_deadline_seconds,remaining))
+                                search,retrieval_mode,retrieval_failure=await retrieve(pool,store_id=store_id,question=search_question,
+                                    embed=lambda:recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id),**({'demo_query':True} if demo else {})),
+                                    timeout=min(2.5 if demo else settings.search_deadline_seconds,remaining),allow_fallback=demo,search_fn=hybrid_search)
                             except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:
                                 raise ApiError(503,"USAGE_UNAVAILABLE","검색 계측을 시작하지 못했습니다.",retryable=True) from exc
-                            except Exception as exc:
-                                raise ApiError(503,"MODEL_UNAVAILABLE","질문 검색을 완료하지 못했습니다.",retryable=True) from exc
-                            search=await hybrid_search(pool,store_id=store_id,question=search_question,query_vector=vectors[0])
                             if getattr(settings,'r_reranker_enabled',False):
                                 remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                    settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))
+                                    model_window-(loop.time()-start))
                                 rank_context=usage.model_copy(update=dict(stage='RERANK',logical_call_id=usage.logical_call_id+':rank'))
                                 try:
                                     search=await rerank(search,store_id=store_id,question=search_question,context=rank_context,
@@ -525,9 +575,21 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 except UsageWriteError as exc:
                                     raise ApiError(503,'USAGE_UNAVAILABLE','재정렬 계측을 시작하지 못했습니다.',retryable=True) from exc
                         decision=decide(search,store_id=store_id,question=question,confirmed_slots=slots,
-                            context_id=choice.context_id if choice else None,
+                            context_id=effective_choice.context_id if effective_choice else None,
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
+                        required_subjects=()
+                        if history and context is None and typed_kind!='new' and req.policy_receipt_id is None:
+                            decision=scoped_fallback(decision,req.question,history,search.snapshot)
+                            required_subjects=requested_subjects(req.question,history,search.snapshot)
+                        previous=user_turns[-1] if user_turns else None
+                        named_scope=(procedure_scope(search.snapshot,question,previous)
+                            if context is None and req.policy_receipt_id is None and not policy_action(question) else None)
+                        if named_scope:
+                            required_subjects=named_scope.subjects
+                            decision=procedure_decision(search.snapshot,question,previous,named_scope,decision)
+                        elif context is None and req.policy_receipt_id is None and not policy_action(question):
+                            decision=operating_decision(search.snapshot,question,previous,decision)
                         if context and 'case' in slots and not policy_action(question):
                             # A rule-only planner cannot decide which user case
                             # was chosen. Keep this path under semantic review.
@@ -538,25 +600,47 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
                                 knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
                                 escalation_reason='USER_REQUESTED_SAFETY_CONFIRMATION'))
+                        known_subject_fallback=decision
                         from app.learn.reviewed_semantics import product_decision
                         semantic_approval=None
                         if req.policy_receipt_id is None and not (context and 'case' in slots):
                             decision,semantic_approval=product_decision(search,settings=settings,
                                 store_id=store_id,question=question,baseline=decision,
                                 user_turns=(context.context.original_question,req.question) if context else (),
-                                context_id=choice.context_id if choice else None,context_verified=context is not None,
+                                context_id=effective_choice.context_id if effective_choice else None,context_verified=context is not None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
                         from app.learn.general_semantics import product_general_decision as general_decision
                         general_audit=None
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
                                 store_id=store_id,question=question,user_turns=user_turns,
+                                previous_replies=replies,current_utterance=req.question,required_subjects=required_subjects,
                                 baseline=decision,confirmed_slots=slots,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                    settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))),
-                                context_verified=context is not None or history is not None,context_id=choice.context_id if choice else None,
+                                    model_window-(loop.time()-start))),
+                                context_verified=context is not None or history is not None,context_id=effective_choice.context_id if effective_choice else None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
+                            if not respects_subjects(decision,required_subjects,search.snapshot):
+                                decision=known_subject_fallback
+                                semantic_approval=None
+                                general_audit=dict(general_audit or {},status='KNOWN_SUBJECT_FALLBACK')
+                        scoped=relevant_entity_offer(decision,search,question)
+                        if scoped is not decision and general_audit is not None:
+                            general_audit=dict(general_audit,task_scope_action=scoped.plan.action)
+                        decision=scoped
+                        # Neither the planner nor a model may restart the same
+                        # offer, even with reordered options or a new context ID.
+                        if context and decision.plan.action=='CLARIFY' and (
+                                context.context.clarify_turns>=2 or decision.plan.clarification_slot==stored.offered_slot
+                                or decision.plan.clarification_slot in slots
+                                or set(decision.plan.allowed_options)==set(stored.offered_options)):
+                            decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
+                                knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
+                                escalation_reason='UNRESOLVED_CONTEXT'),semantic_context=None)
+                        if typed_kind=='detail' and decision.plan.action=='ESCALATE':
+                            # Unconfirmed details can distinguish otherwise similar pending cases.
+                            decision=replace(decision,semantic_context=None)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
                         from app.team.semantic_shadow import observe_decision
@@ -569,20 +653,22 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             completed=await save_answer(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                                 request_id=req.request_id,question=req.question,snapshot=search.snapshot,plan=decision.plan,
                                 resolved=decision.resolved,confirmed_slots=decision.confirmed_slots,
-                                semantic_context=decision.semantic_context,choice=choice,
+                                semantic_context=decision.semantic_context,choice=choice,typed_choice=typed_choice,
                                 policy_receipt_id=req.policy_receipt_id,
-                                history_head=history.head if history is not None else None,
+                                history_head=history.head if history is not None else typed_head,
                                 failed_history_head=history.failed_head if history is not None else None,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
+                                    clarification_reply=typed_kind,clarification_parent=typed_head if typed_choice else None,
                                     dialogue_receipt_ids=history.receipt_ids if history is not None else (),
                                     dialogue_failed_turn_ids=history.failed_turn_ids if history is not None else (),
                                     semantic_approval_id=semantic_approval,
                                     general_semantics=general_audit,
                                     semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,
                                     usage_operation_id=usage.operation_id if usage else None,
+                                    retrieval_mode=retrieval_mode,retrieval_failure=retrieval_failure,
                                     query_logical_call_id=usage.logical_call_id if usage else None,
                                     rerank_logical_call_id=usage.logical_call_id+':rank' if usage and getattr(settings,'r_reranker_enabled',False) else None,
-                                    elapsed_before_save_ms=round((loop.time()-(deadline-settings.chat_deadline_seconds))*1000,3),
+                                    elapsed_before_save_ms=round((loop.time()-start)*1000,3),
                                     rrf_version=RRF_VERSION,lexical_query_version=LEXICAL_QUERY_VERSION,
                                     glossary_version=search.snapshot.glossary_version,alias_terms_hash=digest(search.alias_terms),
                                     index_revision=search.index_revision,rerank_status=search.rerank_status,

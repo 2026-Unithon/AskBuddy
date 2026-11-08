@@ -56,7 +56,8 @@ class ComparisonQuestion(Contract):
 
 
 def proposal_input(search: SearchResult, *, store_id: int, question: str,
-                   user_turns: tuple[str, ...] = (), comparisons: tuple[ComparisonQuestion, ...] = ()) -> dict:
+                   user_turns: tuple[str, ...] = (), comparisons: tuple[ComparisonQuestion, ...] = (),
+                   previous_replies=(), current_utterance=None, model_view=None, required_subjects=()) -> dict:
     if type(store_id) is not int or search.snapshot.store_id != str(store_id):
         raise ValueError('trusted store required')
     verify_snapshot_hash(search.snapshot)
@@ -86,7 +87,14 @@ def proposal_input(search: SearchResult, *, store_id: int, question: str,
         knowledge_revision=search.snapshot.knowledge_revision, snapshot_hash=search.snapshot.snapshot_hash,
         question=question, user_turns=list(user_turns), candidates=evidence,
         comparisons=[c.model_dump(mode='json') for c in comparisons])
-    if len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > 100000:
+    if current_utterance is not None and current_utterance!=question:
+        payload['current_utterance']=current_utterance
+    if previous_replies:payload['previous_replies']=list(previous_replies)
+    if required_subjects:payload['requested_subjects']=list(required_subjects)
+    # Count the actual model representation, not storage-only hashes or
+    # repeated assertions. All candidates remain bound to the full input hash.
+    visible=model_view(payload) if model_view else payload
+    if len(json.dumps(visible, ensure_ascii=False,separators=(',',':') if model_view else None).encode('utf-8')) > 100000:
         raise ValueError('proposal input too large')
     return dict(payload, input_hash=digest(payload))
 
@@ -104,7 +112,7 @@ def validate_proposal(raw, search: SearchResult, payload: dict) -> SemanticPropo
     allowed = {(c.card_id, c.card_version_id, c.block_id) for c in search.candidates}
     if any((b.card_id, b.card_version_id, b.block_id) not in allowed for b in proposal.plan.selected_blocks):
         raise ValueError('reference outside retrieved candidates')
-    text = (payload['question'], *payload['user_turns'])
+    text = (payload.get('current_utterance',payload['question']), *payload['user_turns'])
     if any(not any(slot.question_quote in turn for turn in text) for slot in proposal.slots):
         raise ValueError('slot quote outside user input')
     ids = proposal.equivalent_question_ids
