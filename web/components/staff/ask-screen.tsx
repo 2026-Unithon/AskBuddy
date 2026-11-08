@@ -270,6 +270,10 @@ function MessageView({
   }
 
   const citations = message.receipt_id ? response?.citations ?? [] : [];
+  // The chips below open the receipt's sources, including for stored answers.
+  const bubbleText = response?.action === "ANSWER" && citations.length > 0
+    ? message.content.replace(/ \[(?:점주 답변 \d+ · )?출처 \d+(?:, \d+)*\]$/gm, "")
+    : message.content;
   const clarify = response?.action === "CLARIFY" && isLast && response.context_id && message.context_revision !== null;
   const policy = response?.action === "SAFE_ROUTE" && isLast && message.receipt_id && message.original_question;
 
@@ -308,7 +312,7 @@ function MessageView({
         ) : undefined
       }
     >
-      {animate ? <Typewriter text={message.content} /> : message.content}
+      {animate ? <Typewriter text={bubbleText} /> : bubbleText}
     </AnswerBubble>
   );
 }

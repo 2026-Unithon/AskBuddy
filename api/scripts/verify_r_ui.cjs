@@ -59,7 +59,7 @@ const path = require('node:path');
         else if (body.question === '알레르기 확인') payload = response('SAFE_ROUTE', '안전 여부를 추측하지 않습니다.');
         else if (body.question === '개인정보 질문') payload = response('REFUSE', '개인정보를 제공할 수 없습니다.');
         else if (body.question === '미확인 업무') { state.pending = true; payload = response('ESCALATE', '사장님께 확인을 요청했어요.'); }
-        else if (body.option) { assert.equal(body.context_revision, 1); payload = response('ANSWER', 'HOT 합성 라테 물 225ml'); }
+        else if (body.option) { assert.equal(body.context_revision, 1); payload = response('ANSWER', 'HOT 합성 라테 물 225ml [점주 답변 17 · 출처 1]\n컵을 확인하세요. [출처 1]'); }
         else payload = response('CLARIFY', '어느 경우인지 선택해 주세요.');
         state.messages.push(message(body.question, 'USER'), message(payload.message, 'BUDDY', payload, { original_question: body.question }));
       } else if (p === '/learn/v2/pending') payload = { questions: state.pending ? [{ pending_id: '1', question: '미확인 업무', status: state.answers.length ? 'ANSWERED' : 'WAITING' }] : [], next_after: null };
@@ -109,7 +109,8 @@ const path = require('node:path');
     check('first question creates conversation', state.sessions.length === 1);
     await page.reload();
     await page.getByRole('button', { name: 'HOT', exact: true }).click();
-    await page.getByText('HOT 합성 라테 물 225ml', { exact: true }).waitFor();
+    const bubble = page.getByTestId('message-content').filter({ hasText: 'HOT 합성 라테 물 225ml' });
+    await page.getByText('HOT 합성 라테 물 225ml 컵을 확인하세요.', { exact: true }).waitFor();
     check('clarification survives reload', state.calls === 2);
     await page.getByRole('button', { name: '근거 카드', exact: true }).first().click();
     // 화면 개선 계획 5(s04a): 근거는 작은 회색 글자, 불러오면 '근거 제목'
@@ -121,6 +122,9 @@ const path = require('node:path');
       await page.getByTestId('citation-origin').innerText() === '출처 점주 답변'
       && await page.getByText('원본 자료를 열람할 수 없어요.', { exact: false }).count() === 0);
     await page.reload();
+    await bubble.waitFor();
+    check('restored bubble shows instructions without inline source labels',
+      (await bubble.innerText()).trim() === 'HOT 합성 라테 물 225ml\n컵을 확인하세요.');
     await page.getByRole('button', { name: '근거 카드', exact: true }).first().click();
     await page.getByTestId('citation-origin').waitFor();
     check('owner source survives history reload',
