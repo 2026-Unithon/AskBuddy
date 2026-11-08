@@ -10,7 +10,8 @@ RENDERER_VERSION = "r-approved/v2"
 
 
 def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: int,
-           request_id: str, pending_id: str | None = None, availability=None, resolved=None) -> ChatResponse:
+           request_id: str, pending_id: str | None = None, availability=None, resolved=None,
+           clarification_detail: tuple[str,str] | None = None) -> ChatResponse:
     if snapshot.renderer_version not in ("r-approved/v1",RENDERER_VERSION):
         raise ValueError("unsupported approved renderer version")
     validate_answer_references(plan,snapshot,store_id=str(store_id))
@@ -34,6 +35,12 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         return ChatResponse(**fields,message=message,context_id=plan.context_id,
                             clarification_slot=plan.clarification_slot,allowed_options=plan.allowed_options)
     if plan.action=="ESCALATE":
+        if clarification_detail:
+            def excerpt(text):
+                return text if len(text)<=160 else text[:159]+'…'
+            original,detail=map(excerpt,clarification_detail)
+            return ChatResponse(**fields,message=f'“{original}”에 덧붙인 “{detail}”까지 함께 사장님께 확인을 요청했어요.',
+                                pending_id=pending_id)
         if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED' and resolved:
             from app.learn.entity_names import entity_label
             subject=entity_label(snapshot,resolved.entity_id)

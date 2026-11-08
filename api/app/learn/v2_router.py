@@ -30,7 +30,7 @@ from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision
 from app.learn.procedure_scope import procedure_scope, first_step_reference
-from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection
+from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection,question_prefix
 from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback,requested_subjects,respects_subjects
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
@@ -470,6 +470,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         effective_choice=choice
                         typed_choice=None
                         typed_head=None
+                        typed_kind=None
                         usage=None
                         retrieval_mode='NOT_REQUIRED'
                         retrieval_failure=None
@@ -493,9 +494,10 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         session_id=int(req.session_id),question=req.question.strip(),snapshot=snapshot,
                                         request_id=req.request_id)
                                     if typed:
-                                        stored,typed_head=typed
-                                        typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
-                                        effective_choice=typed_choice
+                                        stored,typed_head,typed_kind=typed
+                                        if typed_kind!='new':
+                                            typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
+                                            effective_choice=typed_choice
                                 recover_question=semantics_enabled and history is not None and effective_choice is None
                                 if effective_choice:
                                     if not typed_choice:
@@ -509,10 +511,12 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         slots={}
                         if context:
                             slots=context.context.confirmed_slots
-                            question=context.context.original_question+" "+req.question
+                            question=question_prefix(context)+" "+req.question
                         user_turns=(history.user_turns if history is not None else
                             (context.context.original_question,req.question) if context else ())
                         replies=reply_context(history,snapshot) if history else ()
+                        if typed_kind=='new':
+                            user_turns,replies=(),()
                         if context and 'case' in slots:
                             from app.learn.case_clarification import case_context_turns
                             if not getattr(settings,'r_general_semantics_enabled',False):
@@ -527,7 +531,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             replies=[dict(after_user_turn=len(user_turns)-1,action='CLARIFY',
                                 asked_for='case',displayed_options=list(stored.offered_options))]
                         search_question=retrieval_question(question,history,snapshot=snapshot,
-                            continuing_choice=context is not None) if history is not None else question
+                            continuing_choice=context is not None) if history is not None and typed_kind!='new' else question
                         if context and 'case' in slots:
                             from app.learn.dialogue_history import DialogueHistory
                             search_question=retrieval_question(question,DialogueHistory(user_turns=user_turns))
@@ -561,7 +565,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
                         required_subjects=()
-                        if history and context is None and req.policy_receipt_id is None:
+                        if history and context is None and typed_kind!='new' and req.policy_receipt_id is None:
                             decision=scoped_fallback(decision,req.question,history,search.snapshot)
                             required_subjects=requested_subjects(req.question,history,search.snapshot)
                         previous=user_turns[-1] if user_turns else None
@@ -605,6 +609,18 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 decision=known_subject_fallback
                                 semantic_approval=None
                                 general_audit=dict(general_audit or {},status='KNOWN_SUBJECT_FALLBACK')
+                        # Neither the planner nor a model may restart the same
+                        # offer, even with reordered options or a new context ID.
+                        if context and decision.plan.action=='CLARIFY' and (
+                                context.context.clarify_turns>=2 or decision.plan.clarification_slot==stored.offered_slot
+                                or decision.plan.clarification_slot in slots
+                                or set(decision.plan.allowed_options)==set(stored.offered_options)):
+                            decision=replace(decision,plan=AnswerPlan(snapshot_id=search.snapshot.snapshot_id,
+                                knowledge_revision=search.snapshot.knowledge_revision,action='ESCALATE',
+                                escalation_reason='UNRESOLVED_CONTEXT'),semantic_context=None)
+                        if typed_kind=='detail' and decision.plan.action=='ESCALATE':
+                            # Unconfirmed details can distinguish otherwise similar pending cases.
+                            decision=replace(decision,semantic_context=None)
                         if stale and decision.plan.action=="ESCALATE":
                             raise ApiError(409,"STALE_KNOWLEDGE","변경된 근거로 답변을 확정하지 못했습니다.",retryable=True)
                         from app.team.semantic_shadow import observe_decision
@@ -622,6 +638,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 history_head=history.head if history is not None else typed_head,
                                 failed_history_head=history.failed_head if history is not None else None,
                                 execution_metadata=dict(planner_version=PLANNER_VERSION,normalization_version=NORMALIZATION_VERSION,
+                                    clarification_reply=typed_kind,clarification_parent=typed_head if typed_choice else None,
                                     dialogue_receipt_ids=history.receipt_ids if history is not None else (),
                                     dialogue_failed_turn_ids=history.failed_turn_ids if history is not None else (),
                                     semantic_approval_id=semantic_approval,
