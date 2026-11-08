@@ -439,6 +439,9 @@ class LedgerConn:
         raise AssertionError(sql)
 
     async def fetchval(self, sql, *args):
+        # 계획 7: '틀린 값'으로 고른 사실인지 먼저 묻는다(이 시험의 사실은 아니다)
+        if "from fact_rejections" in sql:
+            return False
         assert "insert into fact_conflicts" in sql
         self.inserts.append(args)
         return 99

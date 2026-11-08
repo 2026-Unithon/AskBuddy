@@ -230,6 +230,27 @@ class FactBlockView(BaseModel):
     facts: list[FactRow]
 
 
+class ReviewOption(BaseModel):
+    fact_id: int
+    text: str
+
+
+class ReviewItem(BaseModel):
+    """검수 필요 카드에서 사장님이 바로 고를 항목(계획 7 Task 6). 지금은 충돌 고르기(CHOOSE)만 있다."""
+
+    item_id: str
+    kind: Literal["CHOOSE"] = "CHOOSE"
+    conflict_id: int
+    label: str | None = None
+    options: list[ReviewOption]
+
+
+class ReviewChooseRequest(BaseModel):
+    keep_fact_id: int = Field(gt=0)
+    expected_version_id: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=80)
+
+
 class CardFactsView(BaseModel):
     card_id: int
     version_id: int
@@ -241,3 +262,5 @@ class CardFactsView(BaseModel):
     editable: bool
     entity_problem: Literal["MIXED_ENTITY", "MERGED_ENTITY"] | None = None
     blocks: list[FactBlockView]
+    # 들어가자마자 고를 항목(충돌). 없으면 빈 목록
+    review_items: list[ReviewItem] = Field(default_factory=list)

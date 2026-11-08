@@ -40,3 +40,9 @@ test("화살표 없는 단계는 번호 순서대로 이어 붙인다", () => {
   const recipe = compactRecipe([block("QUANTITIES", null, [f("샷=2"), f("시럽=2펌프")]), block("STEPS", null, [f("시럽을 넣는다", 2), f("샷을 내린다", 1)])]);
   assert.deepEqual(recipe.sections, [{ heading: null, steps: [{ text: "샷을 내린다", note: null }, { text: "시럽을 넣는다", note: null }], extras: [{ label: "샷", value: "2" }, { label: "시럽", value: "2펌프" }] }]);
 });
+
+test("고를 항목이 남은 칸은 값 대신 '골라 주세요'", () => {
+  const recipe = compactRecipe([block("QUANTITIES", null, [f("컵=20"), f("토핑=휘핑 30g"), f("토핑=휘핑 90g")]), block("STEPS", null, [f("제조순서=컵 → 토핑", 1)])], new Set(["토핑"]));
+  assert.deepEqual(recipe.sections[0].steps, [{ text: "컵", note: "20온즈" }, { text: "토핑", note: "골라 주세요" }]);
+  assert.deepEqual(recipe.sections[0].extras, []);
+});

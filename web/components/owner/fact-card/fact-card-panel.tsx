@@ -226,7 +226,8 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
     );
   }
   const view = facts.data;
-  const compact = compactRecipe(view.blocks);
+  // 아직 고르지 않은 칸은 값 대신 '골라 주세요'(검수 고르기, 계획 7 Task 6)
+  const compact = compactRecipe(view.blocks, new Set((view.review_items ?? []).flatMap((item) => (item.label ? [item.label] : []))));
   const excluded = card.review_status === "EXCLUDED";
   const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;

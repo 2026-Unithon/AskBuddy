@@ -202,7 +202,8 @@ export function TodayScreen() {
       )}
       {data && (
         <>
-          {data.my_submission ? (
+          {/* 제출했어도 지금 체크가 남아 있으면(풀었으면) 축하 대신 남은 개수를 보인다. 서버가 제출 기록 개수도 맞춘다 */}
+          {data.my_submission && remaining === 0 ? (
             <HeroCard>
               {/* 끝의 기억을 좋게(피크엔드, s01e): 체크가 통통 튄다 */}
               <span
@@ -219,8 +220,7 @@ export function TodayScreen() {
                 오늘 할 일 끝났어요
               </p>
               <p className="mt-3">
-                체크 {data.my_submission.done_lines}/
-                {data.my_submission.total_lines}개 제출했어요
+                체크 {data.scope_counts.done}/{data.scope_counts.total}개 제출했어요
               </p>
               <ButtonLink href="/staff/me" variant="secondary" className="mt-4">
                 내 기록 보기

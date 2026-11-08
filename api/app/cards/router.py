@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+from contextvars import ContextVar
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
@@ -11,10 +13,14 @@ from app.cards import fact_edit
 from app.cards import fact_edit_repo as fact_repo
 from app.cards import fact_parse
 from app.cards import repository as repo
+from app.cards.review_items import load_review_items
+from app.ingest import fact_revisions
 from app.checklist import repository as checklist_repo
 from app.cards.fact_edit_plan import CardFactState, EditError
 from app.cards.fact_edit_schemas import (
     CardFactsView,
+    EditBlock,
+    EditKeep,
     FactBlockView,
     FactEditRequest,
     FactEditResult,
@@ -24,8 +30,12 @@ from app.cards.fact_edit_schemas import (
     FactParseResponse,
     FactRow,
     FactVariant,
+    ReviewChooseRequest,
 )
 from app.cards.schemas import (
+    BulkItem,
+    BulkRequest,
+    BulkResult,
     CardCategory,
     CardDetail,
     CardEvidence,
@@ -76,7 +86,8 @@ OwnerClaims = Annotated[dict[str, Any], Depends(require_owner)]
 def _category(row) -> CardCategory | None:
     if row["category_id"] is None:
         return None
-    return CardCategory(category_id=int(row["category_id"]), name=row["category_name"] or "")
+    return CardCategory(category_id=int(row["category_id"]), name=row["category_name"] or "",
+                        kind=row["category_kind"] if "category_kind" in row.keys() else None)
 
 
 def _source(row, *, read_url: str | None = None) -> CardSource | None:
@@ -347,6 +358,10 @@ async def approve_card(
         ) from exc
 
 
+# 일괄 처리 중에는 카드마다 공개 판을 다시 올리지 않고 모아 두었다가 끝에 한 번 올린다(계획 7 Task 4)
+_DEFERRED_REPUBLISH: ContextVar[list[tuple[int, int]] | None] = ContextVar("_DEFERRED_REPUBLISH", default=None)
+
+
 async def _republish_after_status_change(
     db: Db, *, store_id: int, user_id: int, card_id: int, kind: str, event_id: int
 ) -> None:
@@ -361,6 +376,10 @@ async def _republish_after_status_change(
     실패는 크게 로그로 남긴다. 멱등 키는 검수 사건 id 로 행동마다 유일하다.
     재발행 임베딩 비용은 이 카드의 비용 귀속(card_usage_context)으로 잡힌다.
     """
+    deferred = _DEFERRED_REPUBLISH.get()
+    if deferred is not None:
+        deferred.append((card_id, event_id))
+        return
     try:
         member_id = await db.fetchval(
             "select member_id from store_members where store_id = $1 and user_id = $2 "
@@ -390,6 +409,44 @@ async def _republish_after_status_change(
             "카드 %s 뒤 공개판 재발행을 하지 못했다 — 다음 공개에서 회복된다 "
             "card=%s store=%s status=%s code=%s",
             kind, card_id, store_id, result.status, result.error_code)
+
+
+@router.post("/{card_id}/unpublish", response_model=CardMutationResult)
+async def unpublish_card(
+    card_id: int, db: Db, claims: OwnerClaims
+) -> CardMutationResult:
+    """미공개(공개 내리기, 계획 7 Task 3). 공개였거나 검수 필요였던 카드를 공개 전으로 돌린다.
+
+    공개 포인터를 비워 직원 레시피·검색·답변(공개 판)에서 빠지게 한다. 초안은 그대로라 다시 공개하면
+    같은 판이 올라가 학습 기록이 이어진다. 학습 기록·근무조 연결 표는 건드리지 않는다.
+    """
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    async with db.transaction():
+        card = await repo.get_card_for_update(db, store_id, card_id)
+        if card is None:
+            raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
+        if card["review_status"] not in ("APPROVED", "NEEDS_REVIEW"):
+            raise ApiError(409, "CARD_NOT_PUBLISHED", "공개했거나 검수가 필요한 카드만 미공개로 바꿀 수 있습니다.")
+        await db.execute(
+            """
+            update knowledge_cards
+            set review_status = 'PENDING', published_version_id = null
+            where store_id = $1 and card_id = $2
+            """,
+            store_id,
+            card_id,
+        )
+        event_id = await repo.add_event(
+            db, store_id, card_id, user_id, "UNPUBLISH",
+            from_status=card["review_status"], to_status="PENDING",
+        )
+        row = await repo.mutation_row(db, store_id, card_id)
+    # 공개 판에 있던 카드만 다시 올려 R 색인에서 뺀다
+    if card["published_version_id"] is not None:
+        await _republish_after_status_change(
+            db, store_id=store_id, user_id=user_id, card_id=card_id,
+            kind="unpublish", event_id=event_id)
+    return _mutation(row)
 
 
 @router.post("/{card_id}/exclude", response_model=CardMutationResult)
@@ -688,7 +745,43 @@ async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFacts
             db, store_id, {p.fact.fact_id: p.fact.fact_revision_id for p in state.pinned},
             state.entity_id,
         )
-    return build_facts_view(state, rows, heads)
+    view = build_facts_view(state, rows, heads)
+    view.review_items = await load_review_items(db, store_id, [p.fact.fact_id for p in state.pinned])
+    return view
+
+
+@router.post("/{card_id}/conflicts/{conflict_id}/choose", response_model=FactEditResult)
+async def choose_review_value(
+    card_id: int, conflict_id: int, req: ReviewChooseRequest, db: Db, claims: OwnerClaims
+) -> FactEditResult:
+    """검수 고르기(계획 7 Task 6). 맞는 값을 남기고 고르지 않은 값은 '틀린 값'으로 기억해 카드에서 뺀다.
+
+    빼기는 사실 편집 저장과 같은 경로라 새 초안 판이 생기고, 남은 충돌이 없으면 검수 필요가 풀린다.
+    """
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    try:
+        async with db.transaction():
+            rejected = await fact_revisions.choose_conflict(
+                db, store_id, conflict_id, keep_fact_id=req.keep_fact_id, actor_id=user_id)
+            view = await get_card_facts(card_id, db, claims)
+            gone = [f.fact_revision_id for b in view.blocks for f in b.facts if f.fact_id == rejected]
+            blocks = [
+                EditBlock(kind=b.kind, items=[EditKeep(op="KEEP", fact_revision_id=f.fact_revision_id)
+                                              for f in b.facts if f.fact_id != rejected])
+                for b in view.blocks if b.kind != "RAW"
+            ]
+            edit = FactEditRequest(
+                expected_version_id=req.expected_version_id, idempotency_key=req.idempotency_key,
+                blocks=[b for b in blocks if b.items], deleted_fact_revision_ids=gone)
+            return await fact_edit.save_fact_edit(db, store_id, card_id=card_id, actor_id=user_id, req=edit)
+    except LookupError:
+        raise ApiError(404, "CONFLICT_NOT_FOUND", "고를 항목을 찾을 수 없습니다.") from None
+    except ValueError:
+        raise ApiError(409, "CONFLICT_ALREADY_DECIDED", "이미 정한 항목이에요. 화면을 새로 고쳐 주세요.") from None
+    except EditError as e:
+        raise ApiError(
+            e.status, e.code, fact_edit.message_for(e.code), details=e.details or None
+        ) from None
 
 
 @router.post("/{card_id}/facts/parse", response_model=FactParseResponse)
@@ -749,3 +842,91 @@ async def save_card_facts(
         raise ApiError(
             e.status, e.code, fact_edit.message_for(e.code), details=e.details or None
         ) from None
+
+
+def _bulk_error(error: ApiError) -> dict[str, str]:
+    return {"code": error.code, "message": error.message}
+
+
+@router.post("/bulk", response_model=BulkResult)
+async def bulk_cards(req: BulkRequest, db: Db, claims: OwnerClaims) -> BulkResult:
+    """카드 여러 장을 한 번에(계획 7 Task 4). 카드마다 성공·실패를 돌려준다.
+
+    공개는 한 번에 한 판으로 올리고, 실패하면 그때만 한 장씩 올려 어느 카드가 문제인지 가린다.
+    빼기·미공개·되돌리기·이동은 카드마다 기존 동작을 그대로 쓰고, 공개 판은 마지막에 한 번만 다시 올린다.
+    """
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    ids = list(dict.fromkeys(req.card_ids))
+    if req.action == "approve":
+        return await _bulk_approve(db, claims, store_id, user_id, ids)
+
+    single = {"unpublish": unpublish_card, "exclude": exclude_card, "restore": restore_card}
+    results: list[BulkItem] = []
+    deferred: list[tuple[int, int]] = []
+    token = _DEFERRED_REPUBLISH.set(deferred)
+    try:
+        for card_id in ids:
+            try:
+                if req.action == "move":
+                    row = await db.fetchrow(
+                        "select updated_at from knowledge_cards where store_id = $1 and card_id = $2", store_id, card_id)
+                    if row is None:
+                        raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
+                    done = await update_category(card_id, CategoryUpdateRequest(
+                        category_id=req.category_id, expected_updated_at=row["updated_at"]), db, claims)
+                else:
+                    done = await single[req.action](card_id, db, claims)
+                results.append(BulkItem(card_id=card_id, ok=True, review_status=done.review_status))
+            except ApiError as error:
+                results.append(BulkItem(card_id=card_id, ok=False, error=_bulk_error(error)))
+    finally:
+        _DEFERRED_REPUBLISH.reset(token)
+    if deferred:
+        first_card, first_event = deferred[0]
+        await _republish_after_status_change(
+            db, store_id=store_id, user_id=user_id, card_id=first_card,
+            kind=f"bulk-{req.action}", event_id=first_event)
+    return BulkResult(results=results)
+
+
+async def _bulk_approve(db, claims, store_id: int, user_id: int, ids: list[int]) -> BulkResult:
+    rows = {int(r["card_id"]): r for r in await db.fetch(
+        "select card_id, draft_version_id, review_status from knowledge_cards "
+        "where store_id = $1 and card_id = any($2::bigint[])", store_id, ids)}
+    results: dict[int, BulkItem] = {}
+    ready: list[int] = []
+    for card_id in ids:
+        row = rows.get(card_id)
+        if row is None:
+            results[card_id] = BulkItem(card_id=card_id, ok=False, error={"code": "CARD_NOT_FOUND", "message": "카드를 찾을 수 없습니다."})
+        elif row["review_status"] == "EXCLUDED":
+            results[card_id] = BulkItem(card_id=card_id, ok=False, error={"code": "CARD_EXCLUDED", "message": "제외된 카드를 먼저 복원해 주세요."})
+        elif row["draft_version_id"] is None:
+            results[card_id] = BulkItem(card_id=card_id, ok=False, error={"code": "CARD_DRAFT_MISSING", "message": "승인할 초안이 없습니다."})
+        else:
+            ready.append(card_id)
+    if ready:
+        member_id = await db.fetchval(
+            "select member_id from store_members where store_id = $1 and user_id = $2 and member_role = 'OWNER'",
+            store_id, user_id)
+        if member_id is None:
+            raise ApiError(403, "OWNER_ONLY", "카드는 사장님만 검수할 수 있습니다.")
+        changes = [CardChange(card_id=card_id, expected_draft_version_id=rows[card_id]["draft_version_id"],
+                              target_card_version_id=rows[card_id]["draft_version_id"]) for card_id in ready]
+        digest = hashlib.sha1(",".join(f"{c.card_id}:{c.target_card_version_id}" for c in changes).encode()).hexdigest()[:24]
+        result = await publish_cards(
+            get_pool(), store_id=store_id, member_id=int(member_id), actor_user_id=user_id,
+            changes=changes, idempotency_key=f"bulk-approve:{digest}",
+            usage_context=await card_usage_context(db, store_id, ready[0]))
+        if result.status in ("PUBLISHED", "ALREADY_APPLIED"):
+            for card_id in ready:
+                results[card_id] = BulkItem(card_id=card_id, ok=True, review_status="APPROVED")
+        else:
+            # 한 장이라도 막히면 판 전체가 롤백된다. 한 장씩 올려 어느 카드인지 가린다
+            for card_id in ready:
+                try:
+                    done = await approve_card(card_id, db, claims)
+                    results[card_id] = BulkItem(card_id=card_id, ok=True, review_status=done.review_status)
+                except ApiError as error:
+                    results[card_id] = BulkItem(card_id=card_id, ok=False, error=_bulk_error(error))
+    return BulkResult(results=[results[card_id] for card_id in ids])

@@ -83,13 +83,18 @@ async def _record_conflicts(conn: asyncpg.Connection, store_id: int, fact_id: in
         store_id, fact_id)
     if me is None:
         return 0
+    # 사장님이 '틀린 값'으로 고른 사실은 다시 묻지 않는다(계획 7 Task 6)
+    if await conn.fetchval("select exists(select 1 from fact_rejections where store_id = $1 and fact_id = $2)",
+                           store_id, fact_id):
+        return 0
     others = await conn.fetch(
         "select k.fact_id, r.quantity_value, r.quantity_unit, r.value_text, r.polarity "
         "from knowledge_facts k "
         "join fact_revisions r on r.store_id = k.store_id "
         "  and r.fact_revision_id = k.head_revision_id "
         "where k.store_id = $1 and k.slot_key = $2 and k.identity_key <> $3 "
-        "and k.fact_id <> $4 order by k.fact_id",
+        "and k.fact_id <> $4 and not exists (select 1 from fact_rejections x "
+        "  where x.store_id = k.store_id and x.fact_id = k.fact_id) order by k.fact_id",
         store_id, me["slot_key"], me["identity_key"], fact_id)
     added = 0
     for other in others:

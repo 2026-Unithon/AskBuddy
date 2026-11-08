@@ -10,15 +10,19 @@ import {
   ErrorInline,
   PageHeader,
   Screen,
+  Sheet,
   Skeleton,
   SwipeRow,
+  focusRing,
   useFeedback,
 } from "@/components/kit";
-import { apiErrorMessage, createProductCategory, deleteProductCategory, retryReclassificationJob } from "@/lib/api";
+import { apiErrorMessage, createProductCategory, deleteProductCategory, retryReclassificationJob, updateProductCategory, type ProductCategory } from "@/lib/api";
+import { KIND_LABEL, cardKind, type CardKind } from "@/lib/card-kind";
 import { productCategoriesQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 
 type Removing = { id: number; name: string };
+const KINDS: CardKind[] = ["RECIPE", "TASK", "INFO"];
 
 /** 카테고리(o17a·o17b). 추가 칸은 상태를 칸에서 바로 보이고, 지우기는 밀어서 확인 창 뒤. */
 export default function CategoriesPage() {
@@ -29,6 +33,8 @@ export default function CategoriesPage() {
   // 입력 초안(서버 값 아님)
   const [name, setName] = useState("");
   const [removing, setRemoving] = useState<Removing | null>(null);
+  // 종류를 고르는 시트를 연 카테고리(화면 상태)
+  const [kindFor, setKindFor] = useState<ProductCategory | null>(null);
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.productCategories(state.storeId) }),
@@ -48,6 +54,14 @@ export default function CategoriesPage() {
       setRemoving(null);
       feedback.toast("카테고리를 지웠어요");
       void refresh();
+    },
+  });
+  // 종류: 분류 AI 가 정한 값을 사장님이 고친다. 근무조 고르기·목록 두 칸이 이것을 따른다
+  const setKind = useMutation({
+    mutationFn: ({ id, kind }: { id: number; kind: CardKind }) => updateProductCategory(id, { kind }, state.token!),
+    onSuccess: async () => {
+      setKindFor(null);
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: queryKeys.cardDetails(state.storeId) })]);
     },
   });
   const retry = useMutation({
@@ -109,9 +123,19 @@ export default function CategoriesPage() {
       )}
       <ul className="flex flex-col gap-2">
         {categories.data?.items.map((category) => {
+          const kind = KIND_LABEL[cardKind(category)];
           const row = (
-            <div className="flex min-h-14 items-center rounded-[20px] bg-surface px-[18px] shadow-card">
-              <p className="truncate text-[16px] font-bold text-ink">{category.name}</p>
+            <div className="flex min-h-14 items-center gap-2 rounded-[20px] bg-surface pl-[18px] pr-3 shadow-card">
+              <p className="min-w-0 flex-1 truncate text-[16px] font-bold text-ink">{category.name}</p>
+              <button
+                type="button"
+                aria-label={`${category.name} 종류 바꾸기, 지금 ${kind}`}
+                onClick={() => setKindFor(category)}
+                className={`relative flex h-8 shrink-0 items-center gap-1 rounded-full bg-empty px-3 text-[13px] font-bold text-primary before:absolute before:inset-x-0 before:-inset-y-1.5 ${focusRing}`}
+              >
+                {kind}
+                <span aria-hidden>▾</span>
+              </button>
             </div>
           );
           return (
@@ -134,6 +158,25 @@ export default function CategoriesPage() {
           );
         })}
       </ul>
+      <Sheet open={kindFor !== null} onClose={() => !setKind.isPending && setKindFor(null)} title={`'${kindFor?.name ?? ""}'는 어떤 카드인가요?`}>
+        {setKind.error && <ErrorInline message={apiErrorMessage(setKind.error, "종류를 바꾸지 못했어요.")} />}
+        <div className="flex flex-col gap-2">
+          {KINDS.map((kind) => {
+            const current = kindFor !== null && cardKind(kindFor) === kind;
+            return (
+              <Button
+                key={kind}
+                variant={current ? "primary" : "secondary"}
+                loading={setKind.isPending && setKind.variables?.kind === kind}
+                disabled={setKind.isPending}
+                onClick={() => kindFor && (current ? setKindFor(null) : setKind.mutate({ id: kindFor.category_id, kind }))}
+              >
+                {KIND_LABEL[kind]}
+              </Button>
+            );
+          })}
+        </div>
+      </Sheet>
       <ConfirmDialog
         open={Boolean(removing)}
         title={`'${removing?.name ?? ""}' 카테고리를 지울까요?`}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ReviewStatus = Literal["PENDING", "NEEDS_REVIEW", "APPROVED", "EXCLUDED"]
 
@@ -11,6 +11,8 @@ ReviewStatus = Literal["PENDING", "NEEDS_REVIEW", "APPROVED", "EXCLUDED"]
 class CardCategory(BaseModel):
     category_id: int
     name: str
+    # 카테고리 종류(계획 7 Task 2). 비어 있으면 이름 규칙
+    kind: str | None = None
 
 
 class CardSource(BaseModel):
@@ -106,3 +108,30 @@ class CardMutationResult(BaseModel):
     published_version_id: int | None = None
     updated_at: datetime
     undo_until: datetime | None = None
+
+
+class BulkRequest(BaseModel):
+    """카드 일괄 처리(계획 7 Task 4). 이동은 category_id 가 있어야 한다."""
+
+    action: Literal["approve", "unpublish", "exclude", "restore", "move"]
+    card_ids: list[int] = Field(min_length=1, max_length=200)
+    category_id: int | None = None
+
+    @model_validator(mode="after")
+    def _move_has_category(self) -> "BulkRequest":
+        if self.action == "move" and self.category_id is None:
+            raise ValueError("옮길 카테고리를 골라 주세요.")
+        if any(card_id <= 0 for card_id in self.card_ids):
+            raise ValueError("카드 번호가 올바르지 않습니다.")
+        return self
+
+
+class BulkItem(BaseModel):
+    card_id: int
+    ok: bool
+    review_status: str | None = None
+    error: dict[str, str] | None = None
+
+
+class BulkResult(BaseModel):
+    results: list[BulkItem]

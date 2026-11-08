@@ -15,15 +15,18 @@ import {
   PageHeader,
   RefreshingHint,
   Screen,
+  Sheet,
   Skeleton,
   TabBar,
+  TextButton,
   useFeedback,
 } from "@/components/kit";
+import { SelectBar, useCardSelection } from "@/components/owner/card-select";
 import { CardTile, tileStatus } from "@/components/owner/card-tile";
-import { apiErrorMessage, mutateProductCard, type CardFilters, type CardListItem } from "@/lib/api";
+import { apiErrorMessage, bulkCards, mutateProductCard, type BulkAction, type CardFilters, type CardListItem } from "@/lib/api";
 import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
 import { useCardReviewCount } from "@/lib/card-review-count";
-import { isRecipeCategory } from "@/lib/recipe-category";
+import { cardKind } from "@/lib/card-kind";
 import { useApp } from "@/lib/store";
 
 // 카드 상태(2026-11-06 사용자): 공개 = 살아 있는 카드, 검수 필요 = 뭔가 이상한 카드(제안 걸린 카드 포함),
@@ -62,6 +65,10 @@ function CardsScreen() {
   }
   // 누르는 즉시 숨긴 카드(삭제·공개 중). 실패하면 되살린다
   const [hidden, setHidden] = useState<Set<number>>(new Set());
+  // 선택 모드 켜짐, 일괄 처리 실패 이유, 이동 시트(화면 상태)
+  const [selecting, setSelecting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
 
   const filters = useMemo<CardFilters>(
     () => ({ status, jobId, categoryId, query: queryText || undefined }),
@@ -137,6 +144,25 @@ function CardsScreen() {
     sending.current.add(cardId);
     publish.mutate(cardId);
   };
+  // 미공개(공개 내리기): 직원 화면에서 바로 빠진다. 5초 안에 되돌리면 다시 공개
+  const unpublish = useMutation({
+    mutationFn: (cardId: number) => mutateProductCard(cardId, "unpublish", state.token!),
+    onMutate: (cardId) => setHiddenFor(cardId, status === "approved"),
+    onSuccess: (_, cardId) =>
+      snackbar({
+        message: "미공개로 바꿨어요",
+        actionLabel: "되돌리기",
+        onAction: () => {
+          setHiddenFor(cardId, false);
+          publishOnce(cardId);
+        },
+      }),
+    onError: (error, cardId) => {
+      setHiddenFor(cardId, false);
+      toast(apiErrorMessage(error, "미공개로 바꾸지 못했어요"));
+    },
+    onSettled: refresh,
+  });
   const publish = useMutation({
     mutationFn: (cardId: number) => mutateProductCard(cardId, "approve", state.token!),
     onMutate: (cardId) => setPublishingFor(cardId, true),
@@ -189,10 +215,89 @@ function CardsScreen() {
   const sections = [...groups.entries()].sort(([a], [b]) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
   const reviewCount = review.count;
   const filtered = Boolean(jobId || categoryId || queryText) || status !== "all";
+  // 선택 모드(계획 7 Task 5): 화면에 보이는 순서가 끌기 범위·전체 선택의 기준
+  const cardOrder = sections.flatMap(([, list]) => list.map((card) => card.card_id));
+  const selection = useCardSelection(cardOrder);
+  const count = selection.selected.size;
+  const ACTION_WORD: Record<BulkAction, string> = { approve: "공개", unpublish: "미공개로 바꾸", exclude: "삭제", restore: "되돌리", move: "옮기" };
+  const bulk = useMutation({
+    mutationFn: (body: { action: BulkAction; card_ids: number[]; category_id?: number }) => bulkCards(body, state.token!),
+    onMutate: () => setBulkError(null),
+    onSuccess: (result, body) => {
+      const failed = result.results.filter((r) => !r.ok);
+      const done = result.results.filter((r) => r.ok).map((r) => r.card_id);
+      if (failed.length) {
+        // 실패한 카드만 고른 채로 남기고 이유를 알린다
+        selection.setSelected(new Set(failed.map((r) => r.card_id)));
+        setBulkError(`${failed.length}장은 ${ACTION_WORD[body.action]}하지 못했어요. ${failed[0].error?.message ?? ""}`.trim());
+      } else {
+        setSelecting(false);
+        selection.clear();
+      }
+      if (!done.length) return;
+      if (body.action === "exclude") {
+        snackbar({
+          message: `${done.length}장 삭제했어요`,
+          actionLabel: "되돌리기",
+          onAction: () => bulk.mutate({ action: "restore", card_ids: done }),
+        });
+      } else if (body.action !== "restore") {
+        toast(body.action === "move" ? `${done.length}장 옮겼어요` : body.action === "approve" ? `${done.length}장 공개했어요` : `${done.length}장 미공개로 바꿨어요`);
+      }
+    },
+    onError: (error) => setBulkError(apiErrorMessage(error, "한꺼번에 처리하지 못했어요.")),
+    onSettled: refresh,
+  });
+  const runBulk = (action: BulkAction, categoryIdForMove?: number) =>
+    bulk.mutate({ action, card_ids: cardOrder.filter((id) => selection.selected.has(id)), ...(categoryIdForMove ? { category_id: categoryIdForMove } : {}) });
 
   return (
-    <Screen tabBar={<TabBar tabs={OWNER_TABS} />} onRefresh={() => Promise.all([cards.refetch(), review.refetch()])}>
-      <PageHeader title="카드" />
+    <Screen
+      tabBar={
+        selecting ? (
+          <SelectBar
+            count={count}
+            busy={bulk.isPending}
+            onMove={() => setMoving(true)}
+            onPublish={() => runBulk("approve")}
+            onUnpublish={() => runBulk("unpublish")}
+            onDelete={() => runBulk("exclude")}
+          />
+        ) : (
+          <TabBar tabs={OWNER_TABS} />
+        )
+      }
+      onRefresh={() => Promise.all([cards.refetch(), review.refetch()])}
+    >
+      <PageHeader
+        title={selecting ? (count ? `${count}장 선택` : "카드 선택") : "카드"}
+        action={
+          selecting ? (
+            <div className="flex items-center gap-3">
+              <TextButton onClick={selection.toggleAll}>{selection.allSelected ? "전체 해제" : "전체 선택"}</TextButton>
+              <TextButton
+                className="font-bold text-primary!"
+                onClick={() => {
+                  setSelecting(false);
+                  selection.clear();
+                  setBulkError(null);
+                }}
+              >
+                완료
+              </TextButton>
+            </div>
+          ) : (
+            <TextButton disabled={!cards.data || visible.length === 0} onClick={() => setSelecting(true)}>
+              선택
+            </TextButton>
+          )
+        }
+      />
+      {bulkError && (
+        <p role="alert" className="rounded-[14px] bg-danger-50 px-4 py-3 text-[14px] font-semibold text-danger-700 [word-break:keep-all]">
+          {bulkError}
+        </p>
+      )}
       <form role="search" className="flex w-full items-center gap-2 rounded-full bg-surface px-4 py-3 shadow-card" onSubmit={(event) => event.preventDefault()}>
         <Icon name="search" size={16} className="text-ink-muted" />
         <input
@@ -257,11 +362,24 @@ function CardsScreen() {
             <h2 id={id} className="border-b-2 border-ink pb-1.5 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">
               {name}
             </h2>
-            <div className={`grid gap-3 ${isRecipeCategory(name) ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div
+              className={`grid gap-3 ${cardKind(list[0]?.category ?? { name }) === "RECIPE" ? "grid-cols-2" : "grid-cols-1"}`}
+              {...(selecting ? selection.containerProps : {})}
+            >
               {list.map((card) => {
                 const proposal = proposalCards.has(card.card_id);
                 const tile = tileStatus(card, proposal);
                 const canPublish = tile === "pending" && (status === "all" || status === "pending") && !publishing.has(card.card_id);
+                if (selecting) {
+                  return (
+                    <CardTile
+                      key={card.card_id}
+                      card={card}
+                      status={tile}
+                      select={{ selected: selection.selected.has(card.card_id), onToggle: () => selection.toggle(card.card_id) }}
+                    />
+                  );
+                }
                 return (
                   <CardTile
                     key={card.card_id}
@@ -269,7 +387,13 @@ function CardsScreen() {
                     status={tile}
                     proposal={proposal}
                     right={canPublish ? { label: "공개", ariaLabel: `${card.title} 공개`, tone: "primary", onAction: () => publishOnce(card.card_id) } : undefined}
-                    left={tile === "pending" && status === "pending" ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => remove.mutate(card.card_id) } : undefined}
+                    left={
+                      tile === "pending" && status === "pending"
+                        ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => remove.mutate(card.card_id) }
+                        : tile === "approved" && card.review_status === "APPROVED" && (status === "all" || status === "approved") && !unpublish.isPending
+                          ? { label: "미공개", ariaLabel: `${card.title} 미공개`, tone: "neutral", onAction: () => unpublish.mutate(card.card_id) }
+                          : undefined
+                    }
                   />
                 );
               })}
@@ -283,6 +407,23 @@ function CardsScreen() {
         </Button>
       )}
       <RefreshingHint active={cards.isRefetching && !cards.isFetchingNextPage} />
+      <Sheet open={moving} onClose={() => setMoving(false)} title="어디로 옮길까요?">
+        <div className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto">
+          {categories.data?.items.map((category) => (
+            <Button
+              key={category.category_id}
+              variant="secondary"
+              disabled={bulk.isPending}
+              onClick={() => {
+                setMoving(false);
+                runBulk("move", category.category_id);
+              }}
+            >
+              {category.name}
+            </Button>
+          ))}
+        </div>
+      </Sheet>
     </Screen>
   );
 }

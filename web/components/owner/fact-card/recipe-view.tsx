@@ -2,7 +2,7 @@
 
 import { Fragment, type ReactNode } from "react";
 import { Surface } from "@/components/kit";
-import type { CompactRecipe } from "./fact-group";
+import { PICK_NOTE, type CompactRecipe } from "./fact-group";
 
 // 양(숫자+양 단위)만 굵게. 직원이 만들 때 눈으로 찾는 건 넣는 양이다(온도·번호는 굵게 하지 않는다)
 const AMOUNT = /\d[\d.,]*\s*(?:ml|mL|g|kg|oz|온즈|펌프|샷|스쿱|개)/g;
@@ -46,7 +46,7 @@ export function RecipeView({ recipe }: { recipe: CompactRecipe }) {
                     <li className="relative max-w-full [word-break:keep-all]">
                       {withAmounts(step.text)}
                       {step.note && (
-                        <span className="absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.3] text-ink-muted">{step.note}</span>
+                        <span className={`absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.3] ${step.note === PICK_NOTE ? "font-bold text-warn-700" : "text-ink-muted"}`}>{step.note}</span>
                       )}
                     </li>
                   </Fragment>
@@ -55,7 +55,13 @@ export function RecipeView({ recipe }: { recipe: CompactRecipe }) {
             )}
             {section.extras.length > 0 && (
               <p className="text-[12px] leading-[1.4] text-ink-muted [word-break:keep-all]">
-                {section.extras.map((extra) => `${extra.label} ${extra.value}`).join(", ")}
+                {section.extras.map((extra, j) => (
+                  <span key={extra.label}>
+                    {j > 0 && ", "}
+                    {extra.label}{" "}
+                    <span className={extra.value === PICK_NOTE ? "font-bold text-warn-700" : undefined}>{extra.value}</span>
+                  </span>
+                ))}
               </p>
             )}
           </Surface>

@@ -103,6 +103,8 @@ async def load_entity_groups(conn, store_id: int, entity_ids: Sequence[int]) -> 
         "left join fact_revision_meta m on m.store_id = r.store_id "
         "  and m.fact_revision_id = r.fact_revision_id "
         "where k.store_id = $1 and k.entity_id = any($2::bigint[]) "
+        # 사장님이 고르지 않은 '틀린 값'은 카드에 넣지 않는다(계획 7 Task 6)
+        "  and not exists (select 1 from fact_rejections x where x.store_id = k.store_id and x.fact_id = k.fact_id) "
         "order by k.entity_id, r.fact_revision_id",
         store_id, ids)
 

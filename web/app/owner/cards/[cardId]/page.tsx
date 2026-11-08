@@ -28,7 +28,8 @@ import { useApp } from "@/lib/store";
 import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
 import { evidenceNames } from "@/components/owner/fact-card/fact-row";
 import { compactRecipe } from "@/components/owner/fact-card/fact-group";
-import { isRecipeCategory } from "@/lib/recipe-category";
+import { ReviewPicker } from "@/components/owner/fact-card/review-picker";
+import { cardKind } from "@/lib/card-kind";
 import { pressable } from "@/components/kit/buttons";
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
@@ -60,7 +61,7 @@ export default function OwnerCardPage() {
 
   const card = detail.data;
   const status = useMutation({
-    mutationFn: (action: "approve" | "exclude" | "restore") => mutateProductCard(cardId, action, state.token!),
+    mutationFn: (action: "approve" | "exclude" | "restore" | "unpublish") => mutateProductCard(cardId, action, state.token!),
     onSuccess: async (_result, action) => {
       // 마지막 사실을 빼려다 카드를 지운 경우: 편집 초안을 닫고, 삭제는 5초 되돌리기만 남긴다
       if (action === "exclude") {
@@ -110,6 +111,7 @@ export default function OwnerCardPage() {
   const shown = card.draft ?? card.published;
   // 레시피 한눈에 보기면 가격은 제목 옆에(2026-11-08 사용자 스케치)
   const recipe = card.fact_card && factEditor.facts.data ? compactRecipe(factEditor.facts.data.blocks) : null;
+  const pickItems = card.fact_card ? (factEditor.facts.data?.review_items ?? []) : [];
   const price = recipe && !factEditor.editing ? recipe.price : null;
   const title = shown?.title ?? "";
   const content = shown?.content ?? "";
@@ -154,10 +156,22 @@ export default function OwnerCardPage() {
                   retrying={status.isPending}
                 />
               )}
-              {/* 검수 필요의 '미공개'는 서버 전환이 생긴 뒤(백로그) */}
-              <Button loading={status.isPending && status.variables === "approve"} onClick={() => status.mutate("approve")}>
-                공개
-              </Button>
+              {card.review_status === "NEEDS_REVIEW" ? (
+                // o07b: 검수 필요는 공개(왼쪽, 초록)와 미공개(오른쪽, 흰색) 중 고른다
+                <div className="flex gap-2">
+                  {/* 고를 항목이 남았으면 공개하지 않는다(정하지 않은 값이 직원에게 가지 않게) */}
+                  <Button className="flex-1" loading={status.isPending && status.variables === "approve"} disabled={status.isPending || pickItems.length > 0} onClick={() => status.mutate("approve")}>
+                    공개
+                  </Button>
+                  <Button className="flex-1" variant="secondary" loading={status.isPending && status.variables === "unpublish"} disabled={status.isPending} onClick={() => status.mutate("unpublish")}>
+                    미공개
+                  </Button>
+                </div>
+              ) : (
+                <Button loading={status.isPending && status.variables === "approve"} onClick={() => status.mutate("approve")}>
+                  공개
+                </Button>
+              )}
             </>
           )
         )
@@ -197,7 +211,11 @@ export default function OwnerCardPage() {
           {statusLine.text}
         </p>
       )}
-      {card.review_status === "NEEDS_REVIEW" && (
+      {/* 고를 항목이 있으면 사유 상자 대신 바로 고르는 상자(계획 7 Task 6) */}
+      {card.review_status === "NEEDS_REVIEW" && pickItems.length > 0 && factEditor.facts.data && !factEditor.editing && (
+        <ReviewPicker cardId={cardId} versionId={factEditor.facts.data.version_id} items={pickItems} />
+      )}
+      {card.review_status === "NEEDS_REVIEW" && pickItems.length === 0 && (
         <div className="rounded-[14px] border-l-4 border-warn-500 bg-warn-50 px-4 py-3">
           <p className="text-[15px] font-bold text-warn-700">확인해 주세요</p>
           <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{reviewReasonText(card.needs_review_reason)}</p>
@@ -210,8 +228,8 @@ export default function OwnerCardPage() {
           <NumberedContent content={content} />
         </Surface>
       )}
-      {/* 레시피는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자) */}
-      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !recipe && !isRecipeCategory(card.category?.name ?? "") && <CardAssignment cardId={cardId} />}
+      {/* 레시피·정보는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자, 계획 7 종류) */}
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !recipe && cardKind(card.category) === "TASK" && <CardAssignment cardId={cardId} />}
       {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>

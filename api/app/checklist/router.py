@@ -285,10 +285,14 @@ async def put_check(body: CheckRequest, db: Db, claims: ApiClaims) -> dict[str, 
     keys = line_keys(scoped)
     async with db.transaction():
         await repo.apply_checks(db, member.store_id, today, member.user_id, items, late=False, personal=member.personal)
-        # 범위를 다 체크하면 서버가 제출을 자동 기록한다 (C4). 이미 제출했으면 그대로 둔다
+        # 범위를 다 체크하면 서버가 제출을 자동 기록한다 (C4).
+        # 이미 제출했으면 체크를 바꿀 때마다 제출 기록의 개수를 지금 체크에 맞춘다(풀었는데 100% 로 남지 않게)
         checked = await repo.checked_keys(db, member.store_id, today, [c.card_version_id for c in scoped])
         submission = await repo.get_submission(db, member.store_id, today, member.user_id)
-        if submission is None and keys and keys <= checked:
+        if submission is not None:
+            await repo.update_submission_counts(db, member.store_id, today, member.user_id,
+                                                total=len(keys), done=len(keys & checked))
+        elif keys and keys <= checked:
             submission = await repo.insert_submission(
                 db, member.store_id, today, member.user_id, None if scope.all else list(scope.shift_ids),
                 len(keys), len(keys & checked), late=False, personal=member.personal,

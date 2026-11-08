@@ -6,10 +6,10 @@ const NOW = '2026-10-31T05:00:00Z';
 const STORE = { store_id: 1, store_name: '골목커피 연남점', guide_completed: true, category_version: 1 };
 const USERS = { OWNER: { user_id: 1, name: '김사장' }, STAFF: { user_id: 2, name: '박지호' } };
 const CATEGORIES = [
-  { category_id: 10, name: '음료 레시피', is_system: false, sort_order: 1 },
-  { category_id: 11, name: '오픈 마감', is_system: false, sort_order: 2 },
-  { category_id: 12, name: '재고 위치', is_system: false, sort_order: 3 },
-  { category_id: 13, name: '기타', is_system: true, sort_order: 4 },
+  { category_id: 10, name: '음료 레시피', is_system: false, sort_order: 1, kind: 'RECIPE' },
+  { category_id: 11, name: '오픈 마감', is_system: false, sort_order: 2, kind: 'TASK' },
+  { category_id: 12, name: '재고 위치', is_system: false, sort_order: 3, kind: null },
+  { category_id: 13, name: '기타', is_system: true, sort_order: 4, kind: null },
 ];
 // 사실 카드(카드 1) 보기. verify_w3b_card_facts_ui.cjs 의 factCardView 구조를 옮겼다.
 const origin = (o) => ({ kind: 'SOURCE', source_id: null, source_title: null, source_type: null, source_availability: null,
@@ -132,11 +132,13 @@ function syntheticApi(role, overrides = {}) {
   const calls = [];
   const user = USERS[role];
 
-  const listItem = (c) => ({ card_id: c.card_id, review_status: c.review_status, title: c.title, content: c.content, category: category(c.category_id),
+  // 카드에 붙는 카테고리는 지금 상태(사장님이 종류를 바꾸면 카드에도 보인다)
+  const stateCategory = (id) => { const c = state.categories.find((x) => x.category_id === id) ?? CATEGORIES.find((x) => x.category_id === id); return { category_id: c.category_id, name: c.name, kind: c.kind ?? null }; };
+  const listItem = (c) => ({ card_id: c.card_id, review_status: c.review_status, title: c.title, content: c.content, category: stateCategory(c.category_id),
     assignment_type: 'AUTOMATIC', job_id: 7, source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null },
     has_evidence: true, needs_review_reason: c.needs_review_reason ?? null, updated_at: NOW });
   const version = (c) => ({ version_id: c.card_id * 10, version_no: 1, title: c.title, content: c.content, change_source: 'EXTRACT', created_at: NOW });
-  const detail = (c) => ({ ...listItem(c), fact_card: c.card_id === 1 || (state.singleFactCard && c.card_id === 5), draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
+  const detail = (c) => ({ ...listItem(c), fact_card: c.card_id === 1 || (state.singleFactCard && c.card_id === 5) || (state.pickCard && c.card_id === 3), draft: version(c), published: c.review_status === 'APPROVED' ? version(c) : null, events: [],
     evidence: [{ evidence_id: 1, locator_type: 'PAGE', locator: {}, excerpt: c.content.split('\n')[0], source: { source_id: 1, title: '레시피 메모.jpg', source_type: 'SCAN', read_url: null, source_availability: 'AVAILABLE' } }] });
   const roadmapItems = state.cards.filter((c) => c.review_status === 'APPROVED').map((c) => ({ item_id: c.card_id + 10, card_id: c.card_id, published_version_id: c.card_id * 10, title: c.title, status: 'NOT_STARTED', category_id: c.category_id }));
   const checklistToday = () => ({
@@ -229,7 +231,7 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
       payload = detail(c);
-    } else if (/^\/cards\/\d+\/(approve|exclude|restore)$/.test(p) && m === 'POST') {
+    } else if (/^\/cards\/\d+\/(approve|exclude|restore|unpublish)$/.test(p) && m === 'POST') {
       const [, , id, action] = p.split('/');
       const c = state.cards.find((x) => x.card_id === Number(id));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
@@ -238,8 +240,19 @@ function syntheticApi(role, overrides = {}) {
       if (action === 'approve' && state.failApprove?.includes(c.card_id)) return reply({ error: { message: '공개 실패' } }, 409);
       // 서버(api/app/cards/router.py)처럼 restore 는 공개 전 카드를 빼기 전 상태(검수 필요면 검수 필요)로 되돌린다
       if (action === 'exclude') c.beforeExclude = c.review_status;
-      c.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', restore: c.beforeExclude === 'NEEDS_REVIEW' ? 'NEEDS_REVIEW' : 'PENDING' }[action];
+      c.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', unpublish: 'PENDING', restore: c.beforeExclude === 'NEEDS_REVIEW' ? 'NEEDS_REVIEW' : 'PENDING' }[action];
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: c.review_status === 'APPROVED' ? c.card_id * 10 : null, updated_at: NOW, undo_until: null };
+    } else if (p === '/cards/bulk' && m === 'POST') {
+      // 서버(api/app/cards/router.py bulk_cards)처럼 카드마다 성공·실패
+      const next = { approve: 'APPROVED', unpublish: 'PENDING', exclude: 'EXCLUDED', restore: 'PENDING' };
+      payload = { results: body.card_ids.map((id) => {
+        const c = state.cards.find((x) => x.card_id === id);
+        if (!c) return { card_id: id, ok: false, error: { code: 'CARD_NOT_FOUND', message: '카드를 찾을 수 없습니다.' } };
+        if (state.failBulkIds?.includes(id)) return { card_id: id, ok: false, error: { code: 'CARD_NO_PROVENANCE', message: '출처를 확인할 수 없는 카드는 아직 공개할 수 없습니다.' } };
+        if (body.action === 'move') c.category_id = body.category_id;
+        else c.review_status = next[body.action];
+        return { card_id: id, ok: true, review_status: c.review_status };
+      }) };
     } else if (/^\/cards\/\d+\/category$/.test(p) && m === 'PATCH') {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       c.category_id = body.category_id;
@@ -248,6 +261,21 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/cards/1/facts' && m === 'PUT') {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
+    } else if (p === '/cards/3/facts' && m === 'GET' && state.pickCard) {
+      // 충돌이 있는 검수 필요 표 레시피(계획 7 Task 6). 고르면 틀린 값 줄이 빠지고 고를 항목이 사라진다
+      const v = { temperature: null, size: null };
+      const row = (id, sentence) => factRow({ fact_revision_id: id * 10, fact_id: id, position: id, sentence, variant: v, origins: [memo(1)] });
+      const facts = [row(31, '컵=20'), row(32, '토핑=일반휘핑(30g)'), row(33, '토핑=일반휘핑(90g)'), row(34, '얼음=가득')].filter((f) => f.fact_id !== state.pickRejected);
+      payload = { ...factCardView(state.pickVersion ?? 30, state.cards[2].review_status), card_id: 3, title: '마감 머신 청소', published_version_id: null,
+        blocks: [{ block_id: 'p1', kind: 'QUANTITIES', order: 1, variant: v, facts },
+                 { block_id: 'p2', kind: 'STEPS', order: 2, variant: v, facts: ['블랜더', '믹싱', '컵'].map((n, i) => factRow({ fact_revision_id: 400 + i, fact_id: 40 + i, position: i, sentence: '제조순서=블랜더 → 믹싱 → 컵', value: n, step_order: i + 1, variant: v, origins: [memo(1)] })) }],
+        review_items: state.pickRejected ? [] : [{ item_id: 'conflict-7', kind: 'CHOOSE', conflict_id: 7, label: '토핑', options: [{ fact_id: 32, text: '일반휘핑(30g)' }, { fact_id: 33, text: '일반휘핑(90g)' }] }] };
+    } else if (p === '/cards/3/conflicts/7/choose' && m === 'POST') {
+      if (state.failPick) return reply({ error: { code: 'FACT_EDIT_CONFLICT', message: '그사이 카드가 바뀌었어요.' } }, 409);
+      state.pickRejected = body.keep_fact_id === 32 ? 33 : 32;
+      state.pickVersion = 31;
+      state.cards[2].review_status = 'PENDING';
+      payload = { card_id: 3, review_status: 'PENDING', draft_version_id: 31, published_version_id: null, updated_at: NOW, undo_until: null, changed: true, edit_id: 77, revisions: [] };
     } else if (p === '/cards/5/facts' && m === 'GET' && state.singleFactCard) {
       // 사실이 하나뿐인 카드: 그 줄을 빼면 카드 지우기로 간다
       payload = { ...factCardView(50, state.cards[4].review_status), card_id: 5, title: '원두 보관 위치', published_version_id: null,
@@ -262,6 +290,11 @@ function syntheticApi(role, overrides = {}) {
     } else if (/^\/reclassification-jobs\/\d+\/retry$/.test(p) && m === 'POST') {
       if (state.failRetry) return reply({ error: { message: '재분류 재시도 실패' } }, 409);
       state.reclassification = { ...state.reclassification, status: 'QUEUED' }; payload = state.reclassification;
+    } else if (/^\/categories\/\d+$/.test(p) && m === 'PATCH') {
+      const c = state.categories.find((x) => x.category_id === Number(p.split('/')[2]));
+      if (!c) return reply({ error: { message: '없는 카테고리' } }, 404);
+      Object.assign(c, body);
+      payload = { category: c, version: 1, reclass_job_id: null };
     } else if (/^\/categories\/\d+$/.test(p) && m === 'DELETE') {
       if (state.failCategoryDelete) return reply({ error: { message: '카테고리 삭제 실패' } }, 409);
       const id = Number(p.split('/')[2]);
@@ -282,7 +315,7 @@ function syntheticApi(role, overrides = {}) {
       const item = roadmapItems.find((x) => x.item_id === Number(p.split('/').at(-1)));
       if (!item) return reply({ error: { message: '없는 항목' } }, 404);
       const c = state.cards.find((x) => x.card_id === item.card_id);
-      payload = { ...item, content: state.itemContent[item.item_id] ?? c.content, category: category(c.category_id), evidence: [], return_to: { path: '/staff/recipes', item_id: item.item_id } };
+      payload = { ...item, content: state.itemContent[item.item_id] ?? c.content, category: stateCategory(c.category_id), evidence: [], return_to: { path: '/staff/recipes', item_id: item.item_id } };
     }
     else if (p === '/learn/v2/notifications' && m === 'GET') payload = { notifications: state.rNotifications, next_after: null };
     else if (/^\/learn\/v2\/notifications\/\w+\/read$/.test(p) && m === 'POST') {

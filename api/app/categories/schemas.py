@@ -3,11 +3,20 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+CategoryKind = Literal["RECIPE", "TASK", "INFO"]
+
+
 class CategoryItem(BaseModel):
     category_id: int
     name: str
     is_system: bool
     sort_order: int
+    # 레시피/할 일/정보. 비어 있으면 화면이 이름 규칙으로 본다(계획 7 Task 2)
+    kind: CategoryKind | None = None
+
+
+class UpdateCategoryRequest(BaseModel):
+    kind: CategoryKind
 
 
 class ReclassificationSummary(BaseModel):
