@@ -83,6 +83,14 @@ def test_price_turn_order_names_the_menu_and_cites_its_approved_price(menu,first
     assert answer.action=='ANSWER' and menu in answer.message and '3,000원' in answer.message
     assert [c.fact_revision_id for c in answer.citations]==[fact.fact_revision_id]
 
+    # Receipt 56 had a price predicate on a rendered identity line with no price.
+    wrong=fact.model_copy(update={'assertion':f'구분=커피ICE ; 제품명={menu}'})
+    snapshot=snapshot.model_copy(update={'fact_revisions':(wrong,)})
+    snapshot=snapshot.model_copy(update={'snapshot_hash':snapshot_digest(snapshot)})
+    invalid=decide(replace(search,snapshot=snapshot),store_id=1,question=f'{first} {reply}',
+                   confirmed_slots=slots,context_id=uuid4(),context_verified=True,clarify_turns=1)
+    assert invalid.plan.action=='ESCALATE'
+
 
 def test_model_evidence_keeps_revisions_variants_and_constraints():
     from copy import deepcopy
