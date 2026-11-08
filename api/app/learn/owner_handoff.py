@@ -45,7 +45,7 @@ async def _terminal(conn,*,store_id:int,event_id:int,owner_answer_id:int,reason:
             destination=OWNER_QUESTIONS)
 
 
-async def claim_owner_event(pool, *, store_id:int) -> dict|None:
+async def claim_owner_event(pool, *, store_id:int, event_id:int|None=None) -> dict|None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             event=await conn.fetchrow("""select e.event_id,e.owner_answer_id,r.question_id,r.revision_no,
@@ -55,9 +55,10 @@ async def claim_owner_event(pool, *, store_id:int) -> dict|None:
                 left join outbox_consumptions c on c.store_id=e.store_id and c.event_id=e.event_id and c.consumer=$2
                 left join outbox_leases l on l.store_id=e.store_id and l.event_id=e.event_id and l.consumer=$2
                 where e.store_id=$1 and e.event_type='OWNER_ANSWER_SUBMITTED' and c.event_id is null
+                  and ($3::bigint is null or e.event_id=$3)
                   and (l.event_id is null or l.leased_until<=clock_timestamp())
                   and (l.last_error is null or l.last_error not like 'TERMINAL:%')
-                order by e.event_id for update of e skip locked limit 1""",store_id,CONSUMER)
+                order by e.event_id for update of e skip locked limit 1""",store_id,CONSUMER,event_id)
             if event is None:return None
             latest=await conn.fetchval("""select max(revision_no) from r_owner_answer_revisions
                 where store_id=$1 and question_id=$2""",store_id,event['question_id'])
