@@ -445,6 +445,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
     try:
         async with asyncio.timeout_at(deadline):
             store_id,member_id=await scope(pool,claims,user_id)
+            from app.learn.general_semantics import settings_for_chat_store
+            settings=await settings_for_chat_store(settings,store_id,pool)
             async with request_lease(pool,store_id,user_id):
                 completed=await saved_reply(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                     request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id,
@@ -544,7 +546,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 user_turns=(context.context.original_question,req.question) if context else (),
                                 context_id=choice.context_id if choice else None,context_verified=context is not None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
-                        from app.learn.general_semantics import general_decision
+                        from app.learn.general_semantics import product_general_decision as general_decision
                         general_audit=None
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
