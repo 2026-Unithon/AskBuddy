@@ -14,6 +14,7 @@ from app.contracts.hashing import verify_snapshot_hash
 from app.learn.grounded_calculations import Calculation, calculate
 from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions
 from app.learn.procedure_scope import Step, approved_first_steps, procedure_scope, step_refs
+from app.learn.operating_guidance import Guidance, resolve_guidance
 
 
 class AnswerReferenceError(ValueError):
@@ -66,6 +67,7 @@ class ResolvedSelection:
     literal_card_id: str | None = None
     procedure_steps: tuple[Step,...] = ()
     procedure_previous: str | None = None
+    operating_guidance: Guidance | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,15 @@ def validate_answer_for_question(
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    if query.operating_guidance is not None:
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        guidance = resolve_guidance(snapshot, query.question, query.operating_guidance.previous)
+        if (guidance is None or guidance != query.operating_guidance or plan.selected_blocks != guidance.refs
+                or query.predicate != 'operating_steps' or query.procedure_steps or query.parts
+                or query.calculations or query.conclusions or query.literal_card_id is not None):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        return plan
     if query.procedure_steps:
         try:verify_snapshot_hash(snapshot)
         except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc

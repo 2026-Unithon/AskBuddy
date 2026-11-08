@@ -28,7 +28,8 @@ from app.learn.answer_storage import ContextChoice,save_answer,saved_reply,curre
 from app.contracts.answer import AnswerPlan
 from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
-from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision
+from app.learn.planner import decide,policy_action,PLANNER_VERSION,procedure_decision,operating_decision
+from app.learn.operating_guidance import CHANNEL_DETAIL,compact
 from app.learn.procedure_scope import procedure_scope, first_step_reference
 from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection,question_prefix
 from app.learn.operations_scope import relevant_entity_offer, REFUND_DETAIL, OPENING_DETAIL
@@ -485,7 +486,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
                                 semantics_enabled=getattr(settings,'r_general_semantics_enabled',False)
                                 if ((semantics_enabled or first_step_reference(req.question)
-                                        or REFUND_DETAIL.search(req.question) or OPENING_DETAIL.search(req.question))
+                                        or REFUND_DETAIL.search(req.question) or OPENING_DETAIL.search(req.question)
+                                        or CHANNEL_DETAIL.fullmatch(compact(req.question)))
                                         and req.policy_receipt_id is None and not policy_action(req.question)):
                                     # load_history locks this session. Read its latest offer
                                     # under that same lock, before accepting a typed reply.
@@ -576,6 +578,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if named_scope:
                             required_subjects=named_scope.subjects
                             decision=procedure_decision(search.snapshot,question,previous,named_scope,decision)
+                        elif context is None and req.policy_receipt_id is None and not policy_action(question):
+                            decision=operating_decision(search.snapshot,question,previous,decision)
                         if context and 'case' in slots and not policy_action(question):
                             # A rule-only planner cannot decide which user case
                             # was chosen. Keep this path under semantic review.

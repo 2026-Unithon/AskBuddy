@@ -167,11 +167,15 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 from app.learn.dialogue_history import validate_history_head
                 await validate_history_head(conn,store_id=store_id,member_id=member_id,
                     session_id=session_id,expected_head=history_head)
-            if resolved.procedure_previous is not None:
+            expected_previous = (resolved.operating_guidance.previous if resolved.operating_guidance
+                                 else resolved.procedure_previous)
+            if resolved.operating_guidance and resolved.question != question:
+                raise ApiError(422,'INVALID_CONTRACT','운영 절차의 원문 질문이 일치하지 않습니다.')
+            if expected_previous is not None:
                 from app.learn.dialogue_history import load_history
                 recent=await load_history(conn,store_id=store_id,member_id=member_id,session_id=session_id,
                     include_failed=True,exclude_request_id=request_id)
-                if not recent.user_turns or recent.user_turns[-1]!=resolved.procedure_previous:
+                if not recent.user_turns or recent.user_turns[-1]!=expected_previous:
                     raise ApiError(409,'STALE_DIALOGUE','대화가 변경됐습니다. 다시 질문해 주세요.',retryable=True)
             if policy_receipt_id is not None:
                 if choice is not None or plan.action!='ESCALATE':
@@ -278,13 +282,16 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 await create_pending_question_notification(conn,store_id,pending_id,"업무 질문의 확인 요청이 도착했습니다.",contract_version='v2')
             source_ids=sorted({int(p.source_id) for f in snapshot.fact_revisions for p in f.provenance if p.source_id is not None}
                               | {int(r.source_id) for r in snapshot.raw_spans if r.source_id is not None})
-            rows=await conn.fetch("select source_id,source_availability from sources where store_id=$1 and source_id=any($2::bigint[])",
+            rows=await conn.fetch("""select s.source_id,s.source_availability,o.owner_answer_id
+                from sources s left join owner_answer_sources o on o.store_id=s.store_id and o.source_id=s.source_id
+                where s.store_id=$1 and s.source_id=any($2::bigint[])""",
                                   store_id,source_ids)
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
                 pending_id=str(pending_id) if pending_id else None,resolved=resolved,
                 clarification_detail=(question_prefix(context),question) if typed_choice and context
                     and execution_metadata.get('clarification_reply')=='detail' else detail_pair,
-                availability={str(r["source_id"]):r["source_availability"] for r in rows})
+                availability={str(r["source_id"]):r["source_availability"] for r in rows},
+                owner_sources={str(r["source_id"]):str(r["owner_answer_id"]) for r in rows if r["owner_answer_id"]})
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",
                 session_id,response.message,"ANSWERED" if plan.action=="ANSWER" else "NO_ANSWER",
