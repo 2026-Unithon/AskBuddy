@@ -75,3 +75,22 @@ class SmallFeaturesTest(unittest.IsolatedAsyncioTestCase):
         await order_categories(CategoryOrderRequest(ids=[b, a]), self.conn, owner)
         self.assertEqual([r["category_id"] for r in await self.conn.fetch(
             "select category_id from task_categories where store_id = $1 order by sort_order", self.store)], [b, a])
+
+
+@unittest.skipUnless(ENABLED, SKIP_REASON)
+class AvatarDbTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.conn, self.name = await fresh_db()
+        self.user = await self.conn.fetchval("insert into users (name, role) values ('알바', 'STAFF') returning user_id")
+        self.other = await self.conn.fetchval("insert into users (name, role) values ('다른', 'STAFF') returning user_id")
+
+    async def asyncTearDown(self):
+        await drop_db(self.conn, self.name)
+
+    async def test_set_and_clear_avatar_only_touches_me(self):
+        path = "avatars/1/%d/0123456789abcdef0123456789abcdef.png" % self.user
+        await profile.set_avatar(self.conn, self.user, path)
+        self.assertEqual(await self.conn.fetchval("select avatar_path from users where user_id = $1", self.user), path)
+        self.assertIsNone(await self.conn.fetchval("select avatar_path from users where user_id = $1", self.other))
+        await profile.set_avatar(self.conn, self.user, None)
+        self.assertIsNone(await self.conn.fetchval("select avatar_path from users where user_id = $1", self.user))

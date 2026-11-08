@@ -581,7 +581,8 @@ async def list_knowledge_proposals(
         select p.*, q.question_text, a.answer_text,
                source.source_id as answer_source_id,
                coalesce(cards.items,'[]'::jsonb) as affected_cards,
-               current_v.title as current_title, current_v.content as current_content
+               current_v.title as current_title, current_v.content as current_content,
+               target.review_status as target_review_status
         from knowledge_change_proposals p
         join owner_answers a on a.answer_id = p.answer_id
         join pending_questions q on q.question_id = a.question_id
@@ -596,6 +597,8 @@ async def list_knowledge_proposals(
                 and o.card_id=k.card_id and o.source_id=source.source_id and o.disposition='LINKED')
         ) cards on true
         left join card_versions current_v on current_v.version_id = p.target_version_id
+        -- 대상 카드 상태: 삭제된 카드에 걸린 제안을 화면이 검수 필요 수에서 뺀다(2026-11-08)
+        left join knowledge_cards target on target.store_id = p.store_id and target.card_id = p.target_card_id
         where p.store_id = $1 and p.status = $2
         order by p.created_at desc, p.proposal_id desc
         """,
@@ -632,6 +635,7 @@ async def list_knowledge_proposals(
                 "affected_cards": json.loads(row["affected_cards"]) if isinstance(row["affected_cards"], str) else row["affected_cards"],
                 "category_id": int(row["category_id"]),
                 "created_at": _iso(row["created_at"]),
+                "target_review_status": row["target_review_status"],
             }
             for row in rows
         ],

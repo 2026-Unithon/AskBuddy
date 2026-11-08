@@ -7,7 +7,7 @@ import { Stagger } from "@/components/kit/stagger";
 import { SwipeRow } from "@/components/kit/swipe-row";
 import { QuestionSheet } from "@/components/owner/question-sheet";
 
-type Question = { pending_id: string; question: string };
+type Question = { pending_id: string; question: string; asked_count?: number };
 const SNOOZE_KEY = "askbuddy:snoozed-questions";
 
 function readSnoozed(): string[] {
@@ -55,6 +55,8 @@ export function WaitingQuestionList({ questions, meta }: { questions: Question[]
               className={`flex w-full flex-col gap-1.5 rounded-[20px] bg-surface px-[18px] py-4 text-left shadow-card ${pressable} ${focusRing}`}
             >
               <span className="text-[15px] font-bold leading-[1.45] text-ink [word-break:keep-all]">{q.question}</span>
+              {/* 여러 번 물어본 질문은 횟수를 보인다(2026-11-08). 한 번이면 보이지 않는다 */}
+              {(q.asked_count ?? 0) > 1 && <span className="text-[12px] font-bold text-primary">{q.asked_count}번 물어봤어요</span>}
               {/* 설명 문구는 두지 않는다(2026-11-08 사용자). 부르는 쪽이 꼭 필요한 한 줄만 넘긴다 */}
               {meta && <span className="text-[12px] text-ink-muted">{meta}</span>}
             </button>

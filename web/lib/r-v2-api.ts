@@ -68,7 +68,7 @@ export const rAsk = (token: string, body: RChatInput) => request<RAnswer>("/chat
 export const rHistory = (token: string, session: string, before: string | null, signal?: AbortSignal) =>
   request<{ messages: RMessage[]; next_before: string | null; has_pending_updates: boolean }>(`/sessions/${encodeURIComponent(session)}/history?latest=true${before ? `&before=${encodeURIComponent(before)}` : ""}`, token, signal);
 export const rPendingList = (token: string, after: string | null, signal?: AbortSignal, status?: "WAITING" | "ANSWERED") =>
-  request<{ questions: { pending_id: string; question: string; status: string }[]; next_after: string | null }>(`/pending?${new URLSearchParams({ ...(after ? { after } : {}), ...(status ? { status } : {}) })}`, token, signal);
+  request<{ questions: { pending_id: string; question: string; status: string; asked_count?: number }[]; next_after: string | null }>(`/pending?${new URLSearchParams({ ...(after ? { after } : {}), ...(status ? { status } : {}) })}`, token, signal);
 export const rPendingDetail = (token: string, id: string, signal?: AbortSignal) =>
   request<RPending>(`/pending/${encodeURIComponent(id)}`, token, signal);
 export const rOwnerAnswer = (token: string, id: string, body: ROwnerInput) =>

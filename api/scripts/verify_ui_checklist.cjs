@@ -418,9 +418,11 @@ const fs = require("node:fs");
         (await page.getByTestId("checklist-complete").count()) === 0,
       );
       await page.getByRole("button", { name: "그래도 끝내기" }).click();
-      await page.getByTestId("checklist-complete").waitFor();
+      // 남기고 제출하면 끝 카드가 아니라 '제출했어요' 표시와 남은 개수(2026-11-08 결정)
+      await page.getByText("제출했어요", { exact: true }).waitFor();
       await page.reload();
-      await page.getByTestId("checklist-complete").waitFor();
+      await page.getByText("제출했어요", { exact: true }).waitFor();
+      check("남기고 제출하면 끝 카드 없음", (await page.getByTestId("checklist-complete").count()) === 0);
       check("제출 재진입 복원", true);
       await page.screenshot({ path: `${artifactDir}/staff-complete.png` });
       check("직원 화면 런타임 오류 없음", errors.length === 0);

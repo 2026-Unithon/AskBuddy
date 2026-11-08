@@ -7,6 +7,8 @@ class BootstrapUser(BaseModel):
     user_id: int
     role: Literal["OWNER", "STAFF"] | None
     name: str
+    # 프로필 사진(비공개 버킷의 잠깐 읽는 URL). 없으면 null
+    avatar_url: str | None = None
 
 
 class BootstrapStore(BaseModel):

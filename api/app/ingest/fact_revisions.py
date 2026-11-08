@@ -379,6 +379,11 @@ async def dismiss_conflict(conn: asyncpg.Connection, store_id: int, conflict_id:
             store_id, conflict_id, actor_id, _json(resolution))
 
 
+def _squash(text) -> str:
+    """띄어쓰기만 다른 글을 같게 본다."""
+    return "".join((text or "").split())
+
+
 async def choose_conflict(conn: asyncpg.Connection, store_id: int, conflict_id: int, *,
                           keep_fact_id: int, actor_id: int) -> int:
     """점주가 충돌에서 맞는 값을 고른다(계획 7 Task 6). 고르지 않은 사실의 id 를 돌려준다.
@@ -420,4 +425,31 @@ async def choose_conflict(conn: asyncpg.Connection, store_id: int, conflict_id: 
             "resolution = $3::jsonb where store_id = $1 and status = 'OPEN' "
             "and $4 in (fact_id_low, fact_id_high)",
             store_id, actor_id, _json({"by": "OWNER_PICK", "rejected_fact_id": rejected}), rejected)
+        # 같은 자리에 고르지 않은 값과 같은 글(띄어쓰기 무시)의 사실이 더 있으면, 화면에선 한 질문으로 묶였으니 함께 틀린 값
+        slot = await conn.fetchval(
+            "select slot_key from knowledge_facts where store_id = $1 and fact_id = $2", store_id, rejected)
+        texts = {r["fact_id"]: r["original_assertion"] for r in await conn.fetch(
+            "select k.fact_id, r.original_assertion from knowledge_facts k "
+            "join fact_revisions r on r.store_id = k.store_id and r.fact_revision_id = k.head_revision_id "
+            "where k.store_id = $1 and k.slot_key = $2 "
+            "and not exists (select 1 from fact_rejections x where x.store_id = k.store_id and x.fact_id = k.fact_id)",
+            store_id, slot)}
+        rejected_text = await conn.fetchval(
+            "select r.original_assertion from knowledge_facts k join fact_revisions r "
+            "on r.store_id = k.store_id and r.fact_revision_id = k.head_revision_id "
+            "where k.store_id = $1 and k.fact_id = $2", store_id, rejected)
+        kept_text = _squash(texts.get(keep_fact_id))
+        for twin, text in texts.items():
+            if twin in (keep_fact_id, rejected) or _squash(text) != _squash(rejected_text) or _squash(text) == kept_text:
+                continue
+            await conn.execute(
+                "insert into fact_rejections (store_id, fact_id, rejected_revision_id, conflict_id, rejected_by) "
+                "select $1, $2, head_revision_id, $3, $4 from knowledge_facts where store_id = $1 and fact_id = $2 "
+                "on conflict (store_id, fact_id) do nothing",
+                store_id, twin, conflict_id, actor_id)
+            await conn.execute(
+                "update fact_conflicts set status = 'OBSOLETE', decided_by = $2, decided_at = now(), "
+                "resolution = $3::jsonb where store_id = $1 and status = 'OPEN' "
+                "and $4 in (fact_id_low, fact_id_high)",
+                store_id, actor_id, _json({"by": "OWNER_PICK", "rejected_fact_id": twin}), twin)
     return rejected

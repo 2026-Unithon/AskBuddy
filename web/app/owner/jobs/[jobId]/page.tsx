@@ -13,7 +13,6 @@ import {
   ButtonLink,
   Caption,
   Chip,
-  ConfirmDialog,
   CountBadge,
   Empty,
   ErrorInline,
@@ -34,7 +33,6 @@ import {
   moveProductCard,
   mutateProductCard,
   retryIngestJob,
-  cancelIngestJob,
   extractIngestSourceAnyway,
   INTAKE_NONE_CODE,
   type CardListItem,
@@ -44,6 +42,7 @@ import { JobSteps } from "@/components/owner/job-steps";
 import { ReviewCard } from "@/components/owner/review-card";
 import { bootstrapQuery, cardsQuery, ingestJobQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
+import { CancelJobButton } from "@/components/owner/cancel-job-button";
 
 // O4 알아서 정리됐어요 — 작업 하나의 처리 상태와 결과 카드 확인.
 // 진행률은 만들지 않는다. 서버가 주는 상태·count 만 보여준다 (MVP §10-1).
@@ -152,52 +151,18 @@ export default function JobPage() {
 }
 
 function Processing({ job }: { job: IngestJobDetail }) {
-  const { state } = useApp();
-  const client = useQueryClient();
-  const [confirm, setConfirm] = useState(false);
-  // 오래 걸리거나 잘못 올렸을 때 정리를 멈춘다(2026-11-08 사용자). 끝나면 실패 화면에서 '다시 시도'
-  const cancel = useMutation({
-    mutationFn: () => cancelIngestJob(job.job_id, state.token!),
-    onSuccess: async () => {
-      setConfirm(false);
-      await Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.ingestJob(state.storeId, job.job_id) }),
-        client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) }),
-      ]);
-    },
-  });
   return (
     <Screen
       footer={
-        <>
-          <ButtonLink href="/owner" variant="secondary">
-            오늘 매장으로
-          </ButtonLink>
-          <TextButton className="self-center" onClick={() => setConfirm(true)}>
-            정리 취소
-          </TextButton>
-        </>
+        <ButtonLink href="/owner" variant="secondary">
+          오늘 매장으로
+        </ButtonLink>
       }
     >
       <BackButton parent="/owner" label="오늘 매장" />
       <PageHeader title="정리하고 있어요" description="다른 화면으로 가도 계속 정리해요" />
       <JobSteps status={job.status} />
       <SourceList job={job} />
-      <ConfirmDialog
-        open={confirm}
-        title="정리를 취소할까요?"
-        description="올린 자료는 남아 있어 나중에 다시 정리할 수 있어요."
-        confirmLabel="취소하기"
-        cancelLabel="계속 정리"
-        tone="danger"
-        loading={cancel.isPending}
-        error={cancel.error ? apiErrorMessage(cancel.error, "취소하지 못했어요.") : null}
-        onConfirm={() => cancel.mutate()}
-        onCancel={() => {
-          cancel.reset();
-          setConfirm(false);
-        }}
-      />
     </Screen>
   );
 }
@@ -247,6 +212,10 @@ function SourceList({ job, sources = job.sources }: { job: IngestJobDetail; sour
                 {source.filename}
               </span>
               <SourceState status={deleted ? "DELETED" : source.status} />
+              {/* 오래 걸리거나 잘못 올렸을 때 그 자료 옆에서 멈춘다(2026-11-08). 끝나면 실패 화면에서 '다시 시도' */}
+              {active && !deleted && SOURCE_ACTIVE.has(source.status) && (
+                <CancelJobButton jobId={job.job_id} sourceCount={job.sources.length} />
+              )}
             </div>
             {source.error && !deleted && <p className="text-[12px] text-danger-700">{sourceErrorText(source.error)}</p>}
             {!active && judgedNone(source) && <ExtractAnyway jobId={job.job_id} sourceId={source.source_id} />}

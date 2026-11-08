@@ -1,9 +1,9 @@
-// 화면 검사용 합성 API. 가상 매장 '골목커피 연남점' 데이터만 쓴다(실제 매장 자료 금지).
+// 화면 검사용 합성 API. 가상 매장 '버디 카페 1호점' 데이터만 쓴다(실제 매장 자료 금지).
 // syntheticApi(role, overrides) → { handler, misses, calls, state }
 // 모르는 경로는 misses 에 "METHOD /path" 로 남기고 404 를 준다. 검사 스크립트는 misses 가 비어 있어야 통과로 본다.
 
 const NOW = '2026-10-31T05:00:00Z';
-const STORE = { store_id: 1, store_name: '골목커피 연남점', guide_completed: true, category_version: 1 };
+const STORE = { store_id: 1, store_name: '버디 카페 1호점', guide_completed: true, category_version: 1 };
 const USERS = { OWNER: { user_id: 1, name: '김사장' }, STAFF: { user_id: 2, name: '박지호' } };
 const CATEGORIES = [
   { category_id: 10, name: '음료 레시피', is_system: false, sort_order: 1, kind: 'RECIPE' },
@@ -18,12 +18,12 @@ const factRow = (o) => ({ subject: '바닐라 라떼', predicate: null, variant:
   polarity: 'AFFIRM', step_order: null, conditions: [], exceptions: [], requires: [], change_kind: 'EXTRACTION',
   previous_sentence: null, origins: [], edit_block: null, assertion: o.sentence, ...o });
 const memo = (page) => origin({ source_id: 5, source_title: '레시피 메모.jpg', source_type: 'SCAN', source_availability: 'AVAILABLE', locator_type: 'PAGE', locator: { page } });
-function factCardView(version, status) {
+function factCardView(version, status, friendly = false) {
   return { card_id: 1, version_id: version, title: '바닐라 라떼', entity_id: 9, entity_name: '바닐라 라떼', review_status: status,
     published_version_id: 10, editable: true, entity_problem: null,
     blocks: [
       { block_id: 'b1', kind: 'QUANTITIES', order: 1, variant: { temperature: 'ICE', size: null }, facts: [
-        factRow({ fact_revision_id: 101, fact_id: 1, position: 1, sentence: '바닐라 라떼 ICE 우유는 225ml 넣는다.', value: '225', unit: 'ml', variant: { temperature: 'ICE', size: null }, origins: [memo(1)] }),
+        factRow({ fact_revision_id: 101, fact_id: 1, position: 1, sentence: '바닐라 라떼 ICE 우유는 225ml 넣는다.', value: '225', unit: 'ml', variant: { temperature: 'ICE', size: null }, origins: [memo(1)], ...(friendly ? { assertion: '아이스는 우유를 225ml 넣어요.' } : {}) }),
         factRow({ fact_revision_id: 103, fact_id: 8, position: 3, sentence: 'ICE 얼음은 컵 가득 담는다.', variant: { temperature: 'ICE', size: null }, origins: [memo(1)] }),
         factRow({ fact_revision_id: 102, fact_id: 2, position: 2, sentence: '바닐라 라떼 ICE 시럽은 10g 넣는다.', value: '10', unit: 'g', variant: { temperature: 'ICE', size: null },
           origins: [origin({ source_id: 6, source_title: '지난 메모.jpg', source_type: 'SCAN', source_availability: 'DELETED', locator_type: 'WHOLE_SOURCE' })] }),
@@ -184,6 +184,12 @@ function syntheticApi(role, overrides = {}) {
     }
     if (p === '/auth/refresh') payload = { token: 'synthetic-ui-only', user: { user_id: user.user_id, role, store_id: state.noStore ? null : 1 } };
     else if (p === '/auth/providers') payload = { kakao: true };
+    else if (p === '/app/me/avatar/upload-url' && m === 'POST') payload = { upload_url: 'http://localhost:8000/storage/put', path: 'avatars/1/1/0123456789abcdef0123456789abcdef.png' };
+    else if (p === '/app/me/avatar' && m === 'PUT') {
+      // 합성 사진: 1x1 투명 PNG
+      user.avatar_url = body.path ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=' : null;
+      payload = {};
+    }
     else if ((p === '/app/me' || p === '/app/store') && m === 'PATCH') {
       // 이름 고치기(계획 7 Task 9)
       if (p === '/app/me') user.name = body.name; else store.store_name = body.name;
@@ -207,7 +213,7 @@ function syntheticApi(role, overrides = {}) {
     // 사장 질문
     else if (p === '/learn/v2/pending') {
       const status = url.searchParams.get('status');
-      payload = { questions: state.pending.filter((q) => !status || q.status === status).map(({ pending_id, question, status: s }) => ({ pending_id, question, status: s })), next_after: null };
+      payload = { questions: state.pending.filter((q) => !status || q.status === status).map(({ pending_id, question, status: s, asked_count }) => ({ pending_id, question, status: s, asked_count: asked_count ?? 1 })), next_after: null };
     } else if (/^\/learn\/v2\/pending\/\d+\/answers$/.test(p) && m === 'POST') {
       const q = state.pending.find((x) => x.pending_id === p.split('/')[4]);
       if (state.answerDelayMs) await new Promise((r) => setTimeout(r, state.answerDelayMs));
@@ -265,7 +271,7 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       c.category_id = body.category_id;
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: null, updated_at: NOW, undo_until: null };
-    } else if (p === '/cards/1/facts' && m === 'GET') payload = (state.tableRecipe ? tableRecipeView : factCardView)(state.factVersion, state.cards[0].review_status);
+    } else if (p === '/cards/1/facts' && m === 'GET') payload = (state.tableRecipe ? tableRecipeView : factCardView)(state.factVersion, state.cards[0].review_status, state.friendly);
     else if (p === '/cards/1/facts' && m === 'PUT') {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
@@ -277,7 +283,12 @@ function syntheticApi(role, overrides = {}) {
       payload = { ...factCardView(state.pickVersion ?? 30, state.cards[2].review_status), card_id: 3, title: '마감 머신 청소', published_version_id: null,
         blocks: [{ block_id: 'p1', kind: 'QUANTITIES', order: 1, variant: v, facts },
                  { block_id: 'p2', kind: 'STEPS', order: 2, variant: v, facts: ['블랜더', '믹싱', '컵'].map((n, i) => factRow({ fact_revision_id: 400 + i, fact_id: 40 + i, position: i, sentence: '제조순서=블랜더 → 믹싱 → 컵', value: n, step_order: i + 1, variant: v, origins: [memo(1)] })) }],
-        review_items: state.pickRejected ? [] : [{ item_id: 'conflict-7', kind: 'CHOOSE', conflict_id: 7, label: '토핑', options: [{ fact_id: 32, text: '일반휘핑(30g)' }, { fact_id: 33, text: '일반휘핑(90g)' }] }] };
+        review_items: state.pickWrite
+          ? (state.written ? [] : [{ item_id: 'write-340', kind: 'WRITE', label: '근거 자료를 확인할 수 없어요. 맞게 고쳐 적어 주세요.', fact_revision_id: 340, text: '얼음=가득' }])
+          : state.pickRejected ? [] : [{ item_id: 'conflict-7', kind: 'CHOOSE', conflict_id: 7, label: '토핑', options: [{ fact_id: 32, text: '일반휘핑(30g)' }, { fact_id: 33, text: '일반휘핑(90g)' }] }] };
+    } else if (p === '/cards/3/review-items/write' && m === 'POST') {
+      state.written = body.text; state.cards[2].review_status = 'PENDING';
+      payload = { card_id: 3, review_status: 'PENDING', draft_version_id: 32, published_version_id: null, updated_at: NOW, undo_until: null, changed: true, edit_id: 78, revisions: [] };
     } else if (p === '/cards/3/conflicts/7/choose' && m === 'POST') {
       if (state.failPick) return reply({ error: { code: 'FACT_EDIT_CONFLICT', message: '그사이 카드가 바뀌었어요.' } }, 409);
       state.pickRejected = body.keep_fact_id === 32 ? 33 : 32;
@@ -389,6 +400,8 @@ function syntheticApi(role, overrides = {}) {
       const shift = { shift_id: Math.max(0, ...state.shifts.map((s) => s.shift_id)) + 1, name: body.name, starts_at: body.starts_at ?? null, ends_at: body.ends_at ?? null, sort_order: state.shifts.length, card_ids: [] };
       state.shifts.push(shift); payload = shift;
     } else if (p === '/checklist/shifts/order' && m === 'PUT') {
+      // CI 처럼 느린 저장(o14a 재현): 응답이 늦어도 다음 옮기기가 먹어야 한다
+      if (state.orderDelayMs) await new Promise((r) => setTimeout(r, state.orderDelayMs));
       state.shifts = body.shift_ids.map((id, i) => ({ ...state.shifts.find((s) => s.shift_id === id), sort_order: i })); payload = {};
     } else if (/^\/checklist\/shifts\/\d+\/cards$/.test(p) && m === 'PUT') {
       state.shifts.find((s) => s.shift_id === Number(p.split('/')[3])).card_ids = body.ids; payload = {};
@@ -458,7 +471,10 @@ function syntheticApi(role, overrides = {}) {
     }
     else if (p === '/ingest/jobs' && m === 'GET') {
       const status = jobStatus();
-      payload = { items: [{ job_id: 7, title: null, status, category_version: 1, source_count: jobSources(status).length, card_count: 4, created_at: NOW, completed_at: ACTIVE.has(status) ? null : (state.jobCompletedAt ?? new Date().toISOString()) }], next_cursor: null, total: 1 };
+      // extraJobs: 나중에 올린 다른 작업(최근 것이 앞, 서버 목록 순서처럼)
+      const extra = (state.extraJobs ?? []).map((j) => ({ category_version: 1, source_count: 1, card_count: 0, completed_at: null, title: null, ...j }));
+      const items = [...extra.reverse(), { job_id: 7, title: null, status, category_version: 1, source_count: jobSources(status).length, card_count: 4, created_at: NOW, completed_at: ACTIVE.has(status) ? null : (state.jobCompletedAt ?? new Date().toISOString()) }];
+      payload = { items, next_cursor: null, total: items.length };
     } else if (p === '/ingest/jobs/7' && m === 'GET') {
       const status = jobStatus(), sources = jobSources(status);
       payload = { job_id: 7, title: null, status, category_version: 1,
@@ -469,6 +485,10 @@ function syntheticApi(role, overrides = {}) {
       state.jobSequence = null;
       state.job = { status: 'FAILED', sources: [{ source_id: 31, filename: '레시피 메모.jpg', status: 'FAILED', card_count: 0, source_availability: 'AVAILABLE', error: { code: 'JOB_CANCELED', message: '정리를 취소했어요.' } }] };
       payload = { job_id: 7 };
+    } else if (/^\/ingest\/jobs\/\d+\/cancel$/.test(p) && m === 'POST') {
+      const id = Number(p.split('/')[3]);
+      state.extraJobs = (state.extraJobs ?? []).map((j) => (j.job_id === id ? { ...j, status: 'FAILED' } : j));
+      payload = { job_id: id };
     } else if (p === '/ingest/jobs/7/retry' && m === 'POST') { state.jobSequence = null; state.job = { ...state.job, status: 'QUEUED' }; payload = { job_id: 7, status: 'QUEUED' }; }
     else {
       misses.push(`${m} ${p}`);

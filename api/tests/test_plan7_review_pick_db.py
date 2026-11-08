@@ -80,3 +80,40 @@ class ReviewItemsDbTest(ReviewPickTest):
         self.assertEqual(items[0].label, "토핑")
         self.assertEqual([o.text for o in items[0].options], ["휘핑 30g", "휘핑 90g"])
         self.assertEqual(await load_review_items(self.conn, self.store + 999, [self.a]), [])
+
+
+@unittest.skipUnless(ENABLED, SKIP_REASON)
+class SameQuestionDbTest(ReviewPickTest):
+    async def test_identical_text_pair_is_not_a_conflict(self):
+        # 한 문장을 두 번 뽑아 글이 같다(띄어쓰기만 다름) → 묻지 않는다
+        c = await fact(self.conn, self.store, self.entity, "id-c1", "slot-cube", "치즈 큐브 6e a")
+        d = await fact(self.conn, self.store, self.entity, "id-c2", "slot-cube", "치즈큐브 6ea")
+        self.assertEqual(await fact_ledger._record_conflicts(self.conn, self.store, d), 0)
+
+    async def test_one_pick_settles_repeated_question(self):
+        # 30g(a) · 90g(b) 에 같은 글 90g 사실이 하나 더(e). 두 충돌이 같은 질문이라 한 번 고르면 둘 다 끝
+        e = await fact(self.conn, self.store, self.entity, "id-90g-2", "slot-topping", "휘핑 90g")
+        await fact_ledger._record_conflicts(self.conn, self.store, e)
+        from app.cards.review_items import load_review_items
+        self.assertEqual(len(await load_review_items(self.conn, self.store, [self.a, self.b, e])), 1)
+        await fact_revisions.choose_conflict(self.conn, self.store, self.conflict, keep_fact_id=self.a, actor_id=1)
+        self.assertEqual(await load_review_items(self.conn, self.store, [self.a, self.b, e]), [])
+        self.assertTrue(await self.conn.fetchval(
+            "select exists(select 1 from fact_rejections where store_id = $1 and fact_id = $2)", self.store, e))
+
+
+@unittest.skipUnless(ENABLED, SKIP_REASON)
+class SameStatementMigrationTest(ReviewPickTest):
+    async def test_migration_closes_stored_identical_conflicts(self):
+        from pathlib import Path
+        c = await fact(self.conn, self.store, self.entity, "id-s1", "slot-s", "요거트파우더 3래들")
+        d = await fact(self.conn, self.store, self.entity, "id-s2", "slot-s", "요거 트파우더 3래들")
+        low, high = sorted((c, d))
+        same = await self.conn.fetchval(
+            "insert into fact_conflicts (store_id, entity_id, slot_key, fact_id_low, fact_id_high, value_kind) "
+            "values ($1, $2, 'slot-s', $3, $4, 'TEXT') returning conflict_id", self.store, self.entity, low, high)
+        sql = (Path(__file__).resolve().parents[2] / "supabase/migrations/20261108120400_same_statement_conflicts.sql").read_text()
+        await self.conn.execute(sql)
+        status = {r["conflict_id"]: r["status"] for r in await self.conn.fetch("select conflict_id, status from fact_conflicts")}
+        self.assertEqual(status[same], "OBSOLETE")
+        self.assertEqual(status[self.conflict], "OPEN")  # 30g · 90g 는 진짜 다른 값

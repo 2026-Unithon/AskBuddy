@@ -3,19 +3,18 @@
 // W3b 사실 카드 본문: 사실 목록 읽기(Query)·편집 초안(지역 reducer)·저장(mutation).
 // 서버 값은 cardFactsQuery 가 정본이다. 편집 중 초안은 저장 성공 전까지 서버에 쓰지 않는다.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
-import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface, useFeedback } from "@/components/kit";
+import { useState } from "react";
+import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface, TextButton, useFeedback } from "@/components/kit";
 import { ApiError, apiErrorMessage, revertFactEdit, saveCardFacts, type CardDetailDto, type FactEditRequest, type FactFields, type ParsedFactProposal } from "@/lib/api";
 import { cardFactsQuery, checklistKeys, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
-import { FactGroupRow, FactRowItem, blockHeading, groupFacts } from "./fact-row";
+import { EditFactRow, FactGroupRow, blockHeading, groupFacts } from "./fact-row";
 import { compactRecipe } from "./fact-group";
 import { RecipeView } from "./recipe-view";
 import { SortableList } from "@/components/kit/sortable-list";
-import { useLongPress } from "@/lib/use-long-press";
 import { focusRing } from "@/components/kit/buttons";
 import { disturbsLocked, fieldsOf, isModified, moveStepRows, useFactEditDraft, type DraftBlock } from "./use-fact-edit-draft";
 
@@ -217,7 +216,6 @@ function flaggedKey(error: unknown): string | null {
 
 export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: CardDetailDto }) {
   const { facts, draft, save } = editor;
-  const [menuKey, setMenuKey] = useState<string | null>(null);
   if (facts.isLoading) {
     return (
       <div className="flex flex-col gap-3" data-testid="fact-panel-loading">
@@ -244,7 +242,6 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
   const excluded = card.review_status === "EXCLUDED";
   const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;
-  const menuRow = draft?.blocks.flatMap((block) => block.rows).find((row) => row.key === menuKey) ?? null;
 
   return (
     <div className="flex flex-col gap-3" data-testid="fact-panel">
@@ -267,28 +264,32 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
         ? draft.blocks.map((block) => {
             const steps = block.kind === "STEPS";
             return (
-              <Surface key={block.key} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
-                <h3 className="text-[15px] font-bold text-ink">{blockHeading(block.kind, block.variant)}</h3>
-                <SortableList
-                  // 손잡이 이름: 순서 블록은 번호와 문장 전체(메뉴 이름으로 시작하는 줄끼리 같아지지 않게)
-                  items={block.rows.map((row, i) => ({ ...row, label: steps ? `${i + 1}번 ${row.fields.sentence}` : row.fields.sentence }))}
-                  canMove={(from, to) => !locked && canSwap(block, from, to)}
-                  onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
-                  renderItem={(row, i) => (
-                    // 같은 문장에서 나온 줄(값마다 나뉜 사실)은 앞 줄에 붙여 한 덩어리로 보인다(2026-11-08 사용자 결정 10)
-                    <LongPressRow onLongPress={() => setMenuKey(row.key)} joined={i > 0 && block.rows[i - 1].fields.sentence.trim() === row.fields.sentence.trim()}>
-                      <FactRowItem
+              <section key={block.key} className="flex flex-col gap-2">
+                {/* 머리글은 읽는 화면처럼 규격(HOT/ICE)이 있을 때만. '수치·순서·목록'은 사장님에게 뜻이 없다 */}
+                {(block.variant.temperature || block.variant.size) && (
+                  <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
+                )}
+                <Surface className="flex flex-col py-1 pl-[14px] pr-1">
+                  <SortableList
+                    // 손잡이 이름: 순서 블록은 번호와 문장 전체(메뉴 이름으로 시작하는 줄끼리 같아지지 않게)
+                    items={block.rows.map((row, i) => ({ ...row, label: steps ? `${i + 1}번 ${row.fields.sentence}` : row.fields.sentence }))}
+                    canMove={(from, to) => !locked && canSwap(block, from, to)}
+                    onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
+                    renderItem={(row, i) => (
+                      // 줄을 누르면 고치기, 오른쪽 휴지통으로 빼기(칩 없음). 같은 문장에서 나온 줄은 앞 줄에 붙여 값만
+                      <EditFactRow
                         fields={row.fields}
                         base={row.base}
                         state={!row.base ? "ADDED" : isModified(row) ? "MODIFIED" : null}
                         flagged={flagged === row.key}
+                        joined={i > 0 && block.rows[i - 1].fields.sentence.trim() === row.fields.sentence.trim()}
                         requireLabels={steps ? draftRequireLabels(block, i) : undefined}
                         edit={{ locked, onEdit: () => editor.setEditKey(row.key), onRemove: () => editor.remove(row.key) }}
                       />
-                    </LongPressRow>
-                  )}
-                />
-              </Surface>
+                    )}
+                  />
+                </Surface>
+              </section>
             );
           })
         : compact
@@ -315,40 +316,6 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
           + 사실 추가
         </button>
       )}
-      <Sheet open={menuRow !== null} onClose={() => setMenuKey(null)} title={menuRow ? menuRow.fields.sentence.slice(0, 20) : ""}>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            if (menuRow) editor.setEditKey(menuRow.key);
-            setMenuKey(null);
-          }}
-        >
-          고치기
-        </Button>
-        <Button
-          variant="danger"
-          onClick={() => {
-            if (menuRow) editor.remove(menuRow.key);
-            setMenuKey(null);
-          }}
-        >
-          빼기
-        </Button>
-      </Sheet>
-    </div>
-  );
-}
-
-/** 수정 모드에서 줄을 길게 누르면 고치기·빼기 시트(o06d). 글자 선택·iOS 링크 메뉴는 막는다. */
-function LongPressRow({ onLongPress, joined = false, children }: { onLongPress: () => void; joined?: boolean; children: ReactNode }) {
-  const longPress = useLongPress(onLongPress);
-  return (
-    <div
-      data-same-sentence={joined || undefined}
-      className={`select-none [-webkit-touch-callout:none] ${joined ? "-mt-3 border-l-2 border-empty pl-2" : ""}`}
-      {...longPress}
-    >
-      {children}
     </div>
   );
 }
@@ -446,19 +413,20 @@ export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
         ) : (
           <ErrorInline message={saveErrorMessage(save.error)} />
         ))}
-      {/* o06f: 수정 완료(초록, 왼쪽) / 돌아가기(흰색, 오른쪽) */}
-      <div className="flex gap-2">
-        <Button className="flex-1" loading={save.isPending} disabled={!editor.dirty} onClick={editor.submit}>
-          수정 완료
-        </Button>
-        <Button className="flex-1" variant="secondary" disabled={save.isPending} onClick={() => (editor.dirty ? setDiscard(true) : editor.cancel())}>
-          돌아가기
-        </Button>
-      </div>
+      {/* 주 행동은 큰 버튼 하나, 나가기는 그 아래 작은 글자(스펙 '주 행동은 버튼 하나', 2026-11-08 다시 판단).
+          고친 게 없으면 수정 완료도 그냥 읽는 화면으로 — 눌러도 안 되는 버튼을 두지 않는다 */}
+      <Button loading={save.isPending} onClick={() => (editor.dirty ? editor.submit() : editor.cancel())}>
+        수정 완료
+      </Button>
+      <TextButton className="self-center! px-4" disabled={save.isPending} onClick={() => (editor.dirty ? setDiscard(true) : editor.cancel())}>
+        돌아가기
+      </TextButton>
+      {/* 실수로 눌렀을 때 고친 걸 지키는 쪽(계속 고치기)이 기본 */}
       <ConfirmDialog
         open={discard}
         title="고친 내용을 버릴까요?"
-        confirmLabel="버리기"
+        confirmLabel="버리고 나가기"
+        cancelLabel="계속 고치기"
         tone="danger"
         onCancel={() => setDiscard(false)}
         onConfirm={() => {

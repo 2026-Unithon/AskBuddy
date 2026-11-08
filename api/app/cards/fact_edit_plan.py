@@ -178,7 +178,8 @@ def normalize_fields(f: FactFields) -> NormalizedFields:
 def same_as_pinned(n: NormalizedFields, f: PlanFact) -> bool:
     """고치는 칸(문장·부정·값·단위·조건·예외·단계)이 모두 같은가. 규격·속성은 보지 않는다."""
     return (
-        n.sentence == f.original_assertion.strip()
+        # 화면은 정리한 글(assertion)을 보여 주므로 그것과 같아도 안 바뀐 것
+        n.sentence in {f.original_assertion.strip(), (f.assertion or "").strip()}
         and n.polarity == f.polarity
         and n.quantity == f.quantity_value
         and n.unit == f.quantity_unit

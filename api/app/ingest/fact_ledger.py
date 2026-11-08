@@ -66,6 +66,29 @@ async def _find_same_fact(conn: asyncpg.Connection, store_id: int,
         store_id, ident)
 
 
+def _squash(text) -> str:
+    """띄어쓰기만 다른 글을 같게 본다."""
+    return "".join((text or "").split())
+
+
+def same_statement(a, b) -> bool:
+    """두 사실이 사람 눈에 같은 말인가. 같으면 충돌로 묻지 않는다(2026-11-08 사용자 실화면).
+
+    - 원문이 띄어쓰기 빼고 같다: 한 문장을 두 번 뽑으며 수치만 달리 읽은 경우
+    - 부정 여부가 같고 값이 같다: 수치·단위가 같거나, 서술값이 띄어쓰기 빼고 같다
+    """
+    if (a["polarity"] or "AFFIRM") != (b["polarity"] or "AFFIRM"):
+        return False
+    if _squash(a["original_assertion"]) and _squash(a["original_assertion"]) == _squash(b["original_assertion"]):
+        return True
+    qa, qb = a["quantity_value"], b["quantity_value"]
+    if qa is not None and qb is not None:
+        return qa == qb and _squash(a["quantity_unit"]).lower() == _squash(b["quantity_unit"]).lower()
+    if qa is None and qb is None and a["value_text"] and b["value_text"]:
+        return _squash(a["value_text"]) == _squash(b["value_text"])
+    return False
+
+
 async def _record_conflicts(conn: asyncpg.Connection, store_id: int, fact_id: int) -> int:
     """이 사실과 같은 slot·다른 identity 의 사실마다 OPEN 충돌 쌍을 남긴다. 새로 남긴 수를 돌려준다.
 
@@ -75,7 +98,7 @@ async def _record_conflicts(conn: asyncpg.Connection, store_id: int, fact_id: in
     """
     me = await conn.fetchrow(
         "select k.entity_id, k.slot_key, k.identity_key, r.quantity_value, r.quantity_unit, "
-        "r.value_text, r.polarity "
+        "r.value_text, r.polarity, r.original_assertion "
         "from knowledge_facts k "
         "join fact_revisions r on r.store_id = k.store_id "
         "  and r.fact_revision_id = k.head_revision_id "
@@ -88,7 +111,8 @@ async def _record_conflicts(conn: asyncpg.Connection, store_id: int, fact_id: in
                            store_id, fact_id):
         return 0
     others = await conn.fetch(
-        "select k.fact_id, r.quantity_value, r.quantity_unit, r.value_text, r.polarity "
+        "select k.fact_id, r.quantity_value, r.quantity_unit, r.value_text, r.polarity, "
+        "r.original_assertion "
         "from knowledge_facts k "
         "join fact_revisions r on r.store_id = k.store_id "
         "  and r.fact_revision_id = k.head_revision_id "
@@ -98,6 +122,8 @@ async def _record_conflicts(conn: asyncpg.Connection, store_id: int, fact_id: in
         store_id, me["slot_key"], me["identity_key"], fact_id)
     added = 0
     for other in others:
+        if same_statement(me, other):
+            continue
         low, high = sorted((fact_id, other["fact_id"]))
         if await _still_dismissed(conn, store_id, low, high,
                                   {fact_id: me, other["fact_id"]: other}):
@@ -209,7 +235,7 @@ async def link_source_facts(conn: asyncpg.Connection, store_id: int, source_id: 
     ids = sorted({int(i) for i in source_fact_ids})
     rows = await conn.fetch(
         "select fact_id, subject, variant, attribute, value, unit, polarity, conditions, "
-        "exceptions, step_order, requires, local_ref, original_assertion "
+        "exceptions, step_order, requires, local_ref, original_assertion, assertion "
         "from source_facts where store_id = $1 and source_id = $2 and fact_id = any($3::bigint[]) "
         "order by fact_id",
         store_id, source_id, ids)

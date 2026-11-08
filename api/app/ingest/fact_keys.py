@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 from app.ingest.entity_names import KEY_VERSION, VariantParts
+from app.ingest.friendly import friendly_assertion
 
 # occurrence REVIEW_PENDING 사유 코드. 카드 블록에 붙는 것은 W3 다
 REASON_UNASSEMBLED = "W2_UNASSEMBLED"
@@ -209,9 +210,19 @@ def shape_from_ledger(row, variant: VariantParts, hint_temp: str | None,
         quantity_value=quantity, quantity_unit=quantity_unit, value_text=value_text,
         polarity=row["polarity"] or "AFFIRM", step_order=row["step_order"],
         conditions=_json_list(row["conditions"]), exceptions=_json_list(row["exceptions"]),
-        original_assertion=original, assertion=original,
+        original_assertion=original,
+        # 보이는 문장: 모델이 정리한 글이 숫자 검사를 통과하면 그 글, 아니면 원문(2026-11-08 '원문 그대로' 제거)
+        assertion=friendly_assertion(_get(row, "assertion"), original, value=value, unit=unit),
     )
     return shape, reason
+
+
+def _get(row, key: str):
+    """asyncpg Record·dict 공용. 열이 없으면 None(옛 원장 행)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
 
 
 def original_missing(row) -> bool:
