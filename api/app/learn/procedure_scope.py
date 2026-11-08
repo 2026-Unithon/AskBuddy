@@ -39,8 +39,9 @@ def _comparison(question,snapshot):
     # size, equipment failure, or a second question cannot disappear.
     pattern=(r'(?:둘\s*다\s*)?(?:(?:주문받았어|주문받았어요)[.,]?\s*)?'
         r'(?:승인된\s*카드\s*기준으로\s*)?(?:(hot|ice|아이스|핫)\s*(?:기준으로\s*)?)?'
-        r'(?:제조(?:할\s*때|\s*순서|법)|만들\s*때)\s*(?:헷갈리기\s*쉬운\s*)?'
-        r'차이(?:점)?(?:를|가)?\s*(?:한\s*가지(?:만)?\s*)?(?:알려줘|알려주세요|뭐야)?[?!.]*')
+        r'(?:제조(?:할\s*때|\s*(?:순서|과정)|법)|만들\s*때)(?:를|을|의|가)?\s*(?:헷갈리기\s*쉬운\s*)?'
+        r'(?:(?:차이(?:점)?|다른\s*점)(?:를|을|가)?\s*(?:한\s*가지(?:만)?\s*)?(?:알려줘|알려주세요|뭐야)?'
+        r'|비교해\s*(?:줘|주세요)|어떻게\s*달라(?:요)?)[?!.]*')
     match=re.fullmatch(pattern,request)
     if not match:return None
     return ProcedureScope(names,_temperature(match[1]))
@@ -57,7 +58,8 @@ def procedure_scope(snapshot,question,previous=None):
     if not prior:return None
     followup=re.fullmatch(r'(?:그럼|그러면)?\s*(첫|두)\s*번째\s*(?:음료|메뉴|제품|것)(?:만|를|을|는|은)?\s*'
         r'(?:(hot|ice|아이스|핫)\s*(?:기준으로\s*)?)?(?:만들\s*때(?:는)?\s*)?'
-        r'(?:뭘\s*먼저\s*해야\s*(?:해|하나요)|첫\s*단계(?:는|가)?\s*(?:뭐야|뭔가요)?)[?.!]*',
+        r'(?:뭘\s*먼저\s*해야\s*(?:해|하나요)|뭐부터\s*(?:시작해|시작하나요|해)|'
+        r'첫\s*단계(?:는|가)?\s*(?:뭐야|뭔가요)?)[?.!]*',
         normalize_query(question))
     if not followup:return None
     title=prior.subjects[0 if followup[1]=='첫' else 1]

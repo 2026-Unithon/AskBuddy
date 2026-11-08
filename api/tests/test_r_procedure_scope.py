@@ -78,6 +78,15 @@ def test_conflicting_approved_steps_do_not_become_a_direct_answer():
     assert answer(publication(conflict),COMPARE).plan.action!='ANSWER'
 
 
+@pytest.mark.parametrize('question',['모카와 라테의 제조 과정을 비교해 줘.','모카랑 라테는 제조 순서가 어떻게 달라?'])
+def test_paraphrases_keep_subject_order_and_temperature_evidence(question):
+    snap=publication()
+    first=answer(snap,question)
+    assert [s.title for s in first.resolved.procedure_steps]==['모카','라테']
+    followup=answer(snap,'그럼 두 번째 메뉴는 뭐부터 시작해?',question)
+    assert {s.title for s in followup.resolved.procedure_steps}=={'라테'}
+
+
 def test_open_comparison_retains_both_subjects_without_inferring_procedure_intent():
     from app.learn.dialogue_history import DialogueHistory,scoped_fallback,requested_subjects,respects_subjects
     from app.reg.hybrid import Candidate

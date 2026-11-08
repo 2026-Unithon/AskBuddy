@@ -567,6 +567,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         named_scope=(procedure_scope(search.snapshot,question,previous)
                             if context is None and req.policy_receipt_id is None and not policy_action(question) else None)
                         if named_scope:
+                            required_subjects=named_scope.subjects
                             decision=procedure_decision(search.snapshot,question,previous,named_scope,decision)
                         if context and 'case' in slots and not policy_action(question):
                             # A rule-only planner cannot decide which user case
