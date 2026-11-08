@@ -231,11 +231,38 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             await conn.execute("""insert into access_logs(store_id,user_id,action_type)
                 select store_id,user_id,'QUERY' from store_members where store_id=$1 and member_id=$2""",store_id,member_id)
             pending_id=None
+            detail_pair=None
             if plan.action=="ESCALATE":
+                if plan.escalation_reason=='NO_RELEVANT_TASK_OPTION':
+                    execution_metadata['task_handoff']=True
+                if history_head and not choice and not policy_receipt_id:
+                    from app.learn.operations_scope import handoff_detail
+                    prior=await conn.fetchrow("""select r.original_question,q.question_id
+                        from r_answer_receipts r join pending_questions q on q.question_id=r.pending_id
+                          and q.store_id=r.store_id and q.member_id=r.member_id
+                        where r.store_id=$1 and r.member_id=$2 and r.session_id=$3 and r.receipt_id=$4
+                          and r.snapshot_id=$5 and r.execution_metadata->>'task_handoff'='true'
+                          and r.created_at>clock_timestamp()-interval '10 minutes'
+                          and q.status='WAITING' and q.contract_version='v2'
+                          and q.question_text=r.original_question
+                          and not exists(select 1 from r_failed_user_turns f where f.store_id=r.store_id
+                            and f.member_id=r.member_id and f.session_id=r.session_id and f.created_at>r.created_at
+                            and f.request_id<>$6) for update of q""",
+                        store_id,member_id,session_id,history_head,int(snapshot.snapshot_id),request_id)
+                    if prior and handoff_detail(prior['original_question'],question):
+                        combined=prior['original_question']+' '+question
+                        if len(combined)<=500:
+                            pending_id=prior['question_id']
+                            detail_pair=(prior['original_question'],question)
+                            await conn.execute("update pending_questions set question_text=$2 where question_id=$1",
+                                               pending_id,combined)
+                            execution_metadata['task_detail_parent']=history_head
+                            execution_metadata.pop('task_handoff',None)
                 key=pending_key(store_id=store_id,semantic_context=semantic_context)
-                await conn.execute("select pg_advisory_xact_lock(hashtextextended($1,0))",f"r:pending:{key}")
-                pending_id=await conn.fetchval("""select question_id from pending_questions
-                    where store_id=$1 and semantic_key=$2 and contract_version='v2' and status='WAITING' for update""",store_id,key)
+                if pending_id is None:
+                    await conn.execute("select pg_advisory_xact_lock(hashtextextended($1,0))",f"r:pending:{key}")
+                    pending_id=await conn.fetchval("""select question_id from pending_questions
+                        where store_id=$1 and semantic_key=$2 and contract_version='v2' and status='WAITING' for update""",store_id,key)
                 if pending_id is None:
                     owner_question=resolved.question
                     if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED':
@@ -256,7 +283,7 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
             response=render(plan,snapshot,store_id=store_id,request_id=request_id,
                 pending_id=str(pending_id) if pending_id else None,resolved=resolved,
                 clarification_detail=(question_prefix(context),question) if typed_choice and context
-                    and execution_metadata.get('clarification_reply')=='detail' else None,
+                    and execution_metadata.get('clarification_reply')=='detail' else detail_pair,
                 availability={str(r["source_id"]):r["source_availability"] for r in rows})
             buddy_message=await conn.fetchval("""insert into chat_messages(session_id,sender_type,content,
                 answer_type,answer_source,grounding_status) values($1,'BUDDY',$2,$3,$4,$5) returning message_id""",

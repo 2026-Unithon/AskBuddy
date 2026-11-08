@@ -26,6 +26,7 @@ from app.learn.grounded_calculations import Calculation, calculate
 from app.learn.planner import Decision, policy_action, PREDICATES
 from app.learn.semantic_proposals import SemanticProposal, SlotProposal, proposal_input, validate_proposal
 from app.learn.general_wire import parse_proposal
+from app.learn.general_provider import InputByteLimitExceeded, InputTokenLimitExceeded
 from app.learn.general_verification import Verification, rejection_decision
 from app.learn.case_clarification import CaseOption, validate_case_options
 from app.learn.grounded_conclusions import GroundedConclusion, validate_conclusions, candidate_references, missing_required_evidence,selected_rules,missing_conclusion_rules,missing_case_actions,reference_scopes,conclusion_units,unsupported_situations
@@ -43,7 +44,7 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
     'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py','learn/procedure_scope.py',
-    'learn/semantic_grouping.py','reg/hybrid.py','reg/embeddings.py',
+    'learn/semantic_grouping.py','learn/operations_scope.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
 
@@ -184,7 +185,7 @@ async def product_general_decision(search, **kwargs):
         if ((not getattr(kwargs['settings'],'r_general_semantics_demo_enabled',False)
                 and getattr(kwargs['settings'],'r_general_semantics_store_id',None)!=kwargs['store_id'])
                 or exc.code not in {'GENERAL_RELEASE_UNAVAILABLE','GENERAL_MODEL_UNAVAILABLE',
-                                    'GENERAL_INVALID_PROPOSAL','GENERAL_DEADLINE'}):
+                                    'GENERAL_INVALID_PROPOSAL','GENERAL_INPUT_LIMIT','GENERAL_DEADLINE'}):
             raise
         return kwargs['baseline'],dict(status='PILOT_BASELINE',reason=exc.code,
             **{k:exc.details[k] for k in ('phase','error_type') if k in (exc.details or {})})
@@ -345,7 +346,23 @@ def model_evidence(payload):
             record['provenance']=origins
             facts.append(record)
         candidates.append(dict(candidate,facts=facts))
-    return dict(payload,candidates=candidates)
+    visible=dict(payload,candidates=candidates)
+    # On dense publications send repeated field names once. Each row still
+    # represents a distinct approved fact, including all case conditions,
+    # prerequisites, original wording and origin. The full payload is hashed.
+    if sum(len(c['facts']) for c in candidates)>=32:
+        for candidate in candidates:
+            if len(candidate['facts'])<2:
+                continue
+            facts=candidate.pop('facts')
+            keys=list(dict.fromkeys(key for fact in facts for key in fact))
+            common={key:facts[0].get(key) for key in keys
+                    if all(fact.get(key)==facts[0].get(key) for fact in facts)}
+            columns=[key for key in keys if key not in common]
+            candidate['fact_defaults']=common
+            candidate['fact_columns']=columns
+            candidate['fact_rows']=[[fact.get(key) for key in columns] for fact in facts]
+    return visible
 
 
 async def general_decision(search,*,settings,store_id,question,user_turns,baseline,context,sink,
@@ -503,6 +520,10 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     except ApiError:raise
     except UsageWriteError as exc:raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
     except TimeoutError as exc:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 초과되었습니다.',retryable=True) from exc
+    except (InputByteLimitExceeded,InputTokenLimitExceeded) as exc:
+        logger.warning('general_input_limit phase=%s detail=%s',phase,exc)
+        raise ApiError(503,'GENERAL_INPUT_LIMIT','의미 해석 요청의 입력 한도를 초과했습니다.',
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc
     except (ValueError,KeyError,StopIteration) as exc:
         # 사유를 남기지 않으면 유료 실행에서 무엇이 막았는지 알 수 없다(2026-10-15 진단).
         # 코드가 쓴 상수 문구만 싣는다 — 계약 위반 상세는 **위치·종류만** 남기고

@@ -20,6 +20,9 @@ class InputTokenCountUnavailable(ValueError):
 class InputTokenLimitExceeded(ValueError):
     """The measured input, including headroom, exceeds the accepted release."""
 
+class InputByteLimitExceeded(ValueError):
+    """The serialized prompt and its response schema exceed the release byte cap."""
+
 def usage_tokens(meta):
     """Omitted zero thoughts are known only when the reported total reconciles.
 
@@ -61,7 +64,8 @@ async def generate(prompt,*,schema,release,context,sink,calculation_fact_ids=Non
     # usage is checked again and overages halt the evaluation budget.
     counted_prompt=prompt+'\nJSON schema:\n'+schema_text
     prompt_bytes=len(counted_prompt.encode('utf-8'))
-    if prompt_bytes>max_bytes:raise ValueError('prompt exceeds accepted byte limit')
+    if prompt_bytes>max_bytes:
+        raise InputByteLimitExceeded(f'prompt exceeds accepted byte limit; bytes={prompt_bytes}, limit={max_bytes}')
     config=types.GenerateContentConfig(response_mime_type='application/json',response_json_schema=wire_schema,
         temperature=0,max_output_tokens=max_output,
         thinking_config=types.ThinkingConfig(thinking_level=release.thinking_level),

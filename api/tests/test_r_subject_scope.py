@@ -53,6 +53,29 @@ def test_shared_terms_ignores_single_character_overlap():
     assert not shared_terms("아아", ("아이스아메리카노",))
 
 
+@pytest.mark.parametrize("task",["한 건을 환불하려면 어떻게 처리해?", "오픈 전에 어떤 비품부터 확인해야 해?"])
+def test_operating_question_does_not_offer_incidental_menu_names(task):
+    result=decide(search(),store_id=9,question="카페모카랑 카라멜마끼아또 주문이 있어. "+task)
+    assert result.plan.action=="ESCALATE" and result.plan.escalation_reason=="NO_RELEVANT_TASK_OPTION"
+    assert result.plan.allowed_options==()
+
+
+def test_recipe_question_after_refund_background_keeps_recipe_options():
+    result=decide(search(),store_id=9,question="환불은 끝났어. 카페모카랑 카라멜마끼아또 제조 방법 알려줘.")
+    assert set(result.plan.allowed_options)=={"카페모카","카라멜마끼아또"}
+
+
+def test_positive_task_option_can_be_supported_by_block_text_with_neutral_title():
+    from dataclasses import replace
+    base=search()
+    facts=tuple(f.model_copy(update={"assertion":"이 상품은 영수증으로 환불한다."}) if f.fact_id=="2" else f
+                for f in base.snapshot.fact_revisions)
+    snap=base.snapshot.model_copy(update={"fact_revisions":facts})
+    snap=snap.model_copy(update={"snapshot_hash":snapshot_digest(snap)})
+    result=decide(replace(base,snapshot=snap),store_id=9,question="카페모카랑 카라멜마끼아또 환불 기준은?")
+    assert result.plan.allowed_options==("카라멜마끼아또",)
+
+
 @pytest.mark.parametrize("question", [
     "아이스아메리카노 만드는 법", "아이스아메리카노 만드는 방법", "아이스아메리카노 만드는법 좀",
     "아이스아메리카노 레시피", "아이스아메리카노 순서", "아이스아메리카노 제조법"])
