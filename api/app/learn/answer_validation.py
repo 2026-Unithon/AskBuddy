@@ -62,6 +62,7 @@ class ResolvedSelection:
     conclusions: tuple[GroundedConclusion,...] = ()
     conclusion_user_turns: tuple[str,...] = ()
     conclusions_verified: bool = False
+    literal_card_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,18 @@ def validate_answer_for_question(
         # action 결정·context 소유권·pending 저장은 이 함수의 책임이 아니다.
         return plan
     query = resolved_query
+    if query.literal_card_id is not None:
+        from app.learn.card_read import requested_card,whole_card_refs
+        try:verify_snapshot_hash(snapshot)
+        except ValueError as exc:raise AnswerReferenceError('HASH_MISMATCH') from exc
+        card=requested_card(snapshot,query.question)
+        if (not card or card.card_id!=query.literal_card_id or card.entity_id!=query.entity_id
+                or query.predicate!='card_read' or query.calculations or query.conclusions or query.parts
+                or tuple(plan.selected_blocks)!=whole_card_refs(card)):
+            raise AnswerReferenceError('INVALID_REFERENCE')
+        # Whole-card display makes no quantity, variant, or applicability inference.
+        # The common reference/closure/order checks above still apply.
+        return plan
     if query.conclusions:
         if not query.conclusions_verified:raise AnswerReferenceError('UNVERIFIED_CONCLUSION')
         validate_conclusions(query.conclusions,plan=plan,question=query.question,user_turns=query.conclusion_user_turns)

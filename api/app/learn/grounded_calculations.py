@@ -29,6 +29,9 @@ class Calculation(Contract):
 UNITS = {'ml': ('ml', '1'), 'l': ('ml', '1000'), 'g': ('g', '1'), 'kg': ('g', '1000'),
          '원': ('원', '1'), '개': ('개', '1'), '분': ('분', '1'), '시간': ('분', '60')}
 
+def calculable_unit(unit):
+    return isinstance(unit,str) and unit.lower() in UNITS
+
 
 def number(value):
     text = format(value, 'f')
@@ -52,7 +55,7 @@ def calculate(calculations, *, plan, snapshot, store_id: int, question: str, use
                     raise ValueError('calculation operand outside selected facts')
                 fact = snapshot.fact(fid)
                 quantity = fact.quantity
-                if quantity is None or quantity.unit.lower() not in UNITS:
+                if quantity is None or not calculable_unit(quantity.unit):
                     raise ValueError('unsupported quantity or unit')
                 if fact.polarity != 'AFFIRM':
                     raise ValueError('negative assertion is not a numeric operand')

@@ -250,6 +250,16 @@ const path = require('node:path');
     await page.screenshot({ path: path.join(out, 'staff.png'), fullPage: true });
     await ownerPage.screenshot({ path: path.join(out, 'owner.png'), fullPage: true });
     check('no browser runtime exceptions', errors.length === 0);
+    await page.goto('http://127.0.0.1:3011/staff/ask');
+    await ask().fill('합성 라테 물 얼마나?');
+    await send().click();
+    await page.getByRole('button', { name: 'HOT', exact: true }).waitFor();
+    await ask().fill('HOT');
+    const typedRequest = page.waitForRequest(r => r.url().endsWith('/learn/v2/chat') && r.method() === 'POST');
+    await send().click();
+    const typed = (await typedRequest).postDataJSON();
+    check('typed offered option carries the same context as a click',
+      typed.option === 'HOT' && typed.context_id === '11111111-1111-4111-8111-111111111111' && typed.context_revision === 1);
     // 옛 '이전 대화 이력' 화면은 버디로 넘어간다(화면 개선 NAV-12)
     state.unavailable = true;
     await page.goto('http://127.0.0.1:3011/staff/chat');
