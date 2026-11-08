@@ -310,7 +310,7 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     supplied=[(o.fact_revision_id,o.kind,o.statement) for o in proposal.obligations]
     if set(supplied)!=expected or len(supplied)!=len(set(supplied)):
         raise ValueError('condition/exception omitted or invented')
-    if any(not any(o.question_quote in turn for turn in (payload['question'],*payload['user_turns'])) for o in proposal.obligations):
+    if any(not any(o.question_quote in turn for turn in (payload.get('current_utterance',payload['question']),*payload['user_turns'])) for o in proposal.obligations):
         raise ValueError('condition/exception lacks user evidence')
     for temperature,size in query.variants:
         for key,value in (('temperature',temperature),('size',size)):
@@ -349,16 +349,17 @@ def model_evidence(payload):
 
 
 async def general_decision(search,*,settings,store_id,question,user_turns,baseline,context,sink,
-                           timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None):
+                           timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None,
+                           previous_replies=(),current_utterance=None):
     if (not getattr(settings,'r_general_semantics_enabled',False)
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
         return baseline,None
     from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
-    if baseline.plan.action=='CLARIFY' and (
+    if not user_turns and baseline.plan.action=='CLARIFY' and (
             (baseline.plan.clarification_slot=='entity' and question.strip() in PRICE_WORDS) or
             (baseline.plan.clarification_slot=='predicate' and menu_title(search.snapshot,question))):
         return baseline,None
-    if (user_turns or context_id is not None) and not context_verified:return baseline,None
+    if (user_turns or previous_replies or context_id is not None) and not context_verified:return baseline,None
     try:
         release=load_release(settings,search,store_id)
     except (ValueError,OSError,AttributeError) as exc:
@@ -380,13 +381,15 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     phase='proposal_input'
     try:
         async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
-            payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns)
+            payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns,
+                previous_replies=previous_replies,current_utterance=current_utterance,model_view=model_evidence)
             from app.learn.grounded_calculations import calculable_unit
             quantity_ids=tuple(dict.fromkeys(f['fact_revision_id'] for c in payload['candidates'] for f in c['facts']
                 if f.get('quantity') and f.get('polarity')=='AFFIRM' and calculable_unit(f['quantity'].get('unit'))))
-            quotes=tuple(dict.fromkeys((question,*user_turns)))
+            utterance=payload.get('current_utterance',question)
+            quotes=tuple(dict.fromkeys((utterance,*user_turns)))
             dialogue_turns=[dict(turn_id=i,role='user',current=i==len(user_turns),text=text)
-                for i,text in enumerate((*user_turns,question))]
+                for i,text in enumerate((*user_turns,utterance))]
             visible_payload=model_evidence(payload)
             prompt=((Path(__file__).resolve().parents[2]/'prompts/r_general_proposal.txt').read_text(encoding='utf-8').strip()+'\n'
                 +json.dumps(dict(input=visible_payload,confirmed_slots=trusted_slots,dialogue_turns=dialogue_turns,

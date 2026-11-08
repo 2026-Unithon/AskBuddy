@@ -34,6 +34,10 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         return ChatResponse(**fields,message=message,context_id=plan.context_id,
                             clarification_slot=plan.clarification_slot,allowed_options=plan.allowed_options)
     if plan.action=="ESCALATE":
+        if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED' and resolved:
+            from app.learn.entity_names import entity_label
+            subject=entity_label(snapshot,resolved.entity_id)
+            return ChatResponse(**fields,message=f'{subject}에 대한 질문을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.',pending_id=pending_id)
         title=price_menu(snapshot,resolved.question) if resolved else None
         message=(f'{title} 가격을 승인된 자료로 확인하기 어려워 사장님께 확인을 요청했어요.' if title else
                  '확인된 자료만으로 답하기 어려워 사장님께 확인을 요청했어요.')

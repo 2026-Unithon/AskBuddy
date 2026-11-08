@@ -50,6 +50,7 @@ async def test_preparation_error_keeps_its_phase(tmp_path,monkeypatch):
 def test_unitless_fact_can_be_read_verbatim_but_not_invented_as_operand():
     search=unitless_search()
     decision=decide(search,store_id=1,question='라테 카드 원문 보여줘.')
+    assert decide(search,store_id=1,question='이번엔 라테 카드 원문 보여줘.').plan==decision.plan
     assert decision.plan.action=='ANSWER' and not calculable_unit(None)
     response=render(decision.plan,search.snapshot,store_id=1,request_id='literal-regression',resolved=decision.resolved)
     assert search.snapshot.fact_revisions[0].assertion in response.message

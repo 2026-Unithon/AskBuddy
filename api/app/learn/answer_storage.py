@@ -230,10 +230,14 @@ async def save_answer(pool,*,store_id:int,member_id:int,session_id:int,request_i
                 pending_id=await conn.fetchval("""select question_id from pending_questions
                     where store_id=$1 and semantic_key=$2 and contract_version='v2' and status='WAITING' for update""",store_id,key)
                 if pending_id is None:
+                    owner_question=resolved.question
+                    if plan.escalation_reason=='DIALOGUE_SUBJECT_UNRESOLVED':
+                        from app.learn.entity_names import entity_label
+                        owner_question=f'{entity_label(snapshot,resolved.entity_id)} — {question}'
                     pending_id=await conn.fetchval("""insert into pending_questions(store_id,member_id,message_id,
                         question_text,miss_reason,status,contract_version,semantic_key)
                         values($1,$2,$3,$4,'no_match','WAITING','v2',$5) returning question_id""",
-                        store_id,member_id,user_message,resolved.question[:500],key)
+                        store_id,member_id,user_message,owner_question[:500],key)
                 await conn.execute("""insert into pending_question_occurrences(question_id,member_id,message_id)
                     values($1,$2,$3)""",pending_id,member_id,user_message)
                 # 앱 알림이 durable 전달 원장이다. 민감 원문을 preview에 복제하지 않는다.

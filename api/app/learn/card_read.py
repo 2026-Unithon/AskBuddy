@@ -14,6 +14,11 @@ def requested_card(snapshot,question):
     if not match:return None
     title=match[1].replace(' ','')
     cards=[c for c in snapshot.cards if norm(c.title).replace(' ','')==title]
+    if not cards:
+        # A topic transition is not part of the card name. Still require an
+        # exact, unique title after it and an explicit request for the source.
+        new_title=re.sub(r'^(?:이번엔|이번에는|다음은|다음으로)\s+', '',match[1]).replace(' ','')
+        cards=[c for c in snapshot.cards if norm(c.title).replace(' ','')==new_title]
     if len(cards)!=1:return None
     card=cards[0]
     if not literal and not any(b.kind=='STEPS' for b in card.blocks):return None
