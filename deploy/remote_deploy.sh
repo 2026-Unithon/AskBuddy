@@ -5,6 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 docker compose up -d --build --remove-orphans
+bash demo-gemini.sh apply-once
 # 오래된 이미지가 작은 디스크를 채우지 않게 정리한다
 docker image prune -f >/dev/null
 # 빌드 캐시도 일주일 지난 것은 지운다

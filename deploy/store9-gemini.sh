@@ -6,8 +6,11 @@ cd "$(dirname "$0")"
 envfile=${ASKBUDDY_ENV_FILE:-/home/ubuntu/askbuddy.env}
 test "$envfile" = /home/ubuntu/askbuddy.env && test -f "$envfile" && test ! -L "$envfile" || exit 1
 op=${1:-status}
+demo=0
+suffix=
+if [ "$op" = enable-demo ]; then demo=1; suffix=-demo; op=enable; fi
 if [ "$op" = status ]; then
-  docker compose exec -T api python -c "from app.config import get_settings; s=get_settings(); print('enabled:',s.r_general_semantics_enabled,'store:',s.r_general_semantics_store_id,'model:',s.gemini_model)"
+  docker compose exec -T api python -c "from app.config import get_settings; s=get_settings(); print('enabled:',s.r_general_semantics_enabled,'all_demo:',s.r_general_semantics_demo_enabled,'store:',s.r_general_semantics_store_id,'model:',s.gemini_model)"
   exit
 fi
 [[ "$op" = enable || "$op" = disable ]] || exit 2
@@ -24,7 +27,7 @@ bundle=$(mktemp)
 trap 'rm -f -- "$bundle"' EXIT
 if [ "$op" = enable ]; then
   # This only reads the active index and generates a release; no model is called.
-  docker compose exec -T api python -m scripts.chat_gemini_pilot prepare >"$bundle"
+  docker compose exec -T api python -m scripts.chat_gemini_pilot "prepare$suffix" >"$bundle"
   sudo install -d -o ubuntu -g ubuntu -m 0750 /home/ubuntu/askbuddy-releases
 fi
 rollback() {
@@ -34,10 +37,11 @@ rollback() {
   echo 'Original configuration restored.' >&2
 }
 trap rollback ERR
-python3 - "$envfile" "$op" "$bundle" <<'PY'
+python3 - "$envfile" "$op" "$bundle" "$demo" <<'PY'
 import json,os,re,sys,tempfile
 from pathlib import Path
-p=Path(sys.argv[1]); updates={'R_GENERAL_SEMANTICS_ENABLED':'false'}
+p=Path(sys.argv[1]); demo=sys.argv[4]=='1'
+updates={'R_GENERAL_SEMANTICS_ENABLED':'false','R_GENERAL_SEMANTICS_DEMO_ENABLED':'false','R_GENERAL_SEMANTICS_STORE_ID':None}
 def write(path,body):
     with tempfile.NamedTemporaryFile('w',dir=path.parent,delete=False) as f:
         f.write(body); f.flush(); os.fsync(f.fileno())
@@ -45,13 +49,13 @@ def write(path,body):
 if sys.argv[2]=='enable':
     obj=json.loads(Path(sys.argv[3]).read_text())
     pin=obj['pin']; assert re.fullmatch(r'sha256:[0-9a-f]{64}',pin)
-    name='store9-'+pin[7:]+'.json'
+    name=('demo-' if demo else 'store9-')+pin[7:]+'.json'
     write(Path('/home/ubuntu/askbuddy-releases')/name,json.dumps(obj['release'],ensure_ascii=False))
-    updates.update(R_GENERAL_SEMANTICS_ENABLED='true',R_GENERAL_SEMANTICS_STORE_ID='9',
+    updates.update(R_GENERAL_SEMANTICS_ENABLED='true',R_GENERAL_SEMANTICS_DEMO_ENABLED='true' if demo else 'false',R_GENERAL_SEMANTICS_STORE_ID=None if demo else '9',
         R_GENERAL_SEMANTICS_PATH='/run/askbuddy/releases/'+name,R_GENERAL_SEMANTICS_HASH=pin)
 lines=[line for line in p.read_text().splitlines()
        if not any(re.match(r'^\s*(?:export\s+)?'+k+r'\s*=',line) for k in updates)]
-write(p,'\n'.join([*lines,*(k+'='+v for k,v in updates.items())])+'\n')
+write(p,'\n'.join([*lines,*(k+'='+v for k,v in updates.items() if v is not None)])+'\n')
 PY
 docker compose up -d --no-build --no-deps --force-recreate api
 healthy=0
@@ -61,7 +65,7 @@ for _ in {1..12}; do
 done
 test "$healthy" = 1
 if [ "$op" = enable ]; then
-  docker compose exec -T api python -m scripts.chat_gemini_pilot verify
+  docker compose exec -T api python -m scripts.chat_gemini_pilot "verify$suffix"
 else
   docker compose exec -T api python -c 'from app.config import get_settings; assert not get_settings().r_general_semantics_enabled'
 fi

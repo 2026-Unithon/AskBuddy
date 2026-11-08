@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 셸 스크립트 검사
-        run: shellcheck -S warning deploy/remote_deploy.sh deploy/store9-gemini.sh .github/scripts/*.sh .github/scripts/tests/*.sh
+        run: shellcheck -S warning deploy/remote_deploy.sh deploy/store9-gemini.sh deploy/demo-gemini.sh .github/scripts/*.sh .github/scripts/tests/*.sh
       - name: 배포 스크립트 테스트
         run: |
           bash .github/scripts/tests/ssm_deploy_test.sh
