@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, focusRing } from "@/components/kit/buttons";
 
 // 알림·피드백 기준(G4): 되돌릴 필요 없는 완료는 토스트, 되돌릴 수 있는 완료는 스낵바,
@@ -12,7 +12,8 @@ const SNACKBAR_MS = 5000;
 
 type SnackbarOptions = { message: string; actionLabel: string; onAction: () => void; durationMs?: number };
 type Notice = { id: number; message: string; action?: { label: string; onClick: () => void }; keepOnNavigate?: boolean };
-type ToastOptions = { keepOnNavigate?: boolean };
+/** durationMs: 꼭 읽어야 하는 안내(일부 실패 등)는 기본 2초보다 길게 */
+type ToastOptions = { keepOnNavigate?: boolean; durationMs?: number };
 type Feedback = { toast: (message: string, opts?: ToastOptions) => void; snackbar: (opts: SnackbarOptions) => void; dismiss: () => void };
 
 const FeedbackContext = createContext<Feedback>({ toast: () => {}, snackbar: () => {}, dismiss: () => {} });
@@ -21,24 +22,47 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seq = useRef(0);
+  const remaining = useRef(0);
+  const startedAt = useRef(0);
   const pathname = usePathname();
 
   const dismiss = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
+    remaining.current = 0;
     setNotice(null);
   }, []);
 
-  // 한 번에 하나만 보이고 새 것이 옛 것을 바꾼다
-  const show = useCallback((next: Omit<Notice, "id">, ms: number) => {
+  // 남은 시간. 손을 올리거나 포커스하면 멈추고 떼면 이어 간다(WCAG 2.2.1)
+  const start = useCallback((ms: number) => {
     if (timer.current) clearTimeout(timer.current);
-    seq.current += 1;
-    setNotice({ ...next, id: seq.current });
+    remaining.current = ms;
+    startedAt.current = Date.now();
     timer.current = setTimeout(() => {
       timer.current = null;
       setNotice(null);
     }, ms);
   }, []);
+  const pause = useCallback(() => {
+    if (!timer.current) return;
+    clearTimeout(timer.current);
+    timer.current = null;
+    remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt.current));
+  }, []);
+  const resume = useCallback(() => {
+    if (timer.current || remaining.current <= 0) return;
+    start(Math.max(remaining.current, 1500));
+  }, [start]);
+
+  // 한 번에 하나만 보이고 새 것이 옛 것을 바꾼다
+  const show = useCallback(
+    (next: Omit<Notice, "id">, ms: number) => {
+      seq.current += 1;
+      setNotice({ ...next, id: seq.current });
+      start(ms);
+    },
+    [start],
+  );
 
   // 다른 화면으로 가면 닫는다. 되돌리기가 떠난 화면의 상태를 건드리지 않게 한다.
   // 이동 직전에 띄운 완료 알림(keepOnNavigate)은 다음 화면에서도 보여야 하므로 남긴다
@@ -55,7 +79,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Feedback>(
     () => ({
-      toast: (message, opts) => show({ message, keepOnNavigate: opts?.keepOnNavigate }, TOAST_MS),
+      toast: (message, opts) => show({ message, keepOnNavigate: opts?.keepOnNavigate }, opts?.durationMs ?? TOAST_MS),
       snackbar: ({ message, actionLabel, onAction, durationMs = SNACKBAR_MS }) =>
         show(
           {
@@ -86,6 +110,10 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         {notice && (
           <div
             key={notice.id}
+            onPointerEnter={pause}
+            onPointerLeave={resume}
+            onFocus={pause}
+            onBlur={resume}
             className="pointer-events-auto flex min-h-12 max-w-[420px] items-center gap-3 rounded-[14px] bg-ink px-4 py-2.5 text-[14px] font-medium tracking-[-0.14px] text-white shadow-card animate-[feedback-in_var(--dur-base)_var(--ease-out)]"
           >
             <span className="min-w-0 flex-1 [word-break:keep-all]">{notice.message}</span>
@@ -135,6 +163,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const id = useId();
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -144,10 +173,15 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
-      aria-label={title}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={description ? `${id}-description` : undefined}
       onCancel={(event) => {
         event.preventDefault();
         if (!loading) onCancel();
+      }}
+      // 사용자 동작 없는 두 번째 Esc 는 크롬이 cancel 없이 바로 닫는다. 그때도 open 값을 맞춘다
+      onClose={() => {
+        if (open) onCancel();
       }}
       onClick={(event) => {
         // 바깥(덮개)을 누르면 취소
@@ -156,8 +190,8 @@ export function ConfirmDialog({
       className="m-auto w-[min(340px,calc(100vw-32px))] rounded-[20px] bg-surface p-0 text-ink shadow-card backdrop:bg-black/40"
     >
       <div className="flex flex-col gap-2 p-5">
-        <h2 className="text-[18px] font-bold leading-[1.4] tracking-[-0.36px] [word-break:keep-all]">{title}</h2>
-        {description && <p className="text-[14px] leading-[1.5] text-ink-muted [word-break:keep-all]">{description}</p>}
+        <h2 id={`${id}-title`} className="text-[18px] font-bold leading-[1.4] tracking-[-0.36px] [word-break:keep-all]">{title}</h2>
+        {description && <p id={`${id}-description`} className="text-[14px] leading-[1.5] text-ink-muted [word-break:keep-all]">{description}</p>}
         {error && (
           <p role="alert" className="text-[13px] font-semibold text-danger-700 [word-break:keep-all]">
             {error}

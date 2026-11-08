@@ -29,7 +29,7 @@ export function JoinClient({ inviteToken }: { inviteToken: string }) {
       const s = await refreshSession();
       dispatch({ type: "SET_AUTH", token: s.token, role: s.user.role, userId: s.user.user_id, storeId: s.user.store_id ?? null });
       await queryClient.invalidateQueries({ queryKey: joinStatusQuery(s.token, s.user.user_id).queryKey });
-      router.replace(res.status === "ALREADY_MEMBER" ? "/staff/roadmap" : "/staff/pending");
+      router.replace(res.status === "ALREADY_MEMBER" ? "/staff" : "/staff/pending");
     },
   });
   const { mutate, status: joinStatus } = join;

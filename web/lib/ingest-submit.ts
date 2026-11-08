@@ -9,13 +9,15 @@ import {
   type IngestCapabilities,
   type IngestSourceType,
   type IntakeHint,
+  UploadStalledError,
 } from "@/lib/api";
 
 // 리브랜딩 입력창(O3·O6)의 "넣기" 한 번 = 자료 여러 개 등록 + 작업 하나 접수.
 // 서버가 202 job_id 를 돌려주면 끝이다. 추출 완료는 작업 화면이 서버 상태로 본다 (MVP §10-1).
 
 export type PickedFile = { id: string; file: File; sourceType: IngestSourceType };
-export type SourceFailure = { key: string; name: string; message: string };
+/** retryable: 다시 보내면 될 수도 있는 실패(이미 올린 자료는 다시 보내도 같다) */
+export type SourceFailure = { key: string; name: string; message: string; retryable: boolean };
 export type ItemUpdate = { status: "UPLOADING" | "DONE" | "FAILED"; progress?: number; message?: string };
 export type IngestSubmitResult = { jobId: number | null; failures: SourceFailure[] };
 
@@ -53,12 +55,13 @@ export async function registerFileSource(
   sourceType: IngestSourceType | "TEXT",
   token: string,
   hints: IntakeHint[],
-  onProgress?: (fraction: number) => void
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal
 ) {
   // TEXT 는 병렬 작업의 계약이 오면 이 경로(서명 URL로 .txt 업로드)가 맞는지 다시 확인한다
   const type = sourceType as IngestSourceType;
   const { upload_url, file_url } = await requestUploadUrl(type, file.name, token);
-  await putToStorage(upload_url, file, onProgress);
+  await putToStorage(upload_url, file, onProgress, signal);
   const contentHash = await computeContentHash(file);
   return registerSource(
     { sourceType: type, fileUrl: file_url, title: file.name, fileSize: file.size, contentHash, meta: metaFor(sourceType, file), ownerHints: hints },
@@ -89,6 +92,7 @@ export async function submitIngest({
   idempotencyKey,
   hints = [],
   onItem,
+  signal,
 }: {
   files: PickedFile[];
   text: string;
@@ -97,6 +101,8 @@ export async function submitIngest({
   hints?: IntakeHint[];
   /** 항목별 올리기 상태. key 는 파일이면 PickedFile.id, 붙여 넣은 글이면 "text". */
   onItem?: (key: string, update: ItemUpdate) => void;
+  /** 화면을 떠나면 끊는다. 끊기면 작업을 만들지 않고 AbortError 로 멈춘다 */
+  signal?: AbortSignal;
 }): Promise<IngestSubmitResult> {
   const sourceIds: number[] = [];
   const failures: SourceFailure[] = [];
@@ -113,20 +119,31 @@ export async function submitIngest({
   for (const item of items) {
     onItem?.(item.key, { status: "UPLOADING", progress: 0 });
     try {
-      const { source_id, duplicate } = await registerFileSource(item.file, item.type, token, hints, (progress) =>
-        onItem?.(item.key, { status: "UPLOADING", progress }),
+      const { source_id, duplicate } = await registerFileSource(
+        item.file,
+        item.type,
+        token,
+        hints,
+        (progress) => onItem?.(item.key, { status: "UPLOADING", progress }),
+        signal,
       );
       if (duplicate) {
         const message = "이미 올린 자료예요. 기존 결과를 확인해 주세요.";
-        failures.push({ key: item.key, name: item.name, message });
+        failures.push({ key: item.key, name: item.name, message, retryable: false });
         onItem?.(item.key, { status: "FAILED", message });
       } else {
         sourceIds.push(source_id);
         onItem?.(item.key, { status: "DONE", progress: 1 });
       }
     } catch (error) {
-      const message = error instanceof ApiError ? apiErrorMessage(error, "전송이 완료되지 않았어요.") : "전송이 완료되지 않았어요. 다시 올려주세요.";
-      failures.push({ key: item.key, name: item.name, message });
+      if (signal?.aborted) throw error;
+      const message =
+        error instanceof UploadStalledError
+          ? error.message
+          : error instanceof ApiError
+            ? apiErrorMessage(error, "전송이 완료되지 않았어요.")
+            : "전송이 완료되지 않았어요. 다시 올려주세요.";
+      failures.push({ key: item.key, name: item.name, message, retryable: true });
       onItem?.(item.key, { status: "FAILED", message });
     }
   }

@@ -40,6 +40,22 @@ function factCardView(version, status) {
     ] };
 }
 
+// 표에서 뽑힌 레시피 모양(칸마다 '이름=값', 제조순서는 화살표 한 줄). 합성 메뉴
+function tableRecipeView(version, status) {
+  const v = (temperature) => ({ temperature, size: null });
+  let id = 500;
+  const row = (sentence, temperature, extra = {}) => factRow({ fact_revision_id: ++id, fact_id: id, position: id, sentence, variant: v(temperature), origins: [memo(1)], ...extra });
+  const steps = (temperature, sentence, names) => names.map((value, i) => row(sentence, temperature, { value, step_order: i + 1 }));
+  return { card_id: 1, version_id: version, title: '바닐라 라떼', entity_id: 9, entity_name: '바닐라 라떼', review_status: status, published_version_id: 10, editable: true, entity_problem: null,
+    blocks: [
+      { block_id: 't1', kind: 'QUANTITIES', order: 1, variant: v('HOT'), facts: ['구분=바닐라', '금액=4,500원', '컵=16', '액상(텀블러)=스팀우유250ml(70°C)', '재료(시럽 / 파우더 / 베이스)=바닐라시럽 30ml'].map((s) => row(s, 'HOT')) },
+      { block_id: 't2', kind: 'QUANTITIES', order: 2, variant: v('ICE'), facts: ['구분=바닐라', '금액=4,500원', '컵=20', '얼음=가득', '액상(텀블러)=우유가득(200ml)', '재료(시럽 / 파우더 / 베이스)=바닐라시럽 20ml (컵 밑선)'].map((s) => row(s, 'ICE')) },
+      { block_id: 't3', kind: 'STEPS', order: 3, variant: v('HOT'), facts: steps('HOT', '제조순서=컵 → 재료 → 액상', ['컵', '재료', '액상']) },
+      { block_id: 't4', kind: 'STEPS', order: 4, variant: v('ICE'), facts: steps('ICE', '제조순서=컵 → 재료 → 얼음 → 액상 → 섞음', ['컵', '재료', '얼음', '액상', '섞음']) },
+      { block_id: 't5', kind: 'NOTES', order: 5, variant: v('HOT'), facts: [row('블렌더=x', 'HOT')] },
+    ] };
+}
+
 const category = (id) => { const c = CATEGORIES.find((x) => x.category_id === id); return { category_id: c.category_id, name: c.name }; };
 
 function initialState(overrides) {
@@ -150,7 +166,7 @@ function syntheticApi(role, overrides = {}) {
     const req = route.request(), url = new URL(req.url()), p = url.pathname, m = req.method();
     if (m === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
     const body = ['POST', 'PATCH', 'PUT'].includes(m) && req.postData() && (req.headers()['content-type'] ?? '').includes('json') ? req.postDataJSON() : null;
-    calls.push({ method: m, path: p + url.search, body });
+    calls.push({ method: m, path: p + url.search, body, headers: req.headers() });
     const reply = (payload, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(payload),
       headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true' } });
     let payload;
@@ -217,14 +233,16 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(id));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
       if (action === 'restore' && state.failRestore) return reply({ error: { message: '되돌리기 저장 실패' } }, 503);
-      // 서버(api/app/cards/router.py)처럼 restore 는 공개 전 카드를 PENDING 으로 되돌린다
-      c.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', restore: 'PENDING' }[action];
+      if (action === 'approve' && state.failApprove?.includes(c.card_id)) return reply({ error: { message: '공개 실패' } }, 409);
+      // 서버(api/app/cards/router.py)처럼 restore 는 공개 전 카드를 빼기 전 상태(검수 필요면 검수 필요)로 되돌린다
+      if (action === 'exclude') c.beforeExclude = c.review_status;
+      c.review_status = { approve: 'APPROVED', exclude: 'EXCLUDED', restore: c.beforeExclude === 'NEEDS_REVIEW' ? 'NEEDS_REVIEW' : 'PENDING' }[action];
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: c.review_status === 'APPROVED' ? c.card_id * 10 : null, updated_at: NOW, undo_until: null };
     } else if (/^\/cards\/\d+\/category$/.test(p) && m === 'PATCH') {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       c.category_id = body.category_id;
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: null, updated_at: NOW, undo_until: null };
-    } else if (p === '/cards/1/facts' && m === 'GET') payload = factCardView(state.factVersion, state.cards[0].review_status);
+    } else if (p === '/cards/1/facts' && m === 'GET') payload = (state.tableRecipe ? tableRecipeView : factCardView)(state.factVersion, state.cards[0].review_status);
     else if (p === '/cards/1/facts' && m === 'PUT') {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
@@ -351,14 +369,21 @@ function syntheticApi(role, overrides = {}) {
     else if (p === '/storage/put') {
       if (state.uploadDelayMs) await new Promise((r) => setTimeout(r, state.uploadDelayMs));
       if (state.failUpload) return reply({ error: { message: 'synthetic upload failure' } }, 500);
+      // 앞에서부터 N 개만 실패(일부 파일만 실패한 경우)
+      if (state.failUploadCount > 0) { state.failUploadCount -= 1; return reply({ error: { message: 'synthetic upload failure' } }, 500); }
+      // 멈춘 업로드: 응답하지 않는다(화면의 시간 제한 검사용)
+      if (state.stallUpload) return new Promise(() => {});
       payload = {};
     }
-    else if (p === '/ingest/sources' && m === 'POST') payload = { source_id: 31, status: 'QUEUED', duplicate: false };
+    else if (p === '/ingest/sources' && m === 'POST') payload = { source_id: 31, status: 'QUEUED', duplicate: Boolean(state.duplicateSource) };
     else if (/^\/ingest\/owner-answers\/\d+\/attachments$/.test(p) && m === 'POST') payload = { job_id: 7 };
-    else if (p === '/ingest/jobs' && m === 'POST') payload = { job_id: 7, status: 'QUEUED' };
+    else if (p === '/ingest/jobs' && m === 'POST') {
+      if (state.failJobCreate > 0) { state.failJobCreate -= 1; return reply({ error: { message: '작업 만들기 실패' } }, 503); }
+      payload = { job_id: 7, status: 'QUEUED' };
+    }
     else if (p === '/ingest/jobs' && m === 'GET') {
       const status = jobStatus();
-      payload = { items: [{ job_id: 7, title: null, status, category_version: 1, source_count: jobSources(status).length, card_count: 4, created_at: NOW, completed_at: ACTIVE.has(status) ? null : NOW }], next_cursor: null, total: 1 };
+      payload = { items: [{ job_id: 7, title: null, status, category_version: 1, source_count: jobSources(status).length, card_count: 4, created_at: NOW, completed_at: ACTIVE.has(status) ? null : (state.jobCompletedAt ?? new Date().toISOString()) }], next_cursor: null, total: 1 };
     } else if (p === '/ingest/jobs/7' && m === 'GET') {
       const status = jobStatus(), sources = jobSources(status);
       payload = { job_id: 7, title: null, status, category_version: 1,

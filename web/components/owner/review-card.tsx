@@ -59,7 +59,7 @@ export function ReviewCard({
     <>
       {/* 길게 누르기 대상. 글자 선택과 iOS 링크 미리보기가 같이 뜨지 않게 막는다 */}
       <div data-long-press="" className="select-none [-webkit-touch-callout:none]" {...longPress}>
-      <SwipeRow left={{ label: "빼기", tone: "danger", onAction: onExclude }}>
+      <SwipeRow left={{ label: "빼기", tone: "danger", onAction: onExclude, gestureOnly: tone === "check" }}>
         {tone === "check" ? (
           <div className="overflow-hidden rounded-[20px] bg-surface shadow-card">
             <p className="bg-warn-50 px-[18px] py-2 text-[13px] font-medium leading-[1.45] text-warn-700 [word-break:keep-all]">

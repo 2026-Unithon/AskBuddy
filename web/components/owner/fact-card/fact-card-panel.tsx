@@ -12,6 +12,8 @@ import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
 import { FactGroupRow, FactRowItem, blockHeading, groupFacts } from "./fact-row";
+import { compactRecipe } from "./fact-group";
+import { RecipeView } from "./recipe-view";
 import { SortableList } from "@/components/kit/sortable-list";
 import { useLongPress } from "@/lib/use-long-press";
 import { focusRing } from "@/components/kit/buttons";
@@ -224,6 +226,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
     );
   }
   const view = facts.data;
+  const compact = compactRecipe(view.blocks);
   const excluded = card.review_status === "EXCLUDED";
   const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;
@@ -272,7 +275,9 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
               </Surface>
             );
           })
-        : view.blocks.map((block) => (
+        : compact
+          ? <RecipeView recipe={compact} />
+          : view.blocks.map((block) => (
             // 보기 모드(o06b): 머리글은 카드 밖에 굵게, 칩과 줄마다 근거는 없다
             <section key={block.block_id} className="flex flex-col gap-2">
               <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>

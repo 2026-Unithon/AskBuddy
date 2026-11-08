@@ -27,6 +27,7 @@ import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
 import { evidenceNames } from "@/components/owner/fact-card/fact-row";
+import { compactRecipe } from "@/components/owner/fact-card/fact-group";
 import { pressable } from "@/components/kit/buttons";
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
@@ -102,6 +103,9 @@ export default function OwnerCardPage() {
   }
 
   const shown = card.draft ?? card.published;
+  // 레시피 한눈에 보기면 가격은 제목 옆에(2026-11-08 사용자 스케치)
+  const recipe = card.fact_card && factEditor.facts.data ? compactRecipe(factEditor.facts.data.blocks) : null;
+  const price = recipe && !factEditor.editing ? recipe.price : null;
   const title = shown?.title ?? "";
   const content = shown?.content ?? "";
   const unpublishedDraft = Boolean(card.draft && card.published && card.draft.version_id !== card.published.version_id);
@@ -175,9 +179,12 @@ export default function OwnerCardPage() {
         {card.category?.name ?? "기타"}
         <span aria-hidden>▾</span>
       </button>
-      <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="-mt-2 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
-        {title}
-      </h1>
+      <div className="-mt-2 flex items-baseline justify-between gap-3">
+        <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="min-w-0 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
+          {title}
+        </h1>
+        {price && <p className="shrink-0 text-[17px] font-bold text-ink">{price}</p>}
+      </div>
       {statusLine && (
         <p className="-mt-2 flex items-center gap-1.5 text-[13px] text-ink-muted">
           <span aria-hidden className={`size-2 rounded-full ${statusLine.dot}`} />
@@ -197,7 +204,8 @@ export default function OwnerCardPage() {
           <NumberedContent content={content} />
         </Surface>
       )}
-      {card.review_status === "APPROVED" && card.published && !factEditor.editing && <CardAssignment cardId={cardId} />}
+      {/* 레시피는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자) */}
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !price && !recipe && <CardAssignment cardId={cardId} />}
       {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>

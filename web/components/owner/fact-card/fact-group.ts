@@ -64,3 +64,95 @@ export function groupFacts<T extends Row>(rows: T[]): { groups: FactGroup<T>[]; 
   const numbered = orders.every((o) => o !== null) && new Set(orders).size === orders.length;
   return { groups, numbered };
 }
+
+// ── 레시피 한눈에 보기(2026-11-08 사용자 스케치) ──
+// 표에서 뽑힌 레시피는 칸마다 '이름=값' 사실이라, 그대로 줄마다 보이면 같은 말이 길게 늘어진다.
+// 규격(HOT/ICE)마다 제조 순서 한 줄에 칸 값을 끼워 넣고(컵 → 원액 75ml → 우유가득), 쓰이지 않은 칸만 아래 한 줄로 둔다.
+
+type RecipeRow = Pick<FactFields, "sentence" | "step_order">;
+type RecipeBlock = { kind: string; variant: { temperature: string | null; size: string | null }; facts: RecipeRow[] };
+/** note: 단계 이름과 같은 칸의 숫자 값(컵 16). 단계 바로 아래 작게 붙인다 */
+export type CompactStep = { text: string; note: string | null };
+export type CompactSection = { heading: string | null; steps: CompactStep[]; extras: { label: string; value: string }[] };
+export type CompactRecipe = { price: string | null; sections: CompactSection[] };
+
+const PRICE = /^(금액|가격|판매가)$/;
+const DROP_LABEL = /^(구분)$/;
+const EMPTY_VALUE = /^(x|X|-|없음|✕|×)$/;
+const STEP_LABEL = /순서|방법/;
+// 숫자만 적힌 칸의 단위. 매장 표는 컵 크기를 숫자만 적는다(카페 컵은 HOT, ICE 모두 온즈)
+const NUMBER_UNIT: Record<string, string> = { 컵: "온즈" };
+
+const norm = (label: string) => label.replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
+function split(sentence: string): { label: string; text: string } | null {
+  const eq = sentence.indexOf("=");
+  if (eq <= 0) return null;
+  return { label: sentence.slice(0, eq).trim(), text: sentence.slice(eq + 1).trim() };
+}
+
+/** 이름=값 사실이 대부분인 카드면 한눈에 보기, 아니면 null(원래 보기). */
+export function compactRecipe(blocks: RecipeBlock[]): CompactRecipe | null {
+  type Attr = { label: string; text: string };
+  const order: string[] = [];
+  const headingOf = new Map<string, string | null>();
+  const attrs = new Map<string, Map<string, Attr>>();
+  const stepRows = new Map<string, RecipeRow[]>();
+  let plain = 0;
+  let pairs = 0;
+  for (const block of blocks) {
+    const heading = [block.variant.temperature, block.variant.size].filter(Boolean).join(" ") || null;
+    const key = heading ?? "";
+    if (!headingOf.has(key)) {
+      headingOf.set(key, heading);
+      order.push(key);
+    }
+    for (const fact of block.facts) {
+      const pair = split(fact.sentence);
+      if (fact.step_order !== null || block.kind === "STEPS" || (pair && STEP_LABEL.test(pair.label))) {
+        stepRows.set(key, [...(stepRows.get(key) ?? []), fact]);
+        continue;
+      }
+      if (!pair) {
+        plain += 1;
+        continue;
+      }
+      pairs += 1;
+      const map = attrs.get(key) ?? new Map<string, Attr>();
+      if (!map.has(norm(pair.label))) map.set(norm(pair.label), pair);
+      attrs.set(key, map);
+    }
+  }
+  if (pairs === 0 || pairs < (pairs + plain) * 0.6) return null;
+
+  // 가격: 규격마다 같으면 하나, 다르면 규격마다
+  const prices = order.map((key) => [headingOf.get(key), [...(attrs.get(key)?.values() ?? [])].find((a) => PRICE.test(norm(a.label)))?.text] as const).filter(([, p]) => p);
+  const price = prices.length === 0 ? null : new Set(prices.map(([, p]) => p)).size === 1 ? prices[0][1]! : prices.map(([h, p]) => (h ? `${h} ${p}` : p)).join(", ");
+
+  const common = attrs.get("");
+  const sections: CompactSection[] = [];
+  for (const key of order) {
+    if (key === "" && order.length > 1 && !stepRows.has("")) continue;
+    const own = new Map([...(key ? (common ?? []) : []), ...(attrs.get(key) ?? [])]);
+    const used = new Set<string>();
+    // 단계: 화살표 한 줄이면 나눠 쓰고, 아니면 번호 순서대로 문장
+    const rows = stepRows.get(key) ?? [];
+    const arrow = rows.find((row) => SEQUENCE.test(row.sentence));
+    const raw = arrow
+      ? (split(arrow.sentence)?.text ?? arrow.sentence).split(SEQUENCE).map((s) => s.trim()).filter(Boolean)
+      : [...new Map([...rows].sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0)).map((row) => [row.sentence, split(row.sentence)?.text ?? row.sentence])).values()];
+    const steps = raw.map((step): CompactStep => {
+      const attr = own.get(norm(step));
+      if (!attr || EMPTY_VALUE.test(attr.text)) return { text: step, note: null };
+      used.add(norm(step));
+      // 숫자뿐인 값(컵=16)은 단계 이름을 두고 아래에 붙이고, 나머지는 값으로 바꾼다.
+      // '가득'처럼 짧은 값만 남으면 무엇인지 모르니 이름을 붙인다
+      if (/^[\d.,\s]+$/.test(attr.text)) return { text: step, note: `${attr.text.trim()}${NUMBER_UNIT[norm(attr.label)] ?? ""}` };
+      return { text: attr.text.length <= 3 && !/\d/.test(attr.text) ? `${norm(attr.label)} ${attr.text}` : attr.text, note: null };
+    });
+    const extras = [...own.entries()]
+      .filter(([label, a]) => !used.has(label) && !PRICE.test(label) && !DROP_LABEL.test(label) && !EMPTY_VALUE.test(a.text))
+      .map(([label, a]) => ({ label, value: a.text }));
+    if (steps.length || extras.length) sections.push({ heading: headingOf.get(key) ?? null, steps, extras });
+  }
+  return { price, sections };
+}

@@ -151,7 +151,7 @@ function Preview() {
         />
       }
     >
-      <PageHeader eyebrow="더카페 논현점" title="오늘 매장" action={<HeaderActions role="OWNER" />} />
+      <PageHeader eyebrow="버디 카페 1호점" title="오늘 매장" action={<HeaderActions role="OWNER" />} />
       <HeroCard className="gap-3">
         <HeroClock>지금 · 미들 진행 중</HeroClock>
         <p className="text-[22px] font-bold tracking-[-0.44px]">영업 중이에요</p>
@@ -220,14 +220,18 @@ function GesturesPreview() {
   const router = useRouter();
   const [result, setResult] = useState("");
   const longPress = useLongPress(() => setResult("길게 눌렀어요"));
+  const [rows, setRows] = useState(["하나", "둘", "셋"]);
   return (
     <Screen>
       <PageHeader title="제스처" />
       <Stagger>
-        <p>하나</p>
-        <p>둘</p>
-        <p>셋</p>
+        {rows.map((row) => (
+          <p key={row}>{row}</p>
+        ))}
       </Stagger>
+      <Button variant="secondary" onClick={() => setRows((prev) => prev.slice(1))}>
+        첫 줄 빼기
+      </Button>
       <SwipeRow left={{ label: "빼기", tone: "danger", onAction: () => setResult("뺐어요") }}>
         <div className="rounded-[20px] bg-surface px-4 py-5 shadow-card">밀어 보세요</div>
       </SwipeRow>
@@ -270,6 +274,7 @@ function FeedbackPreview() {
       <ConfirmDialog
         open={confirm}
         title="로그아웃할까요?"
+        description="다시 들어오려면 로그인해야 해요."
         confirmLabel="로그아웃"
         onCancel={() => setConfirm(false)}
         onConfirm={() => {

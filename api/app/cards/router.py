@@ -442,7 +442,12 @@ async def restore_card(
             raise ApiError(404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.")
         if card["review_status"] != "EXCLUDED":
             raise ApiError(409, "CARD_NOT_EXCLUDED", "제외된 카드만 복원할 수 있습니다.")
-        target = "APPROVED" if card["published_version_id"] is not None else "PENDING"
+        # 공개 전 카드는 빼기 전 상태로 돌린다. '검수 필요'였으면 이유(needs_review_reason)와 함께 살아난다
+        if card["published_version_id"] is not None:
+            target = "APPROVED"
+        else:
+            prior = await repo.last_exclude_from_status(db, store_id, card_id)
+            target = "NEEDS_REVIEW" if prior == "NEEDS_REVIEW" else "PENDING"
         await db.execute(
             """
             update knowledge_cards
