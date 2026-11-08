@@ -173,6 +173,9 @@ test('o14a 끌어서 순서, 할 일 담기는 초록 버튼', async (b) => {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + rowHeight * 0.8, { steps: 10 }); await page.mouse.up();
   await page.waitForFunction(() => document.querySelector('main h2')?.textContent === '미들');
   assert.deepEqual(api.state.shifts.map((s) => s.name), ['미들', '오픈', '마감']);
+  // Verify the saved drag order before testing the independent keyboard move.
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('main h2')?.textContent === '미들');
   await page.getByRole('button', { name: '마감 옮기기' }).focus();
   await page.keyboard.press('ArrowUp');
   await page.waitForFunction(() => [...document.querySelectorAll('main h2')].map((h) => h.textContent).join() === '미들,마감,오픈');
