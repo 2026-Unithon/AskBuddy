@@ -42,6 +42,7 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
 
@@ -341,7 +342,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     if context.store_id!=str(store_id) or context.stage!='ANSWER':raise ValueError('trusted ANSWER context required')
     trusted_slots=dict(baseline.confirmed_slots if confirmed_slots is None else confirmed_slots)
     try:
-        async with asyncio.timeout(min(timeout,3.0)):
+        async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
             payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns)
             from app.learn.grounded_calculations import UNITS
             quantity_ids=tuple(dict.fromkeys(f['fact_revision_id'] for c in payload['candidates'] for f in c['facts']

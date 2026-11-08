@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
         retention.cancel()
         with suppress(asyncio.CancelledError):
             await retention
+        from app.reg.embeddings import close_query_client
+        await asyncio.to_thread(close_query_client)
         await close_pool()
 
 

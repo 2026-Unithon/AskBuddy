@@ -121,13 +121,13 @@ class ChannelSearchResult:
     entity_references: tuple[tuple[str, str, str], ...] = ()
 
 
-async def search_channels(pool, *, store_id: int, question: str, query_vector: list[float],
+async def search_channels(pool, *, store_id: int, question: str, query_vector: list[float] | None,
                           channel_limit: int = 20, include_universe: bool = False) -> ChannelSearchResult:
     """제품과 평가가 공유하는 독립 채널 조회. 평가만 현재 승인 모집단도 수집한다."""
     if (type(channel_limit) is not int or not 1<=channel_limit<=100
             or type(include_universe) is not bool
-            or len(query_vector)!=1536 or not any(query_vector)
-            or any(type(x) not in (int,float) or not math.isfinite(x) for x in query_vector)):
+            or (query_vector is not None and (len(query_vector)!=1536 or not any(query_vector)
+            or any(type(x) not in (int,float) or not math.isfinite(x) for x in query_vector)))):
         raise ValueError("invalid query vector or candidate limit")
     query = normalize_query(question)
     if not query:
@@ -156,7 +156,7 @@ async def search_channels(pool, *, store_id: int, question: str, query_vector: l
                   and c.review_status='APPROVED' and c.is_verified=true
                 where d.store_id=$1 and d.prepared_id=$2
                 order by d.embedding <=> $3::vector,d.card_id,d.block_id limit $4
-                """,store_id,pid,vector_literal(query_vector),channel_limit)
+                """,store_id,pid,vector_literal(query_vector),channel_limit) if query_vector is not None else []
             # 분할 카드의 선행 사실은 상위 N개 순위 밖에 있을 수 있다. 같은
             # 불변 공개판·현재 승인 포인터에서만 대상 전체의 후보를 보충한다.
             # 이것은 회수일 뿐이며 대상/규격/적용성 승인은 planner가 수행한다.
@@ -209,7 +209,7 @@ def complete_entity_candidates(result, ranked):
     return (*ranked,*extra)
 
 
-async def hybrid_search(pool, *, store_id: int, question: str, query_vector: list[float],
+async def hybrid_search(pool, *, store_id: int, question: str, query_vector: list[float] | None,
                         channel_limit: int = 20, candidate_limit: int = 10) -> SearchResult:
     if type(candidate_limit) is not int or not 1<=candidate_limit<=100:
         raise ValueError('candidate limit must be 1..100')

@@ -39,7 +39,7 @@ export type RPending = {
 
 async function request<T>(path: string, token: string, signal?: AbortSignal, body?: unknown): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
+  const timer = setTimeout(() => controller.abort(), path === "/chat" ? 35_000 : 10_000);
   try {
     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/learn/v2${path}`, {
       method: body === undefined ? "GET" : "POST",

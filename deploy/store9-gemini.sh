@@ -8,7 +8,9 @@ test "$envfile" = /home/ubuntu/askbuddy.env && test -f "$envfile" && test ! -L "
 op=${1:-status}
 demo=0
 suffix=
+prepare=prepare
 if [ "$op" = enable-demo ]; then demo=1; suffix=-demo; op=enable; fi
+if [ "$op" = rebind-demo ]; then demo=1; suffix=-demo; op=enable; prepare=rebind; fi
 if [ "$op" = status ]; then
   docker compose exec -T api python -c "from app.config import get_settings; s=get_settings(); print('enabled:',s.r_general_semantics_enabled,'all_demo:',s.r_general_semantics_demo_enabled,'store:',s.r_general_semantics_store_id,'model:',s.gemini_model)"
   exit
@@ -27,7 +29,7 @@ bundle=$(mktemp)
 trap 'rm -f -- "$bundle"' EXIT
 if [ "$op" = enable ]; then
   # This only reads the active index and generates a release; no model is called.
-  docker compose exec -T api python -m scripts.chat_gemini_pilot "prepare$suffix" >"$bundle"
+  docker compose exec -T api python -m scripts.chat_gemini_pilot "$prepare$suffix" >"$bundle"
   sudo install -d -o ubuntu -g ubuntu -m 0750 /home/ubuntu/askbuddy-releases
 fi
 rollback() {

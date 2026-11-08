@@ -381,6 +381,19 @@ async def scope(pool,claims,user_id):
     return store_id,member_id
 
 
+@router.get("/v2/demo/requests/{request_id}/outcome")
+async def demo_request_outcome(request_id:str,claims:Claims,user_id:CurrentUserId):
+    if not get_settings().r_general_semantics_demo_enabled or not 8<=len(request_id)<=80:
+        raise ApiError(404,'NOT_FOUND','이 요청의 기록이 없습니다.')
+    enabled()
+    from app.learn.demo_outcome import outcome
+    async with get_pool().acquire() as conn:
+        async with conn.transaction(isolation='repeatable_read',readonly=True):
+            store_id=await get_store_id(claims,conn)
+            result=await outcome(conn,store_id=store_id,user_id=user_id,request_id=request_id)
+    return JSONResponse(content=result,headers={'Cache-Control':'private, no-store'})
+
+
 @router.post("/v2/sessions")
 async def create_session(req:SessionRequest,request:Request,claims:Claims,user_id:CurrentUserId):
     request.state.r_request_id=req.request_id
@@ -427,16 +440,22 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
     pool=get_pool()
     settings=get_settings()
     loop=asyncio.get_running_loop()
-    deadline=loop.time()+settings.chat_deadline_seconds
+    from app.learn.demo_retrieval import demo_active,retrieve
+    start=loop.time()
+    deadline=start+(30 if demo_active(settings) else settings.chat_deadline_seconds)
     stale=False
     completed=None
     recover_question=False
     choice=ContextChoice(req.context_id,req.context_revision,req.option) if req.context_id else None
     try:
-        async with asyncio.timeout_at(deadline):
+        async with asyncio.timeout_at(deadline) as timer:
             store_id,member_id=await scope(pool,claims,user_id)
             from app.learn.general_semantics import settings_for_chat_store
             settings=await settings_for_chat_store(settings,store_id,pool)
+            demo=demo_active(settings)
+            deadline=start+(30 if demo else settings.chat_deadline_seconds)
+            timer.reschedule(deadline)
+            model_window=25 if demo else settings.llm_total_budget_seconds
             async with request_lease(pool,store_id,user_id):
                 completed=await saved_reply(pool,store_id=store_id,member_id=member_id,session_id=int(req.session_id),
                     request_id=req.request_id,question=req.question,choice=choice,policy_receipt_id=req.policy_receipt_id,
@@ -448,6 +467,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             member_id=member_id, user_id=user_id)
                     for requery in range(2):
                         usage=None
+                        retrieval_mode='NOT_REQUIRED'
+                        retrieval_failure=None
                         history=None
                         async with pool.acquire() as conn:
                             async with conn.transaction():
@@ -491,23 +512,21 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             search=SearchResult(snapshot,index_revision,(),question)
                         else:
                             remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))
+                                model_window-(loop.time()-start))
                             if remaining<=0:raise TimeoutError()
                             usage=UsageContext(store_id=str(store_id),cost_phase="OPERATING",stage="QUERY",
                                 operation_id=digest(dict(member_id=member_id,request_id=req.request_id)),
                                 logical_call_id="v2:"+digest(dict(member_id=member_id,request_id=req.request_id))[7:]+f":q{requery}")
                             try:
-                                vectors=await asyncio.wait_for(recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
-                                    timeout=min(settings.search_deadline_seconds,remaining))
+                                search,retrieval_mode,retrieval_failure=await retrieve(pool,store_id=store_id,question=search_question,
+                                    embed=lambda:recorded_embeddings([search_question],context=usage,sink=request_usage_sink(pool,store_id=store_id)),
+                                    timeout=min(2.5 if demo else settings.search_deadline_seconds,remaining),allow_fallback=demo,search_fn=hybrid_search)
                             except (TimeoutError,BudgetDenied):raise
                             except UsageWriteError as exc:
                                 raise ApiError(503,"USAGE_UNAVAILABLE","검색 계측을 시작하지 못했습니다.",retryable=True) from exc
-                            except Exception as exc:
-                                raise ApiError(503,"MODEL_UNAVAILABLE","질문 검색을 완료하지 못했습니다.",retryable=True) from exc
-                            search=await hybrid_search(pool,store_id=store_id,question=search_question,query_vector=vectors[0])
                             if getattr(settings,'r_reranker_enabled',False):
                                 remaining=min(deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                    settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))
+                                    model_window-(loop.time()-start))
                                 rank_context=usage.model_copy(update=dict(stage='RERANK',logical_call_id=usage.logical_call_id+':rank'))
                                 try:
                                     search=await rerank(search,store_id=store_id,question=search_question,context=rank_context,
@@ -544,7 +563,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                 baseline=decision,confirmed_slots=slots,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,
-                                    settings.llm_total_budget_seconds-(loop.time()-(deadline-settings.chat_deadline_seconds)))),
+                                    model_window-(loop.time()-start))),
                                 context_verified=context is not None or history is not None,context_id=choice.context_id if choice else None,
                                 clarify_turns=context.context.clarify_turns if context else 0)
                         if stale and decision.plan.action=="ESCALATE":
@@ -570,9 +589,10 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     general_semantics=general_audit,
                                     semantic_catalog_hash=getattr(settings,'r_reviewed_semantics_hash','') if semantic_approval else None,
                                     usage_operation_id=usage.operation_id if usage else None,
+                                    retrieval_mode=retrieval_mode,retrieval_failure=retrieval_failure,
                                     query_logical_call_id=usage.logical_call_id if usage else None,
                                     rerank_logical_call_id=usage.logical_call_id+':rank' if usage and getattr(settings,'r_reranker_enabled',False) else None,
-                                    elapsed_before_save_ms=round((loop.time()-(deadline-settings.chat_deadline_seconds))*1000,3),
+                                    elapsed_before_save_ms=round((loop.time()-start)*1000,3),
                                     rrf_version=RRF_VERSION,lexical_query_version=LEXICAL_QUERY_VERSION,
                                     glossary_version=search.snapshot.glossary_version,alias_terms_hash=digest(search.alias_terms),
                                     index_revision=search.index_revision,rerank_status=search.rerank_status,
