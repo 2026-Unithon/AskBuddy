@@ -134,7 +134,7 @@ def reply_kind(snapshot, stored, text):
     if text in stored.offered_options or is_price_reply(snapshot, stored, text):
         return 'selection'
     q = normalize_query(text)
-    if re.match(r'^(?:그건\s*(?:됐|말고)|다른\s*질문|별개로|주제(?:를)?\s*바꿔|이번엔|이번에는)', q):
+    if re.match(r'^(?:그건\s*(?:됐|말고)|다른\s*질문|별개로|주제(?:를)?\s*바꿔)', q):
         return 'new'
     previous = normalize_query(question_prefix(stored))
     related = any(word in q for word in re.findall(r'[가-힣a-z0-9]{2,}', previous)
@@ -143,10 +143,14 @@ def reply_kind(snapshot, stored, text):
               or re.search(r'(?:라면|다면|경우에?는|한\s*건은)', q))
     # A self-contained request about a different subject starts fresh. A
     # description ("영수증은 없어요") is useful even with no vocabulary overlap.
-    asks = re.search(r'(?:알려\s*줘|보여\s*줘|어떻게|어디|뭐부터|뭐야|방법|순서.*[?？])', q)
+    asks = re.search(r'(?:알려\s*줘|보여\s*줘|어떻게|어디|얼마나|얼마야|뭐부터|뭐야|방법|순서.*[?？])', q)
     new_title = any(normalize_query(c.title) in q and normalize_query(c.title) not in previous
                     for c in snapshot.cards if c.title.strip())
-    if not refers and not related and (asks or (new_title and stored.offered_slot != 'entity')):
+    if refers:
+        return 'detail'
+    if asks and (new_title or not related):
+        return 'new'
+    if new_title and not related and stored.offered_slot != 'entity':
         return 'new'
     return 'detail'
 

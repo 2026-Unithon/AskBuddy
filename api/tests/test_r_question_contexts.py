@@ -65,6 +65,14 @@ class ContextTest(unittest.TestCase):
                               ('다른 질문인데 오픈 준비는?','new'),('시재 점검 순서 알려줘','new')]:
             self.assertEqual(reply_kind(snap,self.stored,text),expected)
 
+    def test_full_question_naming_a_card_after_an_alias_offer_starts_fresh(self):
+        from dataclasses import replace
+        offer=replace(self.stored,context=self.stored.context.model_copy(update={'original_question':'별칭 물 얼마나?'}),
+                      offered_slot='entity',offered_options=('점검표',))
+        snap=SimpleNamespace(cards=[SimpleNamespace(title='점검표',entity_id='1')])
+        self.assertEqual(reply_kind(snap,offer,'HOT 점검표 물 얼마나?'),'new')
+        self.assertEqual(reply_kind(snap,offer,'이번에는 현금으로 결제했어'),'detail')
+
     def test_old_publication_cannot_replace_current_context(self):
         with self.assertRaises(ApiError) as caught:
             self.accept(knowledge_revision=6)
