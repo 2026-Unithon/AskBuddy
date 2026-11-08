@@ -9,7 +9,12 @@ def norm(text):
 def requested_card(snapshot,question):
     q=norm(question)
     literal=re.fullmatch(r'(.+?)(?:의)?\s+카드\s*원문\s*(?:보여줘|보여주세요|보기)[.!?]?',q)
-    procedure=re.fullmatch(r'(.+?)(?:의)?\s+(?:만드는\s*법(?:\s*(?:전부|전체))?(?:\s*(?:알려줘|알려주세요))?|순서(?:\s*(?:알려줘|알려주세요))?)[.!?]?',q)
+    # 같은 요청을 직원이 쓰는 여러 이름으로 받는다. 제목은 여전히 완전일치다.
+    # '어떻게 만들어?' 같은 서술형 자유 질문은 넣지 않는다 — 그건 원문 열람을
+    # 승인하지 않는다(test_r_raw_original.test_free_questions_do_not_gain_raw_authorization).
+    recipe=r'(?:만드는\s*(?:법|방법)|제조\s*(?:법|방법|순서)|레시피|순서)'
+    procedure=re.fullmatch(
+        rf'(.+?)(?:의|는|은)?\s+{recipe}(?:\s*(?:전부|전체))?(?:\s*(?:알려줘|알려주세요|좀|보여줘))*[.!?]*',q)
     match=literal or procedure
     if not match:return None
     title=match[1].replace(' ','')
