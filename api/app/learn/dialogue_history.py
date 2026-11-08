@@ -76,6 +76,24 @@ def _mentions(text, titles):
     return [t for _,_,t in sorted(found)]
 
 
+def requested_subjects(question,history,snapshot):
+    """Explicit comparisons need every named subject; an ordinal needs its referent."""
+    titles=tuple(dict.fromkeys(c.title for c in snapshot.cards))
+    names=_mentions(question,titles)
+    if len(names)==2 and re.search(r'비교|차이|다른\s*점',question):
+        return tuple(names)
+    followup=followup_subjects(question,history,snapshot)
+    return followup if len(followup)==1 else ()
+
+
+def respects_subjects(decision,subjects,snapshot):
+    if not subjects:return True
+    if decision.plan.clarification_slot=='entity':return False
+    if decision.plan.action!='ANSWER':return True
+    titles={snapshot.card(block.card_id).title for block in decision.plan.selected_blocks}
+    return set(subjects)<=titles
+
+
 def followup_subjects(question,history,snapshot):
     """Narrow an otherwise unrelated fallback only for explicit user references."""
     titles=tuple(dict.fromkeys(c.title.strip() for c in snapshot.cards if c.title.strip()))
@@ -104,8 +122,14 @@ def scoped_fallback(decision,question,history,snapshot):
     from dataclasses import replace
     from app.contracts.answer import AnswerPlan
     from uuid import uuid4
-    if decision.plan.action!='ESCALATE' and not (
+    subjects=requested_subjects(question,history,snapshot)
+    if decision.plan.action!='ESCALATE' and respects_subjects(decision,subjects,snapshot) and not (
             decision.plan.action=='CLARIFY' and decision.plan.clarification_slot=='entity'):return decision
+    if len(subjects)==2:
+        # Asking the user to select one would discard half of the request.
+        return replace(decision,plan=AnswerPlan(snapshot_id=snapshot.snapshot_id,
+            knowledge_revision=snapshot.knowledge_revision,action='ESCALATE',
+            escalation_reason='UNRESOLVED_COMPARISON'),semantic_context=None)
     names=followup_subjects(question,history,snapshot)
     if not names:return decision
     base=dict(snapshot_id=snapshot.snapshot_id,knowledge_revision=snapshot.knowledge_revision)

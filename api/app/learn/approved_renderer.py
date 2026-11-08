@@ -83,6 +83,9 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         from app.learn.answer_validation import validate_answer_for_question
         from app.learn.grounded_calculations import calculate
         validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
+        if resolved.procedure_steps:
+            from app.learn.procedure_scope import step_lines
+            lines=step_lines(resolved.procedure_steps,citations)
         lines.extend(calculate(resolved.calculations,plan=plan,snapshot=snapshot,store_id=store_id,
             question=resolved.question,user_turns=resolved.calculation_user_turns))
         if resolved.conclusions:

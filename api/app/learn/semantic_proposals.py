@@ -57,7 +57,7 @@ class ComparisonQuestion(Contract):
 
 def proposal_input(search: SearchResult, *, store_id: int, question: str,
                    user_turns: tuple[str, ...] = (), comparisons: tuple[ComparisonQuestion, ...] = (),
-                   previous_replies=(), current_utterance=None, model_view=None) -> dict:
+                   previous_replies=(), current_utterance=None, model_view=None, required_subjects=()) -> dict:
     if type(store_id) is not int or search.snapshot.store_id != str(store_id):
         raise ValueError('trusted store required')
     verify_snapshot_hash(search.snapshot)
@@ -90,6 +90,7 @@ def proposal_input(search: SearchResult, *, store_id: int, question: str,
     if current_utterance is not None and current_utterance!=question:
         payload['current_utterance']=current_utterance
     if previous_replies:payload['previous_replies']=list(previous_replies)
+    if required_subjects:payload['requested_subjects']=list(required_subjects)
     # Count the actual model representation, not storage-only hashes or
     # repeated assertions. All candidates remain bound to the full input hash.
     visible=model_view(payload) if model_view else payload

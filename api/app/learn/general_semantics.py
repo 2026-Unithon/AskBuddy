@@ -42,7 +42,7 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
-    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py','learn/procedure_scope.py',
     'learn/semantic_grouping.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
@@ -350,7 +350,7 @@ def model_evidence(payload):
 
 async def general_decision(search,*,settings,store_id,question,user_turns,baseline,context,sink,
                            timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None,
-                           previous_replies=(),current_utterance=None):
+                           previous_replies=(),current_utterance=None,required_subjects=()):
     if (not getattr(settings,'r_general_semantics_enabled',False)
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
         return baseline,None
@@ -382,7 +382,8 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     try:
         async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
             payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns,
-                previous_replies=previous_replies,current_utterance=current_utterance,model_view=model_evidence)
+                previous_replies=previous_replies,current_utterance=current_utterance,model_view=model_evidence,
+                required_subjects=required_subjects)
             from app.learn.grounded_calculations import calculable_unit
             quantity_ids=tuple(dict.fromkeys(f['fact_revision_id'] for c in payload['candidates'] for f in c['facts']
                 if f.get('quantity') and f.get('polarity')=='AFFIRM' and calculable_unit(f['quantity'].get('unit'))))
