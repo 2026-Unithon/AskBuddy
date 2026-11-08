@@ -480,6 +480,12 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                     await validate_policy_confirmation(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),policy_receipt_id=req.policy_receipt_id,question=req.question)
                                 snapshot,_,index_revision=await read_current_index(conn,store_id=store_id)
+                                if (getattr(settings,'r_general_semantics_enabled',False)
+                                        and req.policy_receipt_id is None and not policy_action(req.question)):
+                                    # load_history locks this session. Read its latest offer
+                                    # under that same lock, before accepting a typed reply.
+                                    history=await load_history(conn,store_id=store_id,member_id=member_id,
+                                        session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
                                 if choice is None and req.policy_receipt_id is None and not policy_action(req.question):
                                     typed=await latest_typed_selection(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),question=req.question.strip(),snapshot=snapshot,
@@ -488,12 +494,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         stored,typed_head=typed
                                         typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
                                         effective_choice=typed_choice
-                                if (getattr(settings,'r_general_semantics_enabled',False)
-                                        and req.policy_receipt_id is None
-                                        and not policy_action(req.question)):
-                                    history=await load_history(conn,store_id=store_id,member_id=member_id,
-                                        session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
-                                    recover_question=effective_choice is None
+                                recover_question=history is not None and effective_choice is None
                                 if effective_choice:
                                     if not typed_choice:
                                         stored=await load_context(conn,store_id=store_id,member_id=member_id,
