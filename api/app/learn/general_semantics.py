@@ -42,7 +42,8 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
-    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','reg/hybrid.py','reg/embeddings.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py',
+    'learn/semantic_grouping.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
 
@@ -276,7 +277,9 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     # Check prior server/user-confirmed context; model slots never become confirmed slots.
     slots=trusted_slots
     if slots.get('entity') and slots['entity'] not in entity_names(snap,query.entity_id):raise ValueError('entity contradicts context')
-    if slots.get('predicate') and slots['predicate'] not in (query.predicate,PREDICATES.get(query.predicate,(query.predicate,()))[0]):
+    from app.learn.menu_context import PRICE_WORDS
+    if (slots.get('predicate') and slots['predicate'] not in (query.predicate,PREDICATES.get(query.predicate,(query.predicate,()))[0])
+            and not (query.predicate in PRICE_WORDS and slots['predicate'] in PRICE_WORDS)):
         raise ValueError('predicate contradicts context')
     for key,position in (('temperature',0),('size',1)):
         if slots.get(key) and any(v[position]!=slots[key] for v in query.variants):raise ValueError('variant contradicts context')
@@ -349,6 +352,11 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                            timeout,context_verified=False,context_id=None,clarify_turns=0,provider=None,confirmed_slots=None):
     if (not getattr(settings,'r_general_semantics_enabled',False)
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
+        return baseline,None
+    from app.learn.menu_context import PRICE_WORDS,menu_title
+    if baseline.plan.action=='CLARIFY' and (
+            (baseline.plan.clarification_slot=='entity' and question.strip() in PRICE_WORDS) or
+            (baseline.plan.clarification_slot=='predicate' and menu_title(search.snapshot,question))):
         return baseline,None
     if (user_turns or context_id is not None) and not context_verified:return baseline,None
     try:

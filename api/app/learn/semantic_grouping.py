@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from app.learn.menu_context import PRICE_WORDS
 from app.contracts.hashing import digest
 from app.reg.hybrid import normalize_query
 
@@ -14,14 +15,16 @@ def supported_question(question: str, *, titles: tuple[str, ...], predicate: str
         return quantity_question(question,titles=titles,predicate=predicate,sizes=sizes)
     request = {
         'location': r'(?:어디(?:에)?(?:\s*(?:있어|있나요|보관해|보관하나요))?|(?:보관\s*)?위치(?:는)?)',
-        'price': r'(?:가격(?:은|이)?(?:\s*얼마(?:야|인가요)?)?|얼마(?:야|인가요)?|price)',
+        'price': r'(?:(?:가격|금액|요금|판매가)(?:은|이)?(?:\s*얼마(?:야|인가요)?)?|얼마(?:야|인가요)?|price)',
         'quantity': r'(?:수량(?:은)?|몇\s*개(?:야|인가요)?)',
-    }.get(predicate)
+    }.get('price' if predicate in PRICE_WORDS else predicate)
     if request is None or not titles:
         return False
     title = '(?:'+'|'.join(re.escape(normalize_query(t)) for t in titles)+')'
     variants = ['hot','ice','아이스','핫','따뜻한','뜨거운','차가운',*sizes]
     variant = '(?:'+'|'.join(re.escape(normalize_query(v)) for v in variants)+')'
+    if predicate in PRICE_WORDS and re.fullmatch(rf'{request}\s+{title}[.!?]*(?:\s+{variant}[.!?]*)*',normalize_query(question)):
+        return True
     return re.fullmatch(rf'(?:{variant}\s+)*{title}(?:의|는|은)?\s+(?:{variant}\s+)*'
         rf'{request}[.!?]*(?:\s+{variant}[.!?]*)*',normalize_query(question)) is not None
 

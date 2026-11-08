@@ -17,13 +17,14 @@ from app.learn.semantic_grouping import explicit_context, supported_question
 from app.learn.conditional_scope import conditional_core, prerequisite_closure, exclusive_conditions
 from app.learn.raw_quantity import raw_answer_reference
 from app.learn.entity_names import entity_names, entity_label
+from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
 
 PLANNER_VERSION="r-explicit-slots/v8"
 PREDICATES={
     "milk_amount":("우유 양",("우유","milk")),
     "water_amount":("물 양",("물","water")),
     "location":("보관 위치",("어디","위치")),
-    "price":("가격",("가격","얼마","price")),
+    "price":("가격",(*PRICE_WORDS,"얼마")),
     "quantity":("수량",("수량","몇 개","몇개")),
 }
 
@@ -106,6 +107,9 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     if not cards:
         return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     matches={c.entity_id for c in cards if any(mentioned(q,n) for n in entity_names(snapshot,c.entity_id))}
+    if q in PRICE_WORDS and not slots:
+        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards))[:10]
+        return finish("CLARIFY",slot="entity",options=options)
     if slots.get("entity") and (context_verified or not matches):
         matches={c.entity_id for c in cards if slots["entity"] in entity_names(snapshot,c.entity_id)}
     if not matches:
@@ -159,16 +163,23 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     slots["entity"]=next((n for n in names if mentioned(q,n)),slots.get("entity",names[0]))
     facts=[f for f in snapshot.fact_revisions if f.entity_id==entity]
     available={f.predicate for f in facts if f.predicate}
+    if menu_title(snapshot,q) and not slots.get("predicate"):
+        options=list(dict.fromkeys(PREDICATES.get(p,(p,()))[0] for p in sorted(available)))
+        options.sort(key=lambda name:name not in PRICE_WORDS)
+        if options:return finish("CLARIFY",slot="predicate",options=tuple(options[:10]))
     matched={p for p,(label,words) in PREDICATES.items() if p in available and any(mentioned(q,w) for w in words)}
     if (not re.search(r"얼마나|몇\s*(?:ml|밀리리터|g|그램|리터)|(?:우유|물)(?:의)?\s*양|용량",q)
             or any(word in q for word in ("오래","기한","언제","보관","온도"))):
         matched.difference_update(("milk_amount","water_amount"))
     matched.update(p for p in available if mentioned(q,p))
+    if price_menu(snapshot,question):
+        matched.update(available.intersection(PRICE_WORDS))
     # Condition vocabulary (e.g. 온도) is not the requested attribute. Only a
     # full approved-condition + supported-question parse may override this guard.
     scoped_predicates={f.predicate for f in facts if conditional_core(question,snapshot=snapshot,fact=f,
         titles=names,sizes=tuple(sorted({x.variant.size for x in facts if x.variant.size}))) is not None}
     if scoped_predicates:matched=scoped_predicates
+    if not matched and price_menu(snapshot,question):return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     if not matched and slots.get("predicate"):
         matched={p for p in available if slots["predicate"] in (p,PREDICATES.get(p,(p,()))[0])}
     if len(matched)!=1:
@@ -200,6 +211,9 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     if len(temperatures)>1 and not any(w in q for w in ("비교","각각","둘 다","차이")):
         return finish("CLARIFY",slot="temperature",options=("HOT","ICE"))
     if len(temperatures)>1:slots.pop("temperature",None)
+    if not temperatures and price_menu(snapshot,question) and all(f.variant.temperature and not f.variant.size for f in facts):
+        # Quote each approved price with its own temperature heading.
+        temperatures={f.variant.temperature for f in facts}
     if not temperatures and any(f.variant.temperature for f in facts):
         return finish("CLARIFY",slot="temperature",options=tuple(sorted({f.variant.temperature for f in facts if f.variant.temperature})))
     sizes={f.variant.size for f in facts if f.variant.size}

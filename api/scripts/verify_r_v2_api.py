@@ -52,6 +52,24 @@ async def verify(pool,admin,seed):
                     session_id=session,request_id=key,question=question,**kwargs))
             first=seed["snapshot"].fact_revisions[0]
             title=next(c.title for c in seed["snapshot"].cards if c.entity_id==first.entity_id)
+            # Plain text replies, including one absent from the offered chips, must
+            # carry the immediately preceding menu/attribute through to the owner.
+            for i,turns in enumerate(((title,'요금'),('금액',title))):
+                price_session=(await client.post('/learn/v2/sessions',headers=headers,json={
+                    'request_id':f'price-session-{i}'})).json()['session_id']
+                async def price_turn(n):
+                    return await client.post('/learn/v2/chat',headers=headers,json={
+                        'session_id':price_session,'request_id':f'price-reply-{i}-{n}','question':turns[n]})
+                offer=await price_turn(0)
+                check('clarification asks for the missing slot',offer.json()['clarification_slot']==('predicate','entity')[i])
+                reply=await price_turn(1)
+                check('price handoff names the selected menu',reply.status_code==200 and
+                    reply.json()['action']=='ESCALATE' and title in reply.json()['message'])
+                saved=await admin.fetchval('select question_text from pending_questions where question_id=$1',
+                    int(reply.json()['pending_id']))
+                check('owner receives both turns',saved==' '.join(turns))
+                repeat=await price_turn(1)
+                check('typed reply replays after context consumption',repeat.headers['x-answer-replayed']=='true')
             original=await chat('api-approved-original',title+' 승인 원문 보여줘')
             check('explicit approved original request returns exact RAW',original.status_code==200 and
                 original.json()['action']=='ANSWER' and original.json()['message']==seed['snapshot'].raw_spans[0].text)
