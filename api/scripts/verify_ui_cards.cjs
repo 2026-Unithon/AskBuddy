@@ -196,12 +196,14 @@ test('o06 삭제한 카드 주소는 내용 없이 안내만', async (b) => {
 
 async function startEdit(page) { await page.getByRole('button', { name: '수정하기' }).click(); await page.getByRole('button', { name: '수정 완료' }).waitFor(); }
 
-test('o06f 수정 모드 하단은 수정 완료 왼쪽 초록, 돌아가기 오른쪽 흰색', async (b) => {
+test('o06f 수정 모드 하단은 수정 완료 큰 버튼, 그 아래 작은 글자 돌아가기(2026-11-08 다시 판단)', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
   const done = page.getByRole('button', { name: '수정 완료' }), cancel = page.getByRole('button', { name: '돌아가기' });
   const [d, c] = [await done.boundingBox(), await cancel.boundingBox()];
-  assert.ok(Math.abs(d.y - c.y) < 4 && d.x < c.x, '좌우');
+  assert.ok(c.y > d.y + d.height - 2, '돌아가기는 아래');
+  assert.ok(c.width < d.width / 2, '돌아가기는 작은 글자');
+  assert.ok(Math.abs((c.x + c.width / 2) - (d.x + d.width / 2)) < 8, '가운데');
   assert.equal(await page.getByRole('button', { name: '수정하기' }).count(), 0);
   for (const gone of ['고친 내용 저장', '그만두기']) assert.equal(await page.getByRole('button', { name: gone }).count(), 0, gone);
   await ctx.close();
@@ -248,16 +250,13 @@ test('o06d 선행 단계 앞으로는 끌어도 안 옮겨진다', async (b) => 
   assert.ok(order.findIndex((t) => t.includes('컵에 얼음을 담는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
   await ctx.close();
 });
-test('o06d 수정 모드에서 줄을 길게 누르면 고치기 빼기 시트', async (b) => {
+test('o06d 수정 모드에서 줄을 누르면 고치기, 오른쪽 휴지통으로 빼기(2026-11-08 길게 누르기 메뉴 대신)', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
   const row = page.locator('[data-testid="fact-row"]').filter({ hasText: '뚜껑을 닫는다.' });
-  await row.scrollIntoViewIfNeeded();
-  const box = await row.boundingBox();
-  await page.mouse.move(box.x + 30, box.y + 12); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
-  const sheet = page.getByRole('dialog', { name: /뚜껑을 닫는다/ });
-  await sheet.getByRole('button', { name: '빼기' }).waitFor();
-  await sheet.getByRole('button', { name: '고치기' }).waitFor();
+  await row.getByRole('button', { name: /^빼기: / }).waitFor();
+  await row.getByRole('button', { name: /^고치기: / }).click();
+  await page.getByRole('dialog', { name: '이 사실 고치기' }).waitFor();
   await ctx.close();
 });
 test('o06f 돌아가기는 저장하지 않는다', async (b) => {
@@ -265,7 +264,7 @@ test('o06f 돌아가기는 저장하지 않는다', async (b) => {
   await startEdit(page);
   await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' }).press('ArrowUp');
   await page.getByRole('button', { name: '돌아가기' }).click();
-  await page.getByRole('dialog', { name: '고친 내용을 버릴까요?' }).getByRole('button', { name: '버리기' }).click();
+  await page.getByRole('dialog', { name: '고친 내용을 버릴까요?' }).getByRole('button', { name: '버리고 나가기' }).click();
   await page.getByRole('button', { name: '수정하기' }).waitFor();
   assert.equal(api.calls.filter((c) => c.method === 'PUT').length, 0);
   const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();

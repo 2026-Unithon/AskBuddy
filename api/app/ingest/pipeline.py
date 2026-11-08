@@ -1245,6 +1245,7 @@ async def _persist_ledger(
             "value": a.value,
             "confidence": _to_percent(a.confidence),
             "original_assertion": a.original_assertion,
+            "assertion": (getattr(a, "assertion", "") or None),
             "unit": (a.unit or None),
             "polarity": a.polarity,
             "conditions": list(a.conditions),

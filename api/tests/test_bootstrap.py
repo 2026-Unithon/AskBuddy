@@ -26,7 +26,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_owner_without_store_goes_to_intent(self):
         db = FakeDb(
-            {"user_id": 1, "name": "점주", "role": "OWNER"},
+            {"user_id": 1, "name": "점주", "role": "OWNER", "avatar_path": None},
         )
 
         result = await get_bootstrap(db, {"user_id": 1, "role": "OWNER"})
@@ -37,7 +37,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_completed_owner_gets_store_scoped_badges(self):
         db = FakeDb(
-            {"user_id": 1, "name": "점주", "role": "OWNER"},
+            {"user_id": 1, "name": "점주", "role": "OWNER", "avatar_path": None},
             {
                 "store_id": 10,
                 "member_role": "OWNER",
@@ -61,7 +61,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_staff_with_store_goes_to_roadmap(self):
         db = FakeDb(
-            {"user_id": 2, "name": "직원", "role": "STAFF"},
+            {"user_id": 2, "name": "직원", "role": "STAFF", "avatar_path": None},
             {
                 "store_id": 10,
                 "member_role": "STAFF",
@@ -80,7 +80,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_claimed_other_store_is_hidden(self):
         db = FakeDb(
-            {"user_id": 1, "name": "점주", "role": "OWNER"},
+            {"user_id": 1, "name": "점주", "role": "OWNER", "avatar_path": None},
             None,
         )
 
@@ -93,7 +93,7 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "STORE_NOT_FOUND")
 
     async def test_stale_role_is_rejected(self):
-        db = FakeDb({"user_id": 1, "name": "점주", "role": "OWNER"})
+        db = FakeDb({"user_id": 1, "name": "점주", "role": "OWNER", "avatar_path": None})
 
         with self.assertRaises(ApiError) as raised:
             await get_bootstrap(db, {"user_id": 1, "role": "STAFF"})

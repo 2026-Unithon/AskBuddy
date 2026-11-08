@@ -28,3 +28,18 @@ def test_value_split_keeps_label(name):
 def test_step_split_rule_still_present(name):
     text = (PROMPTS / name).read_text(encoding="utf-8")
     assert '틀림: ①②③ 모두 "제조순서=블랜더(재료,얼음) → 믹싱 → 토핑"' in text
+
+
+@pytest.mark.parametrize("name", FILES)
+def test_friendly_sentence_rule(name):
+    # 2026-11-08 사용자: '원문 그대로'를 보이는 글에서 없앤다. 원문은 근거로만, 보이는 글은 정리한 문장
+    text = (PROMPTS / name).read_text(encoding="utf-8")
+    assert "`assertion`" in text and "사람이 읽기 좋게" in text
+    assert "원문에 없는 숫자" in text
+    assert '"우유가 많이 나가면 사장님께 말해 주세요. 사장님이 추가로 주문해요."' in text
+
+
+@pytest.mark.parametrize("name", FILES)
+def test_same_topic_same_subject(name):
+    text = (PROMPTS / name).read_text(encoding="utf-8")
+    assert "같은 대상은 같은 `subject`" in text

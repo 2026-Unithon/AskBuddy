@@ -154,7 +154,8 @@ export function compactRecipe(blocks: RecipeBlock[], pending: Set<string> = new 
         used.add(norm(step));
         return { text: step, note: PICK_NOTE };
       }
-      const attr = own.get(norm(step));
+      // 단계에 괄호 설명이 붙어 있으면('블랜더(액상,재료,얼음)') 그 자체가 할 일이라 같은 이름 칸 값으로 바꾸지 않는다
+      const attr = /[()]/.test(step) ? undefined : own.get(norm(step));
       if (!attr || EMPTY_VALUE.test(attr.text)) return { text: step, note: null };
       used.add(norm(step));
       // 숫자뿐인 값(컵=16)은 단계 이름을 두고 아래에 붙이고, 나머지는 값으로 바꾼다.

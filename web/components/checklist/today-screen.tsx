@@ -206,8 +206,8 @@ export function TodayScreen() {
       )}
       {data && (
         <>
-          {/* 제출했으면 끝 카드. 숫자는 제출 당시가 아니라 지금 체크 수(풀면 줄어든다). 서버도 제출 기록 수를 맞춘다 */}
-          {data.my_submission ? (
+          {/* 끝 카드는 제출했고 남은 게 없을 때만. 제출 뒤 체크를 풀면 남은 개수로 돌아간다(서버도 제출 기록 수를 맞춘다) */}
+          {data.my_submission && remaining <= 0 ? (
             <HeroCard>
               {/* 끝의 기억을 좋게(피크엔드, s01e): 체크가 통통 튄다 */}
               <span
@@ -224,7 +224,7 @@ export function TodayScreen() {
                 오늘 할 일 끝났어요
               </p>
               <p className="mt-3">
-                체크 {data.scope_counts.done}/{data.scope_counts.total}개 제출했어요
+                체크 {data.scope_counts.done}/{data.scope_counts.total}개 다 했어요
               </p>
               <ButtonLink href="/staff/me" variant="secondary" className="mt-4">
                 내 기록 보기
@@ -232,10 +232,14 @@ export function TodayScreen() {
             </HeroCard>
           ) : data.scope_counts.total > 0 ? (
             <HeroCard>
-              {current && (
-                <HeroClock pill>
-                  {data.upcoming ? "다음" : "지금"} {current.name}
-                </HeroClock>
+              {data.my_submission ? (
+                <HeroClock pill>제출했어요</HeroClock>
+              ) : (
+                current && (
+                  <HeroClock pill>
+                    {data.upcoming ? "다음" : "지금"} {current.name}
+                  </HeroClock>
+                )
               )}
               <p className="my-3 pr-14 text-[22px] font-bold">
                 {remaining}개 남았어요

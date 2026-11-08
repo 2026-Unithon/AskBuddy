@@ -54,3 +54,7 @@ class CardsDbTest(unittest.IsolatedAsyncioTestCase):
         card_id = await card(self.conn, self.store, "APPROVED", published=True)
         version = await self.conn.fetchval("select published_version_id from knowledge_cards where card_id = $1", card_id)
         self.assertIsNone(await published_fact_blocks(self.conn, self.store, card_id, version))
+
+    async def test_pending_list_sql_prepares_on_real_schema(self):
+        from app.learn.v2_router import PENDING_LIST_SQL
+        await self.conn.prepare(PENDING_LIST_SQL)

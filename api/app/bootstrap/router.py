@@ -1,6 +1,8 @@
 """A01 이후 역할·매장 상태에 따른 첫 화면을 한 번에 결정한다."""
 from __future__ import annotations
 
+import logging
+
 from typing import Any
 
 from fastapi import APIRouter
@@ -13,10 +15,13 @@ from app.bootstrap.schemas import (
     BootstrapUser,
 )
 from app.bootstrap import profile
+from app.config import get_settings
+from app.ingest.preprocess.storage import create_signed_read_url, create_signed_upload_url
 from app.deps import Db
 from app.errors import ApiClaims, ApiError
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _default_destination(role: str | None, has_store: bool, guide_completed: bool) -> str:
@@ -39,7 +44,7 @@ async def get_bootstrap(
         raise ApiError(401, "AUTH_INVALID", "로그인 정보가 올바르지 않습니다.")
 
     user = await db.fetchrow(
-        "select user_id, name, role from users where user_id = $1",
+        "select user_id, name, role, avatar_path from users where user_id = $1",
         int(user_id),
     )
     if user is None or claims.get("role") != user["role"]:
@@ -107,6 +112,7 @@ async def get_bootstrap(
             user_id=int(user["user_id"]),
             role=user["role"],
             name=user["name"],
+            avatar_url=await _avatar_url(user["avatar_path"]),
         ),
         store=store,
         badges=badges,
@@ -144,3 +150,66 @@ async def rename_store(req: RenameRequest, db: Db, claims: ApiClaims) -> None:
     if claims.get("role") != "OWNER" or claims.get("store_id") is None:
         raise ApiError(403, "OWNER_ONLY", "매장 이름은 사장님만 바꿀 수 있어요.")
     await profile.rename_store(db, int(claims["store_id"]), req.name)
+
+
+async def _avatar_url(path: str | None) -> str | None:
+    """사진은 비공개 버킷이라 잠깐 읽는 URL 로 준다. 못 만들면 사진 없이(첫 글자) 보인다."""
+    if not path:
+        return None
+    try:
+        return await create_signed_read_url(path, get_settings().avatar_read_seconds)
+    except Exception:  # noqa: BLE001 — 사진 하나 때문에 시작 화면을 막지 않는다
+        logger.warning("avatar sign failed", exc_info=True)
+        return None
+
+
+class AvatarUploadRequest(BaseModel):
+    content_type: str
+    size: int = Field(gt=0)
+
+    @field_validator("size")
+    @classmethod
+    def _small(cls, value: int) -> int:
+        if value > get_settings().avatar_max_bytes:
+            raise ValueError("사진이 너무 커요. 5MB 아래로 골라 주세요.")
+        return value
+
+
+class AvatarUploadResponse(BaseModel):
+    upload_url: str
+    path: str
+
+
+class AvatarSetRequest(BaseModel):
+    # null 이면 사진을 뺀다
+    path: str | None = None
+
+
+def _me(claims) -> tuple[int, int]:
+    user_id, store_id = claims.get("user_id"), claims.get("store_id")
+    if user_id is None:
+        raise ApiError(401, "UNAUTHORIZED", "다시 로그인해 주세요.")
+    if store_id is None:
+        raise ApiError(403, "STORE_REQUIRED", "매장에 들어간 뒤 사진을 바꿀 수 있어요.")
+    return int(user_id), int(store_id)
+
+
+@router.post("/me/avatar/upload-url", response_model=AvatarUploadResponse)
+async def avatar_upload_url(req: AvatarUploadRequest, claims: ApiClaims) -> AvatarUploadResponse:
+    """프로필 사진을 브라우저가 직접 올릴 서명 URL(불변식 7). 경로는 JWT 의 매장·사람으로만 만든다."""
+    user_id, store_id = _me(claims)
+    try:
+        path = profile.avatar_object_path(store_id, user_id, req.content_type)
+    except ValueError as exc:
+        raise ApiError(422, "AVATAR_TYPE", str(exc)) from exc
+    return AvatarUploadResponse(upload_url=await create_signed_upload_url(path), path=path)
+
+
+@router.put("/me/avatar", status_code=204)
+# store-isolation-ok: 본인(JWT user_id) 행만 바꾸고, 경로가 JWT 매장·본인 몫인지 확인한다
+async def set_avatar(req: AvatarSetRequest, db: Db, claims: ApiClaims) -> None:
+    """올린 사진을 내 프로필로. 다른 사람·다른 매장 경로는 거절한다."""
+    user_id, store_id = _me(claims)
+    if req.path is not None and not profile.owns_avatar_path(req.path, store_id=store_id, user_id=user_id):
+        raise ApiError(403, "AVATAR_PATH", "이 사진은 쓸 수 없어요.")
+    await profile.set_avatar(db, user_id, req.path)

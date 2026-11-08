@@ -122,6 +122,18 @@ async def sessions(claims:Claims,user_id:CurrentUserId,q:str|None=Query(default=
             last_at=r['last_at'].isoformat() if r['last_at'] else None) for r in rows])
 
 
+# 질문 목록. 물어본 횟수(2026-11-08)는 상세와 같은 방식: v2 는 답변 영수증, v1 은 발생 기록
+PENDING_LIST_SQL="""select q.question_id,q.question_text,q.status,
+    case when q.contract_version='v1' then
+      (select count(*) from pending_question_occurrences o where o.question_id=q.question_id)
+    else
+      (select count(*) from r_answer_receipts r where r.store_id=q.store_id and r.pending_id=q.question_id)
+    end::int as asked_count
+    from pending_questions q
+    where q.store_id=$1 and q.question_id>$2 and ($3::text is null or q.status=$3)
+    order by q.question_id limit 100"""
+
+
 @router.get('/v2/pending')
 async def pending_list(claims:Claims,user_id:CurrentUserId,after:EntityId|None=None,
                        status:Literal['WAITING','ANSWERED']|None=None):
@@ -131,13 +143,11 @@ async def pending_list(claims:Claims,user_id:CurrentUserId,after:EntityId|None=N
     async with pool.acquire() as conn:
         async with conn.transaction():
             await require_owner(conn,store_id=store_id,member_id=member_id)
-            rows=await conn.fetch("""select question_id,question_text,status from pending_questions
-                where store_id=$1 and question_id>$2 and ($3::text is null or status=$3)
-                order by question_id limit 100""",
-                store_id,int(after) if after else 0,status)
+            # 물어본 횟수(2026-11-08): 상세와 같은 방식. v2 는 답변 영수증, v1 은 발생 기록
+            rows=await conn.fetch(PENDING_LIST_SQL,store_id,int(after) if after else 0,status)
             await conn.execute("insert into access_logs(store_id,user_id,action_type) values($1,$2,'VIEW')",store_id,user_id)
             return dict(contract_version='v2',questions=[dict(pending_id=str(r['question_id']),
-                question=r['question_text'],status=r['status']) for r in rows],
+                question=r['question_text'],status=r['status'],asked_count=int(r['asked_count'] or 0)) for r in rows],
                 next_after=str(rows[-1]['question_id']) if len(rows)==100 else None)
 
 

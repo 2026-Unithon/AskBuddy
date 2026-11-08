@@ -243,7 +243,7 @@ async def verify(db, dsn):
         off_facts = await db.fetchval(
             "select count(*) from source_facts where store_id=$1 and source_id=$2", store, off_src)
         check("플래그 꺼짐 — 이전 스키마로 요청하고, 위치 표는 남기되 쪽은 보지 않는다",
-              off_raw == "FactExtractionResult/286f526e798a"
+              off_raw == "FactExtractionResult/4ec377592d09"  # 정리한 글(assertion) 칸 추가(2026-11-08)로 바뀐 값
               and off_facts == 2 and len(off_occ) == 2
               and all(o["locator_type"] == "WHOLE_SOURCE" for o in off_occ))
 

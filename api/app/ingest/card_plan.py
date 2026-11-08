@@ -467,7 +467,8 @@ def _one_line(text: str) -> str:
 
 
 def _assertion(f: PlanFact) -> str:
-    return _one_line(f.original_assertion.strip())
+    # 카드에는 보이는 문장(정리한 글, 검사를 못 넘으면 원문)을 쓴다(2026-11-08 '원문 그대로' 제거)
+    return _one_line((f.assertion or f.original_assertion).strip())
 
 
 def render_card(

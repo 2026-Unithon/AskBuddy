@@ -13,7 +13,7 @@ from app.cards import fact_edit
 from app.cards import fact_edit_repo as fact_repo
 from app.cards import fact_parse
 from app.cards import repository as repo
-from app.cards.review_items import load_review_items
+from app.cards.review_items import load_review_items, write_items
 from app.cards.fact_edit_revert import plan_revert
 from app.ingest import fact_revisions
 from app.checklist import repository as checklist_repo
@@ -32,6 +32,9 @@ from app.cards.fact_edit_schemas import (
     FactRow,
     FactVariant,
     ReviewChooseRequest,
+    ReviewWriteRequest,
+    EditModify,
+    FactFields,
     RevertRequest,
 )
 from app.cards.schemas import (
@@ -748,8 +751,45 @@ async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFacts
             state.entity_id,
         )
     view = build_facts_view(state, rows, heads)
-    view.review_items = await load_review_items(db, store_id, [p.fact.fact_id for p in state.pinned])
+    view.review_items = [*await load_review_items(db, store_id, [p.fact.fact_id for p in state.pinned]),
+                         *write_items(view)]
     return view
+
+
+@router.post("/{card_id}/review-items/write", response_model=FactEditResult)
+async def write_review_value(
+    card_id: int, req: ReviewWriteRequest, db: Db, claims: OwnerClaims
+) -> FactEditResult:
+    """검수 그 자리 입력칸(2026-11-08). 근거 없는 사실 한 줄을 사장님 글로 고친다. 나머지 줄은 그대로다."""
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    try:
+        async with db.transaction():
+            view = await get_card_facts(card_id, db, claims)
+            target = next((f for b in view.blocks for f in b.facts if f.fact_revision_id == req.fact_revision_id), None)
+            if target is None:
+                raise ApiError(404, "FACT_NOT_FOUND", "고칠 줄을 찾을 수 없어요. 화면을 새로 고쳐 주세요.")
+            blocks = []
+            for b in view.blocks:
+                if b.kind == "RAW":
+                    continue
+                items = []
+                for f in b.facts:
+                    if f.fact_revision_id != req.fact_revision_id:
+                        items.append(EditKeep(op="KEEP", fact_revision_id=f.fact_revision_id))
+                        continue
+                    fields = FactFields(sentence=req.text.strip(), polarity=f.polarity, value=f.value, unit=f.unit,
+                                        conditions=f.conditions, exceptions=f.exceptions, step_order=f.step_order,
+                                        variant=f.variant, predicate=f.predicate)
+                    items.append(EditModify(op="MODIFY", fact_revision_id=f.fact_revision_id, fact=fields))
+                if items:
+                    blocks.append(EditBlock(kind=b.kind, items=items))
+            edit = FactEditRequest(expected_version_id=req.expected_version_id,
+                                   idempotency_key=req.idempotency_key, blocks=blocks)
+            return await fact_edit.save_fact_edit(db, store_id, card_id=card_id, actor_id=user_id, req=edit)
+    except EditError as e:
+        raise ApiError(
+            e.status, e.code, fact_edit.message_for(e.code), details=e.details or None
+        ) from None
 
 
 # 수정 되돌리기는 이 시간 안에만(화면은 5초 알림의 '되돌리기' 글자만 둔다)

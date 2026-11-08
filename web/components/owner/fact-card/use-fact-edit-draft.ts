@@ -53,7 +53,9 @@ type Action =
 
 export function fieldsOf(row: FactRow): FactFields {
   return {
-    sentence: row.sentence,
+    // 보이는 문장은 정리한 글(assertion). 원문(sentence)은 근거로만 남는다(2026-11-08 '원문 그대로' 제거).
+    // 옛 판은 둘이 같다
+    sentence: row.assertion?.trim() ? row.assertion : row.sentence,
     polarity: row.polarity,
     value: row.value,
     unit: row.unit,
@@ -75,7 +77,8 @@ export function isModified(row: DraftRow): boolean {
   const a = row.fields;
   const b = row.base;
   return (
-    a.sentence.trim() !== b.sentence ||
+    // 처음 보여 준 글(정리한 글이 있으면 그것)과 견준다. 원문과 견주면 손대지 않아도 바뀐 것으로 잡힌다
+    a.sentence.trim() !== fieldsOf(b).sentence.trim() ||
     a.polarity !== b.polarity ||
     (a.value?.trim() || null) !== b.value ||
     (a.unit?.trim() || null) !== b.unit ||

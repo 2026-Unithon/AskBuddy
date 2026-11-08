@@ -412,7 +412,8 @@ def test_value_signature_ignores_wording_and_scale():
 def _head(fact_id, revision_id, qty):
     return dict(fact_id=fact_id, head_revision_id=revision_id, entity_id=ENTITY,
                 slot_key="s" * 64, identity_key=f"i{qty}", polarity="AFFIRM",
-                quantity_value=Decimal(qty), quantity_unit="ml", value_text=None)
+                quantity_value=Decimal(qty), quantity_unit="ml", value_text=None,
+                original_assertion=f"음료Z 시럽 {qty}ml")
 
 
 class LedgerConn:

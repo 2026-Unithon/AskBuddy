@@ -219,6 +219,8 @@ export type BootstrapResponse = {
     user_id: number;
     role: "OWNER" | "STAFF" | null;
     name: string;
+    /** 프로필 사진(비공개 버킷의 잠깐 읽는 URL). 없으면 null */
+    avatar_url?: string | null;
   };
   store: {
     store_id: number;
@@ -663,7 +665,18 @@ export type CardFactsView = {
   review_items?: ReviewItem[];
 };
 
-export type ReviewItem = { item_id: string; kind: "CHOOSE"; conflict_id: number; label: string | null; options: { fact_id: number; text: string }[] };
+export type ReviewItem =
+  | { item_id: string; kind: "CHOOSE"; conflict_id: number; label: string | null; options: { fact_id: number; text: string }[] }
+  | { item_id: string; kind: "WRITE"; label: string | null; fact_revision_id: number; text: string };
+
+/** 검수 그 자리 입력칸: 근거 없는 사실 한 줄을 사장님 글로 고친다(사장님 입력이 근거가 된다) */
+export async function writeReviewValue(cardId: number, body: { fact_revision_id: number; text: string; expected_version_id: number; idempotency_key: string }, token: string) {
+  return fetchJson<{ card_id: number; review_status: CardReviewStatus }>(`/cards/${cardId}/review-items/write`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify(body),
+  });
+}
 
 /** 수정 되돌리기(계획 7 Task 7): 가장 최근 수정을 직전 판 내용으로 되돌린다 */
 export async function revertFactEdit(cardId: number, editId: number, token: string) {
@@ -1216,6 +1229,8 @@ export async function attachOwnerAnswerFile(questionId: number, sourceId: number
 }
 
 export type KnowledgeProposal = {
+  /** 대상 카드 상태(2026-11-08). 삭제(EXCLUDED)면 화면에서 빼고 센다 */
+  target_review_status?: string | null;
   can_approve: boolean;
   approval_block_reason: string | null;
   affected_cards: { card_id: number; title: string }[];
@@ -1480,6 +1495,17 @@ export async function undoApproveJoin(requestId: number, token: string) {
 /** 내 이름·매장 이름 고치기(계획 7 Task 9) */
 export async function renameMe(name: string, token: string) {
   return fetchJson<void>("/app/me", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });
+}
+/** 프로필 사진(2026-11-08): 서명 URL 을 받아 브라우저가 직접 올리고, 올린 경로를 내 사진으로 */
+export async function requestAvatarUpload(file: File, token: string) {
+  return fetchJson<{ upload_url: string; path: string }>("/app/me/avatar/upload-url", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ content_type: file.type, size: file.size }),
+  });
+}
+export async function setAvatar(path: string | null, token: string) {
+  return fetchJson<void>("/app/me/avatar", { method: "PUT", headers: authHeader(token), body: JSON.stringify({ path }) });
 }
 export async function renameStore(name: string, token: string) {
   return fetchJson<void>("/app/store", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });

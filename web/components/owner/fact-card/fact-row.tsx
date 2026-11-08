@@ -2,7 +2,8 @@
 
 // 사실 한 줄: 단계 번호·문장·값·부정·조건/예외·선행·근거. 편집 중이면 고치기·빼기·위/아래.
 import type { ReactNode } from "react";
-import { Chip, focusRing } from "@/components/kit";
+import { focusRing } from "@/components/kit";
+import { Icon } from "@/components/kit/icon";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
 import { groupNotes, tidy, valueSpans, type FactGroup } from "./fact-group";
 export { groupFacts, type FactGroup } from "./fact-group";
@@ -111,7 +112,7 @@ export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: 
         ) : (
           <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
             {/* 각주 표시·'//' 는 보이는 글에서만 정리한다 */}
-            {steps.size > 1 ? tidy(first.sentence) : withValues(tidy(first.sentence), group.fields)}
+            {steps.size > 1 ? tidy(first.sentence) : <PairText text={tidy(first.sentence)} values={group.fields} />}
           </p>
         )}
       </div>
@@ -166,90 +167,90 @@ export type FactRowEdit = {
   onRemove: () => void;
 };
 
-function SmallButton({ label, onClick, disabled, children }: { label?: string; onClick: () => void; disabled?: boolean; children: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-11 min-w-11 rounded-full bg-background px-3 text-[13px] font-bold text-primary disabled:opacity-40 ${focusRing}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function FactRowItem({
+/**
+ * 수정 모드 한 줄(2026-11-08 사용자: 칩·근거·머리글 때문에 쓰기 어렵다). 읽는 화면과 같은 문장 줄이고,
+ * 줄을 누르면 고치는 시트, 오른쪽 휴지통으로 뺀다. 순서 손잡이는 SortableList 가 붙인다.
+ * 같은 문장에서 나온 이어진 줄(joined)은 문장을 되풀이하지 않고 값만 보인다.
+ */
+export function EditFactRow({
   fields,
   base,
   state,
   flagged = false,
+  joined = false,
   requireLabels,
   edit,
 }: {
   fields: FactFields;
   base: FactRow | null;
-  /** 편집 중 표시: 고친 줄 / 새로 넣은 줄 */
   state?: "MODIFIED" | "ADDED" | null;
   flagged?: boolean;
-  /** 편집 중: 같은 블록 선행은 지금 초안 번호로 다시 그린 라벨. 없으면 서버 라벨 */
+  joined?: boolean;
   requireLabels?: string[];
-  edit?: FactRowEdit;
+  edit: FactRowEdit;
 }) {
   const blocked = base?.edit_block ? EDIT_BLOCK_TEXT[base.edit_block] : null;
   const shortSentence = fields.sentence.length > 20 ? `${fields.sentence.slice(0, 20)}…` : fields.sentence;
+  const value = fields.value ? `${fields.value}${fields.unit ?? ""}` : null;
   return (
     <div
       data-testid="fact-row"
-      className={`flex flex-col gap-1.5 border-b border-background py-3 last:border-b-0 ${flagged ? "rounded-[12px] bg-danger-50 px-2" : ""}`}
+      data-same-sentence={joined || undefined}
+      className={`flex items-start gap-1 ${joined ? "-mt-2 pl-8" : ""} ${flagged ? "rounded-[12px] bg-danger-50 px-2" : ""}`}
     >
-      <div className="flex items-start gap-2">
-        {fields.step_order !== null && (
-          <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
-            {fields.step_order}
+      <button
+        type="button"
+        aria-label={`고치기: ${shortSentence}`}
+        onClick={edit.onEdit}
+        disabled={edit.locked || Boolean(blocked)}
+        className={`flex min-h-12 min-w-0 flex-1 flex-col gap-1 rounded-[12px] py-2.5 text-left disabled:cursor-default ${focusRing}`}
+      >
+        <span className="flex items-start gap-2">
+          {fields.step_order !== null && !joined && (
+            <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+              {fields.step_order}
+            </span>
+          )}
+          <span className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
+            {joined && value ? <strong className="font-bold">{value}</strong> : <PairText text={tidy(fields.sentence)} values={[fields]} />}
+          </span>
+        </span>
+        {(state || flagged || fields.polarity === "NEGATE") && (
+          <span className="flex flex-wrap gap-2 pl-0.5 text-[12px] font-bold">
+            {state && <span className="text-primary">{state === "ADDED" ? "새로 넣음" : "고침"}</span>}
+            {fields.polarity === "NEGATE" && <span className="text-danger-700">하지 않음</span>}
+            {/* 저장이 이 줄 때문에 막혔으면 어느 줄인지 */}
+            {flagged && <span className="text-danger-700">이 줄을 확인해 주세요</span>}
           </span>
         )}
-        <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">{fields.sentence}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {fields.value && <Chip size="sm" tone="brand">{`${fields.value}${fields.unit ?? ""}`}</Chip>}
-        {fields.polarity === "NEGATE" && <Chip size="sm" tone="danger">하지 않음</Chip>}
-        {state === "MODIFIED" && <Chip size="sm" tone="warn">고침</Chip>}
-        {state === "ADDED" && <Chip size="sm" tone="warn">새로 넣음</Chip>}
-        {blocked && <Chip size="sm" tone="warn">{blocked.chip}</Chip>}
-        {flagged && <Chip size="sm" tone="danger">이 줄을 확인해 주세요</Chip>}
-      </div>
-      {fields.conditions.length > 0 && <p className="text-[13px] leading-[1.45] text-ink-muted">조건: {fields.conditions.join(" / ")}</p>}
-      {fields.exceptions.length > 0 && <p className="text-[13px] leading-[1.45] text-ink-muted">예외: {fields.exceptions.join(" / ")}</p>}
-      {base && base.requires.length > 0 && (
-        <p className="text-[13px] leading-[1.45] text-ink-muted">먼저: {(requireLabels ?? base.requires.map((r) => r.label)).join(", ")}</p>
-      )}
-      {blocked && <p className="text-[13px] leading-[1.45] text-warn-700 [word-break:keep-all]">{blocked.text}</p>}
-      {base ? (
-        <div className="flex flex-col gap-0.5" data-testid="fact-origins">
-          {base.origins.map((origin, i) => (
-            <p key={i} className="text-[12px] leading-[1.45] text-ink-muted [overflow-wrap:anywhere]">
-              근거: {originLabel(origin)}
-            </p>
-          ))}
-          {base.previous_sentence && (
-            <p className="text-[12px] leading-[1.45] text-ink-muted [overflow-wrap:anywhere]">이전: {base.previous_sentence}</p>
-          )}
-        </div>
-      ) : (
-        <p className="text-[12px] leading-[1.45] text-ink-muted">저장하면 근거가 &lsquo;사장님 직접 입력&rsquo;으로 남아요</p>
-      )}
-      {edit && (
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <SmallButton label={`고치기: ${shortSentence}`} onClick={edit.onEdit} disabled={edit.locked || Boolean(blocked)}>
-            고치기
-          </SmallButton>
-          <SmallButton label={`빼기: ${shortSentence}`} onClick={edit.onRemove} disabled={edit.locked}>
-            빼기
-          </SmallButton>
-        </div>
-      )}
+        {fields.conditions.length > 0 && <span className="text-[13px] leading-[1.45] text-ink-muted">조건: {fields.conditions.join(" / ")}</span>}
+        {fields.exceptions.length > 0 && <span className="text-[13px] leading-[1.45] text-ink-muted">예외: {fields.exceptions.join(" / ")}</span>}
+        {base && base.requires.length > 0 && (
+          <span className="text-[13px] leading-[1.45] text-ink-muted">먼저: {(requireLabels ?? base.requires.map((r) => r.label)).join(", ")}</span>
+        )}
+        {blocked && <span className="text-[13px] leading-[1.45] text-warn-700 [word-break:keep-all]">{blocked.text}</span>}
+      </button>
+      <button
+        type="button"
+        aria-label={`빼기: ${shortSentence}`}
+        onClick={edit.onRemove}
+        disabled={edit.locked}
+        className={`mt-0.5 flex size-11 shrink-0 items-center justify-center rounded-[12px] text-ink-muted disabled:opacity-40 ${focusRing}`}
+      >
+        <Icon name="trash" size={20} />
+      </button>
     </div>
+  );
+}
+
+/** 표에서 뽑힌 '이름=값' 줄은 이름을 흐리게, 값은 그대로 읽히게. 다른 문장은 값만 굵게. */
+function PairText({ text, values }: { text: string; values: { value: string | null; unit: string | null }[] }) {
+  const at = text.indexOf("=");
+  if (at <= 0 || at === text.length - 1) return withValues(text, values);
+  return (
+    <>
+      <span className="mr-1.5 text-ink-muted">{text.slice(0, at).trim()}</span>
+      {withValues(text.slice(at + 1).trim(), values)}
+    </>
   );
 }
