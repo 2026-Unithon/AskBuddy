@@ -43,7 +43,7 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
-    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py','learn/procedure_scope.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','learn/menu_context.py','learn/procedure_scope.py','learn/operating_guidance.py',
     'learn/semantic_grouping.py','learn/operations_scope.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 

@@ -74,6 +74,22 @@ class Decision:
     semantic_context:dict|None
 
 
+def operating_decision(snapshot, question, previous, baseline):
+    from app.learn.approved_renderer import render
+    from app.learn.operating_guidance import resolve_guidance
+    guidance = resolve_guidance(snapshot, question, previous)
+    if guidance is None:
+        return baseline
+    resolved = ResolvedSelection('', 'operating_steps', (), question, operating_guidance=guidance)
+    try:
+        plan = AnswerPlan(snapshot_id=snapshot.snapshot_id, knowledge_revision=snapshot.knowledge_revision,
+                          action='ANSWER', selected_blocks=guidance.refs)
+        render(plan, snapshot, store_id=int(snapshot.store_id), request_id='operating-fit', resolved=resolved)
+    except ValueError:
+        return baseline
+    return Decision(plan, resolved, {}, None)
+
+
 def procedure_decision(snapshot,question,previous,scope,baseline):
     """Answer a bounded question from named cards in the current publication."""
     from app.learn.approved_renderer import render

@@ -11,7 +11,7 @@ RENDERER_VERSION = "r-approved/v2"
 
 def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: int,
            request_id: str, pending_id: str | None = None, availability=None, resolved=None,
-           clarification_detail: tuple[str,str] | None = None) -> ChatResponse:
+           clarification_detail: tuple[str,str] | None = None, owner_sources=None) -> ChatResponse:
     if snapshot.renderer_version not in ("r-approved/v1",RENDERER_VERSION):
         raise ValueError("unsupported approved renderer version")
     validate_answer_references(plan,snapshot,store_id=str(store_id))
@@ -96,6 +96,9 @@ def render(plan: AnswerPlan, snapshot: PublishedKnowledgeSnapshot, *, store_id: 
         from app.learn.answer_validation import validate_answer_for_question
         from app.learn.grounded_calculations import calculate
         validate_answer_for_question(plan,snapshot,resolved,store_id=store_id)
+        if resolved.operating_guidance:
+            from app.learn.operating_guidance import guidance_lines
+            lines=guidance_lines(resolved.operating_guidance,snapshot,citations,owner_sources)
         if resolved.procedure_steps:
             from app.learn.procedure_scope import step_lines
             lines=step_lines(resolved.procedure_steps,citations)
