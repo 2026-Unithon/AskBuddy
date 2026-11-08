@@ -4,7 +4,7 @@
 // "문장으로 다시 분석" 은 서버 분석(상태 없음)으로 칸만 채운다. 저장은 하단 "고친 내용 저장" 에서.
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { Button, Caption, ErrorInline, Sheet, focusRing } from "@/components/kit";
+import { Button, Caption, ErrorInline, Sheet, Switch, focusRing } from "@/components/kit";
 import { parseCardFacts, type FactFields, type FactParseResponse } from "@/lib/api";
 import { useApp } from "@/lib/store";
 import { NO_FACT_TEXT, VALUE_CLEAR_TEXT, parseErrorMessage, warningText } from "./fact-messages";
@@ -89,17 +89,12 @@ export function FactFieldsEditor({
           className={`rounded-[16px] bg-surface p-4 text-[16px] leading-[1.6] text-ink shadow-card disabled:opacity-60 ${focusRing}`}
         />
       </label>
-      <button
-        type="button"
-        aria-pressed={fields.polarity === "NEGATE"}
+      <Switch
+        label="하지 않는 일이에요"
+        checked={fields.polarity === "NEGATE"}
         disabled={disabled}
-        onClick={() => set({ polarity: fields.polarity === "NEGATE" ? "AFFIRM" : "NEGATE" })}
-        className={`flex min-h-11 items-center gap-2 self-start rounded-full px-3.5 text-[13px] font-bold ${
-          fields.polarity === "NEGATE" ? "bg-danger-50 text-danger-700" : "bg-background text-ink-muted"
-        } ${focusRing}`}
-      >
-        {fields.polarity === "NEGATE" ? "하지 않음 켜짐" : "하지 않음 꺼짐"}
-      </button>
+        onChange={(negate) => set({ polarity: negate ? "NEGATE" : "AFFIRM" })}
+      />
       {showValue && (
         <div className="flex gap-2">
           <label className="flex min-w-0 flex-[2] flex-col gap-1.5">

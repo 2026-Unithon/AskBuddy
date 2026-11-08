@@ -177,8 +177,9 @@ const BASE = 'http://127.0.0.1:3011';
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').waitFor();
     check('proposal failure shown in place', state.proposals.length === 1);
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
-    await page.getByText('확인할 제안이 없어요', { exact: true }).waitFor();
-    check('proposal resolved empties list', true);
+    // 백로그 일괄 처리: 제안을 정리하면 검수 필요 카드 목록으로 돌아간다
+    await page.waitForURL((u) => u.pathname === '/owner/cards' && u.searchParams.get('status') === 'needs_review');
+    check('proposal resolved returns to review list', state.proposals.length === 0);
 
     // 카드 상세: 자유 편집 없음, 지우기 시트, 다시 살리기, 카테고리 이동, 인용 끊김
     await page.goto(`${BASE}/owner/cards/1`);
@@ -189,9 +190,9 @@ const BASE = 'http://127.0.0.1:3011';
     // Phase A — 자유 본문 편집이 없어졌다. 사실 카드가 아닌 카드는 읽기만 한다
     check('legacy card has no free-text edit', await page.getByRole('button', { name: '고치기', exact: true }).count() === 0
       && await page.locator('textarea').count() === 0);
-    await page.getByRole('button', { name: /카테고리 음료/ }).click();
+    await page.getByRole('button', { name: /^카테고리 바꾸기, 지금 음료/ }).click();
     await page.getByRole('button', { name: '재고 · 위치' }).click();
-    await page.getByRole('button', { name: /카테고리 재고 · 위치/ }).waitFor();
+    await page.getByRole('button', { name: /^카테고리 바꾸기, 지금 재고 · 위치/ }).waitFor();
     check('category move updates card', state.cards[0].category.category_id === 11);
     // 상세에는 지우기·다시 살리기가 없다(삭제는 목록 미공개 탭에서 밀기, 되돌리기는 5초 스낵바만)
     check('detail has no delete or restore buttons', await page.getByRole('button', { name: /^(지우기|다시 살리기)$/ }).count() === 0);
@@ -293,7 +294,8 @@ const BASE = 'http://127.0.0.1:3011';
     await sp.goto(`${BASE}/staff/roadmap`);
     await sp.waitForURL('**/staff/recipes');
     await sp.getByRole('link', { name: /합성 라테/ }).waitFor();
-    check('old roadmap address opens recipes', await sp.getByText('바뀌었어요', { exact: true }).isVisible());
+    // 화면 개선 계획 5(s02b): 글 대신 주황 점
+    check('old roadmap address opens recipes', await sp.getByRole('img', { name: '내용이 바뀜' }).isVisible());
     await sp.goto(`${BASE}/staff/items/5`);
     await sp.waitForURL('**/staff/recipes/5');
     await sp.getByText('내용이 바뀌었어요. 다시 한 번 확인해주세요', { exact: true }).waitFor();
@@ -304,7 +306,7 @@ const BASE = 'http://127.0.0.1:3011';
     await sp.getByRole('button', { name: '확인했어요' }).click();
     await sp.getByRole('button', { name: '확인 취소하기' }).waitFor();
     check('completion saves current published version', state.completionBodies.every((b) => b.published_version_id === 10 && b.completed === true));
-    await sp.getByRole('link', { name: '이 레시피에 대해 물어보기' }).click();
+    await sp.getByRole('button', { name: '이 레시피에 대해 물어보기' }).click();
     await sp.waitForURL('**/staff/ask?q=*');
     check('ask from recipe prefills question', (await sp.getByLabel('모르는 거 물어보기').inputValue()).startsWith('합성 라테'));
     state.roadmapEmpty = true;

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Caption, Composer, ComposerTool, ErrorInline, Icon, useFeedback } from "@/components/kit";
 import { IntakeHintChips } from "@/components/owner/intake-hint-chips";
 import { apiErrorMessage, type IntakeHint } from "@/lib/api";
@@ -55,30 +55,41 @@ export function OwnerAddComposer({
   // 점주 선택 칩: 화면 입력일 뿐이라 이 컴포넌트가 들고, 제출이 성공하면 비운다.
   const [hints, setHints] = useState<IntakeHint[]>(defaultHints);
   const [failures, setFailures] = useState<SourceFailure[]>([]);
-  // 같은 입력을 다시 보내면 같은 작업으로 묶이게 한다. 입력이 바뀌면 새 키.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  // 같은 입력을 다시 보내면 같은 작업으로 묶이게 한다. 키는 보낼 때 입력(글, 파일, 칩)으로 정해
+  // 부모가 글을 바꿔도(넣기 화면의 예시 칩) 입력이 달라지면 새 키가 된다.
+  const sentKey = useRef<{ input: string; key: string } | null>(null);
+  const keyFor = (input: string) => {
+    if (sentKey.current?.input !== input) sentKey.current = { input, key: crypto.randomUUID() };
+    return sentKey.current.key;
+  };
+  // 화면을 떠나면 올리던 파일을 끊는다(멈춘 업로드가 뒤에서 계속 돌지 않게)
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const setText = (value: string) => {
     if (onTextChange) onTextChange(value);
     else setInnerText(value);
-    setIdempotencyKey(crypto.randomUUID());
   };
 
   const textEnabled = supportsText(caps.data);
   const maxChars = caps.data?.TEXT?.max_chars;
   const overLimit = maxChars !== undefined && text.length > maxChars;
   const submit = useMutation({
-    mutationFn: () =>
-      submitIngest({
+    mutationFn: () => {
+      const sentText = textEnabled ? text : "";
+      abortRef.current = new AbortController();
+      return submitIngest({
         files,
-        text: textEnabled ? text : "",
+        text: sentText,
         token: state.token!,
-        idempotencyKey,
+        idempotencyKey: keyFor(JSON.stringify([sentText, files.map((f) => f.id), hints])),
         hints,
         onItem: (key, update) => setProgress((prev) => ({ ...prev, [key]: update })),
-      }),
+        signal: abortRef.current.signal,
+      });
+    },
     onMutate: () => {
       setFailures([]);
       setProgress({});
@@ -89,12 +100,12 @@ export function OwnerAddComposer({
       await client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) });
       // 일부만 실패한 채 작업으로 넘어가면 넣기 화면의 실패 줄이 사라지므로 다음 화면까지 남는 알림으로 알린다
       const failedNames = result.failures.map((f) => f.name);
-      if (failedNames.length) toast(`${failedNames.join(", ")}은(는) 올리지 못했어요`, { keepOnNavigate: true });
+      if (failedNames.length) toast(`${failedNames.join(", ")}은(는) 올리지 못했어요`, { keepOnNavigate: true, durationMs: 6000 });
       setText("");
       setFiles([]);
       setHints([]);
       setProgress({});
-      setIdempotencyKey(crypto.randomUUID());
+      sentKey.current = null;
       // 넣기 화면은 끝났으니 기록에서 지운다(폰 뒤로가 넣기 전 화면으로)
       markReplace();
       router.replace(`/owner/jobs/${result.jobId}`);
@@ -116,10 +127,7 @@ export function OwnerAddComposer({
       else added.push({ id: crypto.randomUUID(), file, sourceType: type });
     }
     setPickErrors(errors);
-    if (added.length) {
-      setFiles((prev) => [...prev, ...added]);
-      setIdempotencyKey(crypto.randomUUID());
-    }
+    if (added.length) setFiles((prev) => [...prev, ...added]);
   };
 
   const hasText = text.trim().length > 0;
@@ -135,7 +143,7 @@ export function OwnerAddComposer({
           retrying={submit.isPending}
         />
       )}
-      {textFailure && !submit.isPending && <ErrorInline message={textFailure.message} onRetry={() => submit.mutate()} />}
+      {textFailure && !submit.isPending && <ErrorInline message={textFailure.message} onRetry={textFailure.retryable ? () => submit.mutate() : undefined} />}
       {pickErrors.length > 0 && <ErrorInline message={pickErrors.join("\n")} />}
       <Composer
         label="새로 알려줄 것"
@@ -159,7 +167,7 @@ export function OwnerAddComposer({
                   key={item.id}
                   name={item.file.name}
                   update={progress[item.id]}
-                  failure={failures.find((f) => f.key === item.id)?.message}
+                  failure={failures.find((f) => f.key === item.id)}
                   disabled={submit.isPending}
                   onRemove={() => setFiles((prev) => prev.filter((f) => f.id !== item.id))}
                   onRetry={() => submit.mutate()}
@@ -176,10 +184,7 @@ export function OwnerAddComposer({
       )}
       <IntakeHintChips
         value={hints}
-        onChange={(next) => {
-          setHints(next);
-          setIdempotencyKey(crypto.randomUUID());
-        }}
+        onChange={setHints}
         disabled={submit.isPending}
       />
       {hasText && !textEnabled && caps.isSuccess && (
@@ -214,7 +219,7 @@ export function OwnerAddComposer({
   );
 }
 
-/** 첨부 파일 한 줄: 올리는 중 막대, 끝나면 체크, 실패하면 빨간 줄과 이유와 '다시'. */
+/** 첨부 파일 한 줄: 올리는 중 막대, 끝나면 체크, 실패하면 빨간 줄과 이유와 '다시'(다시 해도 같은 실패면 빼기만). */
 function FileRow({
   name,
   update,
@@ -225,7 +230,7 @@ function FileRow({
 }: {
   name: string;
   update?: ItemUpdate;
-  failure?: string;
+  failure?: SourceFailure;
   disabled: boolean;
   onRemove: () => void;
   onRetry: () => void;
@@ -242,7 +247,7 @@ function FileRow({
       <div className="flex min-w-0 items-center gap-1.5">
         <Icon name={done ? "check" : "clip"} size={12} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
-        {failed ? (
+        {failed && failure?.retryable !== false ? (
           <button type="button" disabled={disabled} onClick={onRetry} className="min-h-8 rounded-[8px] bg-surface px-2.5 font-bold text-danger-700">
             다시
           </button>
@@ -272,7 +277,7 @@ function FileRow({
           <div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${Math.max(4, (update.progress ?? 0) * 100)}%` }} />
         </div>
       )}
-      {failed && failure && <p>{failure}</p>}
+      {failed && failure && <p>{failure.message}</p>}
     </li>
   );
 }

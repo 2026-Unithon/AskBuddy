@@ -288,7 +288,8 @@ function ShiftEditor({ shift, onClose }: { shift: Shift | null; onClose: () => v
             <TimeWheel label="끝" value={end} onChange={setEnd} />
           </div>
         )}
-        {validation && (
+        {/* 시간을 바꿔 같지 않게 되면 오류는 바로 사라진다 */}
+        {validation && timed && start === end && (
           <p role="alert" className="text-danger-700">
             {validation}
           </p>

@@ -36,7 +36,8 @@ function isActive(tab: Tab, pathname: string) {
 export function TabBar({ tabs, badges = {} }: { tabs: Tab[]; badges?: Record<string, number> }) {
   const pathname = usePathname();
   const { markReplace } = useNavHistory();
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => isActive(tab, pathname)));
+  const found = tabs.findIndex((tab) => isActive(tab, pathname));
+  const activeIndex = Math.max(0, found);
   return (
     <nav
       aria-label="주요 메뉴"
@@ -47,7 +48,8 @@ export function TabBar({ tabs, badges = {} }: { tabs: Tab[]; badges?: Record<str
         aria-hidden
         data-tab-pill=""
         className="absolute inset-y-2 left-2 rounded-[20px] bg-empty transition-transform duration-[var(--dur-base)] ease-[var(--ease-spring)]"
-        style={{ width: `calc((100% - 16px - ${(tabs.length - 1) * 6}px) / ${tabs.length})`, transform: `translateX(calc(${activeIndex} * (100% + 6px)))` }}
+        // 어느 탭도 아닌 화면이면 알약을 숨긴다(첫 탭이 켜진 것처럼 보이지 않게)
+        style={{ opacity: found < 0 ? 0 : 1, width: `calc((100% - 16px - ${(tabs.length - 1) * 6}px) / ${tabs.length})`, transform: `translateX(calc(${activeIndex} * (100% + 6px)))` }}
       />
       {tabs.map((tab) => {
         const active = isActive(tab, pathname);

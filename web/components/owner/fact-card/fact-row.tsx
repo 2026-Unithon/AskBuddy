@@ -1,8 +1,11 @@
 "use client";
 
 // 사실 한 줄: 단계 번호·문장·값·부정·조건/예외·선행·근거. 편집 중이면 고치기·빼기·위/아래.
+import type { ReactNode } from "react";
 import { Chip, focusRing } from "@/components/kit";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
+import { groupNotes, valueSpans, type FactGroup } from "./fact-group";
+export { groupFacts, type FactGroup } from "./fact-group";
 
 const BLOCK_NAME: Record<EditBlockKind | "RAW", string> = { QUANTITIES: "수치", STEPS: "순서", NOTES: "목록", RAW: "내용" };
 
@@ -59,6 +62,60 @@ export function FactViewRow({ fields }: { fields: FactFields }) {
       </div>
       {fields.conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {fields.conditions.join(" / ")}</p>}
       {fields.exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {fields.exceptions.join(" / ")}</p>}
+    </li>
+  );
+}
+
+/** 문장 안의 여러 값을 모두 굵게(겹치지 않게 앞에서부터). */
+function withValues(sentence: string, values: { value: string | null; unit: string | null }[]) {
+  const spans = valueSpans(sentence, values);
+  if (spans.length === 0) return sentence;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach(([a, b], i) => {
+    parts.push(sentence.slice(cursor, a), <strong key={i} className="font-bold">{sentence.slice(a, b)}</strong>);
+    cursor = b;
+  });
+  parts.push(sentence.slice(cursor));
+  return <>{parts}</>;
+}
+
+/** 묶은 한 줄: 문장 하나, 값 모두 굵게(여러 단계를 담은 줄은 굵게 하지 않는다), 조건·예외는 합친다. */
+export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: boolean }) {
+  const first = group.fields[0];
+  const steps = new Set(group.fields.map((f) => f.step_order).filter((o) => o !== null));
+  const { conditions, exceptions } = groupNotes(group.fields);
+  return (
+    <li data-testid="fact-row" className="flex flex-col gap-1 border-b border-background py-3 last:border-b-0">
+      <div className="flex items-start gap-2">
+        {numbered && group.stepOrder !== null && (
+          <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+            {group.stepOrder}
+          </span>
+        )}
+        {group.segments ? (
+          // 한 문장에 이어진 단계는 1·2·3 줄로 펼친다(계획 6)
+          <div className="min-w-0 flex-1">
+            {group.label && <p className="text-[14px] font-bold text-ink-muted">{group.label}</p>}
+            <ol className="mt-1 flex flex-col gap-1.5">
+              {group.segments.map((segment, i) => (
+                <li key={i} className="flex items-start gap-2 text-[16px] leading-[1.5] text-ink [word-break:keep-all]">
+                  <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-empty text-[12px] font-bold text-primary">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{segment}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : (
+          <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
+            {steps.size > 1 ? first.sentence : withValues(first.sentence, group.fields)}
+          </p>
+        )}
+      </div>
+      {conditions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">조건: {conditions.join(" / ")}</p>}
+      {exceptions.length > 0 && <p className="pl-8 text-[13px] leading-[1.45] text-ink-muted">예외: {exceptions.join(" / ")}</p>}
     </li>
   );
 }

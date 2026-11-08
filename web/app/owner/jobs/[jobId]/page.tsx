@@ -1,5 +1,6 @@
 "use client";
 
+import { reviewReasonText } from "@/lib/review-reason";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
@@ -143,7 +144,6 @@ export default function JobPage() {
       onRetryCards={() => void cards.refetch()}
       retryBlock={retryBlock}
       onRetryJob={() => retry.mutate()}
-      retrying={retry.isPending}
     />
   );
 }
@@ -165,7 +165,7 @@ function Processing({ job }: { job: IngestJobDetail }) {
 const SOURCE_STATUS: Record<string, string> = {
   QUEUED: "기다리는 중",
   EXTRACTING: "읽는 중",
-  CLASSIFYING: "나누는 중",
+  CLASSIFYING: "카드 제작 중",
   SUCCEEDED: "완료",
   PARTIAL: "일부 완료",
   NO_RESULT: "내용 없음",
@@ -259,7 +259,6 @@ function ResultReview({
   onRetryCards: () => void;
   retryBlock: React.ReactNode;
   onRetryJob: () => void;
-  retrying: boolean;
 }) {
   const { state } = useApp();
   const client = useQueryClient();
@@ -270,8 +269,8 @@ function ResultReview({
   // 빼기는 누르는 즉시 숨기고(낙관적) 실패하면 되살린다
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [cardErrors, setCardErrors] = useState<Record<number, string>>({});
-  // 서버 restore 는 카드를 PENDING 으로 되돌려 '검수 필요' 표시가 사라진다.
-  // 빼기 전에 검수 필요였던 카드는 이유와 함께 기억해, 되돌린 뒤에도 위 섹션에 두고 검수 완료로 공개하지 않는다
+  // 서버 restore 는 공개 전 카드를 빼기 전 상태(검수 필요면 검수 필요)로 되돌린다.
+  // 되돌린 응답을 다시 받기 전 사이에도 위 섹션에 두고 검수 완료로 공개하지 않도록 빼기 전 이유를 기억한다
   const [checkReasons, setCheckReasons] = useState<Record<number, string>>({});
   // 매장의 첫 카드 공개라면 O5 초대로, 아니면 오늘 매장으로 (Figma O4 → O5 → O6)
   const bootstrap = useQuery(bootstrapQuery(state.token, state.userId, state.storeId));
@@ -303,7 +302,7 @@ function ResultReview({
     onMutate: (cardId) => {
       const card = cards?.find((item) => item.card_id === cardId);
       if (card?.review_status === "NEEDS_REVIEW") {
-        setCheckReasons((prev) => ({ ...prev, [cardId]: card.needs_review_reason ?? "내용이 확실하지 않아요" }));
+        setCheckReasons((prev) => ({ ...prev, [cardId]: reviewReasonText(card.needs_review_reason) }));
       }
       setHiddenFor(cardId, true);
       setCardErrors((prev) => {
@@ -362,6 +361,7 @@ function ResultReview({
     },
   });
 
+  const approveFailed = Object.values(approve).filter((value) => typeof value === "object").length;
   const groups = new Map<string, CardListItem[]>();
   for (const card of good) {
     const name = card.category?.name ?? "기타";
@@ -387,6 +387,11 @@ function ResultReview({
       footer={
         <>
           {retryBlock}
+          {approveFailed > 0 && !approveAll.isPending && (
+            <p role="alert" className="text-center text-[13px] font-semibold text-danger-700 [word-break:keep-all]">
+              {approveFailed}장은 공개하지 못했어요. 다시 누르면 그 카드만 다시 해요.
+            </p>
+          )}
           <Button loading={approveAll.isPending} disabled={!cards} onClick={() => (toApprove.length ? approveAll.mutate() : finish(false))}>
             검수 완료
           </Button>
@@ -431,7 +436,7 @@ function ResultReview({
           </SectionTitle>
           <Stagger>
             {needsReview.map((card) => (
-              <ReviewCard key={card.card_id} tone="check" reason={card.needs_review_reason ?? checkReasons[card.card_id]} {...cardProps(card)} />
+              <ReviewCard key={card.card_id} tone="check" reason={card.needs_review_reason ? reviewReasonText(card.needs_review_reason) : checkReasons[card.card_id]} {...cardProps(card)} />
             ))}
           </Stagger>
         </section>

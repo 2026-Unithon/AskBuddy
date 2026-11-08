@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
-  Chip,
   Empty,
   ErrorInline,
   Icon,
@@ -14,6 +13,7 @@ import {
   Screen,
   HeaderActions,
   Skeleton,
+  Stagger,
   STAFF_TABS,
   TabBar,
 } from "@/components/kit";
@@ -63,19 +63,29 @@ export default function StaffRecipesPage() {
         <Empty buddy={false} title="찾는 레시피가 없어요" description="다른 말로 찾거나 버디에게 물어보세요." />
       )}
 
-      {stages.map((stage) => (
-        <ListGroup key={stage.category_id} label={stage.name}>
-          {stage.items.map((item) => (
-            <ListRow
-              key={item.item_id}
-              title={item.title}
-              subtitle={item.status === "DONE" ? "확인했어요" : item.status === "RECONFIRM_REQUIRED" ? "내용이 바뀌었어요" : "아직 안 봤어요"}
-              href={`/staff/recipes/${item.item_id}`}
-              badge={item.status === "RECONFIRM_REQUIRED" ? <Chip size="sm">바뀌었어요</Chip> : undefined}
-            />
-          ))}
-        </ListGroup>
-      ))}
+      {/* s02b: 상태는 글자가 아니라 표시로(확인함은 초록 체크, 내용이 바뀐 것은 주황 점) */}
+      <Stagger>
+        {stages.map((stage) => (
+          <ListGroup key={stage.category_id} label={stage.name}>
+            {stage.items.map((item) => (
+              <ListRow
+                key={item.item_id}
+                title={item.title}
+                href={`/staff/recipes/${item.item_id}`}
+                badge={
+                  item.status === "RECONFIRM_REQUIRED" ? (
+                    <span role="img" aria-label="내용이 바뀜" className="size-2.5 shrink-0 rounded-full bg-warn-500" />
+                  ) : item.status === "DONE" ? (
+                    <span role="img" aria-label="확인함" className="flex shrink-0 text-primary">
+                      <Icon name="check" size={16} />
+                    </span>
+                  ) : undefined
+                }
+              />
+            ))}
+          </ListGroup>
+        ))}
+      </Stagger>
       <RefreshingHint active={roadmap.isRefetching && !roadmap.isLoading} />
     </Screen>
   );

@@ -11,7 +11,9 @@ import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
 import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
-import { FactRowItem, FactViewRow, blockHeading } from "./fact-row";
+import { FactGroupRow, FactRowItem, blockHeading, groupFacts } from "./fact-row";
+import { compactRecipe } from "./fact-group";
+import { RecipeView } from "./recipe-view";
 import { SortableList } from "@/components/kit/sortable-list";
 import { useLongPress } from "@/lib/use-long-press";
 import { focusRing } from "@/components/kit/buttons";
@@ -224,6 +226,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
     );
   }
   const view = facts.data;
+  const compact = compactRecipe(view.blocks);
   const excluded = card.review_status === "EXCLUDED";
   const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;
@@ -253,7 +256,8 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
               <Surface key={block.key} as="section" className="flex flex-col px-[18px] pb-1 pt-3">
                 <h3 className="text-[15px] font-bold text-ink">{blockHeading(block.kind, block.variant)}</h3>
                 <SortableList
-                  items={block.rows.map((row) => ({ ...row, label: row.fields.sentence }))}
+                  // 손잡이 이름: 순서 블록은 번호와 문장 전체(메뉴 이름으로 시작하는 줄끼리 같아지지 않게)
+                  items={block.rows.map((row, i) => ({ ...row, label: steps ? `${i + 1}번 ${row.fields.sentence}` : row.fields.sentence }))}
                   canMove={(from, to) => !locked && canSwap(block, from, to)}
                   onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
                   renderItem={(row, i) => (
@@ -272,16 +276,14 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
               </Surface>
             );
           })
-        : view.blocks.map((block) => (
+        : compact
+          ? <RecipeView recipe={compact} />
+          : view.blocks.map((block) => (
             // 보기 모드(o06b): 머리글은 카드 밖에 굵게, 칩과 줄마다 근거는 없다
             <section key={block.block_id} className="flex flex-col gap-2">
               <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
               <Surface className="flex flex-col px-[18px] py-1">
-                <ul className="flex flex-col">
-                  {block.facts.map((row) => (
-                    <FactViewRow key={row.fact_revision_id} fields={fieldsOf(row)} />
-                  ))}
-                </ul>
+                <FactGroupList rows={block.facts.map(fieldsOf)} />
               </Surface>
             </section>
           ))}
@@ -443,5 +445,17 @@ export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
         }}
       />
     </>
+  );
+}
+
+/** 보기 모드 블록 목록: 같은 문장은 한 줄로 묶는다. */
+function FactGroupList({ rows }: { rows: FactFields[] }) {
+  const { groups, numbered } = groupFacts(rows);
+  return (
+    <ul className="flex flex-col">
+      {groups.map((group) => (
+        <FactGroupRow key={group.key} group={group} numbered={numbered} />
+      ))}
+    </ul>
   );
 }

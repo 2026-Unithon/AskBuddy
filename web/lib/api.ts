@@ -912,16 +912,55 @@ export async function requestUploadUrl(
 }
 
 /** 서명 URL 로 파일을 올린다. fetch 는 올리는 진행을 알려주지 않아 XHR 을 쓴다. */
-export function putToStorage(uploadUrl: string, file: File, onProgress?: (fraction: number) => void) {
+/** 이만큼 진행이 없으면 멈춘 업로드로 보고 끊는다 */
+export const UPLOAD_STALL_MS = 60_000;
+export const UPLOAD_STALLED_MESSAGE = "올리는 데 너무 오래 걸려요. 다시 올려주세요.";
+
+export class UploadStalledError extends Error {}
+
+/**
+ * 서명 URL 로 파일을 올린다. 진행이 UPLOAD_STALL_MS 동안 없으면 끊고 UploadStalledError,
+ * signal 이 끊기면(화면을 떠남) 바로 중단한다.
+ */
+export function putToStorage(uploadUrl: string, file: File, onProgress?: (fraction: number) => void, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("aborted", "AbortError"));
     const xhr = new XMLHttpRequest();
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const arm = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        stalled = true;
+        xhr.abort();
+      }, UPLOAD_STALL_MS);
+    };
+    const onAbort = () => xhr.abort();
+    const done = () => {
+      clearTimeout(watchdog);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    signal?.addEventListener("abort", onAbort);
     xhr.open("PUT", uploadUrl);
     xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
     xhr.upload.onprogress = (event) => {
+      arm();
       if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
     };
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`업로드 실패: ${xhr.status}`)));
-    xhr.onerror = () => reject(new Error("업로드 실패: 네트워크"));
+    xhr.onload = () => {
+      done();
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`업로드 실패: ${xhr.status}`));
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new Error("업로드 실패: 네트워크"));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(stalled ? new UploadStalledError(UPLOAD_STALLED_MESSAGE) : new DOMException("aborted", "AbortError"));
+    };
+    arm();
     xhr.send(file);
   });
 }

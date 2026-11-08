@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import replace, dataclass
 import re
 from decimal import Decimal
 
@@ -369,6 +369,37 @@ def fallback_cards(group: EntityGroup, *, category_name: str) -> tuple[Validated
         raise PlanInvalid(DATA_TOO_LARGE, e.code) from e
 
 
+_SEQUENCE_MARK = re.compile(r"→|->|⇒|➔")
+
+
+def normalize_step_orders(facts: Sequence[PlanFact]) -> list[PlanFact]:
+    """추출이 단계가 아닌 사실에 붙인 번호를 뗀다(계획 6, 결정적 규칙·모델 호출 없음).
+
+    단계로 인정하는 것: 문장에 순서 표시(→)가 있거나, 같은 규격에서 그 번호를 그 사실 하나만 쓸 때.
+    버리는 것: 같은 규격에서 다른 문장의 사실과 같은 번호를 나눠 쓸 때(메뉴 표의 칸마다 1번),
+    순서 표시 없는 한 문장에서 번호가 여러 개일 때(값 나열 순번).
+    저장된 판은 바꾸지 않고, 조립·렌더에 쓰는 사본만 고친다.
+    """
+    out: list[PlanFact] = []
+    for f in facts:
+        if f.step_order is None or _SEQUENCE_MARK.search(f.original_assertion or ""):
+            out.append(f)
+            continue
+        same_number_other_sentence = any(
+            g is not f and g.variant == f.variant and g.step_order == f.step_order
+            and g.original_assertion.strip() != f.original_assertion.strip()
+            and not _SEQUENCE_MARK.search(g.original_assertion or "")
+            for g in facts
+        )
+        listed_in_one_sentence = any(
+            g is not f and g.step_order is not None and g.step_order != f.step_order
+            and g.original_assertion.strip() == f.original_assertion.strip()
+            for g in facts
+        )
+        out.append(replace(f, step_order=None) if same_number_other_sentence or listed_in_one_sentence else f)
+    return out
+
+
 def _kind_of(f: PlanFact) -> str:
     """fallback_cards 와 같은 종류 규칙."""
     if f.step_order is not None:
@@ -462,6 +493,7 @@ def render_card(
         if b.variant != _NO_VARIANT:
             head += f" · {variant_label(b.variant)}"
         lines = [head + "]"]
+        seen: set[str] = set()
         for rid in b.fact_revision_ids:
             f = facts[rid]
             line = f"{f.step_order}. " if b.kind == "STEPS" else "- "
@@ -473,6 +505,10 @@ def render_card(
             labels = [x for x in (prerequisite_label(r) for r in f.requires_fact_ids) if x]
             if labels:
                 line += f" (먼저: {', '.join(labels)})"
+            # 한 문장에서 값마다 나뉜 사실은 같은 줄이 된다. 같은 줄은 한 번만 쓴다(render_missing 은 포함 여부로 본다)
+            if line in seen:
+                continue
+            seen.add(line)
             lines.append(line)
         sections.append("\n".join(lines))
     text = "\n\n".join(sections)

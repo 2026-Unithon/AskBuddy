@@ -10,6 +10,7 @@ export function CheckRow({
   saving = false,
   error,
   href,
+  onOpen,
 }: {
   label: string;
   checked: boolean;
@@ -18,8 +19,10 @@ export function CheckRow({
   error?: string;
   /** 있으면 체크박스는 체크만 하고, 제목은 이 주소로 가는 링크가 된다. */
   href?: string;
+  /** 있으면 제목은 이 동작을 하는 버튼이 된다(예: 레시피 시트 열기). href 와 함께 주지 않는다. */
+  onOpen?: () => void;
 }) {
-  if (href)
+  if (href || onOpen)
     return (
       <li>
         <div className="flex min-h-[52px] w-full items-center gap-1.5">
@@ -42,14 +45,26 @@ export function CheckRow({
               {checked && <Icon name="check" size={14} className="animate-[check-pop_var(--dur-base)_var(--ease-spring)]" />}
             </span>
           </button>
-          <Link
-            href={href}
-            className={`flex min-h-11 min-w-0 flex-1 items-center py-2 text-[16px] leading-[1.45] tracking-[-0.16px] [word-break:keep-all] ${focusRing} ${
-              checked ? "text-ink-muted line-through" : "text-ink"
-            }`}
-          >
-            {label}
-          </Link>
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={onOpen}
+              className={`flex min-h-11 min-w-0 flex-1 items-center py-2 text-left text-[16px] leading-[1.45] tracking-[-0.16px] [word-break:keep-all] ${focusRing} ${
+                checked ? "text-ink-muted line-through" : "text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ) : (
+            <Link
+              href={href!}
+              className={`flex min-h-11 min-w-0 flex-1 items-center py-2 text-[16px] leading-[1.45] tracking-[-0.16px] [word-break:keep-all] ${focusRing} ${
+                checked ? "text-ink-muted line-through" : "text-ink"
+              }`}
+            >
+              {label}
+            </Link>
+          )}
         </div>
         {error && <p className="pb-2 pl-[50px] text-[12px] text-danger-700">{error}</p>}
       </li>

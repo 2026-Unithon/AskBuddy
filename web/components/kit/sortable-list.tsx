@@ -81,7 +81,7 @@ export function SortableList<T extends Item>({
           <div className="min-w-0 flex-1">{renderItem(item, index)}</div>
           <button
             type="button"
-            aria-label={`${item.label.slice(0, 12)} 옮기기`}
+            aria-label={`${item.label} 옮기기`}
             onPointerDown={onPointerDown(item.key)}
             onKeyDown={onKeyDown(item.key)}
             className={`mt-2 flex size-11 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded-[12px] text-[20px] text-ink-muted active:cursor-grabbing ${focusRing}`}

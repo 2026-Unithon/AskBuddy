@@ -33,7 +33,7 @@ test('키트 왼쪽으로 밀면 동작, 조금만 밀면 제자리', async (b) 
 });
 test('키트 밀기 동작은 키보드로도 된다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/dev/kit?s=gestures');
-  await page.getByRole('button', { name: '빼기' }).focus(); await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: '빼기', exact: true }).focus(); await page.keyboard.press('Enter');
   await page.getByText('뺐어요').waitFor();
   await ctx.close();
 });
@@ -110,7 +110,7 @@ test('o03a 정리 단계는 서버 상태대로 체크된다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/jobs/7', { overrides: { job: { status: 'CLASSIFYING' } } });
   const steps = page.getByRole('list', { name: '정리 단계' });
   await steps.waitFor();
-  assert.equal((await steps.locator('[aria-current="step"]').innerText()).trim(), '나누는 중');
+  assert.equal((await steps.locator('[aria-current="step"]').innerText()).trim(), '카드 제작 중');
   assert.equal(await page.getByText('%').count(), 0);
   await ctx.close();
 });

@@ -91,6 +91,22 @@ class ApproveRouteTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.card_id, CARD)
         self.assertEqual(result.review_status, "APPROVED")
 
+    async def test_first_publish_puts_task_card_on_every_shift(self):
+        self._patches(publish_result=PublishCardsResult(
+            status="PUBLISHED", snapshot_id=12, knowledge_revision=4))
+        db = FakeDb(_expected_row(published_version_id=None), MEMBER)
+        with patch(f"{MOD}.checklist_repo.add_default_link", new=AsyncMock()) as add:
+            await approve_card(CARD, db, _claims())
+        add.assert_awaited_once_with(db, STORE, CARD)
+
+    async def test_republish_keeps_owner_shift_choice(self):
+        self._patches(publish_result=PublishCardsResult(
+            status="PUBLISHED", snapshot_id=12, knowledge_revision=4))
+        db = FakeDb(_expected_row(published_version_id=DRAFT_VERSION - 1), MEMBER)
+        with patch(f"{MOD}.checklist_repo.add_default_link", new=AsyncMock()) as add:
+            await approve_card(CARD, db, _claims())
+        add.assert_not_awaited()
+
     async def test_already_applied_returns_mutation_row(self):
         self._patches(publish_result=PublishCardsResult(
             status="ALREADY_APPLIED", snapshot_id=12, knowledge_revision=4))
@@ -255,6 +271,18 @@ class StatusDb:
         return self.member_id
 
 
+class TargetDb(StatusDb):
+    """복원 update 의 대상 상태($3)를 기록한다."""
+
+    def __init__(self, log: list):
+        super().__init__(log)
+        self.targets: list = []
+
+    async def execute(self, query, *args):
+        self.targets.append(args[2])
+        await super().execute(query, *args)
+
+
 class ExcludeRestoreRepublishTest(unittest.IsolatedAsyncioTestCase):
     """제외·복원 커밋 뒤 현재 포인터로 best-effort 재발행한다(final fix #1)."""
 
@@ -314,6 +342,30 @@ class ExcludeRestoreRepublishTest(unittest.IsolatedAsyncioTestCase):
         self.card.update(review_status="EXCLUDED", published_version_id=None)
         await restore_card(CARD, StatusDb(self.log), _claims())
         self.publish.assert_not_awaited()
+
+    async def test_restore_of_unpublished_needs_review_card_returns_to_needs_review(self):
+        self.card.update(review_status="EXCLUDED", published_version_id=None)
+        db = TargetDb(self.log)
+        with patch(f"{MOD}.repo.last_exclude_from_status", new=AsyncMock(return_value="NEEDS_REVIEW")):
+            await restore_card(CARD, db, _claims())
+        self.assertEqual(db.targets, ["NEEDS_REVIEW"])
+        self.publish.assert_not_awaited()
+
+    async def test_restore_of_unpublished_pending_card_returns_to_pending(self):
+        for prior in ("PENDING", None):
+            with self.subTest(prior=prior):
+                self.card.update(review_status="EXCLUDED", published_version_id=None)
+                db = TargetDb(self.log)
+                with patch(f"{MOD}.repo.last_exclude_from_status", new=AsyncMock(return_value=prior)):
+                    await restore_card(CARD, db, _claims())
+                self.assertEqual(db.targets, ["PENDING"])
+
+    async def test_restore_of_published_card_stays_approved(self):
+        self.card["review_status"] = "EXCLUDED"
+        db = TargetDb(self.log)
+        with patch(f"{MOD}.repo.last_exclude_from_status", new=AsyncMock(return_value="NEEDS_REVIEW")):
+            await restore_card(CARD, db, _claims())
+        self.assertEqual(db.targets, ["APPROVED"])
 
     async def test_exclude_of_never_published_card_does_not_republish(self):
         self.card.update(review_status="PENDING", published_version_id=None)

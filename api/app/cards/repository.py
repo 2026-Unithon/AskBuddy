@@ -219,6 +219,22 @@ async def add_event(
     )
 
 
+async def last_exclude_from_status(
+    conn: asyncpg.Connection, store_id: int, card_id: int
+) -> str | None:
+    """마지막 빼기(EXCLUDE) 직전 상태. 공개 전 카드를 되돌릴 때 '검수 필요'를 살린다."""
+    return await conn.fetchval(
+        """
+        select from_status from card_review_events
+        where store_id = $1 and card_id = $2 and action = 'EXCLUDE'
+        order by event_id desc
+        limit 1
+        """,
+        store_id,
+        card_id,
+    )
+
+
 async def list_evidence(
     conn: asyncpg.Connection, store_id: int, version_id: int
 ):

@@ -1,5 +1,6 @@
 "use client";
 
+import { reviewReasonText } from "@/lib/review-reason";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -26,6 +27,8 @@ import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
 import { evidenceNames } from "@/components/owner/fact-card/fact-row";
+import { compactRecipe } from "@/components/owner/fact-card/fact-group";
+import { isRecipeCategory } from "@/lib/recipe-category";
 import { pressable } from "@/components/kit/buttons";
 
 // O10 카드 보기: 공개본·초안·근거·고치기·지우기(제외)·카테고리 이동.
@@ -66,7 +69,11 @@ export default function OwnerCardPage() {
       }
       await refresh();
     },
-    onError: onConflict,
+    onError: async (error, action) => {
+      // 삭제한 뒤엔 삭제 안내 화면이라 아래 오류 줄이 안 보인다. 되돌리기 실패는 스낵바로 '다시'
+      if (action === "restore") snackbar({ message: "되돌리지 못했어요", actionLabel: "다시", onAction: () => status.mutate("restore") });
+      await onConflict(error);
+    },
   });
 
   if (!cardId) {
@@ -101,6 +108,9 @@ export default function OwnerCardPage() {
   }
 
   const shown = card.draft ?? card.published;
+  // 레시피 한눈에 보기면 가격은 제목 옆에(2026-11-08 사용자 스케치)
+  const recipe = card.fact_card && factEditor.facts.data ? compactRecipe(factEditor.facts.data.blocks) : null;
+  const price = recipe && !factEditor.editing ? recipe.price : null;
   const title = shown?.title ?? "";
   const content = shown?.content ?? "";
   const unpublishedDraft = Boolean(card.draft && card.published && card.draft.version_id !== card.published.version_id);
@@ -154,7 +164,8 @@ export default function OwnerCardPage() {
       }
     >
       <div className="flex items-center justify-between gap-2">
-        <BackButton parent="/owner/cards" label="카드" />
+        {/* 수정 중에는 하단 '돌아가기'(버릴지 묻는다)로만 나간다. 뒤로 버튼은 묻지 않고 떠나므로 숨긴다 */}
+        {factEditor.editing ? <span /> : <BackButton parent="/owner/cards" label="카드" />}
         {card.fact_card && factEditor.canEdit && !factEditor.editing && (
           <button
             type="button"
@@ -168,15 +179,18 @@ export default function OwnerCardPage() {
       <button
         type="button"
         onClick={() => setMoving(true)}
-        aria-label={`카테고리 ${card.category?.name ?? "기타"}, 옮기기`}
+        aria-label={`카테고리 바꾸기, 지금 ${card.category?.name ?? "기타"}`}
         className={`inline-flex min-h-8 items-center gap-1 self-start rounded-full bg-empty px-3 text-[13px] font-bold text-primary ${pressable} ${focusRing}`}
       >
         {card.category?.name ?? "기타"}
         <span aria-hidden>▾</span>
       </button>
-      <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="-mt-2 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
-        {title}
-      </h1>
+      <div className="-mt-2 flex items-baseline justify-between gap-3">
+        <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="min-w-0 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
+          {title}
+        </h1>
+        {price && <p className="shrink-0 text-[17px] font-bold text-ink">{price}</p>}
+      </div>
       {statusLine && (
         <p className="-mt-2 flex items-center gap-1.5 text-[13px] text-ink-muted">
           <span aria-hidden className={`size-2 rounded-full ${statusLine.dot}`} />
@@ -186,7 +200,7 @@ export default function OwnerCardPage() {
       {card.review_status === "NEEDS_REVIEW" && (
         <div className="rounded-[14px] border-l-4 border-warn-500 bg-warn-50 px-4 py-3">
           <p className="text-[15px] font-bold text-warn-700">확인해 주세요</p>
-          <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{card.needs_review_reason ?? "내용이 확실하지 않아요"}</p>
+          <p className="mt-0.5 text-[15px] leading-[1.5] text-ink [word-break:keep-all]">{reviewReasonText(card.needs_review_reason)}</p>
         </div>
       )}
       {card.fact_card ? (
@@ -196,7 +210,8 @@ export default function OwnerCardPage() {
           <NumberedContent content={content} />
         </Surface>
       )}
-      {card.review_status === "APPROVED" && card.published && !factEditor.editing && <CardAssignment cardId={cardId} />}
+      {/* 레시피는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자) */}
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !recipe && !isRecipeCategory(card.category?.name ?? "") && <CardAssignment cardId={cardId} />}
       {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>

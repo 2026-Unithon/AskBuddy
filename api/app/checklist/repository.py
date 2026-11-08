@@ -461,3 +461,22 @@ async def record_day(db, store_id: int, user_id: int, day: date) -> dict[str, An
         store_id, user_id, day,
     )
     return {"date": day.isoformat(), "lines": lines, "submission": _submission(sub)}
+
+
+# 레시피(음료·메뉴 제조) 카테고리는 할 일이 아니라 근무조와 상관없이 모두에게 보인다(2026-11-08 사용자).
+# 카테고리에 종류가 없어 이름으로 가른다. 화면 카드 목록(web/app/owner/cards/page.tsx RECIPE_NAME)과 같은 규칙
+RECIPE_CATEGORY_PATTERN = "레시피|음료|메뉴|제조|제작"
+
+
+async def add_default_link(db, store_id: int, card_id: int) -> None:
+    """처음 공개한 할 일 카드는 모든 근무조(공통)에 켠다. 레시피 카드와 이미 연결된 카드는 건드리지 않는다."""
+    await db.execute(
+        """insert into checklist_cards (store_id, card_id)
+           select k.store_id, k.card_id
+             from knowledge_cards k
+             left join task_categories c on c.store_id = k.store_id and c.category_id = k.category_id
+            where k.store_id = $1 and k.card_id = $2
+              and coalesce(c.category_name, '') !~ $3
+           on conflict do nothing""",
+        store_id, card_id, RECIPE_CATEGORY_PATTERN,
+    )

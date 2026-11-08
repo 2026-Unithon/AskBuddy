@@ -52,6 +52,7 @@ export function Coachmark({ id, steps }: { id: string; steps: Step[] }) {
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const target = useRef<HTMLElement | null>(null);
+  const shown = useRef(false);
   const nextButton = useRef<HTMLButtonElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
   // 서버 렌더에는 창이 없어 꺼 둔 채 그린다(대상 위치를 찾기 전엔 아무것도 그리지 않아 화면이 어긋나지 않는다)
@@ -72,13 +73,14 @@ export function Coachmark({ id, steps }: { id: string; steps: Step[] }) {
     void findTarget(steps[index].target, WAIT_MS).then((el) => {
       if (cancelled) return;
       if (!el) {
-        // 대상이 끝내 없으면 이 단계를 건너뛴다
+        // 대상이 끝내 없으면 이 단계를 건너뛴다. 한 단계도 못 보여 줬으면 '봤음'으로 남기지 않는다(다음에 대상이 생기면 보여 준다)
         if (index + 1 >= steps.length) {
-          markDone(id);
+          if (shown.current) markDone(id);
           setActive(false);
         } else setIndex(index + 1);
         return;
       }
+      shown.current = true;
       target.current = el;
       el.scrollIntoView({ block: "nearest" });
       setRect(el.getBoundingClientRect());

@@ -17,7 +17,7 @@ import {
   TextButton,
   useFeedback,
 } from "@/components/kit";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { diffWords } from "@/lib/diff-words";
 import { apiErrorMessage, resolveKnowledgeProposal, type KnowledgeProposal } from "@/lib/api";
@@ -71,10 +71,13 @@ function ProposalCard({ proposal }: { proposal: KnowledgeProposal }) {
   const { state } = useApp();
   const client = useQueryClient();
   const { toast } = useFeedback();
+  const router = useRouter();
   const resolve = useMutation({
     mutationFn: (action: "approve" | "dismiss") => resolveKnowledgeProposal(proposal.proposal_id, action, state.token!),
     onSuccess: (_result, action) => {
-      toast(action === "approve" ? "카드에 반영했어요" : "그대로 뒀어요");
+      toast(action === "approve" ? "카드에 반영했어요" : "그대로 뒀어요", { keepOnNavigate: true });
+      // 제안을 정리했으면 검수 필요 목록으로 돌아간다(이 화면에 남을 일이 없다)
+      router.replace("/owner/cards?status=needs_review");
       return Promise.all([
         client.invalidateQueries({ queryKey: queryKeys.proposals(state.storeId) }),
         client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
@@ -129,7 +132,7 @@ function ProposalCard({ proposal }: { proposal: KnowledgeProposal }) {
         </Button>
       )}
       <TextButton className="self-center" disabled={resolve.isPending} onClick={() => resolve.mutate("dismiss")}>
-        수정하지 않고 돌아가기
+        이 답은 쓰지 않기
       </TextButton>
     </Surface>
   );

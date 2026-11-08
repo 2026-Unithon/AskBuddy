@@ -19,6 +19,7 @@ import {
   TabBar,
 } from "@/components/kit";
 import { OwnerChecklistStatus } from "@/components/checklist/owner-status";
+import { ActiveJobBanner } from "@/components/owner/active-job-banner";
 import { FinishedJobBanner } from "@/components/owner/finished-job-banner";
 import { OwnerAddComposer } from "@/components/owner/owner-add-composer";
 import { TodayTasksSection } from "@/components/owner/today-tasks-section";
@@ -52,6 +53,7 @@ export default function OwnerTodayPage() {
         title="오늘 매장"
         action={<HeaderActions role="OWNER" />}
       />
+      <ActiveJobBanner />
       <FinishedJobBanner />
 
       <OwnerChecklistStatus />

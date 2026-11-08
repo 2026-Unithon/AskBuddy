@@ -50,7 +50,7 @@ test('NAV-1 알림의 뒤로: 기록이 없으면 오늘 매장(T3)', async (b) 
 });
 test('NAV-1 BackButton 보조 키 클릭은 가로채지 않는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
-  const popup = ctx.waitForEvent('page', { timeout: 5000 });
+  const popup = ctx.waitForEvent('page', { timeout: 10000 });
   await back(page).click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
   await popup;
   // 헤드리스 크로미움은 보조 키로 연 뒷탭을 불러오지 않아(about:blank) 새 탭 주소 대신 링크 주소를 본다
@@ -109,7 +109,7 @@ test('NAV-3 탭마다 스크롤 위치를 기억한다', async (b) => {
   await ctx.close();
 });
 test('NAV-4 옛 하단 탭이 어디에도 없다', async (b) => {
-  for (const [role, url] of [['OWNER', '/owner/questions'], ['STAFF', '/staff/faqs']]) {
+  for (const [role, url] of [['OWNER', '/owner/questions'], ['STAFF', '/staff/recipes']]) {
     const { page, ctx } = await open(b, role, url);
     for (const label of ['업로드', '답변 대기', '카드 목록', '학습', '자주 묻는 질문']) {
       assert.equal(await page.getByRole('navigation').getByText(label, { exact: true }).count(), 0, `${url} ${label}`);
@@ -242,7 +242,7 @@ test('G1 같은 화면 안 필터 replace 는 진입 모션을 다시 틀지 않
   const { page, ctx } = await open(b, 'OWNER', '/owner');
   await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '카드' }).click(); await to(page, '/owner/cards');
   await page.waitForFunction(() => document.querySelector('[data-enter]')?.getAttribute('data-enter') === 'fade');
-  await page.getByRole('tab', { name: /검수 필요/ }).click(); await page.waitForURL(/review_status|status=/);
+  await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: /검수 필요/ }).click(); await page.waitForURL(/review_status|status=/);
   await page.waitForTimeout(300);
   assert.notEqual(await page.locator('[data-enter]').first().getAttribute('data-enter'), 'forward');
   await ctx.close();

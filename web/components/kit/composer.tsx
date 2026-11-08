@@ -111,6 +111,7 @@ export function AskBar({
   submitting = false,
   voiceActive = false,
   disabled,
+  newAnswer = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -120,6 +121,8 @@ export function AskBar({
   submitting?: boolean;
   voiceActive?: boolean;
   disabled?: boolean;
+  /** 버디에게 아직 안 본 새 답이 있으면 초록 점(NAV-8) */
+  newAnswer?: boolean;
 }) {
   const hasText = value.trim().length > 0;
   const showVoice = !hasText && onVoice;
@@ -131,6 +134,7 @@ export function AskBar({
         if (hasText && !submitting && !disabled) onSubmit();
       }}
     >
+      {newAnswer && <span data-new-answer="" role="img" aria-label="새 답이 왔어요" className="size-2.5 shrink-0 rounded-full bg-primary" />}
       <input
         aria-label={placeholder}
         value={value}

@@ -293,3 +293,36 @@ def test_render_collapses_newlines_in_one_fact():
     body = cp.render_card(card, _facts_map(g))
     assert body == "[목록]\n- 값 근거: x [목록] (조건: a b) (예외: c d)"
     assert cp.render_missing(card, _facts_map(g), body) == []
+
+
+# ── 계획 6: 값 사실에 잘못 붙은 단계 번호, 같은 문장 반복(2026-11-07 실화면) ──
+
+def test_step_order_kept_for_arrow_sequence_and_distinct_steps():
+    seq = "제조순서=컵(재료) → 얼음 → 액상"
+    facts = [_fact(1, 11, step=1, text=seq), _fact(2, 12, step=2, text=seq), _fact(3, 13, step=3, text=seq),
+             _fact(4, 14, step=1, text="컵에 얼음을 담는다"), _fact(5, 15, step=2, text="샷을 붓는다")]
+    fixed = {f.fact_revision_id: f.step_order for f in cp.normalize_step_orders(facts)}
+    assert fixed == {1: 1, 2: 2, 3: 3, 4: 1, 5: 2}
+
+
+def test_step_order_dropped_for_table_attributes_sharing_number():
+    # 메뉴 표의 칸(구분·금액·컵)에 모두 1번이 붙어 들어온 경우: 단계가 아니다
+    facts = [_fact(1, 11, step=1, text="구분=에이드"), _fact(2, 12, step=1, text="금액=3,500원"),
+             _fact(3, 13, step=1, q="24", text="컵=24")]
+    assert [f.step_order for f in cp.normalize_step_orders(facts)] == [None, None, None]
+
+
+def test_step_order_dropped_for_value_listing_in_one_sentence():
+    # 한 문장의 값 나열(레몬퓨레 1, 슈가시럽 2)에 붙은 번호는 순서 표시가 없으면 단계가 아니다
+    s = "재료=레몬퓨레 1.5P + 슈가시럽 1P"
+    facts = [_fact(1, 11, step=1, text=s), _fact(2, 12, step=2, text=s)]
+    assert [f.step_order for f in cp.normalize_step_orders(facts)] == [None, None]
+
+
+def test_render_card_writes_identical_line_once():
+    s = "토핑=휘핑 + 오레오 + 쿠키분태"
+    group = _group([_fact(1, 11, text=s), _fact(2, 12, text=s), _fact(3, 13, text=s)])
+    card = cp.fallback_cards(group, category_name="레시피")[0]
+    content = cp.render_card(card, {f.fact_revision_id: f for f in group.facts})
+    assert content.count(s) == 1
+    assert cp.render_missing(card, {f.fact_revision_id: f for f in group.facts}, content) == []

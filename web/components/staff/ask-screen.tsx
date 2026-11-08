@@ -3,12 +3,12 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { SuggestedQuestions } from "@/components/staff/suggested-questions";
 import {
   AnswerBubble,
   AskBar,
   BackButton,
   Button,
-  Caption,
   Chip,
   ErrorInline,
   QuestionBubble,
@@ -83,6 +83,12 @@ export function AskScreen() {
   }, [lastId, ask.isPending]);
 
   const busy = ask.isPending;
+  // 처음 불러온 대화는 '이미 본 것'. 그 뒤 새로 생긴 버디 답만 타이핑으로 보인다(s04c).
+  // 서버 데이터 복사가 아니라 화면 연출용 표시(어떤 id 를 처음 봤는지)만 둔다
+  const [known, setKnown] = useState<Set<string> | null>(null);
+  // 목록·기록을 실제로 받은 뒤에만 '처음 본 것'을 정한다(실패 뒤 다시 받아 온 옛 대화가 새 답처럼 타이핑되지 않게)
+  const firstReady = !sessions.isLoading && !sessions.error && !history.error && (!session || Boolean(history.data));
+  if (known === null && firstReady) setKnown(new Set(messages.map((m) => m.message_id)));
   const loading = sessions.isLoading || (Boolean(session) && history.isLoading);
   const loadError = sessions.error ?? history.error;
 
@@ -100,6 +106,10 @@ export function AskScreen() {
               onRetry={() => ask.variables && ask.mutate(ask.variables)}
               retrying={busy}
             />
+          )}
+          {/* 대화 목록을 불러오기 전에 누르면 새 대화가 생기므로 다 불러온 뒤에만 보인다 */}
+          {!busy && !loading && !input.trim() && !loadError && (
+            <SuggestedQuestions onPick={(question) => ask.mutate({ request_id: crypto.randomUUID(), question })} />
           )}
           <AskBar
             value={input}
@@ -145,6 +155,7 @@ export function AskScreen() {
             <MessageView
               message={message}
               isLast={message.message_id === lastId}
+              animate={known !== null && !known.has(message.message_id) && message.message_id === lastId}
               busy={busy}
               onOption={(option, context) =>
                 ask.mutate({
@@ -165,7 +176,11 @@ export function AskScreen() {
       {busy && ask.variables && !ask.variables.option && !ask.variables.policy_receipt_id && (
         <div className="flex flex-col gap-4" aria-live="polite">
           <QuestionBubble pending>{ask.variables.question}</QuestionBubble>
-          <Caption>매장 카드를 확인하고 있어요</Caption>
+          <div role="status" aria-label="버디가 생각 중이에요" data-thinking="" className="flex gap-1.5 self-start rounded-[18px] bg-surface px-4 py-3 shadow-card">
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="size-2 rounded-full bg-ink-muted motion-safe:animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />
+            ))}
+          </div>
         </div>
       )}
       <RefreshingHint active={history.isRefetching && !busy} />
@@ -177,12 +192,14 @@ export function AskScreen() {
 function MessageView({
   message,
   isLast,
+  animate = false,
   busy,
   onOption,
   onPolicyConfirm,
 }: {
   message: RMessage;
   isLast: boolean;
+  animate?: boolean;
   busy: boolean;
   onOption: (option: string, context: { context_id: string; context_revision: number }) => void;
   onPolicyConfirm: (question: string, receiptId: string) => void;
@@ -218,7 +235,7 @@ function MessageView({
               broken={citation.source_availability !== "AVAILABLE"}
             />
           ))}
-          {response?.action === "ESCALATE" && response.pending_id && <Chip>확인 중이에요. 답 오면 알려드려요</Chip>}
+          {response?.action === "ESCALATE" && response.pending_id && <EscalateSteps />}
         </>
       }
       actions={
@@ -241,8 +258,61 @@ function MessageView({
         ) : undefined
       }
     >
-      {message.content}
+      {animate ? <Typewriter text={message.content} /> : message.content}
     </AnswerBubble>
+  );
+}
+
+/** 사장님께 넘긴 답의 단계(s04b). 앞 두 단계는 끝났고, 마지막은 답을 기다린다. */
+function EscalateSteps() {
+  const steps = ["질문을 받았어요", "사장님께 보냈어요", "답 오면 알려드려요"];
+  return (
+    <div role="list" aria-label="사장님께 확인 중" className="flex w-full flex-col gap-1.5 rounded-[14px] bg-background px-3 py-2.5">
+      {steps.map((step, i) => {
+        const waiting = i === steps.length - 1;
+        return (
+          <div role="listitem" key={step} className={`flex items-center gap-2 text-[13px] ${waiting ? "font-bold text-primary" : "text-ink-muted"}`}>
+            {waiting ? (
+              <span aria-hidden className="size-2 rounded-full bg-primary motion-safe:animate-pulse" />
+            ) : (
+              <span aria-hidden className="flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-white">✓</span>
+            )}
+            {step}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const TYPE_MS = 300;
+
+/** 다 받은 답을 0.3초에 걸쳐 타이핑하듯 보인다(s04c). 움직임 줄이기 설정이면 바로 전부. */
+function Typewriter({ text }: { text: string }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const id = requestAnimationFrame(() => setShown(text.length));
+      return () => cancelAnimationFrame(id);
+    }
+    const start = performance.now();
+    let id = 0;
+    const tick = (now: number) => {
+      const next = Math.min(text.length, Math.ceil(((now - start) / TYPE_MS) * text.length));
+      setShown(next);
+      if (next < text.length) id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(id);
+  }, [text]);
+  if (shown >= text.length) return <>{text}</>;
+  return (
+    // 화면낭독기는 조각이 아니라 전체 답을 한 번에 읽는다. 글자가 늘어나는 보이는 글은 CSS 로만 그려
+    // 문서 글(복사·검색·textContent)에는 전체 답이 한 번만 있다
+    <span data-typing="">
+      <span aria-hidden="true" data-shown={text.slice(0, shown)} className="before:content-[attr(data-shown)]" />
+      <span className="sr-only">{text}</span>
+    </span>
   );
 }
 
@@ -281,9 +351,9 @@ function CitationChip({ receipt, order, broken }: { receipt: string; order: numb
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="self-start rounded-full bg-empty px-2.5 py-1.5 text-[12px] font-medium leading-[1.45] text-primary"
+        className="min-h-8 self-start text-[12px] leading-[1.45] text-ink-muted underline underline-offset-2"
       >
-        {citation.data ? `카드 ${citation.data.title}` : `근거 카드 ${order}`}
+        {citation.data ? `근거 ${citation.data.title}` : "근거 카드"}
         {broken && " (인용 끊김)"}
       </button>
       {open && (

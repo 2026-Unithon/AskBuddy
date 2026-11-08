@@ -22,7 +22,9 @@ export function findMiddots(source, fileName) {
   const visit = (node) => {
     if (TEXT_KINDS.has(node.kind)) {
       const text = node.getText(file);
-      if (text.includes(MIDDOT)) {
+      // 쓴 글(엔티티 &middot;·&#183;)과 실제 값(이스케이프 \u00B7 를 푼 node.text)을 함께 본다
+      const value = "text" in node ? node.text : "";
+      if (text.includes(MIDDOT) || value.includes(MIDDOT) || /&middot;|&#183;|&#xb7;/i.test(text)) {
         const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
         found.push({ line: line + 1, text: text.trim() });
       }

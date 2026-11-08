@@ -3,8 +3,11 @@
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { focusRing } from "@/components/kit/buttons";
 
-/** ariaLabel: 스크린리더가 읽을 이름(줄마다 같은 글자면 어느 줄인지 붙인다). 없으면 label. */
-export type SwipeAction = { label: string; ariaLabel?: string; tone: "danger" | "primary" | "neutral"; onAction: () => void };
+/**
+ * ariaLabel: 스크린리더가 읽을 이름(줄마다 같은 글자면 어느 줄인지 붙인다). 없으면 label.
+ * gestureOnly: 같은 동작의 보이는 버튼이 따로 있으면 밀기 판은 손가락 전용(스크린리더·탭 순서에서 뺀다).
+ */
+export type SwipeAction = { label: string; ariaLabel?: string; tone: "danger" | "primary" | "neutral"; onAction: () => void; gestureOnly?: boolean };
 
 const TRIGGER = 72;
 const toneClass = { danger: "bg-danger-500 text-white", primary: "bg-primary text-white", neutral: "bg-ink-muted text-white" } as const;
@@ -23,6 +26,7 @@ export function SwipeRow({ children, left, right }: { children: ReactNode; left?
     setDx(value);
   };
   const [dragging, setDragging] = useState(false);
+  const [focused, setFocused] = useState(false);
   const start = useRef<{ x: number; y: number; horizontal: boolean | null } | null>(null);
   const moved = useRef(false);
 
@@ -82,15 +86,17 @@ export function SwipeRow({ children, left, right }: { children: ReactNode; left?
       >
         {children}
       </div>
-      {/* 동작 버튼은 내용 뒤(아래 층)에 두고, 키보드로 포커스하면 내용을 밀어 드러낸다 */}
+      {/* 동작 버튼은 내용 뒤(아래 층)에 두고, 키보드로 포커스하면 내용을 밀어 드러낸다. 놓으면 내용이 돌아오는 동안 같이 흐려진다(바로 사라져 빈 바탕이 번쩍이지 않게) */}
       {right && (
-        <button type="button" aria-label={right.ariaLabel ?? right.label} onClick={right.onAction} onFocus={() => move(120)} onBlur={() => move(0)}
+        <button type="button" aria-label={right.ariaLabel ?? right.label} aria-hidden={right.gestureOnly || undefined} tabIndex={right.gestureOnly ? -1 : undefined} onClick={right.onAction} onFocus={() => { setFocused(true); move(120); }} onBlur={() => { setFocused(false); move(0); }}
+          style={{ opacity: dx > 0 || (focused && dx >= 0) ? 1 : 0, transition: dragging ? "none" : "opacity var(--dur-base) var(--ease-out)" }}
           className={`absolute inset-y-0 left-0 z-0 flex w-[120px] items-center justify-start pl-5 text-[14px] font-bold ${toneClass[right.tone]} ${focusRing}`}>
           {right.label}
         </button>
       )}
       {left && (
-        <button type="button" aria-label={left.ariaLabel ?? left.label} onClick={left.onAction} onFocus={() => move(-120)} onBlur={() => move(0)}
+        <button type="button" aria-label={left.ariaLabel ?? left.label} aria-hidden={left.gestureOnly || undefined} tabIndex={left.gestureOnly ? -1 : undefined} onClick={left.onAction} onFocus={() => { setFocused(true); move(-120); }} onBlur={() => { setFocused(false); move(0); }}
+          style={{ opacity: dx < 0 || (focused && dx <= 0) ? 1 : 0, transition: dragging ? "none" : "opacity var(--dur-base) var(--ease-out)" }}
           className={`absolute inset-y-0 right-0 z-0 flex w-[120px] items-center justify-end pr-5 text-[14px] font-bold ${toneClass[left.tone]} ${focusRing}`}>
           {left.label}
         </button>

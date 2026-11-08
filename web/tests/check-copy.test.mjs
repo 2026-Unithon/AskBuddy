@@ -10,3 +10,7 @@ test("주석과 중간점 없는 글은 무시한다", () => {
   const src = `// 오늘 매장 · 카드 탭\n/* 근거 · 1쪽 */\nconst a = "정리 끝!";`;
   assert.deepEqual(findMiddots(src, "a.tsx"), []);
 });
+test("엔티티와 이스케이프 중간점도 찾는다", () => {
+  const src = `export const A = () => <p>근거 &middot; 1</p>;\nconst b = "근거 \\u00B7 1";\nexport const C = () => <p>a &#183; b</p>;`;
+  assert.deepEqual(findMiddots(src, "a.tsx").map((f) => f.line), [1, 2, 3]);
+});

@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Chip,
@@ -23,6 +23,7 @@ import { CardTile, tileStatus } from "@/components/owner/card-tile";
 import { apiErrorMessage, mutateProductCard, type CardFilters, type CardListItem } from "@/lib/api";
 import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
 import { useCardReviewCount } from "@/lib/card-review-count";
+import { isRecipeCategory } from "@/lib/recipe-category";
 import { useApp } from "@/lib/store";
 
 // 카드 상태(2026-11-06 사용자): 공개 = 살아 있는 카드, 검수 필요 = 뭔가 이상한 카드(제안 걸린 카드 포함),
@@ -36,13 +37,6 @@ const FILTERS: { value: "all" | "approved" | "needs_review" | "pending"; label: 
 type FilterValue = (typeof FILTERS)[number]["value"];
 
 const SEARCH_DELAY_MS = 250;
-
-// 레시피 카테고리는 두 칸, 공지·위치·순서 같은 나머지는 한 칸씩(2026-11-07 사용자 스케치).
-// 카테고리에 종류 정보가 없어 이름으로 가른다(서버 카테고리 종류가 생기면 그걸로 바꾼다: 백로그)
-const RECIPE_NAME = /레시피|음료|메뉴|제조|제작/;
-function isRecipeCategory(name: string) {
-  return RECIPE_NAME.test(name);
-}
 
 // O9 카드: 카테고리 섹션 + 2열 카드 + 검색 + 상태 필터. 알림 딥링크의 status/job_id/category_id/query 를 그대로 받는다.
 function CardsScreen() {
@@ -127,11 +121,32 @@ function CardsScreen() {
     },
     onSettled: refresh,
   });
+  // 공개를 보내는 중인 카드. 끝날 때까지 그 카드의 공개 밀기를 막는다(연타로 두 번 보내지 않게)
+  const [publishing, setPublishing] = useState<Set<number>>(new Set());
+  const setPublishingFor = (cardId: number, on: boolean) =>
+    setPublishing((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(cardId);
+      else next.delete(cardId);
+      return next;
+    });
+  // 같은 순간에 두 번 눌리면 화면이 다시 그려지기 전이라 위 상태로는 못 막는다. 누를 때 바로 기록한다
+  const sending = useRef<Set<number>>(new Set());
+  const publishOnce = (cardId: number) => {
+    if (sending.current.has(cardId)) return;
+    sending.current.add(cardId);
+    publish.mutate(cardId);
+  };
   const publish = useMutation({
     mutationFn: (cardId: number) => mutateProductCard(cardId, "approve", state.token!),
+    onMutate: (cardId) => setPublishingFor(cardId, true),
     onSuccess: () => toast("공개했어요"),
     onError: (error) => toast(apiErrorMessage(error, "공개하지 못했어요")),
-    onSettled: refresh,
+    onSettled: async (_data, _error, cardId) => {
+      await refresh();
+      sending.current.delete(cardId);
+      setPublishingFor(cardId, false);
+    },
   });
 
   const proposalItems = (proposals.data?.items ?? []).filter((p) => p.target_card_id !== null);
@@ -145,6 +160,8 @@ function CardsScreen() {
     const shown = new Set(visible.map((card) => card.card_id));
     for (const proposal of proposalItems) {
       if (shown.has(proposal.target_card_id!)) continue;
+      // 한 카테고리만 보는 중이면 그 카테고리 제안만
+      if (categoryId && proposal.category_id !== categoryId) continue;
       shown.add(proposal.target_card_id!);
       const category = categories.data?.items.find((c) => c.category_id === proposal.category_id);
       visible.push({
@@ -189,15 +206,15 @@ function CardsScreen() {
         />
       </form>
 
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="카드 상태">
+      <div className="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label="카드 상태">
         {FILTERS.map((filter) => {
           const active = filter.value === status;
           return (
             <button
               key={filter.value}
               type="button"
-              role="tab"
-              aria-selected={active}
+              aria-pressed={active}
+              aria-label={filter.value === "needs_review" && reviewCount > 0 ? `${filter.label} ${reviewCount}` : undefined}
               onClick={() => setParam("status", filter.value === "all" ? null : filter.value)}
               className={`flex min-h-9 shrink-0 items-center rounded-full px-3.5 text-[13px] font-bold ${
                 active ? "bg-primary text-white" : "bg-surface text-ink-muted shadow-card"
@@ -244,15 +261,15 @@ function CardsScreen() {
               {list.map((card) => {
                 const proposal = proposalCards.has(card.card_id);
                 const tile = tileStatus(card, proposal);
-                const canPublish = tile === "pending" && (status === "all" || status === "pending");
+                const canPublish = tile === "pending" && (status === "all" || status === "pending") && !publishing.has(card.card_id);
                 return (
                   <CardTile
                     key={card.card_id}
                     card={card}
                     status={tile}
                     proposal={proposal}
-                    right={canPublish ? { label: "공개", tone: "primary", onAction: () => publish.mutate(card.card_id) } : undefined}
-                    left={tile === "pending" && status === "pending" ? { label: "삭제", tone: "danger", onAction: () => remove.mutate(card.card_id) } : undefined}
+                    right={canPublish ? { label: "공개", ariaLabel: `${card.title} 공개`, tone: "primary", onAction: () => publishOnce(card.card_id) } : undefined}
+                    left={tile === "pending" && status === "pending" ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => remove.mutate(card.card_id) } : undefined}
                   />
                 );
               })}

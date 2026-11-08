@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { focusRing, pressable } from "@/components/kit/buttons";
+import { useFeedback } from "@/components/kit/feedback";
 import { Stagger } from "@/components/kit/stagger";
 import { SwipeRow } from "@/components/kit/swipe-row";
 import { QuestionSheet } from "@/components/owner/question-sheet";
@@ -25,7 +26,13 @@ function readSnoozed(): string[] {
 export function WaitingQuestionList({ questions, meta = "한 번 답하면 다음 알바는 이걸 안 물어봐요" }: { questions: Question[]; meta?: string }) {
   const [open, setOpen] = useState<Question | null>(null);
   const [snoozed, setSnoozed] = useState<string[]>(() => (typeof window === "undefined" ? [] : readSnoozed()));
+  const { toast } = useFeedback();
   const snooze = (id: string) => {
+    // 하나뿐이면 끝으로 보내도 그대로라 아무 일도 안 일어난 것처럼 보인다
+    if (questions.length <= 1) {
+      toast("다른 질문이 없어 그대로 둘게요");
+      return;
+    }
     const next = [...snoozed.filter((x) => x !== id), id];
     setSnoozed(next);
     try {
@@ -41,7 +48,7 @@ export function WaitingQuestionList({ questions, meta = "한 번 답하면 다�
     <>
       <Stagger>
         {ordered.map((q) => (
-          <SwipeRow key={q.pending_id} left={{ label: "나중에", tone: "neutral", onAction: () => snooze(q.pending_id) }}>
+          <SwipeRow key={q.pending_id} left={{ label: "나중에", ariaLabel: `${q.question} 나중에`, tone: "neutral", onAction: () => snooze(q.pending_id) }}>
             <button
               type="button"
               onClick={() => setOpen(q)}

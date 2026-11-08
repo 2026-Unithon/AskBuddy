@@ -97,9 +97,10 @@ const path = require('node:path');
     check('old v2 address opens new ask screen', true);
     check('empty state distinct', await page.getByRole('link', { name: '뒤로' }).isVisible());
     await page.goto('http://127.0.0.1:3011/staff/notifications/v2');
-    await page.getByText('아직 도착한 답변 알림이 없습니다.', { exact: false }).waitFor();
+    // 화면 개선 계획 5(s09a): 답변 알림은 키트 화면
+    await page.getByText('아직 도착한 답이 없어요', { exact: true }).waitFor();
     check('notification empty state distinct', true);
-    await page.getByRole('link', { name: '대화로 돌아가기' }).click();
+    await page.goto('http://127.0.0.1:3011/staff/ask');
     await page.waitForURL('**/staff/ask');
     await ask().fill('합성 라테 물 얼마나?');
     await send().click();
@@ -110,8 +111,9 @@ const path = require('node:path');
     await page.getByRole('button', { name: 'HOT', exact: true }).click();
     await page.getByText('HOT 합성 라테 물 225ml', { exact: true }).waitFor();
     check('clarification survives reload', state.calls === 2);
-    await page.getByRole('button', { name: '근거 카드 1' }).click();
-    await page.getByRole('button', { name: '카드 합성 라테' }).waitFor();
+    await page.getByRole('button', { name: '근거 카드', exact: true }).first().click();
+    // 화면 개선 계획 5(s04a): 근거는 작은 회색 글자, 불러오면 '근거 제목'
+    await page.getByRole('button', { name: '근거 합성 라테' }).waitFor();
     check('approved citation expands', true);
     // 출처 표시는 공통 CitationOrigin 이 담당한다. source_kind 가 없는 응답은 owner_answer_id 로 점주 답변으로 본다
     await page.getByTestId('citation-origin').waitFor();
@@ -119,7 +121,7 @@ const path = require('node:path');
       await page.getByTestId('citation-origin').innerText() === '출처 점주 답변'
       && await page.getByText('원본 자료를 열람할 수 없어요.', { exact: false }).count() === 0);
     await page.reload();
-    await page.getByRole('button', { name: '근거 카드 1' }).click();
+    await page.getByRole('button', { name: '근거 카드', exact: true }).first().click();
     await page.getByTestId('citation-origin').waitFor();
     check('owner source survives history reload',
       await page.getByTestId('citation-origin').innerText() === '출처 점주 답변');
@@ -130,14 +132,14 @@ const path = require('node:path');
     check('failed submit retains input', await ask().inputValue() === '미확인 업무');
     await page.getByRole('button', { name: '다시 시도', exact: true }).click();
     await page.getByText('사장님께 확인을 요청했어요.', { exact: true }).waitFor();
-    check('retry reaches stored escalation', await page.getByText('확인 중이에요. 답 오면 알려드려요', { exact: true }).isVisible());
+    check('retry reaches stored escalation', await page.getByRole('list', { name: '사장님께 확인 중' }).last().getByText('답 오면 알려드려요').isVisible());
 
     const owner = await context('OWNER'), ownerPage = await owner.newPage();
     ownerPage.on('pageerror', (e) => errors.push(e.message));
     const answerBox = () => ownerPage.getByLabel('직원에게 보낼 답');
     await ownerPage.goto('http://127.0.0.1:3011/owner');
     // 화면 개선 계획 4a: 오늘 매장 질문은 시트로 열리고, 상세는 '자세히 보기'
-    await ownerPage.getByRole('button', { name: /미확인 업무/ }).click();
+    await ownerPage.getByRole('button', { name: /미확인 업무(?!.* 나중에$)/ }).click();
     await ownerPage.getByRole('link', { name: '자세히 보기' }).click();
     await ownerPage.waitForURL('**/owner/questions/1');
     await answerBox().waitFor();
@@ -200,33 +202,34 @@ const path = require('node:path');
     state.notices.push({ notification_id: '2', title: '합성 경로 검사', body: '외부 주소를 열지 않습니다.', destination: 'https://example.invalid/', read: false });
     state.failNotices = true;
     await page.goto('http://127.0.0.1:3011/staff/notifications/v2');
-    await page.getByText('알림 조회 실패', { exact: true }).waitFor();
-    check('notification fetch failure shown as error', await page.getByText('아직 도착한 답변 알림이 없습니다.', { exact: false }).count() === 0);
+    await page.locator('[role="alert"]:not(#__next-route-announcer__)').first().waitFor();
+    check('notification fetch failure shown as error', await page.getByText('아직 도착한 답이 없어요', { exact: true }).count() === 0);
     state.failNotices = false;
-    await page.getByRole('button', { name: '다시 확인', exact: true }).click();
-    await page.getByText('사장님 답변 도착 (읽지 않음)', { exact: true }).waitFor();
+    await page.locator('[role="alert"]:not(#__next-route-announcer__)').first().getByRole('button').click();
+    await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).getByLabel('읽지 않음').waitFor();
     state.failRead = true;
-    await page.getByRole('button', { name: '답변 확인', exact: true }).click();
-    await page.getByText('알림 읽음 저장 실패', { exact: true }).waitFor();
+    await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).click();
+    await page.locator('[role="alert"]:not(#__next-route-announcer__)').first().waitFor();
     check('read failure does not navigate or mark success', page.url().endsWith('/staff/notifications/v2') && state.notices[0].read === false);
-    await page.getByRole('button', { name: '다시 확인', exact: true }).click();
+    state.failRead = false;
+    await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).click();
     await page.waitForURL('**/staff/ask?session_id=1');
     check('notification read opens exact conversation', state.notices[0].read === true);
     await page.goto('http://127.0.0.1:3011/staff/notifications/v2');
-    await page.getByText('사장님 답변 도착 (읽음)', { exact: true }).waitFor();
-    check('notification read survives reload', true);
-    await page.getByRole('button', { name: '다음 알림 보기' }).click();
-    await page.getByText('합성 경로 검사 (읽지 않음)', { exact: true }).waitFor();
+    await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).waitFor();
+    check('notification read survives reload', await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).getByLabel('읽지 않음').count() === 0);
+    await page.getByRole('button', { name: '이전 알림 더 보기' }).click();
+    await page.locator('[data-notice]', { hasText: '합성 경로 검사' }).getByLabel('읽지 않음').waitFor();
     check('notification cursor loads next page', true);
-    await page.getByRole('button', { name: '읽음으로 표시' }).click();
-    await page.getByText('합성 경로 검사 (읽음)', { exact: true }).waitFor();
+    await page.locator('[data-notice]', { hasText: '합성 경로 검사' }).click();
+    await page.locator('[data-notice]', { hasText: '합성 경로 검사' }).getByLabel('읽지 않음').waitFor({ state: 'detached' });
     check('notification cannot navigate to arbitrary destination', page.url().endsWith('/staff/notifications/v2'));
     for (const width of [390, 360]) {
       await page.setViewportSize({ width, height: 844 });
       check(`notifications width ${width} no overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     }
     await page.screenshot({ path: path.join(policyOut, 'notifications.png'), fullPage: true });
-    await page.getByRole('button', { name: '답변 확인', exact: true }).click();
+    await page.locator('[data-notice]', { hasText: '사장님 답변 도착' }).click();
     await page.waitForURL('**/staff/ask?session_id=1');
     for (const width of [390, 360]) {
       await page.setViewportSize({ width, height: 844 });

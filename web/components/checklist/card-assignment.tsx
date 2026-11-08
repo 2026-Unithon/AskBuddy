@@ -25,7 +25,8 @@ export function CardAssignment({ cardId }: { cardId: number }) {
   const data = links.data;
   return (
     <Surface className="p-4">
-      <h2 className="text-[16px] font-bold">어느 근무조 할 일인가요?</h2>
+      <div role="group" aria-labelledby={`card-shifts-${cardId}`}>
+      <h2 id={`card-shifts-${cardId}`} className="text-[16px] font-bold">어느 근무조 할 일인가요?</h2>
       {(links.isLoading || shifts.isLoading) && (
         <Skeleton className="mt-3 h-16" />
       )}
@@ -42,25 +43,22 @@ export function CardAssignment({ cardId }: { cardId: number }) {
         />
       )}
       {data && shifts.data && (
-        // o06e: 공통과 근무조마다 스위치. 공통을 켜면 근무조는 꺼지고, 근무조를 켜면 공통은 꺼진다. 모두 끄면 할 일에서 빠진다
+        // 근무조마다 스위치 하나. 공통(모든 근무조)은 모두 켜진 것으로 보이고, 다 켜면 다시 공통으로 저장한다.
+        // 처음 공개한 할 일 카드는 서버가 공통으로 켠다(2026-11-08 사용자: 기본은 모두 켜짐). 모두 끄면 할 일에서 빠진다
         <div className="mt-1 flex flex-col">
-          <Switch
-            label="공통"
-            checked={data.checklist && data.shift_ids.length === 0}
-            disabled={save.isPending}
-            onChange={(on) => save.mutate({ checklist: on, shift_ids: [] })}
-          />
           {shifts.data.items.map((s) => {
-            const selected = data.checklist && data.shift_ids.includes(s.shift_id);
+            const all = shifts.data.items.map((x) => x.shift_id);
+            const current = data.checklist ? (data.shift_ids.length === 0 ? all : data.shift_ids) : [];
             return (
               <Switch
                 key={s.shift_id}
                 label={s.name}
-                checked={selected}
+                checked={current.includes(s.shift_id)}
                 disabled={save.isPending}
                 onChange={(on) => {
-                  const ids = on ? [...data.shift_ids, s.shift_id] : data.shift_ids.filter((id) => id !== s.shift_id);
-                  save.mutate({ checklist: ids.length > 0, shift_ids: ids });
+                  const ids = on ? [...current, s.shift_id] : current.filter((id) => id !== s.shift_id);
+                  const everyShift = all.every((id) => ids.includes(id));
+                  save.mutate({ checklist: ids.length > 0, shift_ids: everyShift ? [] : all.filter((id) => ids.includes(id)) });
                 }}
               />
             );
@@ -74,6 +72,7 @@ export function CardAssignment({ cardId }: { cardId: number }) {
           retrying={save.isPending}
         />
       )}
+      </div>
     </Surface>
   );
 }

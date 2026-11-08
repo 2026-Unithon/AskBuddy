@@ -35,6 +35,11 @@ const SLOT_LABEL: Record<string, string> = { entity: "대상", predicate: "물�
 // O7 답하기 → O8 카드로 남았어요. 원문 전달과 카드 반영은 다른 단계다 (MVP §13-2).
 export default function OwnerAnswerPage() {
   const { pendingId } = useParams<{ pendingId: string }>();
+  // 다음 질문으로 가면 화면 상태(보냄, 펼침, 입력)를 새로 시작한다
+  return <AnswerScreen key={pendingId} pendingId={pendingId} />;
+}
+
+function AnswerScreen({ pendingId }: { pendingId: string }) {
   const { state } = useApp();
   const router = useRouter();
   const { markReplace } = useNavHistory();
@@ -99,7 +104,6 @@ export default function OwnerAnswerPage() {
               onClick={() => {
                 markReplace();
                 router.replace(`/owner/questions/${others[0].pending_id}`);
-                setSent(false);
               }}
             >
               다음 질문 {others.length}개
@@ -152,7 +156,7 @@ export default function OwnerAnswerPage() {
       <div className="-mt-2 flex flex-wrap items-center gap-2">
         <Caption className="text-[13px]">{askedCount > 1 ? `직원이 ${askedCount}번 물어봤어요` : "직원이 물어본 질문"}</Caption>
         {askedCount > 1 && (
-          <button type="button" aria-expanded={showAsked} onClick={() => setShowAsked((v) => !v)} className="min-h-8 text-[13px] font-bold text-primary underline-offset-4 hover:underline">
+          <button type="button" aria-expanded={showAsked} onClick={() => setShowAsked((v) => !v)} className={`min-h-8 rounded-[6px] text-[13px] font-bold text-primary underline-offset-4 hover:underline ${focusRing}`}>
             물어본 말 보기
           </button>
         )}
