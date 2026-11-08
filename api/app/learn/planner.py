@@ -35,6 +35,21 @@ def mentioned(query:str,term:str)->bool:
         r"(?:은|는|이|가|의|을|를|에|에서|로|랑|와|과)?(?![가-힣a-z0-9_])",query))
 
 
+def shared_terms(query:str,names:tuple[str,...])->bool:
+    """질문과 대상 이름이 두 글자 이상의 낱말을 공유하는가.
+
+    대상 '확정'이 아니라 되묻기 선택지를 좁히는 데만 쓴다. 글자가 하나도 겹치지
+    않는 후보까지 전부 나열하면 직원이 무관한 메뉴 중에서 고르게 된다.
+    """
+    words=[w for w in re.split(r'[^0-9A-Za-z가-힣]+',normalize_query(query)) if len(w)>=2]
+    if not words:return False
+    for name in names:
+        for part in re.split(r'[^0-9A-Za-z가-힣]+',normalize_query(name)):
+            if len(part)>=2 and any(part in word or word in part for word in words):
+                return True
+    return False
+
+
 def atomic_quantity_agrees(fact)->bool:
     """수치 속성은 승인 문장과 구조화 수치/단위가 같은 원자 사실이어야 한다."""
     if fact.quantity is None:return False
@@ -120,6 +135,13 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
             if any(n in search.alias_terms for n in entity_names(snapshot,c.entity_id))))
         if 0<len(alias_options)<=10:
             return finish('CLARIFY',slot='entity',options=alias_options)
+        shared=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
+            if shared_terms(q,entity_names(snapshot,c.entity_id))))
+        if 0<len(shared)<=10:
+            return finish('CLARIFY',slot='entity',options=shared)
+        # 질문이 어떤 승인 대상도 가리키지 않는다. 후보 전체를 선택지로 내밀면
+        # 근거 없는 추측을 직원에게 떠넘기는 것이다. 되묻지 않고 점주에게 넘긴다 (불변식 5).
+        return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     if len(matches)!=1:
         options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards if not matches or c.entity_id in matches))
         if len(options)>10 or len(options)<2:

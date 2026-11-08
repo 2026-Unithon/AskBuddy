@@ -18,15 +18,40 @@ def supported_question(question: str, *, titles: tuple[str, ...], predicate: str
         'price': r'(?:(?:가격|금액|요금|판매가)(?:은|이)?(?:\s*얼마(?:야|인가요)?)?|얼마(?:야|인가요)?|price)',
         'quantity': r'(?:수량(?:은)?|몇\s*개(?:야|인가요)?)',
     }.get('price' if predicate in PRICE_WORDS else predicate)
-    if request is None or not titles:
+    if not titles:
         return False
     title = '(?:'+'|'.join(re.escape(normalize_query(t)) for t in titles)+')'
     variants = ['hot','ice','아이스','핫','따뜻한','뜨거운','차가운',*sizes]
     variant = '(?:'+'|'.join(re.escape(normalize_query(v)) for v in variants)+')'
+    if request is None:
+        # 닫힌 어휘 밖의 속성은 '속성 이름이 질문에 그대로 나올 때'만 지원한다.
+        # 유사어 추정이 아니라 글자 일치이며, 대상·속성·규격·조사·맺음말 외의
+        # 낱말이 남으면 지원하지 않는다. 그래야 기존 보수성이 유지된다.
+        return explicit_attribute_question(question,title=title,variant=variant,predicate=predicate)
     if predicate in PRICE_WORDS and re.fullmatch(rf'{request}\s+{title}[.!?]*(?:\s+{variant}[.!?]*)*',normalize_query(question)):
         return True
     return re.fullmatch(rf'(?:{variant}\s+)*{title}(?:의|는|은)?\s+(?:{variant}\s+)*'
         rf'{request}[.!?]*(?:\s+{variant}[.!?]*)*',normalize_query(question)) is not None
+
+
+CLOSING = r'(?:\s*(?:알려줘|알려주세요|알려줄래|뭐야|뭔가요|어떻게\s*돼|어떻게\s*되나요|좀))?'
+
+
+def explicit_attribute_question(question: str, *, title: str, variant: str, predicate: str) -> bool:
+    """`<대상> <속성>` 처럼 승인 속성 이름을 그대로 말한 요청만 인정한다.
+
+    속성 이름은 W가 붙인 자유 문자열이라 미리 어휘를 정할 수 없다. 대신 질문에
+    같은 글자가 있는지로만 판단하고, 남는 낱말이 있으면 지원하지 않는다.
+    """
+    # predicate 는 계약상 None 일 수 있다(extraction.py). 이름이 없으면 지원하지 않는다.
+    name = normalize_query(predicate) if predicate else ''
+    if len(name) < 2:
+        return False
+    attribute = re.escape(name).replace(r'\ ', r'\s*')
+    return re.fullmatch(
+        rf'(?:{variant}\s+)*{title}(?:의|는|은|에서|에)?\s+(?:{variant}\s+)*'
+        rf'{attribute}(?:은|는|이|가|을|를)?{CLOSING}[.!?]*(?:\s+{variant}[.!?]*)*',
+        normalize_query(question)) is not None
 
 
 def quantity_question(question: str, *, titles: tuple[str, ...], predicate: str,
