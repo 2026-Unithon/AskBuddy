@@ -517,7 +517,12 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             try:user_turns=case_context_turns(context.context)
                             except (ValueError,KeyError,TypeError) as exc:
                                 raise ApiError(422,'INVALID_CONTRACT','사건 선택의 원문 문맥을 확인하지 못했습니다.') from exc
-                            replies=()  # Case provenance uses its own user-turn numbering.
+                            # The case record covers the dialogue *before* the offer.
+                            # Include the question that triggered it as a separate
+                            # user turn; rebuild the offer against these local IDs.
+                            user_turns=(*user_turns,context.context.original_question)[-10:]
+                            replies=[dict(after_user_turn=len(user_turns)-1,action='CLARIFY',
+                                asked_for='case',displayed_options=list(stored.offered_options))]
                         search_question=retrieval_question(question,history,snapshot=snapshot,
                             continuing_choice=context is not None) if history is not None else question
                         if context and 'case' in slots:

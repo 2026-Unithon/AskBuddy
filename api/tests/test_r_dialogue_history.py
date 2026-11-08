@@ -66,6 +66,7 @@ async def test_reply_order_is_preserved_without_reusing_past_factual_answers():
         dict(after_user_turn=1,action='ANSWER',cited_subjects=['그라인더'])]
     assert '그라인더' in retrieval_question('그건 어디에 보관해?',history,snapshot=snapshot)
     assert retrieval_question('다른 장비 청소법은?',history,snapshot=snapshot)=='다른 장비 청소법은?'
+    assert '보관 위치' in retrieval_question('다른 장비는?',history,snapshot=snapshot)
 
 
 def test_fallback_for_second_named_subject_or_ambiguous_reference_uses_staff_order():

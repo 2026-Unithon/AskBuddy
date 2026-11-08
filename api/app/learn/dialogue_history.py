@@ -140,8 +140,9 @@ def retrieval_question(question: str, history: DialogueHistory, *, snapshot=None
         titles=tuple(dict.fromkeys(c.title.strip() for c in snapshot.cards if c.title.strip()))
         current_names=_mentions(question,titles)
         refers_back=re.search(r'그럼|그러면|그중|그 중|둘 중|첫 번째|두 번째|앞에서|아까|대신|비교|차이',question)
+        bare_subject=any(re.fullmatch(re.escape(n)+r'(?:은|는|도)?[?!. ]*',question.strip(),re.I) for n in titles)
         if not continuing_choice and (re.match(r'\s*(?:다른 질문|별개로|주제를 바꿔)',question)
-                or (current_names and not refers_back and question.strip(' .!?') not in current_names)):
+                or (current_names and not refers_back and not bare_subject)):
             return question
         frame=next((r for r in reversed(history.replies) if r.turn_id==len(history.user_turns)-1),None)
         if frame:

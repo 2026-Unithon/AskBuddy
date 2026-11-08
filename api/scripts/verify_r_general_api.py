@@ -57,6 +57,10 @@ async def verify(chat,client,headers,pool,admin,seed,settings,title):
                 assert request['confirmed_slots']=={'case':'A'}
                 assert 'A는 결제 상태 미확인, B는 환불 승인 대기야.' in request['input']['user_turns']
                 assert request['input']['question']=='그 건은 메시지 읽었대. 인계 완료로 해도 돼? A'
+                assert request['dialogue_turns'][-1]['text']=='A'
+                q=request['input']['user_turns'][-1]
+                assert q=='그 건은 메시지 읽었대. 인계 완료로 해도 돼?'
+                assert request['input']['previous_replies'][-1]['displayed_options']==['A','B']
             else:assert request['confirmed_slots']=={},'planner guesses must not become accepted user context'
             raw=dict(input_hash=request['input']['input_hash'],snapshot_hash=search.snapshot.snapshot_hash,
                 plan=original.plan.model_dump(mode='json'),interpretation=dict(entity_id=a.entity_id,predicate=a.predicate,

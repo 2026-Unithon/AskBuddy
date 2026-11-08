@@ -355,7 +355,7 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
             or baseline.plan.action not in ('ESCALATE','CLARIFY') or policy_action(question)):
         return baseline,None
     from app.learn.menu_context import PRICE_WORDS,menu_title,price_menu
-    if baseline.plan.action=='CLARIFY' and (
+    if not user_turns and baseline.plan.action=='CLARIFY' and (
             (baseline.plan.clarification_slot=='entity' and question.strip() in PRICE_WORDS) or
             (baseline.plan.clarification_slot=='predicate' and menu_title(search.snapshot,question))):
         return baseline,None
