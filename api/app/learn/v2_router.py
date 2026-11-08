@@ -30,7 +30,7 @@ from app.contracts.chat import ChatResponse
 from app.contracts.snapshot import KnowledgeContent
 from app.learn.planner import decide,policy_action,PLANNER_VERSION
 from app.learn.question_contexts import load_context,accept_selection,latest_typed_selection
-from app.learn.dialogue_history import load_history,retrieval_question
+from app.learn.dialogue_history import load_history,retrieval_question,reply_context,scoped_fallback
 from app.learn.request_limits import request_lease
 from app.learn.owner_delivery import require_owner,submit_owner_answer
 from app.learn.owner_handoff import retry_owner_event
@@ -489,11 +489,11 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                                         typed_choice=ContextChoice(stored.context.context_id,stored.state_revision,req.question.strip())
                                         effective_choice=typed_choice
                                 if (getattr(settings,'r_general_semantics_enabled',False)
-                                        and req.policy_receipt_id is None and effective_choice is None
+                                        and req.policy_receipt_id is None
                                         and not policy_action(req.question)):
                                     history=await load_history(conn,store_id=store_id,member_id=member_id,
                                         session_id=int(req.session_id),include_failed=True,exclude_request_id=req.request_id)
-                                    recover_question=True
+                                    recover_question=effective_choice is None
                                 if effective_choice:
                                     if not typed_choice:
                                         stored=await load_context(conn,store_id=store_id,member_id=member_id,
@@ -507,8 +507,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if context:
                             slots=context.context.confirmed_slots
                             question=context.context.original_question+" "+req.question
-                        user_turns=((context.context.original_question,req.question) if context else
-                                    history.user_turns if history is not None else ())
+                        user_turns=(history.user_turns if history is not None else
+                            (context.context.original_question,req.question) if context else ())
+                        replies=reply_context(history,snapshot) if history else ()
                         if context and 'case' in slots:
                             from app.learn.case_clarification import case_context_turns
                             if not getattr(settings,'r_general_semantics_enabled',False):
@@ -516,7 +517,9 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             try:user_turns=case_context_turns(context.context)
                             except (ValueError,KeyError,TypeError) as exc:
                                 raise ApiError(422,'INVALID_CONTRACT','사건 선택의 원문 문맥을 확인하지 못했습니다.') from exc
-                        search_question=retrieval_question(question,history) if history is not None else question
+                            replies=()  # Case provenance uses its own user-turn numbering.
+                        search_question=retrieval_question(question,history,snapshot=snapshot,
+                            continuing_choice=context is not None) if history is not None else question
                         if context and 'case' in slots:
                             from app.learn.dialogue_history import DialogueHistory
                             search_question=retrieval_question(question,DialogueHistory(user_turns=user_turns))
@@ -549,6 +552,8 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                             context_id=effective_choice.context_id if effective_choice else None,
                             context_verified=context is not None,
                             clarify_turns=context.context.clarify_turns if context else 0)
+                        if history and context is None and req.policy_receipt_id is None:
+                            decision=scoped_fallback(decision,req.question,history,snapshot)
                         if context and 'case' in slots and not policy_action(question):
                             # A rule-only planner cannot decide which user case
                             # was chosen. Keep this path under semantic review.
@@ -572,6 +577,7 @@ async def chat(req:ChatRequest,request:Request,claims:Claims,user_id:CurrentUser
                         if req.policy_receipt_id is None and usage is not None:
                             decision,general_audit=await general_decision(search,settings=settings,
                                 store_id=store_id,question=question,user_turns=user_turns,
+                                previous_replies=replies,current_utterance=req.question,
                                 baseline=decision,confirmed_slots=slots,context=usage.model_copy(update={'stage':'ANSWER'}),
                                 sink=request_usage_sink(pool,store_id=store_id),timeout=max(0,min(
                                     deadline-loop.time()-settings.chat_save_reserve_seconds,

@@ -142,9 +142,16 @@ async def verify(pool,admin,seed):
             payload=clarify.json()
             restored=await client.get(f'/learn/v2/sessions/{session}/history',headers=headers)
             check('history restores clarification revision',restored.json()['messages'][-1]['context_revision']==int(clarify.headers['x-context-revision']))
-            selected=await chat("api-clarify-selection",first.variant.temperature,context_id=payload["context_id"],
-                context_revision=int(clarify.headers["x-context-revision"]),option=first.variant.temperature)
+            # Clicking an option keeps the previous turns as well as the verified slot.
+            with patch.object(settings,'r_general_semantics_enabled',True,create=True):
+                selected=await chat("api-clarify-selection",first.variant.temperature,context_id=payload["context_id"],
+                    context_revision=int(clarify.headers["x-context-revision"]),option=first.variant.temperature)
             check("clarification choice reaches ANSWER",selected.status_code==200 and selected.json()["action"]=="ANSWER")
+            previous=await admin.fetchval("select execution_metadata->'dialogue_receipt_ids' from r_answer_receipts where receipt_id=$1",
+                int(selected.headers['x-answer-receipt-id']))
+            previous=json.loads(previous) if isinstance(previous,str) else previous
+            check('choice keeps conversation before the offer',int(receipt) in previous and
+                previous[-1]==int(clarify.headers['x-answer-receipt-id']))
             escalate=await chat("api-unknown-key","존재하지 않는 업무의 위치 알려줘")
             check("default planner ESCALATE persisted",escalate.status_code==200 and escalate.json()["action"]=="ESCALATE"
                   and bool(escalate.json()["pending_id"]))

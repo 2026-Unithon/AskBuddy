@@ -74,8 +74,9 @@ async def test_generic_entity_clarification_can_be_resolved_by_accepted_semantic
 async def test_committed_history_quotes_are_bound_and_passed_to_both_model_calls(tmp_path):
     search,raw,kw,_=setup(tmp_path)
     prior=kw['question']
-    kw.update(question='그 절차를 다시 알려줘',user_turns=(prior,),context_verified=True)
-    payload=proposal_input(search,store_id=1,question=kw['question'],user_turns=kw['user_turns'])
+    replies=[dict(after_user_turn=0,action='CLARIFY',asked_for='predicate',prompt='어떤 정보인가요?',displayed_options=['절차','보관 위치'])]
+    kw.update(question='그 절차를 다시 알려줘',user_turns=(prior,),previous_replies=replies,context_verified=True)
+    payload=proposal_input(search,store_id=1,question=kw['question'],user_turns=kw['user_turns'],previous_replies=replies)
     raw['input_hash']=payload['input_hash']
     kw['baseline']=replace(kw['baseline'],resolved=replace(kw['baseline'].resolved,question=kw['question']))
     provider=provider_for(search,raw)
@@ -84,6 +85,12 @@ async def test_committed_history_quotes_are_bound_and_passed_to_both_model_calls
     for call in provider.call_args_list:
         body=json.loads(call.args[0].rsplit('\n',1)[1])
         assert body['input']['user_turns']==[prior] and body['input']['question']==kw['question']
+        assert body['input']['previous_replies']==replies
+        assert all('어떤 정보인가요?'!=turn['text'] for turn in body['dialogue_turns'])
+    raw['slots'][0]['question_quote']='어떤 정보인가요?'
+    with pytest.raises(ApiError,match='.*') as rejected:
+        await general_decision(search,provider=provider_for(search,raw),**kw)
+    assert rejected.value.code=='GENERAL_INVALID_PROPOSAL'
 
 
 @pytest.mark.asyncio
