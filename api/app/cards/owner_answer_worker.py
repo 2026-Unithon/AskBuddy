@@ -728,9 +728,9 @@ async def _apply(pool, *, store_id: int, event_id: int, token: str, answer_id: i
                               cards=cards)
 
 
-async def process_next_owner_event(pool, *, store_id: int) -> str | None:
-    """사건 하나를 처리한다. None(할 일 없음)|STALE|LINKED|REVIEW|PUBLISHED|FAILED."""
-    claim = await claim_owner_event(pool, store_id=store_id)
+async def process_next_owner_event(pool, *, store_id: int, event_id: int | None = None) -> str | None:
+    """지정된 사건 하나, 미지정 시 대기열의 다음 사건을 기존 lease·검수 경로로 처리한다."""
+    claim = await claim_owner_event(pool, store_id=store_id, event_id=event_id)
     if claim is None:
         return None
     if claim.get("stale"):

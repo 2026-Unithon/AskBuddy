@@ -56,8 +56,14 @@ async def verify(pool,admin,seed):
     try:await submit('owner-invalid-member',member_id=999999)
     except ApiError as exc:check('non owner rejected',exc.status_code==403)
     else:raise AssertionError('missing owner accepted')
+    latest_event=await admin.fetchval('select max(event_id) from outbox_events where store_id=$1 and event_type=\'OWNER_ANSWER_SUBMITTED\'',store_id)
+    check('missing target does not consume queue head',await claim_owner_event(pool,store_id=store_id,event_id=-1) is None)
+    targeted=await claim_owner_event(pool,store_id=store_id,event_id=latest_event)
+    check('newer target can be claimed before older event',int(targeted['event_id'])==latest_event and not targeted['stale'])
+    check('target respects an existing lease',await claim_owner_event(pool,store_id=store_id,event_id=latest_event) is None)
     old=await claim_owner_event(pool,store_id=store_id)
     check('superseded event skipped before W apply',old['stale'] and int(old['owner_answer_id'])==aid)
+    await admin.execute("update outbox_leases set leased_until=clock_timestamp()-interval '1 second' where store_id=$1 and event_id=$2",store_id,latest_event)
     claims=await asyncio.gather(claim_owner_event(pool,store_id=store_id),claim_owner_event(pool,store_id=store_id))
     claim=next(c for c in claims if c)
     check('concurrent workers claim once',sum(c is not None for c in claims)==1)
@@ -65,7 +71,7 @@ async def verify(pool,admin,seed):
     check('current claim heartbeat succeeds',await heartbeat_owner_event(pool,store_id=store_id,event_id=int(claim['event_id']),claim_token=claim['claim_token']))
     await admin.execute("update outbox_leases set leased_until=clock_timestamp()-interval '1 second' where store_id=$1 and event_id=$2",store_id,int(claim['event_id']))
     newer=await claim_owner_event(pool,store_id=store_id)
-    check('expired claim recovered as next attempt',newer['attempt']==2 and newer['claim_token']!=claim['claim_token'])
+    check('expired claim recovered as next attempt',newer['attempt']==claim['attempt']+1 and newer['claim_token']!=claim['claim_token'])
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
