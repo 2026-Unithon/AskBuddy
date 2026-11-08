@@ -351,10 +351,16 @@ def model_evidence(payload):
     # represents a distinct approved fact, including all case conditions,
     # prerequisites, original wording and origin. The full payload is hashed.
     if sum(len(c['facts']) for c in candidates)>=32:
-        columns=list(dict.fromkeys(key for c in candidates for f in c['facts'] for key in f))
-        visible['fact_columns']=columns
         for candidate in candidates:
+            if len(candidate['facts'])<2:
+                continue
             facts=candidate.pop('facts')
+            keys=list(dict.fromkeys(key for fact in facts for key in fact))
+            common={key:facts[0].get(key) for key in keys
+                    if all(fact.get(key)==facts[0].get(key) for fact in facts)}
+            columns=[key for key in keys if key not in common]
+            candidate['fact_defaults']=common
+            candidate['fact_columns']=columns
             candidate['fact_rows']=[[fact.get(key) for key in columns] for fact in facts]
     return visible
 

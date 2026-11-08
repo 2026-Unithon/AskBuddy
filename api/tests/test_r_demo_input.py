@@ -122,7 +122,8 @@ def test_dense_evidence_keeps_every_row_and_constraint_with_one_column_header():
     one=model_evidence(p)['candidates'][0]['facts'][0]
     p['candidates'][0]['facts']=[dict(deepcopy(f),fact_revision_id=str(i)) for i in range(1,51)]
     dense=model_evidence(p)
-    rows=[dict(zip(dense['fact_columns'],r,strict=True)) for r in dense['candidates'][0]['fact_rows']]
+    c=dense['candidates'][0]
+    rows=[{**c['fact_defaults'],**dict(zip(c['fact_columns'],r,strict=True))} for r in c['fact_rows']]
     assert rows==[dict(one,fact_revision_id=str(i)) for i in range(1,51)]
 
 
