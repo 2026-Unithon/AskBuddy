@@ -200,6 +200,9 @@ const path = require('node:path');
     check('completed confirmation no longer offers duplicate button', await page.getByTestId('r-policy-confirm').count() === 0);
 
     state.notices.push({ notification_id: '2', title: '합성 경로 검사', body: '외부 주소를 열지 않습니다.', destination: 'https://example.invalid/', read: false });
+    // 계획 7(사용자 결정 13): 대화를 열면 그 대화의 답 알림은 읽음이 된다. 위에서 그 대화를 열었으니
+    // 대화를 떠난 뒤 새 답이 다시 온 것처럼 읽지 않음으로 되돌려 알림 화면 동작을 검사한다
+    state.notices.find((n) => n.notification_id === '1').read = false;
     state.failNotices = true;
     await page.goto('http://127.0.0.1:3011/staff/notifications/v2');
     await page.locator('[role="alert"]:not(#__next-route-announcer__)').first().waitFor();

@@ -23,7 +23,7 @@ function readSnoozed(): string[] {
  * 기다리는 질문 목록(o01d·o09b). 누르면 답하기 시트가 올라오고, 왼쪽으로 밀면 '나중에'(목록 끝으로).
  * '나중에' 순서는 이 탭의 사용자 편의라 sessionStorage 에 두고, 못 쓰면 이번 화면에서만 유지한다.
  */
-export function WaitingQuestionList({ questions, meta = "한 번 답하면 다음 알바는 이걸 안 물어봐요" }: { questions: Question[]; meta?: string }) {
+export function WaitingQuestionList({ questions, meta }: { questions: Question[]; meta?: string }) {
   const [open, setOpen] = useState<Question | null>(null);
   const [snoozed, setSnoozed] = useState<string[]>(() => (typeof window === "undefined" ? [] : readSnoozed()));
   const { toast } = useFeedback();
@@ -55,7 +55,8 @@ export function WaitingQuestionList({ questions, meta = "한 번 답하면 다�
               className={`flex w-full flex-col gap-1.5 rounded-[20px] bg-surface px-[18px] py-4 text-left shadow-card ${pressable} ${focusRing}`}
             >
               <span className="text-[15px] font-bold leading-[1.45] text-ink [word-break:keep-all]">{q.question}</span>
-              <span className="text-[12px] text-ink-muted">{meta}</span>
+              {/* 설명 문구는 두지 않는다(2026-11-08 사용자). 부르는 쪽이 꼭 필요한 한 줄만 넘긴다 */}
+              {meta && <span className="text-[12px] text-ink-muted">{meta}</span>}
             </button>
           </SwipeRow>
         ))}

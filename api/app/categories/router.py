@@ -14,6 +14,7 @@ from app.categories.schemas import (
     ReclassificationJob,
     ReclassificationSummary,
     UpdateCategoryRequest,
+    CategoryOrderRequest,
 )
 from app.categories.worker import process_reclassification_job
 from app.deps import Db
@@ -124,13 +125,31 @@ async def add_category(
     )
 
 
+@router.put("/order", status_code=status.HTTP_204_NO_CONTENT)
+async def order_categories(req: CategoryOrderRequest, db: Db, claims: OwnerClaims) -> None:
+    """끌어서 바꾼 카테고리 순서(계획 7 Task 9, o17)."""
+    _, store_id = _identity(claims)
+    await repo.set_order(db, store_id, list(dict.fromkeys(req.ids)))
+
+
 @router.patch("/{category_id}", response_model=CategoryMutationResult)
 async def update_category(
     category_id: int, req: UpdateCategoryRequest, db: Db, claims: OwnerClaims
 ) -> CategoryMutationResult:
-    """카테고리 종류를 사장님이 고친다. 분류 판(version)은 바뀌지 않아 다시 나누지 않는다."""
+    """카테고리 종류·이름을 사장님이 고친다. 분류 판(version)은 바뀌지 않아 다시 나누지 않는다."""
     _, store_id = _identity(claims)
-    row = await repo.set_kind(db, store_id, category_id, req.kind)
+    row = None
+    if req.name:
+        if req.name == "기타":
+            raise ApiError(409, "CATEGORY_ALREADY_EXISTS", "이미 존재하는 카테고리입니다.")
+        try:
+            row = await repo.rename(db, store_id, category_id, req.name)
+        except repo.NameTaken:
+            raise ApiError(409, "CATEGORY_ALREADY_EXISTS", "이미 존재하는 카테고리입니다.") from None
+        if row is None:
+            raise ApiError(404, "CATEGORY_NOT_FOUND", "카테고리를 찾을 수 없습니다.")
+    if req.kind:
+        row = await repo.set_kind(db, store_id, category_id, req.kind)
     if row is None:
         raise ApiError(404, "CATEGORY_NOT_FOUND", "카테고리를 찾을 수 없습니다.")
     version = await db.fetchval("select category_version from stores where store_id = $1", store_id)

@@ -97,6 +97,13 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
     try:
         for row in source_ids:
             source_id = int(row["source_id"])
+            async with pool.acquire() as conn:
+                canceled = await conn.fetchval(
+                    "select error_code = 'JOB_CANCELED' from ingest_jobs where store_id = $1 and job_id = $2",
+                    store_id, job_id)
+                if canceled is True:
+                    logger.info("ingest job canceled store=%s job=%s — 남은 자료를 건너뛴다", store_id, job_id)
+                    return
             # 묶음이 훑은 자료만 캐시를 넘긴다 — 묶지 않은 자료는 지금과 같은 호출이다
             cache_kw = ({"intake_cache": caches[source_id]} if source_id in caches else {})
             async with pool.acquire() as conn:
@@ -228,6 +235,7 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                     set status = $4, card_count = $5, error_code = $6,
                         error_message = $7, completed_at = now(), updated_at = now()
                     where store_id = $1 and job_id = $2 and source_id = $3
+                      and error_code is distinct from 'JOB_CANCELED'
                     """,
                     store_id,
                     job_id,
@@ -264,6 +272,7 @@ async def process_ingest_job(store_id: int, job_id: int) -> None:
                 set status = 'FAILED', error_code = 'JOB_WORKER_FAILED',
                     error_message = $3, completed_at = now(), updated_at = now()
                 where store_id = $1 and job_id = $2
+                  and error_code is distinct from 'JOB_CANCELED'
                 """,
                 store_id,
                 job_id,
@@ -306,6 +315,8 @@ async def _refresh_job(
             completed_at = case when $7 then now() else completed_at end,
             updated_at = now()
         where store_id = $1 and job_id = $2
+          -- 사장님이 취소했거나 멈춤으로 정리된 작업은 뒤늦게 끝난 처리가 덮어쓰지 않는다
+          and error_code is distinct from 'JOB_CANCELED' and error_code is distinct from 'JOB_STALLED'
         """,
         store_id,
         job_id,

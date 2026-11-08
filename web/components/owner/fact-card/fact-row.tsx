@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { Chip, focusRing } from "@/components/kit";
 import type { EditBlockKind, FactFields, FactOrigin, FactRow, FactVariant } from "@/lib/api";
-import { groupNotes, valueSpans, type FactGroup } from "./fact-group";
+import { groupNotes, tidy, valueSpans, type FactGroup } from "./fact-group";
 export { groupFacts, type FactGroup } from "./fact-group";
 
 const BLOCK_NAME: Record<EditBlockKind | "RAW", string> = { QUANTITIES: "수치", STEPS: "순서", NOTES: "목록", RAW: "내용" };
@@ -110,7 +110,8 @@ export function FactGroupRow({ group, numbered }: { group: FactGroup; numbered: 
           </div>
         ) : (
           <p className="min-w-0 flex-1 text-[16px] leading-[1.5] text-ink [overflow-wrap:anywhere] [word-break:keep-all]">
-            {steps.size > 1 ? first.sentence : withValues(first.sentence, group.fields)}
+            {/* 각주 표시·'//' 는 보이는 글에서만 정리한다 */}
+            {steps.size > 1 ? tidy(first.sentence) : withValues(tidy(first.sentence), group.fields)}
           </p>
         )}
       </div>

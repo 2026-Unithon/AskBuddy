@@ -33,6 +33,7 @@ from app.learn.owner_handoff import finish_owner_review
 from app.learn.owner_delivery import submit_owner_answer
 from app.contracts.hashing import digest
 from app.learn import roadmap as roadmap_repo
+from app.learn.recipe_blocks import published_fact_blocks
 from app.notifications.service import (
     create_pending_question_notification,
     deliver_notification,
@@ -1223,6 +1224,7 @@ async def get_roadmap_item(
         },
         evidence=await _evidence_items(db, store_id, version_id),
         return_to={"path": STAFF_RECIPES, "item_id": item_id},
+        fact_blocks=await published_fact_blocks(db, store_id, int(row["card_id"]), version_id),
     )
 
 

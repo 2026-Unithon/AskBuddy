@@ -13,6 +13,7 @@ export function rCitationQuery(token: string | null, store: number | null, user:
 export const rKeys = {
   root: (storeId: number | null, userId: number | null) => ["r-v2", storeId, userId] as const,
   sessions: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "sessions"] as const,
+  sessionSearch: (storeId: number | null, userId: number | null, q: string) => [...rKeys.sessions(storeId, userId), "search", q] as const,
   notifications: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "notifications"] as const,
   history: (storeId: number | null, userId: number | null, session: string | null) => [...rKeys.root(storeId, userId), "history", session, "latest"] as const,
   pending: (storeId: number | null, userId: number | null) => [...rKeys.root(storeId, userId), "pending"] as const,
@@ -27,6 +28,15 @@ export function rNotificationsQuery(token: string | null, store: number | null, 
 }
 export function rSessionsQuery(token: string | null, store: number | null, user: number | null) {
   return queryOptions({ queryKey: rKeys.sessions(store, user), queryFn: ({ signal }) => rSessions(token!, signal), enabled: Boolean(token && store && user) });
+}
+/** 지난 대화 목록(계획 7 Task 8). 검색어가 있으면 서버가 내 질문에서 찾는다 */
+export function rSessionSearchQuery(token: string | null, store: number | null, user: number | null, q: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: rKeys.sessionSearch(store, user, q),
+    queryFn: ({ signal }) => rSessions(token!, signal, q || undefined),
+    enabled: enabled && Boolean(token && store && user),
+    placeholderData: (previous) => previous,
+  });
 }
 export function rHistoryQuery(token: string | null, store: number | null, user: number | null, session: string | null) {
   return infiniteQueryOptions({ queryKey: rKeys.history(store, user, session),

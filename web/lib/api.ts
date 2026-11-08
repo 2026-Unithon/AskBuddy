@@ -410,6 +410,8 @@ export type LearnItemDetail = {
   category: { category_id: number; name: string };
   evidence: CardEvidenceDto[];
   return_to: { path: string; item_id: number };
+  /** 사실 카드면 공개 판 사실 묶음(한눈에 보기용, 계획 7 Task 12) */
+  fact_blocks?: { kind: string; variant: { temperature: "HOT" | "ICE" | null; size: string | null }; facts: { sentence: string; step_order: number | null }[] }[] | null;
 };
 
 export async function getLearnItem(itemId: number, token: string, signal?: AbortSignal) {
@@ -663,6 +665,15 @@ export type CardFactsView = {
 
 export type ReviewItem = { item_id: string; kind: "CHOOSE"; conflict_id: number; label: string | null; options: { fact_id: number; text: string }[] };
 
+/** 수정 되돌리기(계획 7 Task 7): 가장 최근 수정을 직전 판 내용으로 되돌린다 */
+export async function revertFactEdit(cardId: number, editId: number, token: string) {
+  return fetchJson<FactEditResult>(`/cards/${cardId}/facts/edits/${editId}/revert`, {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ idempotency_key: `revert-${editId}-${crypto.randomUUID().slice(0, 8)}` }),
+  });
+}
+
 /** 검수 고르기: 맞는 값을 남기고 고르지 않은 값은 '틀린 값'으로 카드에서 뺀다. */
 export async function chooseReviewValue(cardId: number, conflictId: number, body: { keep_fact_id: number; expected_version_id: number; idempotency_key: string }, token: string) {
   return fetchJson<{ card_id: number; review_status: CardReviewStatus }>(`/cards/${cardId}/conflicts/${conflictId}/choose`, {
@@ -737,12 +748,17 @@ export async function createProductCategory(name: string, sortOrder: number, tok
 }
 
 /** 카테고리 종류를 사장님이 고친다(계획 7 Task 2). 분류 판은 그대로라 다시 나누지 않는다. */
-export async function updateProductCategory(categoryId: number, patch: { kind: CardKind }, token: string) {
+export async function updateProductCategory(categoryId: number, patch: { kind?: CardKind; name?: string }, token: string) {
   return fetchJson<{ category: ProductCategory; version: number; reclass_job_id: number | null }>(`/categories/${categoryId}`, {
     method: "PATCH",
     headers: authHeader(token),
     body: JSON.stringify(patch),
   });
+}
+
+/** 끌어서 바꾼 카테고리 순서(계획 7 Task 9) */
+export async function orderProductCategories(ids: number[], token: string) {
+  return fetchJson<void>("/categories/order", { method: "PUT", headers: authHeader(token), body: JSON.stringify({ ids }) });
 }
 
 export async function deleteProductCategory(categoryId: number, token: string) {
@@ -918,6 +934,11 @@ export async function deleteIngestSource(sourceId: number, token: string) {
 
 /** 서버 ingest_job_sources.error_code — 입구 분류가 업무 자료 아님(NONE)으로 보고 추출하지 않은 자료. */
 export const INTAKE_NONE_CODE = "INTAKE_NONE";
+
+/** 정리 취소(2026-11-08). 진행 중일 때만 */
+export async function cancelIngestJob(jobId: number, token: string) {
+  return fetchJson<IngestJobDetail>(`/ingest/jobs/${jobId}/cancel`, { method: "POST", headers: authHeader(token) });
+}
 
 export async function retryIngestJob(jobId: number, token: string) {
   return fetchJson<{ job_id: number; status: IngestJobStatus }>(
@@ -1451,6 +1472,17 @@ export async function rotateInviteLink(token: string) {
 }
 export async function listMembers(token: string, signal?: AbortSignal) {
   return fetchJson<MembersResponse>("/members", { headers: authHeader(token), signal });
+}
+/** 방금 한 합류 승인 되돌리기(계획 7 Task 9). 10분 안에만 */
+export async function undoApproveJoin(requestId: number, token: string) {
+  return fetchJson<void>(`/members/requests/${requestId}/undo-approve`, { method: "POST", headers: authHeader(token) });
+}
+/** 내 이름·매장 이름 고치기(계획 7 Task 9) */
+export async function renameMe(name: string, token: string) {
+  return fetchJson<void>("/app/me", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });
+}
+export async function renameStore(name: string, token: string) {
+  return fetchJson<void>("/app/store", { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ name }) });
 }
 export async function approveJoin(requestId: number, token: string) {
   return fetchJson<void>(`/members/requests/${requestId}/approve`, { method: "POST", headers: authHeader(token) });

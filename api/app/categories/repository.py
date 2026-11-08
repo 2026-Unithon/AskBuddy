@@ -277,3 +277,38 @@ async def set_kind(conn, store_id: int, category_id: int, kind: str):
         """,
         store_id, category_id, kind,
     )
+
+
+
+class NameTaken(Exception):
+    """같은 매장에 같은 이름(대소문자 무시) 카테고리가 이미 있다."""
+
+
+async def set_order(conn, store_id: int, category_ids: list[int]) -> None:
+    """끌어서 바꾼 순서(계획 7 Task 9). 이 매장 카테고리만, 받은 순서대로 sort_order 0.. 을 준다."""
+    await conn.execute(
+        """
+        update task_categories t set sort_order = o.position - 1
+          from unnest($2::bigint[]) with ordinality as o(category_id, position)
+         where t.store_id = $1 and t.category_id = o.category_id and t.deleted_at is null
+        """,
+        store_id, category_ids,
+    )
+
+
+async def rename(conn, store_id: int, category_id: int, name: str):
+    """카테고리 이름 고치기. 시스템('기타')은 고치지 않는다. 없으면 None, 같은 이름이 있으면 NameTaken."""
+    taken = await conn.fetchval(
+        "select 1 from task_categories where store_id = $1 and category_id <> $2 "
+        "and deleted_at is null and lower(category_name) = lower($3)",
+        store_id, category_id, name)
+    if taken:
+        raise NameTaken(name)
+    return await conn.fetchrow(
+        """
+        update task_categories set category_name = $3
+         where store_id = $1 and category_id = $2 and deleted_at is null and is_system = false
+        returning category_id, category_name, is_system, sort_order, kind
+        """,
+        store_id, category_id, name,
+    )

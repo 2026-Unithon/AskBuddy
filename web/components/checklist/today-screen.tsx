@@ -8,6 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AskBar,
@@ -31,7 +32,9 @@ import {
   Sheet,
   Skeleton,
   STAFF_TABS,
+  Surface,
   TabBar,
+  focusRing,
 } from "@/components/kit";
 import { TodayOnlyTasks } from "@/components/checklist/today-only-tasks";
 import { SuggestedQuestions } from "@/components/staff/suggested-questions";
@@ -109,7 +112,8 @@ export function TodayScreen() {
   // 버디에 아직 안 본 새 답이 있으면 입력창에 점(NAV-8)
   const notices = useInfiniteQuery(rNotificationsQuery(state.token, state.storeId, state.userId));
   const newAnswer = Boolean(notices.data?.pages[0]?.notifications.some((n) => !n.read));
-  const ask = (text: string) => router.push(`/staff/ask?q=${encodeURIComponent(text.trim())}`);
+  // 추천 칩·입력창에서 보낸 질문은 버디에서 바로 보낸다(send=1, 2026-11-08 사용자)
+  const ask = (text: string) => router.push(`/staff/ask?q=${encodeURIComponent(text.trim())}&send=1`);
   const saving =
     useIsMutating({
       mutationKey: [...checklistKeys.root(state.storeId), "check"],
@@ -202,8 +206,8 @@ export function TodayScreen() {
       )}
       {data && (
         <>
-          {/* 제출했어도 지금 체크가 남아 있으면(풀었으면) 축하 대신 남은 개수를 보인다. 서버가 제출 기록 개수도 맞춘다 */}
-          {data.my_submission && remaining === 0 ? (
+          {/* 제출했으면 끝 카드. 숫자는 제출 당시가 아니라 지금 체크 수(풀면 줄어든다). 서버도 제출 기록 수를 맞춘다 */}
+          {data.my_submission ? (
             <HeroCard>
               {/* 끝의 기억을 좋게(피크엔드, s01e): 체크가 통통 튄다 */}
               <span
@@ -265,6 +269,7 @@ export function TodayScreen() {
               />
             )}
           />
+          {(data.other_groups?.length ?? 0) > 0 && <OtherShifts groups={data.other_groups!} />}
           {data.scope_counts.total > 0 && data.view.total === 0 && (
             <Caption>
               이 근무조에는 담긴 할 일이 없어요. 다른 근무조를 선택해 주세요.
@@ -562,5 +567,43 @@ function RecipeSheet({ preview, onClose }: { preview: { itemId: number; title: s
         </ButtonLink>
       )}
     </Sheet>
+  );
+}
+
+
+/** 범위 밖 근무조의 할 일(읽기만). 다른 근무조를 대신 서는 날 펼쳐 본다(2026-11-08 사용자). 기본은 접힘 */
+function OtherShifts({ groups }: { groups: { shift_id: number; name: string; cards: { card_id: number; title: string; item_id: number | null }[] }[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex min-h-11 items-center justify-center gap-1 self-center px-3 text-[14px] font-bold text-primary ${focusRing}`}
+      >
+        다른 근무조 할 일 보기
+        <span aria-hidden className={`transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {open &&
+        groups.map((group) => (
+          <Surface key={group.shift_id} as="section" className="flex flex-col gap-1 px-[18px] py-3">
+            <h3 className="text-[14px] font-bold text-ink-muted">{group.name}</h3>
+            <ul className="flex flex-col">
+              {group.cards.map((card) => (
+                <li key={card.card_id} className="py-1.5 text-[15px] text-ink">
+                  {card.item_id ? (
+                    <Link href={`/staff/recipes/${card.item_id}`} className={`underline-offset-4 hover:underline ${focusRing}`}>
+                      {card.title}
+                    </Link>
+                  ) : (
+                    card.title
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Surface>
+        ))}
+    </div>
   );
 }

@@ -86,6 +86,38 @@ async def approve(db, *, store_id: int, request_id: int, owner_id: int) -> tuple
     return user_id, notification_id
 
 
+# 합류 승인 되돌리기는 이 시간 안에만(화면은 5초 스낵바)
+UNDO_APPROVE_MINUTES = 10
+
+
+async def undo_approve(db, *, store_id: int, request_id: int, owner_id: int) -> None:
+    """방금 한 합류 승인을 되돌린다(계획 7 Task 9). 직원 소속을 빼고 요청을 다시 대기로 둔다."""
+    async with db.transaction():
+        row = await db.fetchrow(
+            """
+            select user_id, status, decided_at > now() - make_interval(mins => $3) as recent
+            from store_join_requests where store_id = $1 and request_id = $2 for update
+            """,
+            store_id, request_id, UNDO_APPROVE_MINUTES)
+        if row is None:
+            raise LookupError(request_id)
+        if row["status"] != "APPROVED" or not row["recent"]:
+            raise AlreadyDecided(request_id)
+        await db.execute(
+            """
+            update store_members set removed_at = now(), removed_by = $3
+            where store_id = $1 and user_id = $2 and member_role = 'STAFF' and removed_at is null
+            """,
+            store_id, row["user_id"], owner_id)
+        await db.execute(
+            """
+            update store_join_requests set status = 'PENDING', decided_at = null, decided_by = null
+            where store_id = $1 and request_id = $2
+            """,
+            store_id, request_id)
+    return int(row["user_id"])
+
+
 async def reject(db, *, store_id: int, request_id: int, owner_id: int) -> None:
     async with db.transaction():
         await _decide(db, store_id=store_id, request_id=request_id,

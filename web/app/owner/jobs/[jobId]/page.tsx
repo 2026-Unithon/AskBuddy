@@ -1,6 +1,7 @@
 "use client";
 
 import { reviewReasonText } from "@/lib/review-reason";
+import { sourceErrorText } from "@/lib/source-error";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { useNavHistory } from "@/lib/nav-history";
@@ -12,6 +13,7 @@ import {
   ButtonLink,
   Caption,
   Chip,
+  ConfirmDialog,
   CountBadge,
   Empty,
   ErrorInline,
@@ -32,6 +34,7 @@ import {
   moveProductCard,
   mutateProductCard,
   retryIngestJob,
+  cancelIngestJob,
   extractIngestSourceAnyway,
   INTAKE_NONE_CODE,
   type CardListItem,
@@ -149,15 +152,52 @@ export default function JobPage() {
 }
 
 function Processing({ job }: { job: IngestJobDetail }) {
+  const { state } = useApp();
+  const client = useQueryClient();
+  const [confirm, setConfirm] = useState(false);
+  // 오래 걸리거나 잘못 올렸을 때 정리를 멈춘다(2026-11-08 사용자). 끝나면 실패 화면에서 '다시 시도'
+  const cancel = useMutation({
+    mutationFn: () => cancelIngestJob(job.job_id, state.token!),
+    onSuccess: async () => {
+      setConfirm(false);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.ingestJob(state.storeId, job.job_id) }),
+        client.invalidateQueries({ queryKey: queryKeys.ingestJobs(state.storeId) }),
+      ]);
+    },
+  });
   return (
-    <Screen footer={<ButtonLink href="/owner" variant="secondary">오늘 매장으로</ButtonLink>}>
+    <Screen
+      footer={
+        <>
+          <ButtonLink href="/owner" variant="secondary">
+            오늘 매장으로
+          </ButtonLink>
+          <TextButton className="self-center" onClick={() => setConfirm(true)}>
+            정리 취소
+          </TextButton>
+        </>
+      }
+    >
       <BackButton parent="/owner" label="오늘 매장" />
       <PageHeader title="정리하고 있어요" description="다른 화면으로 가도 계속 정리해요" />
       <JobSteps status={job.status} />
       <SourceList job={job} />
-      {/* 만들어질 카드 자리 */}
-      <Skeleton className="h-24" />
-      <Skeleton className="h-24" />
+      <ConfirmDialog
+        open={confirm}
+        title="정리를 취소할까요?"
+        description="올린 자료는 남아 있어 나중에 다시 정리할 수 있어요."
+        confirmLabel="취소하기"
+        cancelLabel="계속 정리"
+        tone="danger"
+        loading={cancel.isPending}
+        error={cancel.error ? apiErrorMessage(cancel.error, "취소하지 못했어요.") : null}
+        onConfirm={() => cancel.mutate()}
+        onCancel={() => {
+          cancel.reset();
+          setConfirm(false);
+        }}
+      />
     </Screen>
   );
 }
@@ -208,7 +248,7 @@ function SourceList({ job, sources = job.sources }: { job: IngestJobDetail; sour
               </span>
               <SourceState status={deleted ? "DELETED" : source.status} />
             </div>
-            {source.error && !deleted && <p className="text-[12px] text-danger-700">{source.error.message}</p>}
+            {source.error && !deleted && <p className="text-[12px] text-danger-700">{sourceErrorText(source.error)}</p>}
             {!active && judgedNone(source) && <ExtractAnyway jobId={job.job_id} sourceId={source.source_id} />}
           </li>
         );
@@ -415,7 +455,7 @@ function ResultReview({
           <p>처리하지 못한 자료가 있어요.</p>
           {failedSources.map((source) => (
             <p key={source.source_id} className="mt-0.5 text-[13px] font-normal">
-              {source.filename}: {source.error?.message ?? "이유를 알 수 없어요"}
+              {source.filename}: {sourceErrorText(source.error)}
             </p>
           ))}
         </Banner>

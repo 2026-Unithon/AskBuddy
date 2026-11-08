@@ -52,6 +52,8 @@ class LearnItemDetail(BaseModel):
     category: CardCategory
     evidence: list[CardEvidence]
     return_to: dict[str, str | int]
+    # 사실 카드면 공개 판 사실 묶음(한눈에 보기용, 계획 7 Task 12). 아니면 None
+    fact_blocks: list[dict] | None = None
 
 
 class CompletionRequest(BaseModel):

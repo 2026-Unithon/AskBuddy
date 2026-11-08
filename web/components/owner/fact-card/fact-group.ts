@@ -84,7 +84,13 @@ const STEP_LABEL = /순서|방법/;
 const NUMBER_UNIT: Record<string, string> = { 컵: "온즈" };
 
 const norm = (label: string) => label.replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
-function split(sentence: string): { label: string; text: string } | null {
+/** 원문 표시 정리: 앞의 각주 표시(*, ※, •)를 떼고 표 구분자 '//' 는 쉼표로. 원장 문장은 그대로 두고 보이는 글만 */
+export function tidy(text: string): string {
+  return text.replace(/^\s*[*※•·]+\s*/, "").replace(/\s*\/\/\s*/g, ", ").trim();
+}
+
+function split(raw: string): { label: string; text: string } | null {
+  const sentence = tidy(raw);
   const eq = sentence.indexOf("=");
   if (eq <= 0) return null;
   return { label: sentence.slice(0, eq).trim(), text: sentence.slice(eq + 1).trim() };

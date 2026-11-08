@@ -339,6 +339,8 @@ def _worker(*, linked_cards, pending):
         return {"segments_total": 1, "segments_failed": 0}
 
     async def fetchval(sql, *args):
+        if "error_code = 'JOB_CANCELED'" in sql:  # 계획 7: 정리 취소 확인
+            return False
         if "returning started_at" in sql:
             return None
         if "count(distinct card_id) from fact_occurrences" in sql:

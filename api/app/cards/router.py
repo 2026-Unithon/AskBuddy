@@ -14,6 +14,7 @@ from app.cards import fact_edit_repo as fact_repo
 from app.cards import fact_parse
 from app.cards import repository as repo
 from app.cards.review_items import load_review_items
+from app.cards.fact_edit_revert import plan_revert
 from app.ingest import fact_revisions
 from app.checklist import repository as checklist_repo
 from app.cards.fact_edit_plan import CardFactState, EditError
@@ -31,6 +32,7 @@ from app.cards.fact_edit_schemas import (
     FactRow,
     FactVariant,
     ReviewChooseRequest,
+    RevertRequest,
 )
 from app.cards.schemas import (
     BulkItem,
@@ -748,6 +750,48 @@ async def get_card_facts(card_id: int, db: Db, claims: OwnerClaims) -> CardFacts
     view = build_facts_view(state, rows, heads)
     view.review_items = await load_review_items(db, store_id, [p.fact.fact_id for p in state.pinned])
     return view
+
+
+# 수정 되돌리기는 이 시간 안에만(화면은 5초 알림의 '되돌리기' 글자만 둔다)
+_REVERT_WINDOW = timedelta(minutes=10)
+
+
+async def _facts_view_at(db, store_id: int, card_id: int, version_id: int) -> CardFactsView:
+    """카드의 특정 판(수정 전 판) 사실 보기."""
+    state = await fact_repo.load_card_fact_state(db, store_id, card_id, version_id)
+    if state is None:
+        raise ApiError(409, "REVERT_NOT_POSSIBLE", "이 수정은 되돌릴 수 없어요.")
+    rows = await fact_repo.load_fact_rows(db, store_id, state)
+    return build_facts_view(state, rows, {})
+
+
+@router.post("/{card_id}/facts/edits/{edit_id}/revert", response_model=FactEditResult)
+async def revert_fact_edit(
+    card_id: int, edit_id: int, req: RevertRequest, db: Db, claims: OwnerClaims
+) -> FactEditResult:
+    """수정 되돌리기(계획 7 Task 7). 가장 최근 수정만, 그사이 카드가 바뀌지 않았을 때만 직전 판 내용으로 새 판을 만든다."""
+    user_id, store_id, _ = _identity(claims, owner_only=True)
+    edit = await db.fetchrow(
+        "select from_version_id, to_version_id, created_at from card_fact_edits "
+        "where store_id = $1 and card_id = $2 and edit_id = $3", store_id, card_id, edit_id)
+    if edit is None or edit["to_version_id"] is None:
+        raise ApiError(404, "EDIT_NOT_FOUND", "되돌릴 수정을 찾을 수 없어요.")
+    draft = await db.fetchval(
+        "select draft_version_id from knowledge_cards where store_id = $1 and card_id = $2", store_id, card_id)
+    if draft != edit["to_version_id"]:
+        raise ApiError(409, "REVERT_STALE", "그사이 카드가 바뀌어 되돌릴 수 없어요.")
+    if datetime.now(timezone.utc) - edit["created_at"] > _REVERT_WINDOW:
+        raise ApiError(409, "REVERT_EXPIRED", "시간이 지나 되돌릴 수 없어요. 직접 고쳐 주세요.")
+    try:
+        async with db.transaction():
+            old = await _facts_view_at(db, store_id, card_id, int(edit["from_version_id"]))
+            current = await get_card_facts(card_id, db, claims)
+            plan = plan_revert(old, current, idempotency_key=req.idempotency_key)
+            return await fact_edit.save_fact_edit(db, store_id, card_id=card_id, actor_id=user_id, req=plan)
+    except EditError as e:
+        raise ApiError(
+            e.status, e.code, fact_edit.message_for(e.code), details=e.details or None
+        ) from None
 
 
 @router.post("/{card_id}/conflicts/{conflict_id}/choose", response_model=FactEditResult)

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 CategoryKind = Literal["RECIPE", "TASK", "INFO"]
@@ -16,7 +16,25 @@ class CategoryItem(BaseModel):
 
 
 class UpdateCategoryRequest(BaseModel):
-    kind: CategoryKind
+    """종류나 이름 중 하나 이상(계획 7 Task 2·9)."""
+
+    kind: CategoryKind | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def _trim(cls, value: str | None) -> str | None:
+        return " ".join(value.split()) if value is not None else None
+
+    @model_validator(mode="after")
+    def _something(self) -> "UpdateCategoryRequest":
+        if self.kind is None and not self.name:
+            raise ValueError("바꿀 내용이 없어요.")
+        return self
+
+
+class CategoryOrderRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=100)
 
 
 class ReclassificationSummary(BaseModel):

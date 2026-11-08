@@ -8,6 +8,7 @@ import {
   AnswerBubble,
   AskBar,
   BackButton,
+  TextButton,
   Button,
   Chip,
   ErrorInline,
@@ -17,9 +18,10 @@ import {
   Skeleton,
 } from "@/components/kit";
 import { ApiError, apiErrorMessage } from "@/lib/api";
-import { rCitationQuery, rHistoryQuery, rKeys, rSessionsQuery } from "@/lib/query";
+import { ChatListSheet } from "@/components/staff/chat-list-sheet";
+import { rCitationQuery, rHistoryQuery, rKeys, rNotificationsQuery, rSessionsQuery } from "@/lib/query";
 import { useRPublicationRefresh } from "@/lib/r-publication-refresh";
-import { rAsk, rCreateSession, type RChatInput, type RMessage } from "@/lib/r-v2-api";
+import { rAsk, rCreateSession, rReadNotification, type RChatInput, type RMessage } from "@/lib/r-v2-api";
 import { useApp } from "@/lib/store";
 import { CitationOrigin } from "@/components/citation-origin";
 
@@ -47,7 +49,10 @@ export function AskScreen() {
 
   const sessions = useQuery(rSessionsQuery(state.token, state.storeId, state.userId));
   // 딥링크(답 도착 알림)가 가리키는 대화를 먼저, 없으면 가장 최근 대화를 이어 쓴다
-  const session = sessionParam ?? sessions.data?.sessions[0]?.session_id ?? null;
+  // ?new=1 이면 지난 대화를 잇지 않고 새 대화(첫 질문을 보낼 때 만든다)
+  const fresh = params.get("new") === "1";
+  const session = sessionParam ?? (fresh ? null : (sessions.data?.sessions[0]?.session_id ?? null));
+  const [listOpen, setListOpen] = useState(false);
   const history = useInfiniteQuery(rHistoryQuery(state.token, state.storeId, state.userId, session));
   const messages: RMessage[] = history.data ? [...history.data.pages].reverse().flatMap((page) => page.messages) : [];
 
@@ -81,6 +86,34 @@ export function AskScreen() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lastId, ask.isPending]);
+
+  // 추천 질문 칩은 누르면 바로 보낸다(2026-11-08 사용자): 다른 화면이 ?q=…&send=1 로 넘긴다. 한 번만
+  const autoSent = useRef(false);
+  const sendParam = params.get("send") === "1" ? params.get("q")?.trim() : null;
+  const readyToSend = !sessions.isLoading && (!session || Boolean(history.data));
+  const { mutate: askNow } = ask;
+  useEffect(() => {
+    if (!sendParam || autoSent.current || !readyToSend) return;
+    autoSent.current = true;
+    askNow({ request_id: crypto.randomUUID(), question: sendParam });
+    setInput("");
+  }, [sendParam, readyToSend, askNow]);
+
+  // 새 답이 온 대화를 열면 그 대화의 답 알림을 읽음으로 바꿔 '새 답' 점을 끈다(2026-11-08 사용자)
+  const notices = useInfiniteQuery(rNotificationsQuery(state.token, state.storeId, state.userId));
+  const { mutate: markRead } = useMutation({
+    mutationFn: (id: string) => rReadNotification(state.token!, id),
+    onSettled: () => client.invalidateQueries({ queryKey: rKeys.notifications(state.storeId, state.userId) }),
+  });
+  const readFor = useRef<string | null>(null);
+  const unreadHere = (notices.data?.pages.flatMap((page) => page.notifications) ?? []).filter(
+    (n) => !n.read && session !== null && new URLSearchParams(n.destination.split("?")[1] ?? "").get("session_id") === session,
+  );
+  useEffect(() => {
+    if (!session || !history.data || unreadHere.length === 0 || readFor.current === session) return;
+    readFor.current = session;
+    for (const notice of unreadHere) markRead(notice.notification_id);
+  }, [session, history.data, unreadHere, markRead]);
 
   const busy = ask.isPending;
   // 처음 불러온 대화는 '이미 본 것'. 그 뒤 새로 생긴 버디 답만 타이핑으로 보인다(s04c).
@@ -124,7 +157,13 @@ export function AskScreen() {
         </div>
       }
     >
-      <BackButton parent="/staff" />
+      <div className="flex items-center justify-between gap-2">
+        <BackButton parent="/staff" />
+        <TextButton className="self-center font-bold text-primary!" onClick={() => setListOpen(true)}>
+          지난 대화
+        </TextButton>
+      </div>
+      <ChatListSheet open={listOpen} onClose={() => setListOpen(false)} current={session} />
       <p className="text-[20px] font-black leading-[1.45] tracking-[-0.4px] text-ink">버디</p>
 
       {loading && (

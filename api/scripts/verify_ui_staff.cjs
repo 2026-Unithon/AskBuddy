@@ -39,11 +39,12 @@ test('s01e 남았는데 끝내면 확인 창, 끝나면 축하', async (b) => {
   assert.ok(await page.locator('[data-celebrate]').isVisible());
   await ctx.close();
 });
-test('s01f 추천 질문 칩을 누르면 버디에 채워진다', async (b) => {
+test('s01f 추천 질문 칩을 누르면 버디에서 바로 보낸다(계획 7 결정 12)', async (b) => {
   const { page, ctx } = await open(b, 'STAFF', '/staff');
   await page.locator('[data-suggested]', { hasText: '바닐라 라떼 시럽 몇 펌프예요?' }).click();
-  await page.waitForURL(/\/staff\/ask\?q=/);
-  assert.equal(await page.getByLabel('모르는 거 물어보기').inputValue(), '바닐라 라떼 시럽 몇 펌프예요?');
+  await page.waitForURL(/\/staff\/ask/);
+  await page.getByText('ICE 바닐라 라떼는 바닐라 시럽 2펌프예요.').waitFor();
+  assert.equal(await page.getByLabel('모르는 거 물어보기').inputValue(), '');
   await ctx.close();
 });
 test('NAV-8 새 답이 있으면 입력창에 점, 없으면 없다', async (b) => {
@@ -74,11 +75,11 @@ test('s03a 레시피 보기는 HOT·ICE 를 카드 밖 제목으로', async (b) 
   for (const gone of [/^출처/, '확인했어요. 내용이 바뀌면 다시 알려드려요.']) assert.equal(await page.getByText(gone).count(), 0, String(gone));
   await ctx.close();
 });
-test('s03c 레시피 보기 아래 추천 질문 칩', async (b) => {
+test('s03c 레시피 보기 아래 추천 질문 칩도 바로 보낸다(계획 7 결정 12)', async (b) => {
   const { page, ctx } = await open(b, 'STAFF', '/staff/recipes/11');
   await page.locator('[data-suggested]', { hasText: '바닐라 라떼 시럽 몇 펌프예요?' }).click();
-  await page.waitForURL(/\/staff\/ask\?q=/);
-  assert.equal(await page.getByLabel('모르는 거 물어보기').inputValue(), '바닐라 라떼 시럽 몇 펌프예요?');
+  await page.waitForURL(/\/staff\/ask/);
+  await page.getByText('ICE 바닐라 라떼는 바닐라 시럽 2펌프예요.').waitFor();
   await ctx.close();
 });
 

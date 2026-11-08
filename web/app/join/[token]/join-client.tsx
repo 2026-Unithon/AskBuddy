@@ -3,7 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Buddy, Button, Input, Shell } from "@/components/ui";
+import { Input, Shell } from "@/components/ui";
+import { BuddyImage, Button, ErrorInline } from "@/components/kit";
 import { KakaoLoginButton } from "@/components/kakao-login-button";
 import { AUTH_ERROR_COPY, ApiError, apiErrorMessage, login, refreshSession, requestJoin, signup } from "@/lib/api";
 import { invitePreviewQuery, joinStatusQuery } from "@/lib/query";
@@ -65,16 +66,15 @@ export function JoinClient({ inviteToken }: { inviteToken: string }) {
     <Shell>
       <div className="flex flex-1 flex-col justify-center gap-5 px-6">
         <div className="flex flex-col items-center gap-3 text-center">
-          <Buddy size={96} />
-          {(preview.isPending || !state.hydrated) && <p role="status" className="text-sm text-muted">초대 링크를 확인하고 있어요…</p>}
-          {invalid && <p role="alert" className="text-sm font-medium">{AUTH_ERROR_COPY.INVITE_INVALID}</p>}
+          <BuddyImage size={96} />
+          {(preview.isPending || !state.hydrated) && <p role="status" className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]">초대 링크를 확인하고 있어요…</p>}
+          {invalid && <p role="alert" className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]">{AUTH_ERROR_COPY.INVITE_INVALID}</p>}
           {preview.isError && !invalid && (
             <>
-              <p role="alert" className="text-sm text-danger-500">{apiErrorMessage(preview.error, "초대 링크를 확인하지 못했어요.")}</p>
-              <Button onClick={() => void preview.refetch()}>다시 시도</Button>
+              <ErrorInline message={apiErrorMessage(preview.error, "초대 링크를 확인하지 못했어요.")} onRetry={() => void preview.refetch()} retrying={preview.isRefetching} />
             </>
           )}
-          {preview.data && <h1 className="text-xl font-bold">{preview.data.store_name}에 합류합니다</h1>}
+          {preview.data && <h1 className="text-[26px] font-bold leading-[1.35] tracking-[-0.52px] text-ink [word-break:keep-all]">{preview.data.store_name}에 합류합니다</h1>}
         </div>
 
         {preview.data && loggedInOwner && (
@@ -83,19 +83,18 @@ export function JoinClient({ inviteToken }: { inviteToken: string }) {
 
         {preview.data && loggedInStaff && (
           <div className="text-center">
-            {join.isPending && <p role="status" className="text-sm text-muted">합류 요청을 보내는 중…</p>}
+            {join.isPending && <p role="status" className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]">합류 요청을 보내는 중…</p>}
             {join.isError && (
-              <>
-                <p role="alert" className="text-sm text-danger-500">
-                  {joinErrorCode && AUTH_ERROR_COPY[joinErrorCode] ? AUTH_ERROR_COPY[joinErrorCode] : apiErrorMessage(join.error, "합류 요청을 보내지 못했어요.")}
-                </p>
-                <Button onClick={() => join.mutate(state.token!)}>다시 시도</Button>
-              </>
+              <ErrorInline
+                message={joinErrorCode && AUTH_ERROR_COPY[joinErrorCode] ? AUTH_ERROR_COPY[joinErrorCode] : apiErrorMessage(join.error, "합류 요청을 보내지 못했어요.")}
+                onRetry={() => join.mutate(state.token!)}
+                retrying={join.isPending}
+              />
             )}
           </div>
         )}
 
-        {state.sessionError && <div role="alert"><p>로그인 상태를 확인하지 못했어요.</p><Button onClick={retrySession}>다시 시도</Button></div>}
+        {state.sessionError && <ErrorInline message="로그인 상태를 확인하지 못했어요." onRetry={retrySession} />}
         {preview.data && state.hydrated && !state.sessionError && !state.token && (
           <div className="space-y-3">
             <p className="text-center text-sm text-muted">가입하면 사장님이 승인한 뒤 시작할 수 있어요.</p>
@@ -110,7 +109,7 @@ export function JoinClient({ inviteToken }: { inviteToken: string }) {
                 <Input aria-label="이메일" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" required />
                 <Input aria-label="비밀번호" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호 6자 이상" required minLength={6} />
                 {error && <p role="alert" className="text-xs text-danger-500">{error}</p>}
-                <Button type="submit" className="w-full" loading={busy} loadingLabel="처리 중">
+                <Button type="submit" loading={busy}>
                   {emailMode === "login" ? "로그인하고 합류 요청" : "가입하고 합류 요청"}
                 </Button>
               </form>

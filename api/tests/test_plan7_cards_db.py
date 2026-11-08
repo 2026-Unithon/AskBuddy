@@ -48,3 +48,9 @@ class CardsDbTest(unittest.IsolatedAsyncioTestCase):
             "select review_status from knowledge_cards where store_id = $1", self.store)}, {"EXCLUDED"})
         restored = await bulk_cards(BulkRequest(action="restore", card_ids=[a, b]), self.conn, self.claims)
         self.assertEqual([r.review_status for r in restored.results], ["PENDING", "PENDING"])
+
+    async def test_staff_fact_blocks_none_for_plain_card(self):
+        from app.learn.recipe_blocks import published_fact_blocks
+        card_id = await card(self.conn, self.store, "APPROVED", published=True)
+        version = await self.conn.fetchval("select published_version_id from knowledge_cards where card_id = $1", card_id)
+        self.assertIsNone(await published_fact_blocks(self.conn, self.store, card_id, version))

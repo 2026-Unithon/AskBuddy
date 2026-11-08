@@ -95,7 +95,10 @@ test('o02b 올리기 실패한 파일은 빨간 줄과 다시', async (b) => {
 });
 test('o02c 종류 칩은 한 줄이고 선택하면 진한 배경만', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/add');
+  // 칩은 글이나 파일을 넣었을 때만 보인다(2026-11-08)
+  await page.getByLabel('새로 알려줄 것').fill('우유는 월목 발주');
   const group = page.getByRole('group', { name: '자료 종류' });
+  await group.waitFor();
   const tops = await group.getByRole('button').evaluateAll((els) => [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().top)))]);
   assert.equal(tops.length, 1, '한 줄');
   const chip = group.getByRole('button', { name: '공지' });

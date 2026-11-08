@@ -272,11 +272,11 @@ test('o17 추가 칸 상태: 비면 꺼짐, 같은 이름은 칸 아래 빨간 �
   for (const gone of ['카테고리를 바꾸면', '사용자 카테고리', '필수 시스템 카테고리']) assert.equal(await page.getByText(gone).count(), 0, gone);
   await ctx.close();
 });
-test('o17 밀어서 지우기는 확인 창, 기타는 못 지운다', async (b) => {
+test('o17 휴지통을 누르면 확인 창, 기타는 못 지운다(2026-11-08 밀기 대신 휴지통)', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/categories');
   const row = page.locator('[data-category]').filter({ hasText: '오픈 마감' });
   await row.waitFor();
-  await swipeLeft(page, row);
+  await row.getByRole('button', { name: '오픈 마감 지우기' }).click();
   const dialog = page.getByRole('dialog', { name: "'오픈 마감' 카테고리를 지울까요?" });
   await dialog.getByRole('button', { name: '지우기' }).click();
   await page.getByRole('status').getByText('카테고리를 지웠어요').waitFor();
@@ -434,7 +434,7 @@ test('검토 5 확인 창에서 실패하면 창 안에 이유가 보인다', as
   const { page, ctx } = await open(b, 'OWNER', '/owner/categories', { overrides: { failCategoryDelete: true } });
   const row = page.locator('[data-category]').filter({ hasText: '오픈 마감' });
   await row.waitFor();
-  await swipeLeft(page, row);
+  await row.getByRole('button', { name: '오픈 마감 지우기' }).click();
   const dialog = page.getByRole('dialog', { name: "'오픈 마감' 카테고리를 지울까요?" });
   await dialog.getByRole('button', { name: '지우기' }).click();
   await dialog.getByRole('alert').getByText('카테고리 삭제 실패').waitFor({ timeout: 3000 });

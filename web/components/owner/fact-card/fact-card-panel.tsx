@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface, useFeedback } from "@/components/kit";
-import { ApiError, apiErrorMessage, saveCardFacts, type CardDetailDto, type FactEditRequest, type FactFields, type ParsedFactProposal } from "@/lib/api";
+import { ApiError, apiErrorMessage, revertFactEdit, saveCardFacts, type CardDetailDto, type FactEditRequest, type FactFields, type ParsedFactProposal } from "@/lib/api";
 import { cardFactsQuery, checklistKeys, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
@@ -28,7 +28,7 @@ const RAW_TEXT = "이 카드에는 사실로 나뉘지 않은 내용이 섞여 �
 export function useFactCardEditor(cardId: number, enabled: boolean) {
   const { state } = useApp();
   const client = useQueryClient();
-  const { toast } = useFeedback();
+  const { toast, snackbar } = useFeedback();
   const facts = useQuery(cardFactsQuery(state.token, state.storeId, cardId, enabled));
   const { draft, dirty, remaining, actions, buildRequest } = useFactEditDraft();
   const [editKey, setEditKey] = useState<string | null>(null);
@@ -44,19 +44,32 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
       client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
     ]);
 
+  const refreshAll = () =>
+    Promise.all([
+      invalidateCard(),
+      client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
+      client.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
+    ]);
+  const revert = useMutation({
+    mutationFn: (editId: number) => revertFactEdit(cardId, editId, state.token!),
+    onSuccess: async () => {
+      await refreshAll();
+      toast("되돌렸어요");
+    },
+    onError: (error) => toast(apiErrorMessage(error, "되돌리지 못했어요."), { durationMs: 5000 }),
+  });
   const save = useMutation({
     mutationFn: (request: FactEditRequest) => saveCardFacts(cardId, request, state.token!),
-    onSuccess: async () => {
-      await Promise.all([
-        invalidateCard(),
-        client.invalidateQueries({ queryKey: checklistKeys.root(state.storeId) }),
-        client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
-        client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
-        client.invalidateQueries({ queryKey: queryKeys.faqs(state.storeId) }),
-      ]);
+    onSuccess: async (result) => {
+      await refreshAll();
       actions.clear();
-      // 되돌리기 스낵바는 서버 '이전 판으로'가 생긴 뒤(백로그). 지금은 완료만 알린다
-      toast("수정 완료");
+      // 5초 안에 '되돌리기' 글자를 누르면 직전 판 내용으로 돌아간다(계획 7 Task 7)
+      if (result.changed && result.edit_id) {
+        const editId = result.edit_id;
+        snackbar({ message: "수정했어요", actionLabel: "되돌리기", onAction: () => revert.mutate(editId) });
+      } else toast("수정 완료");
     },
     onError: async (error) => {
       const code = errorCode(error);
@@ -262,7 +275,8 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
                   canMove={(from, to) => !locked && canSwap(block, from, to)}
                   onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
                   renderItem={(row, i) => (
-                    <LongPressRow onLongPress={() => setMenuKey(row.key)}>
+                    // 같은 문장에서 나온 줄(값마다 나뉜 사실)은 앞 줄에 붙여 한 덩어리로 보인다(2026-11-08 사용자 결정 10)
+                    <LongPressRow onLongPress={() => setMenuKey(row.key)} joined={i > 0 && block.rows[i - 1].fields.sentence.trim() === row.fields.sentence.trim()}>
                       <FactRowItem
                         fields={row.fields}
                         base={row.base}
@@ -282,7 +296,10 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
           : view.blocks.map((block) => (
             // 보기 모드(o06b): 머리글은 카드 밖에 굵게, 칩과 줄마다 근거는 없다
             <section key={block.block_id} className="flex flex-col gap-2">
-              <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
+              {/* 보기 모드 머리글은 규격(HOT/ICE)이 있을 때만. '수치·순서·목록'은 사장님에게 뜻이 없다(2026-11-08) */}
+              {(block.variant.temperature || block.variant.size) && (
+                <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
+              )}
               <Surface className="flex flex-col px-[18px] py-1">
                 <FactGroupList rows={block.facts.map(fieldsOf)} />
               </Surface>
@@ -323,10 +340,14 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
 }
 
 /** 수정 모드에서 줄을 길게 누르면 고치기·빼기 시트(o06d). 글자 선택·iOS 링크 메뉴는 막는다. */
-function LongPressRow({ onLongPress, children }: { onLongPress: () => void; children: ReactNode }) {
+function LongPressRow({ onLongPress, joined = false, children }: { onLongPress: () => void; joined?: boolean; children: ReactNode }) {
   const longPress = useLongPress(onLongPress);
   return (
-    <div className="select-none [-webkit-touch-callout:none]" {...longPress}>
+    <div
+      data-same-sentence={joined || undefined}
+      className={`select-none [-webkit-touch-callout:none] ${joined ? "-mt-3 border-l-2 border-empty pl-2" : ""}`}
+      {...longPress}
+    >
       {children}
     </div>
   );

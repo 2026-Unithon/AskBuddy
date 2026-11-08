@@ -16,6 +16,7 @@ export type IconName =
   | "mic"
   | "right"
   | "search"
+  | "trash"
   | "up"
   | "user";
 

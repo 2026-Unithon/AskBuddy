@@ -47,6 +47,8 @@ export type ChecklistToday = {
   view: Counts;
   scope_counts: Counts;
   my_submission: Submission | null;
+  /** 범위 밖 근무조의 할 일(읽기만, 2026-11-08). 옛 서버면 없다 */
+  other_groups?: { shift_id: number; name: string; cards: { card_id: number; title: string; item_id: number | null }[] }[];
 };
 export type ChecklistStatus = {
   business_date: string;

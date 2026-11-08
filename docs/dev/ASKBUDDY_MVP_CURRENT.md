@@ -290,7 +290,7 @@ APPROVED/PENDING/NEEDS_REVIEW
 
 복원 시 이전에 공개 버전이 있었다면 승인 상태로, 없었다면 미확인 상태로 돌아간다. 매장 전체 데이터의 완전 삭제는 T4의 별도 요청·감사·복구 절차에서 다룬다.
 
-D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/hash·승인 사실과 과거 카드/인용은 보존하고 원본 파일 접근을 해제한다. 인용 API는 현재 권한으로 occurrence별 `source_availability`를 조회해 `인용 끊김`을 표시한다. 삭제된 source 때문에 승인 카드를 자동 제외하거나 과거 snapshot을 수정하지 않는다. 기존 source_facts의 CASCADE FK 전환·삭제 서비스·로컬 보존 검증이 구현되기 전에는 새 삭제 경로를 활성화하지 않는다.
+D20의 source 삭제는 카드 제외와 별도다. source tombstone·locator/hash·승인 사실과 과거 카드/인용은 보존하고 원본 파일 접근을 해제한다. 인용 API는 현재 권한으로 occurrence별 `source_availability`를 조회해 `인용 끊김`을 표시한다. 화면 표시는 사장님 카드 상세에만 둔다. 직원 레시피·버디 화면에는 `인용 끊김`을 보이지 않는다(2026-11-08 사용자 결정, 직원에게 쓸모없는 정보라서). 데이터·API 계약은 그대로다. 삭제된 source 때문에 승인 카드를 자동 제외하거나 과거 snapshot을 수정하지 않는다. 기존 source_facts의 CASCADE FK 전환·삭제 서비스·로컬 보존 검증이 구현되기 전에는 새 삭제 경로를 활성화하지 않는다.
 
 ---
 

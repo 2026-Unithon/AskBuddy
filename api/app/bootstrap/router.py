@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field, field_validator
 
 from app.bootstrap.schemas import (
     BootstrapBadges,
@@ -11,6 +12,7 @@ from app.bootstrap.schemas import (
     BootstrapStore,
     BootstrapUser,
 )
+from app.bootstrap import profile
 from app.deps import Db
 from app.errors import ApiClaims, ApiError
 
@@ -112,3 +114,33 @@ async def get_bootstrap(
             user["role"], membership is not None, guide_completed
         ),
     )
+
+
+class RenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def _trim(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("이름을 적어 주세요.")
+        return value
+
+
+@router.patch("/me", status_code=204)
+# store-isolation-ok: 매장 데이터가 아니라 로그인한 본인(JWT user_id)의 사용자 행 이름만 바꾼다
+async def rename_me(req: RenameRequest, db: Db, claims: ApiClaims) -> None:
+    """내 이름 고치기(계획 7 Task 9, o12a)."""
+    user_id = claims.get("user_id")
+    if user_id is None:
+        raise ApiError(401, "UNAUTHORIZED", "다시 로그인해 주세요.")
+    await profile.rename_user(db, int(user_id), req.name)
+
+
+@router.patch("/store", status_code=204)
+async def rename_store(req: RenameRequest, db: Db, claims: ApiClaims) -> None:
+    """매장 이름 고치기. 사장님만, JWT 의 매장만."""
+    if claims.get("role") != "OWNER" or claims.get("store_id") is None:
+        raise ApiError(403, "OWNER_ONLY", "매장 이름은 사장님만 바꿀 수 있어요.")
+    await profile.rename_store(db, int(claims["store_id"]), req.name)

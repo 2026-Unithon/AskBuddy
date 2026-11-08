@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Buddy, Button } from "@/components/ui";
+import { BuddyImage, Button, ErrorInline } from "@/components/kit";
 import { apiErrorMessage } from "@/lib/api";
 import { PUSH_MESSAGE, enablePersonalPush } from "@/lib/push";
 import { approvedSessionQuery, joinStatusQuery } from "@/lib/query";
@@ -43,7 +43,7 @@ export default function StaffPendingPage() {
 
   const approved = useQuery(approvedSessionQuery(state.userId, status.data?.status === "APPROVED" && !state.storeId));
   useEffect(() => {
-    if (approved.data || state.storeId) router.replace("/staff/roadmap");
+    if (approved.data || state.storeId) router.replace("/staff");
   }, [approved.data, state.storeId, router]);
 
   async function turnOnPush() {
@@ -60,29 +60,26 @@ export default function StaffPendingPage() {
   return (
     <>
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-        <Buddy size={110} />
-        {status.isPending && <p className="text-sm text-muted" role="status">확인하고 있어요…</p>}
+        <BuddyImage size={110} />
+        {status.isPending && <p className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]" role="status">확인하고 있어요…</p>}
         {status.isError && (
-          <>
-            <p role="alert" className="text-sm text-danger-500">{apiErrorMessage(status.error, "상태를 불러오지 못했어요.")}</p>
-            <Button onClick={() => void status.refetch()}>다시 시도</Button>
-          </>
+          <ErrorInline message={apiErrorMessage(status.error, "상태를 불러오지 못했어요.")} onRetry={() => void status.refetch()} retrying={status.isRefetching} />
         )}
         {kind && (
           <>
-            {status.data?.store_name && <p className="text-sm font-bold text-brand-700">{status.data.store_name}</p>}
-            <h1 className="text-xl font-bold text-foreground">{COPY[kind].title}</h1>
-            <p className="text-sm text-muted">{COPY[kind].body}</p>
+            {status.data?.store_name && <p className="text-[14px] font-bold text-primary">{status.data.store_name}</p>}
+            <h1 className="text-[26px] font-bold leading-[1.35] tracking-[-0.52px] text-ink [word-break:keep-all]">{COPY[kind].title}</h1>
+            <p className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]">{COPY[kind].body}</p>
           </>
         )}
         {kind === "PENDING" && push !== "enabled" && (
-          <Button loading={push === "busy"} loadingLabel="알림 켜는 중" onClick={() => void turnOnPush()}>
+          <Button loading={push === "busy"} onClick={() => void turnOnPush()}>
             승인되면 알림 받기
           </Button>
         )}
-        {push && push !== "busy" && <p className="text-xs text-muted" role="status">{PUSH_COPY[push]}</p>}
-        {approved.isError && <div><p role="alert">승인은 완료됐지만 연결에 실패했어요.</p><Button onClick={() => void approved.refetch()}>다시 시도</Button></div>}
-        {status.data?.status === "APPROVED" && <p className="text-sm text-muted" role="status">승인됐어요. 시작하는 중…</p>}
+        {push && push !== "busy" && <p className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]" role="status">{PUSH_COPY[push]}</p>}
+        {approved.isError && <ErrorInline message="승인은 완료됐지만 연결에 실패했어요." onRetry={() => void approved.refetch()} retrying={approved.isRefetching} />}
+        {status.data?.status === "APPROVED" && <p className="text-[15px] leading-[1.5] text-ink-muted [word-break:keep-all]" role="status">승인됐어요. 시작하는 중…</p>}
       </div>
     </>
   );

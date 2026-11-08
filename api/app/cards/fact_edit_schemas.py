@@ -245,6 +245,10 @@ class ReviewItem(BaseModel):
     options: list[ReviewOption]
 
 
+class RevertRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=80)
+
+
 class ReviewChooseRequest(BaseModel):
     keep_fact_id: int = Field(gt=0)
     expected_version_id: int = Field(gt=0)

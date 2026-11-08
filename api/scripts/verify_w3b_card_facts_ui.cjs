@@ -294,8 +294,9 @@ async function handle(route) {
     await page.goto(`${BASE}/owner/cards/1`);
     await panel().waitFor();
     // 화면 개선 계획 3: 보기 모드는 블록 머리글(카드 밖), 칩·줄마다 근거 없음, 근거는 맨 아래 한 줄
-    check("블록 머리글(규격 또는 블록 이름)",
-      await page.getByRole("heading", { name: "ICE", exact: true }).isVisible() && await page.getByRole("heading", { name: "순서", exact: true }).isVisible() && await page.getByRole("heading", { name: "목록", exact: true }).isVisible());
+    // 2026-11-08 사용자: '수치·순서·목록' 머리글은 뜻이 없어 규격(HOT/ICE) 머리글만 둔다
+    check("블록 머리글은 규격만",
+      await page.getByRole("heading", { name: "ICE", exact: true }).isVisible() && await page.getByRole("heading", { name: "순서", exact: true }).count() === 0 && await page.getByRole("heading", { name: "목록", exact: true }).count() === 0);
     check("보기 모드에 하지 않음 칩 없음", await page.locator("main").getByText("하지 않음", { exact: true }).count() === 0);
     check("조건·예외 줄", await text("조건: 손님이 연하게 원하면 한 번만").isVisible() && await text("예외: 손님이 따로 요청하면").isVisible());
     check("보기 모드에 줄마다 근거·이전 문장 없음", await page.getByText(/^근거:|^이전:|^먼저:/).count() === 0);
