@@ -41,7 +41,7 @@ def atomic_quantity_agrees(fact)->bool:
            "g":("mass",Decimal(1)),"kg":("mass",Decimal(1000)),
            "개":("count",Decimal(1)),"샷":("shot",Decimal(1))}
     def quantity(value,unit):
-        item=units.get(unit.lower())
+        item=units.get(unit.lower()) if isinstance(unit,str) else None
         return (item[0],Decimal(value)*item[1]) if item else None
     expected=quantity(fact.quantity.value,fact.quantity.unit)
     observed={quantity(value,unit) for value,unit in re.findall(
@@ -91,11 +91,22 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
     if any(word in q for word in ("수정","변경","바꿔","아니야","않아","말아")):
         return finish("ESCALATE","UNSUPPORTED_QUESTION_INTENT")
     candidates={(c.card_id,c.card_version_id,c.block_id) for c in search.candidates}
+    if not confirmed_slots and context_id is None:
+        from app.learn.card_read import requested_card,whole_card_refs
+        card=requested_card(snapshot,question)
+        if card and card.blocks and all((card.card_id,card.card_version_id,b.block_id) in candidates for b in card.blocks):
+            from app.learn.approved_renderer import render
+            literal=ResolvedSelection(card.entity_id,'card_read',(),question=question,literal_card_id=card.card_id)
+            try:
+                plan=AnswerPlan(**base,action='ANSWER',selected_blocks=whole_card_refs(card))
+                render(plan,snapshot,store_id=store_id,request_id='card-read-size-check',resolved=literal)
+            except ValueError:pass  # Whole card does not fit or references are incomplete: use ordinary planning.
+            else:return Decision(plan,literal,slots,None)
     cards=[c for c in snapshot.cards if any(key[0]==c.card_id for key in candidates)]
     if not cards:
         return finish("ESCALATE","INSUFFICIENT_KNOWLEDGE")
     matches={c.entity_id for c in cards if any(mentioned(q,n) for n in entity_names(snapshot,c.entity_id))}
-    if not matches and slots.get("entity"):
+    if slots.get("entity") and (context_verified or not matches):
         matches={c.entity_id for c in cards if slots["entity"] in entity_names(snapshot,c.entity_id)}
     if not matches:
         alias_options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards
@@ -103,7 +114,7 @@ def decide(search:SearchResult,*,store_id:int,question:str,confirmed_slots:dict[
         if 0<len(alias_options)<=10:
             return finish('CLARIFY',slot='entity',options=alias_options)
     if len(matches)!=1:
-        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards))
+        options=tuple(dict.fromkeys(entity_label(snapshot,c.entity_id) for c in cards if not matches or c.entity_id in matches))
         if len(options)>10 or len(options)<2:
             return finish("ESCALATE","UNRESOLVED_CONTEXT")
         return finish("CLARIFY",slot="entity",options=options)

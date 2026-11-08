@@ -42,7 +42,7 @@ SOURCES=('learn/general_semantics.py','learn/general_provider.py','learn/answer_
     'learn/clarification_scope.py','learn/entity_names.py','learn/reviewed_grouping.py','learn/reviewed_semantics.py',
     'learn/dialogue_history.py','learn/grounded_calculations.py','learn/general_wire.py',
     'learn/general_verification.py','learn/case_clarification.py','learn/grounded_conclusions.py','learn/failed_user_turns.py',
-    'learn/demo_retrieval.py','learn/request_limits.py','reg/hybrid.py','reg/embeddings.py',
+    'learn/demo_retrieval.py','learn/request_limits.py','learn/card_read.py','reg/hybrid.py','reg/embeddings.py',
     '../prompts/r_general_proposal.txt','../prompts/r_general_verification.txt')
 
 
@@ -185,7 +185,8 @@ async def product_general_decision(search, **kwargs):
                 or exc.code not in {'GENERAL_RELEASE_UNAVAILABLE','GENERAL_MODEL_UNAVAILABLE',
                                     'GENERAL_INVALID_PROPOSAL','GENERAL_DEADLINE'}):
             raise
-        return kwargs['baseline'],dict(status='PILOT_BASELINE',reason=exc.code)
+        return kwargs['baseline'],dict(status='PILOT_BASELINE',reason=exc.code,
+            **{k:exc.details[k] for k in ('phase','error_type') if k in (exc.details or {})})
 
 
 def validate_interpretation(search,*,payload,proposal,baseline,context_id=None,clarify_turns=0,confirmed_slots=None):
@@ -205,6 +206,7 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
     # Explicitly supplied slots come from accepted server context, not from the
     # planner's guesses while processing the current question.
     trusted_slots=dict(baseline.confirmed_slots if confirmed_slots is None else confirmed_slots)
+    phase='proposal_input'
     base=SemanticProposal.model_validate(proposal.model_dump(exclude={'interpretation','obligations','parts','calculations','unsupported_calculation','case_options','conclusions','case_requirements'}))
     validate_proposal(base,search,payload)
     if proposal.equivalent_question_ids:raise ValueError('model cannot merge questions')
@@ -221,9 +223,9 @@ def _validate_interpretation(search,*,payload,proposal,baseline,context_id=None,
             case_options=proposal.case_options,case_user_turns=tuple(payload['user_turns'])),trusted_slots,None)
     if proposal.case_options:raise ValueError('case options require case clarification')
     if proposal.unsupported_calculation:
-        from app.learn.grounded_calculations import UNITS
+        from app.learn.grounded_calculations import calculable_unit
         if (proposal.plan.action!='ESCALATE' or not proposal.unresolved or proposal.calculations or proposal.parts
-                or any(f.quantity and f.polarity=='AFFIRM' and f.quantity.unit.lower() in UNITS
+                or any(f.quantity and f.polarity=='AFFIRM' and calculable_unit(f.quantity.unit)
                     for c in search.candidates for b in search.snapshot.card(c.card_id).blocks if b.block_id==c.block_id
                     for fid in b.fact_revision_ids for f in (search.snapshot.fact(fid),))):
             raise ValueError('unsupported calculation requires escalation without eligible retrieved quantities')
@@ -344,9 +346,9 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
     try:
         async with (asyncio.timeout(min(timeout,25.0)) if getattr(settings,'r_general_semantics_demo_enabled',False) else asyncio.timeout(min(timeout,3.0))):
             payload=proposal_input(search,store_id=store_id,question=question,user_turns=user_turns)
-            from app.learn.grounded_calculations import UNITS
+            from app.learn.grounded_calculations import calculable_unit
             quantity_ids=tuple(dict.fromkeys(f['fact_revision_id'] for c in payload['candidates'] for f in c['facts']
-                if f.get('quantity') and f.get('polarity')=='AFFIRM' and f['quantity']['unit'].lower() in UNITS))
+                if f.get('quantity') and f.get('polarity')=='AFFIRM' and calculable_unit(f['quantity'].get('unit'))))
             quotes=tuple(dict.fromkeys((question,*user_turns)))
             dialogue_turns=[dict(turn_id=i,role='user',current=i==len(user_turns),text=text)
                 for i,text in enumerate((*user_turns,question))]
@@ -356,9 +358,12 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                         reference_scopes=reference_scopes(search),
                         max_answer_chars=ChatResponse.model_json_schema()['properties']['message']['maxLength'])),ensure_ascii=False))
             proposal_started=perf_counter()
-            proposal=parse_proposal(await provider(prompt,schema=GeneralProposal,release=release,
+            phase='proposal_provider'
+            wire_proposal=await provider(prompt,schema=GeneralProposal,release=release,
                 calculation_fact_ids=quantity_ids,question_quotes=quotes,
-                context=context.model_copy(update={'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='proposal'))[7:]}),sink=sink))
+                context=context.model_copy(update={'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='proposal'))[7:]}),sink=sink)
+            phase='proposal_validation'
+            proposal=parse_proposal(wire_proposal)
             decision=validate_interpretation(search,payload=payload,proposal=proposal,baseline=baseline,
                 context_id=context_id,clarify_turns=clarify_turns,confirmed_slots=trusted_slots)
             if release.response_style=='approved_original' and proposal.conclusions:
@@ -386,11 +391,14 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                     store_id=store_id,question=question,user_turns=user_turns))
             review['request_hash']=digest(review)
             verification_started=perf_counter()
-            verdict=Verification.model_validate(await provider(
+            phase='verification_provider'
+            wire_verdict=await provider(
                 (Path(__file__).resolve().parents[2]/'prompts/r_general_verification.txt').read_text(encoding='utf-8').strip()
                 +'\n'+json.dumps(review,ensure_ascii=False),
                 schema=Verification,release=release,context=context.model_copy(update={
-                    'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='verify'))[7:]}),sink=sink))
+                    'logical_call_id':'general:'+digest(dict(call=context.logical_call_id,phase='verify'))[7:]}),sink=sink)
+            phase='verification_validation'
+            verdict=Verification.model_validate(wire_verdict)
             if (verdict.request_hash!=review['request_hash'] or set(verdict.checked_fact_ids)!=set(refs.fact_ids)
                     or len(verdict.checked_fact_ids)!=len(set(verdict.checked_fact_ids))
                     or set(verdict.checked_raw_blocks)!=set(refs.raw_blocks)
@@ -464,5 +472,9 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                                   for e in errors()}))[:300] if callable(errors)
                 else f'{type(exc).__name__}: {exc}'[:300])
         logger.warning('general_proposal_rejected detail=%s',detail)
-        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False) from exc
-    except Exception as exc:raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True) from exc
+        raise ApiError(503,'GENERAL_INVALID_PROPOSAL','해석 결과를 검증하지 못했습니다.',retryable=False,
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc
+    except Exception as exc:
+        logger.warning('general_failure phase=%s error_type=%s',phase,type(exc).__name__)
+        raise ApiError(503,'GENERAL_MODEL_UNAVAILABLE','의미 해석을 완료하지 못했습니다.',retryable=True,
+                       details={'phase':phase,'error_type':type(exc).__name__}) from exc

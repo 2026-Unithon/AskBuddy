@@ -77,7 +77,7 @@ export function AskScreen() {
       return target;
     },
     onSuccess: async (target, body) => {
-      if (!body.option && !body.policy_receipt_id) setInput("");
+      if (!body.policy_receipt_id) setInput((draft) => (!body.option || draft.trim() === body.option ? "" : draft));
       await client.invalidateQueries({ queryKey: rKeys.history(state.storeId, state.userId, target) });
     },
   });
@@ -150,7 +150,18 @@ export function AskScreen() {
               setInput(value);
               if (ask.isError) ask.reset();
             }}
-            onSubmit={() => ask.mutate({ request_id: crypto.randomUUID(), question: input })}
+              onSubmit={() => {
+                const last = messages.at(-1);
+                const reply = last?.response;
+                const option = input.trim();
+                if (reply?.action === "CLARIFY" && reply.context_id && last?.context_revision != null &&
+                    reply.allowed_options.includes(option)) {
+                  ask.mutate({ request_id: crypto.randomUUID(), question: option, option,
+                    context_id: reply.context_id, context_revision: last.context_revision });
+                } else {
+                  ask.mutate({ request_id: crypto.randomUUID(), question: input });
+                }
+              }}
             submitting={busy}
             disabled={loading || Boolean(loadError)}
           />
