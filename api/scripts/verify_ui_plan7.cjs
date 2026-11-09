@@ -316,6 +316,22 @@ test('NAME-3 사진 올리기가 실패하면 시트에 이유, 이름은 그대
   assert.equal(await sheet.getByRole('textbox', { name: '이름', exact: true }).inputValue(), '김사장님');
   await ctx.close();
 });
+test('NAME-4 사진만 실패하면 이름은 저장되고, 영어 서버 문구 대신 무엇이 안 됐는지', async (b) => {
+  // 사용자 실화면(11-09): 사진 API 가 없는 서버에서 'Not Found' 만 뜨고 이름도 안 바뀌었다
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/settings', { overrides: { oldServerAvatar: true } });
+  await page.getByRole('button', { name: '프로필 고치기' }).click();
+  const sheet = page.getByRole('dialog', { name: '프로필 고치기' });
+  await sheet.getByRole('textbox', { name: '이름', exact: true }).fill('사장3');
+  await sheet.getByRole('textbox', { name: '매장 이름' }).fill('데모 매장');
+  await sheet.locator('input[type=file]').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: Buffer.from('89504e470d0a1a0a', 'hex') });
+  await sheet.getByRole('button', { name: '저장' }).click();
+  await sheet.getByRole('alert').getByText('이름은 저장했어요. 사진은 올리지 못했어요.', { exact: false }).waitFor();
+  assert.equal(await page.getByText('Not Found').count(), 0, '영어 서버 문구 없음');
+  assert.ok(api.calls.some((c) => c.method === 'PATCH' && c.path === '/app/me'));
+  assert.ok(api.calls.some((c) => c.method === 'PATCH' && c.path === '/app/store'));
+  await page.locator('[data-profile]').getByText('사장3').waitFor();
+  await ctx.close();
+});
 test("JOIN-1 합류 승인 뒤 스낵바 '되돌리기'", async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/members');
   await page.getByRole('button', { name: '승인' }).click();

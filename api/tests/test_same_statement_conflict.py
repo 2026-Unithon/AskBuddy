@@ -56,3 +56,15 @@ def test_load_hides_identical_and_merges_repeated_questions():
     ]
     items = asyncio.run(load_review_items(_Conn(rows), 7, [10, 11, 12, 13, 14, 15]))
     assert [i.conflict_id for i in items] == [2]
+
+
+def test_invisible_characters_are_ignored():
+    # PDF 에서 뽑힌 글에 섞이는 폭 0 공백·줄바꿈 금지 공백·BOM
+    a = _r("재료=요거트파우더 3래들 + 가당딸기 150ml", Decimal("3"), "래들")
+    b = _r("재료=요거​트파우더 3래들 +﻿ 가당딸기 150ml", Decimal("150"), "ml")
+    assert same_statement(a, b)
+
+
+def test_load_hides_pairs_differing_only_by_invisible_characters():
+    rows = [_row(1, 10, "재료=요거트파우더 3래들", 11, "재료=요거​트파우더 3래들")]
+    assert asyncio.run(load_review_items(_Conn(rows), 7, [10, 11])) == []

@@ -1,3 +1,4 @@
+import { visibleDetail } from "./api-error-text";
 import type { CardKind } from "@/lib/card-kind";
 // FastAPI 호출 래퍼. Supabase는 절대 직접 호출하지 않는다 (CLAUDE.md 불변식 1).
 // 실패를 조용히 삼키지 않고 종류와 복구 가능 여부를 보존해 올린다.
@@ -70,7 +71,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   if (error.kind === "aborted") return "요청이 취소되었습니다.";
   if (error.status === 429) return "요청이 많습니다. 잠시 후 다시 시도해주세요.";
   if (error.status === 503 || error.status === 504) return "서비스가 잠시 지연되고 있습니다. 입력은 유지됩니다.";
-  return error.detail || fallback;
+  return visibleDetail(error.detail) ?? fallback;
 }
 
 async function fetchJsonOnce<T>(path: string, init?: FetchJsonInit): Promise<T> {
