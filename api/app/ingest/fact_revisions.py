@@ -23,6 +23,7 @@ from typing import Literal
 
 import asyncpg
 
+from app.ingest.text_norm import squash
 from app.ingest.entities import lock_store_knowledge
 from app.ingest.fact_keys import FactShape, identity_key, parse_value, slot_key
 from app.ingest.fact_ledger import _record_conflicts
@@ -379,9 +380,6 @@ async def dismiss_conflict(conn: asyncpg.Connection, store_id: int, conflict_id:
             store_id, conflict_id, actor_id, _json(resolution))
 
 
-def _squash(text) -> str:
-    """띄어쓰기만 다른 글을 같게 본다."""
-    return "".join((text or "").split())
 
 
 async def choose_conflict(conn: asyncpg.Connection, store_id: int, conflict_id: int, *,
@@ -438,9 +436,9 @@ async def choose_conflict(conn: asyncpg.Connection, store_id: int, conflict_id: 
             "select r.original_assertion from knowledge_facts k join fact_revisions r "
             "on r.store_id = k.store_id and r.fact_revision_id = k.head_revision_id "
             "where k.store_id = $1 and k.fact_id = $2", store_id, rejected)
-        kept_text = _squash(texts.get(keep_fact_id))
+        kept_text = squash(texts.get(keep_fact_id))
         for twin, text in texts.items():
-            if twin in (keep_fact_id, rejected) or _squash(text) != _squash(rejected_text) or _squash(text) == kept_text:
+            if twin in (keep_fact_id, rejected) or squash(text) != squash(rejected_text) or squash(text) == kept_text:
                 continue
             await conn.execute(
                 "insert into fact_rejections (store_id, fact_id, rejected_revision_id, conflict_id, rejected_by) "

@@ -109,11 +109,21 @@ class SameStatementMigrationTest(ReviewPickTest):
         c = await fact(self.conn, self.store, self.entity, "id-s1", "slot-s", "요거트파우더 3래들")
         d = await fact(self.conn, self.store, self.entity, "id-s2", "slot-s", "요거 트파우더 3래들")
         low, high = sorted((c, d))
+        # 보이지 않는 글자(폭 0 공백·줄바꿈 금지 공백·BOM)만 다른 쌍도 닫힌다
+        e = await fact(self.conn, self.store, self.entity, "id-s3", "slot-s2", "요거트\u200b파우더\u00a03래들\ufeff")
+        f = await fact(self.conn, self.store, self.entity, "id-s4", "slot-s2", "요거트파우더 3래들")
+        lo2, hi2 = sorted((e, f))
+        invisible = await self.conn.fetchval(
+            "insert into fact_conflicts (store_id, entity_id, slot_key, fact_id_low, fact_id_high, value_kind) "
+            "values ($1, $2, 'slot-s2', $3, $4, 'TEXT') returning conflict_id", self.store, self.entity, lo2, hi2)
         same = await self.conn.fetchval(
             "insert into fact_conflicts (store_id, entity_id, slot_key, fact_id_low, fact_id_high, value_kind) "
             "values ($1, $2, 'slot-s', $3, $4, 'TEXT') returning conflict_id", self.store, self.entity, low, high)
-        sql = (Path(__file__).resolve().parents[2] / "supabase/migrations/20261108120400_same_statement_conflicts.sql").read_text()
-        await self.conn.execute(sql)
+        # 배포 순서대로: 먼저 올라간 120400, 그 뒤 보이지 않는 글자까지 보는 20261109 보강
+        root = Path(__file__).resolve().parents[2] / "supabase/migrations"
+        for name in ("20261108120400_same_statement_conflicts.sql", "20261109120000_same_statement_invisible.sql"):
+            await self.conn.execute((root / name).read_text())
         status = {r["conflict_id"]: r["status"] for r in await self.conn.fetch("select conflict_id, status from fact_conflicts")}
         self.assertEqual(status[same], "OBSOLETE")
+        self.assertEqual(status[invisible], "OBSOLETE")
         self.assertEqual(status[self.conflict], "OPEN")  # 30g · 90g 는 진짜 다른 값

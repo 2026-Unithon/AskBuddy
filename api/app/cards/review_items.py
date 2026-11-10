@@ -1,6 +1,7 @@
 """검수 고르기 항목(계획 7 Task 6). 충돌한 두 사실을 '맞는 것을 골라 주세요!' 의 두 버튼으로 바꾼다."""
 from __future__ import annotations
 
+from app.ingest.text_norm import squash
 from app.cards.fact_edit_schemas import CardFactsView, ReviewItem, ReviewOption
 
 
@@ -45,7 +46,7 @@ async def load_review_items(conn, store_id: int, fact_ids: list[int]) -> list[Re
     for r in rows:
         item = review_item_from_conflict(r["conflict_id"], r["fact_id_low"], r["low_text"],
                                          r["fact_id_high"], r["high_text"])
-        texts = frozenset(_squash(o.text) for o in item.options)
+        texts = frozenset(squash(o.text) for o in item.options)
         # 띄어쓰기만 다른 두 값은 고를 게 없고, 같은 질문(같은 이름·같은 두 값)은 한 번만 묻는다
         if len(texts) < 2 or (item.label, texts) in asked:
             continue
@@ -54,8 +55,7 @@ async def load_review_items(conn, store_id: int, fact_ids: list[int]) -> list[Re
     return items
 
 
-def _squash(text: str) -> str:
-    return "".join(text.split())
+
 
 
 WRITE_LABEL = "근거 자료를 확인할 수 없어요. 맞게 고쳐 적어 주세요."

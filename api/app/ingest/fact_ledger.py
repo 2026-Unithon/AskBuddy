@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import asyncpg
 
+from app.ingest.text_norm import squash
 from app.ingest.entities import EntityUnresolvable, lock_store_knowledge, resolve_entity
 from app.ingest.entity_names import normalize_subject, parse_variant
 from app.ingest.fact_keys import (FactShape, identity_key, original_missing,
@@ -66,9 +67,6 @@ async def _find_same_fact(conn: asyncpg.Connection, store_id: int,
         store_id, ident)
 
 
-def _squash(text) -> str:
-    """띄어쓰기만 다른 글을 같게 본다."""
-    return "".join((text or "").split())
 
 
 def same_statement(a, b) -> bool:
@@ -79,13 +77,13 @@ def same_statement(a, b) -> bool:
     """
     if (a["polarity"] or "AFFIRM") != (b["polarity"] or "AFFIRM"):
         return False
-    if _squash(a["original_assertion"]) and _squash(a["original_assertion"]) == _squash(b["original_assertion"]):
+    if squash(a["original_assertion"]) and squash(a["original_assertion"]) == squash(b["original_assertion"]):
         return True
     qa, qb = a["quantity_value"], b["quantity_value"]
     if qa is not None and qb is not None:
-        return qa == qb and _squash(a["quantity_unit"]).lower() == _squash(b["quantity_unit"]).lower()
+        return qa == qb and squash(a["quantity_unit"]).lower() == squash(b["quantity_unit"]).lower()
     if qa is None and qb is None and a["value_text"] and b["value_text"]:
-        return _squash(a["value_text"]) == _squash(b["value_text"])
+        return squash(a["value_text"]) == squash(b["value_text"])
     return False
 
 

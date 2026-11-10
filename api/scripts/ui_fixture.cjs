@@ -184,6 +184,8 @@ function syntheticApi(role, overrides = {}) {
     }
     if (p === '/auth/refresh') payload = { token: 'synthetic-ui-only', user: { user_id: user.user_id, role, store_id: state.noStore ? null : 1 } };
     else if (p === '/auth/providers') payload = { kakao: true };
+    // 옛 서버(사진 API 없음) 재현: FastAPI 기본 404 본문
+    else if (p === '/app/me/avatar/upload-url' && m === 'POST' && state.oldServerAvatar) return reply({ detail: 'Not Found' }, 404);
     else if (p === '/app/me/avatar/upload-url' && m === 'POST') payload = { upload_url: 'http://localhost:8000/storage/put', path: 'avatars/1/1/0123456789abcdef0123456789abcdef.png' };
     else if (p === '/app/me/avatar' && m === 'PUT') {
       // 합성 사진: 1x1 투명 PNG

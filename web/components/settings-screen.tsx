@@ -246,27 +246,29 @@ function ProfileSheet({
     null,
   );
   const [photoError, setPhotoError] = useState<string | null>(null);
+  // 이름이 먼저(실패가 적고 되돌릴 일도 없다), 사진은 뒤. 사진만 실패하면 이름은 남기고 무엇이 안 됐는지 알린다
+  const [photoFailed, setPhotoFailed] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: async () => {
-      if (photo) {
-        const { upload_url, path } = await requestAvatarUpload(
-          photo.file,
-          state.token!,
-        );
+      setPhotoFailed(null);
+      if (name.trim() !== initialName) await renameMe(name.trim(), state.token!);
+      if (owner && storeName.trim() && storeName.trim() !== initialStore) await renameStore(storeName.trim(), state.token!);
+      if (!photo) return true;
+      try {
+        const { upload_url, path } = await requestAvatarUpload(photo.file, state.token!);
         await putToStorage(upload_url, photo.file);
         await setAvatar(path, state.token!);
+        return true;
+      } catch (error) {
+        setPhotoFailed(`이름은 저장했어요. 사진은 올리지 못했어요. ${apiErrorMessage(error, "잠시 뒤 다시 골라 주세요.")}`);
+        return false;
       }
-      if (name.trim() !== initialName)
-        await renameMe(name.trim(), state.token!);
-      if (owner && storeName.trim() && storeName.trim() !== initialStore)
-        await renameStore(storeName.trim(), state.token!);
     },
     // 일부만 저장됐어도 화면은 서버 값으로 맞춘다
-    onSettled: () =>
-      client.invalidateQueries({
-        queryKey: queryKeys.bootstrap(state.userId, state.storeId),
-      }),
-    onSuccess: onClose,
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.bootstrap(state.userId, state.storeId) }),
+    onSuccess: (done) => {
+      if (done) onClose();
+    },
   });
   const pick = (file: File | undefined) => {
     setPhotoError(null);
@@ -329,6 +331,7 @@ function ProfileSheet({
             />
           </label>
         )}
+        {photoFailed && <ErrorInline message={photoFailed} />}
         {mutation.error && (
           <ErrorInline
             message={apiErrorMessage(
