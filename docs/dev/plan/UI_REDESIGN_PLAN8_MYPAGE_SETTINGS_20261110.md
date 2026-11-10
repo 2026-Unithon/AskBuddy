@@ -40,26 +40,27 @@
 
 받기 전까지 초안의 해당 칸은 `【채워야 함: …】`으로 두고, 화면 페이지는 그 표시가 남아 있으면 빌드 검사(Task 9 Step 6)에서 실패한다.
 
-## 파기 방식에 대한 결정 (Task 7, 사용자 확인 필요)
+## 파기 방식 (사용자 결정 2026-11-10: B안)
 
-`stores`와 `users`를 가리키는 FK 중 cascade가 아닌 것은 다음과 같다. 그래서 매장 행을 통째로 지우려면 이 FK를 모두 바꾸는 별도 migration이 필요하다.
-- `stores` 쪽: restrict 7개, 동작 없음 5개
-- `users` 쪽: restrict 6개, 동작 없음 8개
-- 평가, 원가 장부, 사실 정정 이력 등에 걸려 있다
+30일이 지나면 그 매장의 모든 행과 Storage 파일을 지운다. 남는 것은 원가 장부(`ai_usage_attempts`, `cost_assessments`)와 비운 `stores` 행뿐이다. 처리방침에도 이렇게 적는다.
 
-이 계획은 **A안**으로 쓴다. B안을 원하면 Task 7을 B안으로 바꾼다.
-- **A안(이 계획):** 30일 뒤 다음 순서로 처리한다.
-  1. 개인정보를 파기한다: 사람 이름, 사진, 카카오 연결, 로그인 기록, 푸시 구독, 의견 글
-  2. 원본 파일을 Storage에서 지운다: `sources`, `avatars`
-  3. 매장은 `deleted_at`으로 영구 닫는다. 매장 이름은 '삭제된 매장'으로 바꾼다
-  4. 카드, 질문 글, 원가 장부는 DB에 남는다. 누구와도 연결되지 않고 아무도 열 수 없다
-  - 처리방침에도 이렇게 적는다.
-- **B안:** 위에 더해 그 매장의 카드, 사실, 질문, 학습 기록까지 행을 지운다. FK 정리 migration과 평가 데이터 처리 규칙이 필요해 작업이 두 배다.
+파기 자체는 **계획 9**(`docs/dev/plan/DB_CLEANUP_PURGE_PLAN9_20261110.md`)의 Task 5~7이 만든다. 이 계획은 그것을 쓴다. **계획 9의 Task 5~7이 끝난 뒤에 Task 7을 시작한다.**
+
+| 계획 9가 주는 것 | 이 계획이 쓰는 곳 |
+|---|---|
+| 칸 `stores.closing_at`, `stores.purge_due_at`, `stores.deleted_at`, `users.deleted_at` | Task 7 |
+| `Settings.withdrawal_grace_days`(30) | Task 7 `withdraw_owner` |
+| `purge.purge_due_stores(pool) -> list[int]` | Task 7 `withdrawal_loop` |
+| `purge.PURGE_ORDER`와 분류 검사(`test_every_table_is_classified`) | Task 1: 새 표 `user_feedback`을 목록에 넣어야 검사가 통과한다 |
+| `storage.delete_objects(bucket, paths)` | Task 7 알바생 탈퇴의 사진 삭제 |
+
+탈퇴 기한은 `stores.purge_due_at` 한 곳에만 둔다. `users.withdrawal_due_at`은 만들지 않는다(계획 9 R3).
 
 ## Global Constraints
 
 - 매장 격리: 모든 새 쿼리는 `store_id` 필수, JWT의 store_id. 사용자 단위 쿼리(기기, 탈퇴)는 `# store-isolation-ok: <사유>`. `check_store_id.py` 위반 수가 변경 전(ingest 15건)과 같아야 한다.
-- migration은 가산만, `supabase/migrations/20261110120000_settings_account.sql` 하나. `verify_r_schema_rebuild.py` 통과(필요하면 고정 digest 갱신).
+- migration은 가산만, `supabase/migrations/20261110120000_settings_account.sql` 하나. 계획 9의 migration 네 개 뒤에 온다. `verify_r_schema_rebuild.py` 통과.
+- 30일은 `config.py`의 `withdrawal_grace_days`에서만 읽는다. 코드나 SQL에 30을 적지 않는다.
 - 확인 문구는 정확히 '퇴사하겠습니다', '탈퇴하겠습니다'(앞뒤 공백만 무시). 서버도 같은 문구를 받아야 처리한다(화면 우회 방지).
 - 화면 글: 중간점 금지, 회색 설명 추가 금지, % 금지, `eslint-disable` 금지. 붙잡는 문구(다크패턴) 금지.
 - 브라우저는 DB, Storage에 직접 가지 않는다(불변식 1, 7). 내려받기는 API 응답을 blob으로 받아 저장한다.
@@ -79,10 +80,11 @@
 
 | 파일 | 책임 |
 |---|---|
-| `supabase/migrations/20261110120000_settings_account.sql` | `auth_refresh_tokens.user_agent`, `user_feedback`, `users.deleted_at`, `users.withdrawal_due_at`, `stores.closing_at`, `stores.deleted_at` |
-| `api/app/bootstrap/account.py` (새) | 퇴사, 탈퇴, 취소, 파기 순수 DB 함수 |
+| `supabase/migrations/20261110120000_settings_account.sql` | `auth_refresh_tokens.user_agent`, `user_feedback` (탈퇴 칸은 계획 9의 `20261110110000_store_purge.sql`) |
+| `api/app/bootstrap/purge.py` | `PURGE_ORDER`에 `user_feedback` 추가 |
+| `api/app/bootstrap/account.py` (새) | 퇴사, 탈퇴, 취소 순수 DB 함수. 파기는 계획 9의 `purge.py` |
 | `api/app/bootstrap/account_router.py` (새) | `/app/me/leave-store`, `/app/me/withdraw`, `/app/me/withdrawal`, `/app/me/withdrawal/cancel`, `/app/feedback` |
-| `api/app/bootstrap/withdrawal_loop.py` (새) | 한 시간마다 기한 지난 탈퇴 파기 |
+| `api/app/bootstrap/withdrawal_loop.py` (새) | 한 시간마다 `purge.purge_due_stores`를 부른다 |
 | `api/app/auth/devices.py` (새) | `device_label(ua)`, 기기 목록, 기기 끊기 |
 | `api/app/auth/session.py` | `issue_refresh(..., user_agent)` |
 | `api/app/deps.py` | `get_store_id`가 닫힌 매장을 막는다 |
@@ -100,7 +102,9 @@
 
 ### Task 1: migration
 
-**Files:** Create `supabase/migrations/20261110120000_settings_account.sql`, Test `api/tests/test_plan8_account_db.py`
+**Files:** Create `supabase/migrations/20261110120000_settings_account.sql`, Test `api/tests/test_plan8_account_db.py`. Modify `api/app/bootstrap/purge.py`(`PURGE_ORDER` 맨 앞에 `"user_feedback"`).
+
+**Interfaces — Consumes:** 계획 9의 `purge.PURGE_ORDER`. 새 표를 넣지 않으면 `tests/test_plan9_purge_db.py::PurgeCatalogTest::test_every_table_is_classified`가 실패한다(매장을 파기해도 의견 글이 남는 것을 막는 검사).
 
 - [ ] **Step 1: 실패하는 테스트**
 
@@ -121,9 +125,14 @@ class SchemaTest(unittest.IsolatedAsyncioTestCase):
     async def test_columns_exist(self):
         cols = {(r["table_name"], r["column_name"]) for r in await self.conn.fetch(
             "select table_name, column_name from information_schema.columns where table_schema = 'public'")}
-        for pair in [("auth_refresh_tokens", "user_agent"), ("users", "deleted_at"), ("users", "withdrawal_due_at"),
-                     ("stores", "closing_at"), ("stores", "deleted_at"), ("user_feedback", "body")]:
+        for pair in [("auth_refresh_tokens", "user_agent"), ("user_feedback", "body")]:
             self.assertIn(pair, cols)
+        # 기한은 stores.purge_due_at 한 곳에만 둔다(계획 9 R3)
+        self.assertNotIn(("users", "withdrawal_due_at"), cols)
+
+    async def test_feedback_is_in_the_purge_list(self):
+        from app.bootstrap import purge
+        self.assertIn("user_feedback", purge.PURGE_ORDER)
 
     async def test_feedback_checks(self):
         store = await seed_store(self.conn)
@@ -150,15 +159,10 @@ create table if not exists user_feedback (
   created_at  timestamptz not null default now()
 );
 create index if not exists user_feedback_created on user_feedback (created_at desc);
-
-alter table users add column if not exists deleted_at timestamptz;
-alter table users add column if not exists withdrawal_due_at timestamptz;
-alter table stores add column if not exists closing_at timestamptz;
-alter table stores add column if not exists deleted_at timestamptz;
-create index if not exists users_withdrawal_due on users (withdrawal_due_at) where withdrawal_due_at is not null and deleted_at is null;
 ```
 
-- [ ] **Step 4:** template 지우고 다시 실행. Expected: 2 passed. `python scripts/verify_r_schema_rebuild.py`(usage_verify 재생성 후). Expected: exit 0. 고정 digest가 바뀌면 새 값으로 갱신.
+- [ ] **Step 4:** `purge.PURGE_ORDER` 맨 앞에 `"user_feedback"`을 넣는다(다른 표가 가리키지 않아 순서 제약이 없다).
+- [ ] **Step 5:** template 지우고 `python -m pytest tests/test_plan8_account_db.py tests/test_plan9_purge_db.py -q`. Expected: 모두 통과(계획 8 쪽 3 passed). `python scripts/verify_r_schema_rebuild.py`. Expected: exit 0.
 
 ### Task 2: 마이페이지와 설정 화면 골격
 
@@ -432,21 +436,20 @@ test('FB-2 보내기 실패면 쓴 글이 남는다', async (b) => {
 
 ### Task 7: 퇴사, 회원 탈퇴 (서버)
 
-**Files:** Create `api/app/bootstrap/account.py`, `api/app/bootstrap/withdrawal_loop.py`. Modify `api/app/bootstrap/account_router.py`, `api/app/deps.py`, `api/app/auth/kakao_accounts.py`, `api/app/bootstrap/router.py`(bootstrap 응답에 `withdrawal_due_at`), `api/app/main.py`(loop 등록), `api/app/ingest/preprocess/storage.py`(`delete_objects(bucket, paths)`). Test `api/tests/test_plan8_account_db.py`(추가), `api/tests/test_plan8_account_routes.py`.
+**선행:** 계획 9 Task 5~7.
+
+**Files:** Create `api/app/bootstrap/account.py`, `api/app/bootstrap/withdrawal_loop.py`. Modify `api/app/bootstrap/account_router.py`, `api/app/deps.py`, `api/app/auth/kakao_accounts.py`, `api/app/bootstrap/router.py`(bootstrap 응답에 `withdrawal_due_at`. 값은 그 사장님 매장의 `stores.purge_due_at`), `api/app/main.py`(loop 등록). Test `api/tests/test_plan8_account_db.py`(추가), `api/tests/test_plan8_account_routes.py`.
+
+**Interfaces — Consumes(계획 9):** `stores.closing_at/purge_due_at/deleted_at`, `users.deleted_at`, `get_settings().withdrawal_grace_days`, `purge.purge_due_stores(pool) -> list[int]`, `storage.delete_objects(bucket, paths)`, `storage.split_object_path(file_url)`.
 
 **Interfaces — Produces:**
 - `CONFIRM_LEAVE = "퇴사하겠습니다"`, `CONFIRM_WITHDRAW = "탈퇴하겠습니다"`
 - `leave_store(conn, *, store_id, user_id)`: STAFF만. `store_members.removed_at = now(), removed_by = user_id`. 그다음 `revoke_user_sessions`.
 - `withdraw_staff(conn, *, user_id)`: 모든 활성 membership `removed_at`, `user_identities` 행 삭제, `push_subscriptions`(user_id cascade 표) 중 그 사용자 행 삭제, 세션 폐기, `users`를 `name='탈퇴한 사용자', phone=null, email=null, password_hash=null, avatar_path=null, deleted_at=now()`로. avatar Storage 객체 삭제는 커밋 뒤 best-effort, 실패는 로그.
-- `withdraw_owner(conn, *, store_id, user_id, now)`: `users.withdrawal_due_at = now + 30 days`, `stores.closing_at = now`. 그 매장 모든 멤버의 세션 폐기.
-- `cancel_withdrawal(conn, *, user_id)`: due가 미래일 때만. `withdrawal_due_at = null`, `stores.closing_at = null`. 지났으면 `WithdrawalExpired`.
-- `purge_due(conn, *, now) -> list[int]`: due ≤ now이고 `deleted_at is null`인 사장님마다 매장 단위로 처리한다.
-  - 그 매장 모든 사용자에 `withdraw_staff`와 같은 익명화
-  - `sources` 파일 경로 목록을 모은다
-  - `sources.deleted_at = now(), file_url = null`
-  - `stores.deleted_at = now(), store_name = '삭제된 매장'`
-  - `user_feedback` 중 그 매장 행 삭제
-  - 커밋한 뒤 Storage 객체를 지운다
+- `withdraw_owner(conn, *, store_id, user_id, now)`: `stores.closing_at = now, purge_due_at = now + timedelta(days=get_settings().withdrawal_grace_days)`(조건 `store_id = $1 and owner_id = $2`). 그 매장 모든 멤버의 세션 폐기. 사용자 행은 건드리지 않는다.
+- `withdrawal_due(conn, *, user_id) -> datetime | None`: `select purge_due_at from stores where owner_id = $1 and closing_at is not null and deleted_at is null`. `# store-isolation-ok: 로그인한 사장님 자신의 매장을 owner_id 로 찾는다`
+- `cancel_withdrawal(conn, *, user_id, now)`: `purge_due_at > now`일 때만 `closing_at = null, purge_due_at = null`. 지났으면 `WithdrawalExpired`.
+- 파기는 이 파일에 두지 않는다. `withdrawal_loop(pool)`가 한 시간마다 `purge.purge_due_stores(pool)`를 부른다.
 - `get_store_id`: 멤버 조회에 `join stores s using (store_id)`를 더하고 `s.closing_at is null and s.deleted_at is null`을 건다.
   - 사장님이 닫힌 매장이면 `ApiError(403, "OWNER_WITHDRAWING")`
   - 그 밖이면 `ApiError(403, "STORE_CLOSED")`
@@ -456,7 +459,7 @@ test('FB-2 보내기 실패면 쓴 글이 남는다', async (b) => {
   - `GET /app/me/withdrawal` → `{ due_at | null }` (CurrentUserId만)
   - `POST /app/me/withdrawal/cancel` → 204
   - confirm이 문구와 다르면 400 `CONFIRM_MISMATCH`. 사장님이 퇴사하려 하면 403 `OWNER_CANNOT_LEAVE`
-- 카카오 로그인: 사용자가 `deleted_at`이면 그 identity는 이미 지워져 새 계정이 만들어진다. 사장님이 `withdrawal_due_at`이 미래이면 로그인은 되고 `next=/withdrawal`로 보낸다.
+- 카카오 로그인: 사용자가 `deleted_at`이면 그 identity는 이미 지워져 새 계정이 만들어진다. 사장님의 `withdrawal_due()`가 미래이면 로그인은 되고 `next=/withdrawal`로 보낸다. 파기가 끝난 뒤에는 사용자 행 자체가 없어 새 계정이 된다.
 
 - [ ] **Step 1: 실패하는 DB 테스트**
 
@@ -470,6 +473,7 @@ class AccountTest(unittest.IsolatedAsyncioTestCase):
         self.conn, self.name = await fresh_db(); self.store = await seed_store(self.conn)
         q = "insert into users (name, role) values ($1, $2) returning user_id"
         self.owner = await self.conn.fetchval(q, "사장", "OWNER"); self.staff = await self.conn.fetchval(q, "알바", "STAFF")
+        await self.conn.execute("update stores set owner_id = $2 where store_id = $1", self.store, self.owner)
         for uid, role in [(self.owner, "OWNER"), (self.staff, "STAFF")]:
             await self.conn.execute("insert into store_members (store_id, user_id, member_role) values ($1, $2, $3)", self.store, uid, role)
         await self.conn.execute("insert into user_identities (user_id, provider, provider_user_id) values ($1, 'KAKAO', 'k-staff')", self.staff)
@@ -496,10 +500,21 @@ class AccountTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_owner_withdraw_closes_store_then_cancel_reopens(self):
         from app.bootstrap import account
+        from app.config import get_settings
+        days = get_settings().withdrawal_grace_days
         await account.withdraw_owner(self.conn, store_id=self.store, user_id=self.owner, now=NOW)
-        self.assertEqual(await self.conn.fetchval("select withdrawal_due_at from users where user_id = $1", self.owner), NOW + timedelta(days=30))
-        self.assertIsNotNone(await self.conn.fetchval("select closing_at from stores where store_id = $1", self.store))
-        await account.cancel_withdrawal(self.conn, user_id=self.owner, now=NOW + timedelta(days=29))
+        row = await self.conn.fetchrow("select closing_at, purge_due_at from stores where store_id = $1", self.store)
+        self.assertEqual((row["closing_at"], row["purge_due_at"]), (NOW, NOW + timedelta(days=days)))
+        self.assertEqual(await account.withdrawal_due(self.conn, user_id=self.owner), NOW + timedelta(days=days))
+        await account.cancel_withdrawal(self.conn, user_id=self.owner, now=NOW + timedelta(days=days - 1))
+        row = await self.conn.fetchrow("select closing_at, purge_due_at from stores where store_id = $1", self.store)
+        self.assertEqual((row["closing_at"], row["purge_due_at"]), (None, None))
+        self.assertIsNone(await account.withdrawal_due(self.conn, user_id=self.owner))
+
+    async def test_withdraw_owner_refuses_someone_elses_store(self):
+        from app.bootstrap import account
+        with self.assertRaises(LookupError):
+            await account.withdraw_owner(self.conn, store_id=self.store, user_id=self.staff, now=NOW)
         self.assertIsNone(await self.conn.fetchval("select closing_at from stores where store_id = $1", self.store))
 
     async def test_cancel_after_due_fails(self):
@@ -508,16 +523,34 @@ class AccountTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(account.WithdrawalExpired):
             await account.cancel_withdrawal(self.conn, user_id=self.owner, now=NOW + timedelta(days=31))
 
-    async def test_purge_due_anonymizes_everyone_and_closes_store_for_good(self):
-        from app.bootstrap import account
-        src = await self.conn.fetchval("insert into sources (store_id, uploaded_by, source_type, title, file_url) values ($1, $2, 'SCAN', '레시피', 'sources/1/scan/a.pdf') returning source_id", self.store, self.owner)
-        await account.withdraw_owner(self.conn, store_id=self.store, user_id=self.owner, now=NOW)
-        self.assertEqual(await account.purge_due(self.conn, now=NOW + timedelta(days=29)), [])
-        purged = await account.purge_due(self.conn, now=NOW + timedelta(days=30, seconds=1))
-        self.assertEqual(purged, [self.store])
-        self.assertEqual(await self.conn.fetchval("select count(*) from users where user_id = any($1::bigint[]) and deleted_at is null", [self.owner, self.staff]), 0)
+    async def test_withdrawn_store_is_purged_once_the_grace_has_passed(self):
+        # 탈퇴(이 계획)와 파기(계획 9)가 이어지는지 본다. DB 시계가 기준이라 탈퇴 시각을 과거로 준다
+        import asyncpg
+        from datetime import datetime as dt
+        from app.bootstrap import account, purge
+        from app.config import get_settings
+        from tests._plan7_db import _db_url
+        days = get_settings().withdrawal_grace_days
+        await self.conn.execute("insert into user_feedback (store_id, user_id, kind, body) values ($1, $2, 'IDEA', '의견')", self.store, self.staff)
+        await self.conn.execute("set session_replication_role = origin")
+        deleted = []
+
+        async def fake(bucket, paths):
+            deleted.append(bucket)
+        pool = await asyncpg.create_pool(_db_url(self.name), min_size=1, max_size=2)
+        try:
+            await account.withdraw_owner(self.conn, store_id=self.store, user_id=self.owner, now=dt.now(timezone.utc) - timedelta(days=days - 1))
+            self.assertEqual(await purge.purge_due_stores(pool, delete_objects=fake), [])
+            await account.cancel_withdrawal(self.conn, user_id=self.owner, now=dt.now(timezone.utc))
+            await account.withdraw_owner(self.conn, store_id=self.store, user_id=self.owner, now=dt.now(timezone.utc) - timedelta(days=days, seconds=1))
+            self.assertEqual(await purge.purge_due_stores(pool, delete_objects=fake), [self.store])
+        finally:
+            await pool.close()
+        self.assertEqual(await self.conn.fetchval("select count(*) from users where user_id = any($1::bigint[])", [self.owner, self.staff]), 0)
+        self.assertEqual(await self.conn.fetchval("select count(*) from user_feedback where store_id = $1", self.store), 0)
         self.assertEqual(await self.conn.fetchval("select store_name from stores where store_id = $1", self.store), "삭제된 매장")
-        self.assertIsNone(await self.conn.fetchval("select file_url from sources where source_id = $1", src))
+        with self.assertRaises(account.WithdrawalExpired):
+            await account.cancel_withdrawal(self.conn, user_id=self.owner, now=dt.now(timezone.utc))
 
     async def test_closed_store_blocks_every_request(self):
         from app.bootstrap import account
@@ -548,7 +581,7 @@ def test_confirm_must_match_exactly_ignoring_edges():
     assert err.value.code == "CONFIRM_MISMATCH"
 ```
 
-- [ ] **Step 3:** 둘 다 FAIL 확인. **Step 4:** 구현. `withdrawal_loop(pool)`는 `metadata_retention.retention_loop`과 같은 모양(한 시간마다 `purge_due`, 예외는 로그 후 계속). **Step 5:** PASS. 전체 pytest(실 DB 포함) 통과. `check_store_id.py api/app/bootstrap api/app/auth api/app/ingest` 결과 기록.
+- [ ] **Step 3:** 둘 다 FAIL 확인. **Step 4:** 구현. `withdrawal_loop(pool)`는 `metadata_retention.retention_loop`과 같은 모양(한 시간마다 `purge.purge_due_stores(pool)`, 예외는 종류만 로그에 남기고 계속). **Step 5:** PASS. 전체 pytest(실 DB 포함) 통과. `check_store_id.py api/app/bootstrap api/app/auth api/app/ingest` 결과 기록.
 
 ### Task 8: 퇴사, 탈퇴, 로그인된 기기 (화면과 기기 서버)
 
@@ -677,7 +710,8 @@ test('DEV-1 로그인된 기기: 이 기기 표시, 다른 기기 로그아웃',
    - 탈퇴: 알바생은 즉시, 사장님은 30일 유예 뒤
    - 자료 삭제 시 원본 즉시
    - 로그인 기록은 만료 뒤
-   - 파기 방법(A안 그대로)
+   - 파기 방법: 사장님 탈퇴 30일 뒤 그 매장의 모든 기록과 파일을 지운다. 남는 것은 매장 번호와 AI 호출 건수, 비용 기록뿐이고 여기에는 사람이나 매장을 알아볼 내용이 없다(계획 9 D22)
+   - 서버 로그(CloudWatch) 30일, 백업 사본의 보존 기간(Supabase 설정값 확인 후 기재)
 4. 제3자 제공: 없음
 5. 처리 위탁과 국외 이전 표: 받는 자, 국가, 항목, 목적, 시기와 방법, 보유 기간, 거부 방법(거부하면 서비스 이용 불가)
 6. 정보주체 권리와 행사 방법: 열람, 정정, 삭제, 처리정지, 전송요구, 동의 철회. 앱 안 경로(마이페이지, 설정, 문의하기)
@@ -729,7 +763,7 @@ test("제목, 문단, 표를 나눈다", () => {
 
 ### Task 10: 문서와 마무리
 
-- [ ] MVP 정본에 설정 계약, 탈퇴 상태(`closing_at`, `withdrawal_due_at`, 403 코드 두 개), 의견 표, 기기 목록을 적는다. D20과 A안의 관계를 한 줄로 적는다.
+- [ ] MVP 정본에 설정 계약, 탈퇴 상태(`stores.closing_at`, `stores.purge_due_at`, 응답의 `withdrawal_due_at`, 403 코드 두 개), 의견 표, 기기 목록을 적는다. 파기 규칙(D22)은 계획 9 Task 4가 이미 적었으므로 그 절을 가리킨다.
 - [ ] `ui-state-walkthrough`, `web-async-state-check`, `store-isolation-check` 스킬을 실행한다.
 - [ ] 전체 `run-ui.sh`(OLD=1), 전체 pytest(실 DB), `verify_r_schema_rebuild.py`, `node --test web/tests` 통과 기록을 ledger에 남긴다.
 - [ ] 휴대폰 실기기 확인은 자동화 범위 밖이다(아이폰 홈 화면 앱 푸시). 확인하지 못했으면 그렇게 보고한다.
