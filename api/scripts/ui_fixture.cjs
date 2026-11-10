@@ -236,6 +236,8 @@ function syntheticApi(role, overrides = {}) {
     }
     // 카드
     else if (p === '/cards' && m === 'GET') {
+      // 목록 응답을 늦춰 캐시만으로 그려지는 순간을 본다(DEL-2)
+      if (state.listDelayMs) await new Promise((r) => setTimeout(r, state.listDelayMs));
       const status = url.searchParams.get('review_status'), q = url.searchParams.get('query');
       const jobId = url.searchParams.get('job_id');
       let items = state.cards;
@@ -244,6 +246,7 @@ function syntheticApi(role, overrides = {}) {
       if (q) items = items.filter((c) => c.title.includes(q));
       payload = { items: items.map(listItem), next_cursor: null, total: items.length };
     } else if (/^\/cards\/\d+$/.test(p)) {
+      if (state.listDelayMs) await new Promise((r) => setTimeout(r, state.listDelayMs));
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       if (!c) return reply({ error: { message: '없는 카드' } }, 404);
       payload = detail(c);

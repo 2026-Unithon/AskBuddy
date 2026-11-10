@@ -1,11 +1,12 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Chip,
+  ConfirmDialog,
   CountBadge,
   Empty,
   ErrorInline,
@@ -23,7 +24,7 @@ import {
 } from "@/components/kit";
 import { SelectBar, useCardSelection } from "@/components/owner/card-select";
 import { CardTile, tileStatus } from "@/components/owner/card-tile";
-import { apiErrorMessage, bulkCards, mutateProductCard, type BulkAction, type CardFilters, type CardListItem } from "@/lib/api";
+import { apiErrorMessage, bulkCards, mutateProductCard, type BulkAction, type CardFilters, type CardListItem, type CardListResponse } from "@/lib/api";
 import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
 import { useCardReviewCount } from "@/lib/card-review-count";
 import { cardKind } from "@/lib/card-kind";
@@ -69,6 +70,8 @@ function CardsScreen() {
   const [selecting, setSelecting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  // 삭제는 바로 하지 않고 먼저 묻는다(2026-11-10 사용자). 묻는 동안 지울 카드
+  const [askDelete, setAskDelete] = useState<{ ids: number[]; bulk: boolean } | null>(null);
 
   const filters = useMemo<CardFilters>(
     () => ({ status, jobId, categoryId, query: queryText || undefined }),
@@ -104,6 +107,17 @@ function CardsScreen() {
       client.invalidateQueries({ queryKey: queryKeys.cardLists(state.storeId) }),
       client.invalidateQueries({ queryKey: queryKeys.roadmapRoot(state.storeId) }),
     ]);
+  // 삭제한 카드를 캐시에 남은 모든 목록(다른 탭 포함)과 상세에서 바로 뺀다.
+  // 안 그러면 다른 탭으로 갈 때 서버 응답 전까지 옛 목록·옛 상세('직원에게 보여요')가 그려진다(2026-11-10 사용자)
+  const forgetExcluded = (ids: number[]) => {
+    const gone = new Set(ids);
+    client.setQueriesData<InfiniteData<CardListResponse>>({ queryKey: queryKeys.cardLists(state.storeId) }, (data) =>
+      data?.pages
+        ? { ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.map((card) => (gone.has(card.card_id) ? { ...card, review_status: "EXCLUDED" } : card)) })) }
+        : data,
+    );
+    for (const id of ids) client.removeQueries({ queryKey: queryKeys.card(state.storeId, id) });
+  };
   const setHiddenFor = (cardId: number, on: boolean) =>
     setHidden((prev) => {
       const next = new Set(prev);
@@ -114,14 +128,20 @@ function CardsScreen() {
 
   const restore = useMutation({
     mutationFn: (cardId: number) => mutateProductCard(cardId, "restore", state.token!),
-    onSuccess: (_, cardId) => setHiddenFor(cardId, false),
+    onSuccess: (_, cardId) => {
+      setHiddenFor(cardId, false);
+      client.removeQueries({ queryKey: queryKeys.card(state.storeId, cardId) });
+    },
     onError: (_error, cardId) => snackbar({ message: "되돌리지 못했어요", actionLabel: "다시", onAction: () => restore.mutate(cardId) }),
     onSettled: refresh,
   });
   const remove = useMutation({
     mutationFn: (cardId: number) => mutateProductCard(cardId, "exclude", state.token!),
     onMutate: (cardId) => setHiddenFor(cardId, true),
-    onSuccess: (_, cardId) => snackbar({ message: "삭제했어요", actionLabel: "되돌리기", onAction: () => restore.mutate(cardId) }),
+    onSuccess: (_, cardId) => {
+      forgetExcluded([cardId]);
+      snackbar({ message: "삭제했어요", actionLabel: "되돌리기", onAction: () => restore.mutate(cardId) });
+    },
     onError: (_error, cardId) => {
       setHiddenFor(cardId, false);
       toast("삭제하지 못했어요");
@@ -236,7 +256,10 @@ function CardsScreen() {
         selection.clear();
       }
       if (!done.length) return;
+      // 상태가 바뀐 카드의 상세 캐시는 버린다(다시 열면 서버에서 새로 받는다)
+      for (const id of done) client.removeQueries({ queryKey: queryKeys.card(state.storeId, id) });
       if (body.action === "exclude") {
+        forgetExcluded(done);
         snackbar({
           message: `${done.length}장 삭제했어요`,
           actionLabel: "되돌리기",
@@ -262,7 +285,7 @@ function CardsScreen() {
             onMove={() => setMoving(true)}
             onPublish={() => runBulk("approve")}
             onUnpublish={() => runBulk("unpublish")}
-            onDelete={() => runBulk("exclude")}
+            onDelete={() => setAskDelete({ ids: cardOrder.filter((id) => selection.selected.has(id)), bulk: true })}
           />
         ) : (
           <TabBar tabs={OWNER_TABS} />
@@ -390,7 +413,7 @@ function CardsScreen() {
                     right={canPublish ? { label: "공개", ariaLabel: `${card.title} 공개`, tone: "primary", onAction: () => publishOnce(card.card_id) } : undefined}
                     left={
                       tile === "pending" && status === "pending"
-                        ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => remove.mutate(card.card_id) }
+                        ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => setAskDelete({ ids: [card.card_id], bulk: false }) }
                         : tile === "approved" && card.review_status === "APPROVED" && (status === "all" || status === "approved") && !unpublish.isPending
                           ? { label: "미공개", ariaLabel: `${card.title} 미공개`, tone: "neutral", onAction: () => unpublish.mutate(card.card_id) }
                           : undefined
@@ -408,6 +431,21 @@ function CardsScreen() {
         </Button>
       )}
       <RefreshingHint active={cards.isRefetching && !cards.isFetchingNextPage} />
+      <ConfirmDialog
+        open={askDelete !== null}
+        title={`카드 ${askDelete?.ids.length ?? 0}장을 삭제할까요?`}
+        description="직원에게도 더 이상 보이지 않아요."
+        confirmLabel="삭제하기"
+        cancelLabel="그대로 두기"
+        tone="danger"
+        onConfirm={() => {
+          if (!askDelete) return;
+          if (askDelete.bulk) runBulk("exclude");
+          else remove.mutate(askDelete.ids[0]);
+          setAskDelete(null);
+        }}
+        onCancel={() => setAskDelete(null)}
+      />
       <Sheet open={moving} onClose={() => setMoving(false)} title="어디로 옮길까요?">
         <div className="flex max-h-[50dvh] flex-col gap-1 overflow-y-auto">
           {categories.data?.items.map((category) => (
