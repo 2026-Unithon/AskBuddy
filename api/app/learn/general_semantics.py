@@ -518,7 +518,10 @@ async def general_decision(search,*,settings,store_id,question,user_turns,baseli
                 checked_conclusion_ids=list(verdict.checked_conclusion_ids),checked_user_turn_ids=list(verdict.checked_user_turn_ids))
     except BudgetDenied:raise
     except ApiError:raise
-    except UsageWriteError as exc:raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
+    except UsageWriteError as exc:
+        # 원인(단계·예외 종류·걸린 시간)을 남긴다. CI 에서 가끔 여기로 오는데 원인이 로그에 없었다(2026-11-11)
+        logger.warning('general_usage_write_failed phase=%s detail=%s cause=%s',phase,exc,type(exc.__cause__).__name__ if exc.__cause__ else None)
+        raise ApiError(503,'USAGE_UNAVAILABLE','의미 해석 계측을 시작하지 못했습니다.',retryable=True) from exc
     except TimeoutError as exc:raise ApiError(504,'GENERAL_DEADLINE','의미 해석 시간이 초과되었습니다.',retryable=True) from exc
     except (InputByteLimitExceeded,InputTokenLimitExceeded) as exc:
         logger.warning('general_input_limit phase=%s detail=%s',phase,exc)
