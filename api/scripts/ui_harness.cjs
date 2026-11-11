@@ -21,6 +21,26 @@ async function open(browser, role, url, { viewport = { width: 390, height: 844 }
       try { for (const k of keys) localStorage.setItem(`askbuddy:coach:${k}`, 'done'); } catch {}
     });
   }
+  // 계획 8: 푸시 상태 흉내. 아이폰, 홈 화면 앱, 권한, 푸시 API 유무를 브라우저 쪽에서 바꾼다(실제 푸시 서비스는 부르지 않는다)
+  if (overrides?.pushEnv) {
+    await ctx.addInitScript((env) => {
+      const e = { ios: false, standalone: false, permission: 'default', hasPushApi: true, ...env };
+      let subscription = null;
+      let permission = e.permission;
+      const make = () => ({ endpoint: 'https://push.example.invalid/1', toJSON() { return { endpoint: this.endpoint, keys: { p256dh: 'p', auth: 'a' } }; },
+        unsubscribe: async () => { subscription = null; return true; } });
+      const registration = { pushManager: { getSubscription: async () => subscription, subscribe: async () => (subscription = make()) } };
+      if (e.ios) Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 Version/18.1 Mobile/15E148 Safari/604.1' });
+      if (e.standalone) Object.defineProperty(navigator, 'standalone', { get: () => true });
+      if (e.hasPushApi) {
+        window.PushManager = function PushManager() {};
+        Object.defineProperty(navigator, 'serviceWorker', { get: () => ({ register: async () => registration, ready: Promise.resolve(registration), getRegistration: async () => registration }) });
+      } else {
+        delete window.PushManager;
+      }
+      window.Notification = { get permission() { return permission; }, requestPermission: async () => (permission === 'default' ? (permission = 'granted') : permission) };
+    }, overrides.pushEnv);
+  }
   const page = await ctx.newPage();
   page.on('pageerror', (error) => api.misses.push(`pageerror ${error.message}`));
   await page.goto(BASE + url);

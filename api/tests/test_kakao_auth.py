@@ -168,14 +168,19 @@ class KakaoRouteTest(unittest.TestCase):
             self.completed.append((kakao_user.id, intent, invite))
             return 5, None
 
-        async def start_session(db, response, *, user_id):
+        async def start_session(db, response, *, user_id, user_agent=None):
             response.set_cookie("ab_refresh", "r", path="/auth")
+
+        async def next_after_login(db, *, user_id, requested):
+            return requested
 
         for target, fn in (("app.auth.kakao_router.invites.resolve", resolve),
                            ("app.auth.kakao_router.invites.resolve_by_id", resolve_by_id),
                            ("app.auth.kakao_router.kakao.fetch_user", fetch_user),
                            ("app.auth.kakao_router.complete_kakao_login", complete),
-                           ("app.auth.kakao_router.start_session", start_session)):
+                           ("app.auth.kakao_router.start_session", start_session),
+                           # 탈퇴 대기 확인(계획 8)도 DB 를 본다. 이 검사는 요청한 next 를 그대로 둔다
+                           ("app.auth.kakao_router.next_after_login", next_after_login)):
             q = patch(target, side_effect=fn)
             q.start()
             self.addCleanup(q.stop)

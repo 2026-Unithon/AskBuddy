@@ -118,12 +118,12 @@ test('NAV-4 옛 하단 탭이 어디에도 없다', async (b) => {
   }
 });
 
-test('NAV-10 사장 헤더: 사람 아이콘은 설정, 종은 읽지 않은 수와 함께 알림', async (b) => {
+test('NAV-10 사장 헤더: 사람 아이콘은 마이페이지, 종은 읽지 않은 수와 함께 알림', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner');
   const bell = page.getByRole('link', { name: '알림 3개 읽지 않음' });
   await bell.waitFor();
   assert.equal((await bell.innerText()).trim(), '3');
-  await page.getByRole('link', { name: '설정' }).click(); await to(page, '/owner/settings');
+  await page.getByRole('link', { name: '마이페이지' }).click(); await to(page, '/owner/settings');
   await back(page).click(); await to(page, '/owner');
   await bell.click(); await to(page, '/owner/notifications');
   await ctx.close();

@@ -365,8 +365,10 @@ const output = process.env.P7_ARTIFACT_DIR;
     for (const [route, title, name] of [
       ["/owner/cards", "카드", "owner-cards"],
       [`/owner/cards/${f.cards[0]}`, "합성 청소 안내", "owner-card"],
-      ["/owner/settings", "설정", "owner-settings"],
-      ["/staff/settings", "설정", "staff-settings"],
+      // 계획 8: 사람 아이콘 화면은 마이페이지, 설정은 그 아래 /settings/app
+      ["/owner/settings", "마이페이지", "owner-settings"],
+      ["/staff/settings", "마이페이지", "staff-settings"],
+      ["/owner/settings/app", "설정", "owner-app-settings"],
       ["/owner/invite", "첫 준비 끝났어요", "owner-invite"],
     ]) {
       const page = route.startsWith("/staff") ? sp : op;

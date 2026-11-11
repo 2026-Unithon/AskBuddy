@@ -169,24 +169,3 @@ async def counts(conn: asyncpg.Connection, store_id: int, member_id: int) -> dic
         "done": int(row["done"]),
         "reconfirm_required": int(row["reconfirm_required"]),
     }
-
-
-async def update_member_rate(
-    conn: asyncpg.Connection, store_id: int, member_id: int, summary: dict[str, int]
-) -> float:
-    total = summary["total"]
-    rate = round(summary["done"] / total * 100, 2) if total else 0.0
-    await conn.execute(
-        """
-        update store_members m
-        set progress_rate = $3::numeric,
-            is_deployable = $3::numeric >= (
-              select deploy_threshold from stores where store_id = $2
-            )
-        where m.member_id = $1 and m.store_id = $2
-        """,
-        member_id,
-        store_id,
-        rate,
-    )
-    return rate

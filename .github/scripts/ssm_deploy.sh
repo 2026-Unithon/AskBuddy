@@ -15,8 +15,18 @@ if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
   exit 2
 fi
 
+# 서버 compose 의 CloudWatch 로그 리전(계획 9 Task 9). 워크플로의 AWS_REGION 을 그대로 넘긴다.
+# 원격 셸에 들어가는 값이라 리전 모양만 받는다
+region="${AWS_REGION:-}"
+if [[ -n "$region" && ! "$region" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
+  echo "잘못된 AWS_REGION: $region" >&2
+  exit 2
+fi
+region_env=""
+[[ -n "$region" ]] && region_env="AWS_REGION=${region} "
+
 # SSM 은 root 로 실행된다. 저장소·Docker 작업은 ubuntu 사용자로 한다
-remote="runuser -l ubuntu -c 'set -euo pipefail; cd ~/askbuddy && git fetch --quiet origin && git checkout --quiet --force ${sha} && bash deploy/remote_deploy.sh'"
+remote="runuser -l ubuntu -c 'set -euo pipefail; cd ~/askbuddy && git fetch --quiet origin && git checkout --quiet --force ${sha} && ${region_env}bash deploy/remote_deploy.sh'"
 params=$(jq -nc --arg c "$remote" --arg t "$timeout_sec" '{commands: [$c], executionTimeout: [$t]}')
 
 command_id=$(aws ssm send-command \

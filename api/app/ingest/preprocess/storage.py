@@ -40,6 +40,47 @@ def _object_url(file_url: str) -> tuple[str, dict[str, str]]:
     )
 
 
+def split_object_path(file_url: str) -> tuple[str, str]:
+    """'sources/1/scan/a.pdf' → ('sources', '1/scan/a.pdf'). _object_url 과 같은 규칙(버킷을 포함한 경로)."""
+    path = file_url
+    if path.startswith(("http://", "https://")):
+        marker = "/storage/v1/object/"
+        if marker not in path:
+            raise ValueError("Storage 경로를 해석할 수 없다")
+        path = path.split(marker, 1)[1].split("?", 1)[0]
+        # 서명 URL·공개 URL 접두(sign/, public/)는 버킷이 아니다
+        for prefix in ("sign/", "public/", "authenticated/"):
+            if path.startswith(prefix):
+                path = path[len(prefix):]
+    bucket, sep, rest = path.lstrip("/").partition("/")
+    if not sep or not bucket or not rest:
+        raise ValueError("버킷과 경로가 모두 있어야 한다")
+    return bucket, rest
+
+
+DELETE_BATCH = 100
+
+
+async def delete_objects(bucket: str, paths: list[str]) -> None:
+    """버킷의 오브젝트를 지운다. 100개씩 끊어 보낸다. 200 이 아니면 RuntimeError. 빈 목록이면 요청하지 않는다.
+
+    이미 없는 파일은 Storage 가 200 으로 넘긴다. 여러 번 불러도 같다.
+    """
+    if not paths:
+        return
+    s = get_settings()
+    if not s.supabase_url or not s.supabase_service_key:
+        raise RuntimeError("SUPABASE_URL·SUPABASE_SERVICE_KEY 가 필요하다")
+    async with httpx.AsyncClient(timeout=30) as client:
+        for i in range(0, len(paths), DELETE_BATCH):
+            res = await client.request(
+                "DELETE", f"{s.supabase_url}/storage/v1/object/{bucket}",
+                headers={"Authorization": f"Bearer {s.supabase_service_key}"},
+                json={"prefixes": paths[i:i + DELETE_BATCH]})
+            if res.status_code != 200:
+                raise RuntimeError(f"Storage 삭제 실패 {res.status_code}")
+
+
 async def download(source_id: int, file_url: str) -> Path:
     url, headers = _object_url(file_url)
     dest = workdir(source_id) / Path(file_url.split("?")[0]).name

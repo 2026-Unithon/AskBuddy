@@ -2,7 +2,7 @@
 
 miss 판정은 retrieve_question, 기록은 POST /pending 또는 POST /chat 이 한다.
 점주 답변은 POST /pending/{id}/answer — 카드(승인) + 임베딩 + ANSWERED (가이드 6-4).
-로드맵은 GET /roadmap (카드→칸 동기화) · PATCH 칸 상태 · progress_rate.
+로드맵은 GET /roadmap (카드→칸 동기화) · PATCH 칸 상태.
 store_id 는 JWT 에서만 해석한다 (불변식 4).
 """
 from __future__ import annotations
@@ -368,63 +368,6 @@ async def get_pending(
         "answer_text": row["answer_text"],
         "answered_at": _iso(row["answered_at"]) or None,
         "created_at": _iso(row["created_at"]),
-    }
-
-
-@router.get("/staff")
-async def list_staff(
-    db: Db,
-    claims: Claims,
-    store_id: CurrentStoreId,
-):
-    """점주 대시보드 직원 목록. STAFF 만. store_id 는 JWT.
-
-    StaffLevel 은 DB 컬럼이 아니다. progress_rate 와 deploy_threshold 를 내려 프론트가 나눈다.
-    """
-    if claims.get("role") != "OWNER":
-        raise HTTPException(403, "owner only")
-
-    store = await db.fetchrow(
-        """
-        select deploy_threshold
-        from stores
-        where store_id = $1
-        """,
-        store_id,
-    )
-    if not store:
-        raise HTTPException(404, "store not found")
-    threshold = int(store["deploy_threshold"])
-
-    rows = await db.fetch(
-        """
-        select
-          m.member_id,
-          u.name,
-          m.day_count,
-          m.progress_rate,
-          m.is_deployable
-        from store_members m
-        join users u on u.user_id = m.user_id
-        where m.store_id = $1
-          and m.member_role = 'STAFF' and m.removed_at is null
-        order by m.joined_at asc, m.member_id asc
-        """,
-        store_id,
-    )
-    return {
-        "store_id": store_id,
-        "deploy_threshold": threshold,
-        "items": [
-            {
-                "member_id": int(r["member_id"]),
-                "name": r["name"],
-                "day_count": int(r["day_count"]),
-                "progress_rate": float(r["progress_rate"]),
-                "is_deployable": bool(r["is_deployable"]),
-            }
-            for r in rows
-        ],
     }
 
 
@@ -1084,7 +1027,7 @@ async def list_chat(
           c.card_id,
           c.version_id,
           c.relevance,
-          coalesce(cv.title, kc.title) as card_title,
+          cv.title as card_title,
           (
             kc.review_status = 'APPROVED'
             and kc.is_verified = true
@@ -1261,7 +1204,6 @@ async def put_roadmap_completion(
                 details={"current_published_version_id": current_version_id},
             )
         summary = await roadmap_repo.counts(db, store_id, member_id)
-        await roadmap_repo.update_member_rate(db, store_id, member_id, summary)
     return CompletionResult(
         item_id=item_id,
         card_id=int(item["card_id"]),
@@ -1294,11 +1236,8 @@ async def patch_roadmap_item(
             published_version_id=int(item["published_version_id"]),
             completed=req.status == "DONE",
         )
-        summary = await roadmap_repo.counts(db, store_id, member_id)
-        rate = await roadmap_repo.update_member_rate(db, store_id, member_id, summary)
 
     return {
         "item_id": item_id,
         "status": req.status,
-        "progress_rate": rate,
     }

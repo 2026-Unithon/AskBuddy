@@ -145,8 +145,8 @@ async def blockless_card(conn, *, store_id: int, category_id: int | None, title:
                          content: str) -> tuple[int, int]:
     """판 1 만 있고 사실 블록이 없는 카드. (card_id, version_id). 공개 경로가 거절해야 한다."""
     card_id = int(await conn.fetchval(
-        "insert into knowledge_cards (store_id, category_id, title, content, confidence) "
-        "values ($1, $2, $3, $4, 90) returning card_id", store_id, category_id, title, content))
+        "insert into knowledge_cards (store_id, category_id, confidence) "
+        "values ($1, $2, 90) returning card_id", store_id, category_id))
     version_id = int(await conn.fetchval(
         "insert into card_versions (store_id, card_id, version_no, title, content, change_source) "
         "values ($1, $2, 1, $3, $4, 'EXTRACTION') returning version_id",

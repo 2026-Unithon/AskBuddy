@@ -298,7 +298,7 @@ async def provenance_for(conn: asyncpg.Connection, store_id: int,
 async def create_extraction_draft(conn: asyncpg.Connection, store_id: int, card_id: int, *,
                                   title: str, content: str, confidence: float,
                                   entity_id: int) -> int:
-    """새 EXTRACTION 초안 판을 만들고 카드의 초안 포인터·제목·본문을 한 문장으로 옮긴다."""
+    """새 EXTRACTION 초안 판을 만들고 카드의 초안 포인터를 옮긴다. 제목·본문은 판에만 둔다(계획 9A)."""
     title = title[:_TITLE_MAX]
     version_id = await conn.fetchval(
         "insert into card_versions "
@@ -307,11 +307,10 @@ async def create_extraction_draft(conn: asyncpg.Connection, store_id: int, card_
         "from card_versions where store_id = $1 and card_id = $2 "
         "returning version_id",
         store_id, card_id, title, content)
-    # 같은 문장에서 draft_version_id 를 바꾸므로 레거시 쓰기 트리거가 판을 따로 만들지 않는다
     await conn.execute(
-        "update knowledge_cards set title = $3, content = $4, draft_version_id = $5, "
-        "confidence = $6, entity_id = $7 where store_id = $1 and card_id = $2",
-        store_id, card_id, title, content, version_id, confidence, entity_id)
+        "update knowledge_cards set draft_version_id = $3, "
+        "confidence = $4, entity_id = $5 where store_id = $1 and card_id = $2",
+        store_id, card_id, version_id, confidence, entity_id)
     return int(version_id)
 
 

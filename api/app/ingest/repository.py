@@ -217,14 +217,14 @@ async def insert_card(
     """
     card_id = await conn.fetchval(
         "insert into knowledge_cards "
-        "  (store_id, category_id, source_id, title, content, confidence, is_verified, "
+        "  (store_id, category_id, source_id, confidence, is_verified, "
         "   origin_job_id, category_version, entity_id) "
-        "values ($1, $2, $3, $4, $5, $6, false, $7, $8, $9) returning card_id",
+        "values ($1, $2, $3, $4, false, $5, $6, $7) returning card_id",
         store_id, category_id, source_id,
-        title[:MAX_TITLE_LEN], content, confidence, origin_job_id, category_version,
+        confidence, origin_job_id, category_version,
         entity_id,
     )
-    # 레거시 트리거가 없어졌다 — 판 1 과 초안 포인터를 여기서 잇는다(Phase A)
+    # 제목·본문은 판(card_versions)에만 둔다(계획 9A). 판 1 과 초안 포인터를 여기서 잇는다
     version_id = await conn.fetchval(
         "insert into card_versions (store_id, card_id, version_no, title, content, change_source) "
         "values ($1, $2, 1, $3, $4, 'EXTRACTION') returning version_id",
@@ -399,13 +399,16 @@ async def insert_card_evidence(
     )
 
 
-async def get_card(
-    conn: asyncpg.Connection, store_id: int, card_id: int
-) -> asyncpg.Record | None:
-    return await conn.fetchrow(
-        "select card_id, title, content, is_verified, draft_version_id, published_version_id, review_status from knowledge_cards "
-        "where store_id = $1 and card_id = $2",
-        store_id, card_id,
+async def list_sources(
+    conn: asyncpg.Connection, store_id: int, *, cursor: int | None, limit: int
+) -> list[asyncpg.Record]:
+    """올린 자료 관리(계획 8). 지우지 않은 자료만, 새것부터. cursor 는 앞 페이지 마지막 source_id."""
+    return await conn.fetch(
+        "select source_id, coalesce(original_filename, title) as title, source_type, file_size, created_at "
+        "from sources where store_id = $1 and deleted_at is null "
+        "  and ($2::bigint is null or source_id < $2::bigint) "
+        "order by source_id desc limit $3",
+        store_id, cursor, limit,
     )
 
 
@@ -530,10 +533,11 @@ async def list_review_cards(
     빠르게 넘기고 애매한 것에 시간을 쓰게 한다.
     """
     return await conn.fetch(
-        "select c.card_id, c.title, c.content, c.confidence, c.is_verified, "
+        "select c.card_id, v.title, v.content, c.confidence, c.is_verified, "
         "       c.created_at, c.category_id, coalesce(tc.category_name, '') as category_name, "
         "       c.source_id, s.source_type, s.title as source_title "
         "from knowledge_cards c "
+        "join card_versions v on v.store_id = c.store_id and v.version_id = c.draft_version_id "
         "left join task_categories tc on tc.category_id = c.category_id "
         "left join sources s on s.source_id = c.source_id and s.store_id = c.store_id "
         "where c.store_id = $1 "

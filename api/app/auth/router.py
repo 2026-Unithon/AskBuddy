@@ -19,6 +19,7 @@ from app.auth.session import (
     create_access_token, issue_refresh, require_allowed_origin, revoke_family_of,
     rotate_refresh, session_payload, set_refresh_cookie,
 )
+from app.auth import devices
 from app.errors import ApiError
 
 from app.members import invites, join_requests
@@ -75,9 +76,9 @@ def _token_for(user_id: int, store_id: int | None, role: str | None) -> str:
     return create_access_token(user_id=user_id, role=role, store_id=store_id)
 
 
-async def start_session(db, response: Response, *, user_id: int) -> None:
-    """로그인·가입이 끝나면 refresh 쿠키를 심는다. 카카오 콜백도 이 함수를 쓴다."""
-    raw, _ = await issue_refresh(db, user_id=user_id)
+async def start_session(db, response: Response, *, user_id: int, user_agent: str | None = None) -> None:
+    """로그인·가입이 끝나면 refresh 쿠키를 심는다. 카카오 콜백도 이 함수를 쓴다. user_agent 는 '로그인된 기기' 이름용."""
+    raw, _ = await issue_refresh(db, user_id=user_id, user_agent=user_agent)
     set_refresh_cookie(response, raw)
 
 
@@ -216,8 +217,8 @@ async def create_store(req: CreateStoreRequest, db: Db, claims: Claims):
             await db.execute(
                 """
                 insert into store_members
-                  (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
-                values ($1, $2, 'OWNER', 0, 0, false)
+                  (store_id, user_id, member_role)
+                values ($1, $2, 'OWNER')
                 """,
                 store_id,
                 user_id,
@@ -280,6 +281,26 @@ async def logout(request: Request, db: Db):
     clear_refresh_cookie(out)
     return out
 
+
+
+# ── 로그인된 기기(계획 8) ──────────────────────────────────────────────────
+# store-isolation-ok: 세션은 사용자 단위다. 이 기기 표시는 요청의 refresh 쿠키 계열로 정한다
+@router.get("/sessions")
+async def list_sessions(request: Request, db: Db, user_id: CurrentUserId):
+    current = await devices.family_of(db, raw=request.cookies.get(REFRESH_COOKIE))
+    rows = await devices.list_sessions(db, user_id=user_id, current_family=current)
+    return [{**row, "last_used_at": row["last_used_at"].isoformat()} for row in rows]
+
+
+# store-isolation-ok: 세션은 사용자 단위다. 남의 계열은 404
+@router.post("/sessions/{family_id}/revoke", status_code=204)
+async def revoke_session(family_id: str, request: Request, db: Db, user_id: CurrentUserId):
+    require_allowed_origin(request)
+    try:
+        await devices.revoke(db, user_id=user_id, family_id=family_id)
+    except LookupError as exc:
+        raise ApiError(404, "SESSION_NOT_FOUND", "기기를 찾을 수 없습니다.") from exc
+    return Response(status_code=204)
 
 
 # store-isolation-ok: 공개 초대 링크 미리보기. 매장명만 돌려준다

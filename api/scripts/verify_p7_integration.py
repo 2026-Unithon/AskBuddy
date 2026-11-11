@@ -38,7 +38,7 @@ async def seed(db):
     job = await db.fetchval("insert into ingest_jobs(store_id,created_by,title,status,category_version,prompt_version,card_count) values($1,$2,'합성 등록 결과','SUCCEEDED',1,'P7_FIXTURE',2) returning job_id", store, owner)
     cards = []
     for title, content in (("합성 청소 안내", "머신 청소\n바닥 닦기"), ("합성 공통 안내 · 직원이 읽기 쉽게 적은 길고 상세한 매장 정리 안내", "작업대 닦기")):
-        card = await db.fetchval("insert into knowledge_cards(store_id,category_id,origin_job_id,title,content,review_status) values($1,$2,$3,$4,$5,'APPROVED') returning card_id", store, category, job, title, content)
+        card = await db.fetchval("insert into knowledge_cards(store_id,category_id,origin_job_id,review_status,is_verified) values($1,$2,$3,'APPROVED',true) returning card_id", store, category, job)
         # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고 초안·공개 포인터를 둔다
         version = await db.fetchval("insert into card_versions(store_id,card_id,version_no,title,content,change_source) values($1,$2,1,$3,$4,'EXTRACTION') returning version_id", store, card, title, content)
         await db.execute("update knowledge_cards set draft_version_id=$3, published_version_id=$3 where store_id=$1 and card_id=$2", store, card, version)

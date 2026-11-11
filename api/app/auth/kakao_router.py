@@ -67,6 +67,15 @@ async def kakao_start(db: Db, intent: Literal["LOGIN", "STAFF_JOIN"],
     return res
 
 
+async def next_after_login(db, *, user_id: int, requested: str | None) -> str | None:
+    """탈퇴 대기 중인 사장님은 매장 화면보다 취소 화면을 먼저 본다(계획 8 Review Focus 3)."""
+    from app.bootstrap.account import withdrawal_due
+
+    if await withdrawal_due(db, user_id=user_id) is not None:
+        return "/withdrawal"
+    return requested
+
+
 # store-isolation-ok: 로그인 콜백. 매장은 서명 쿠키의 초대 id 를 다시 검증해 정한다
 @router.get("/kakao/callback")
 async def kakao_callback(request: Request, db: Db, background: BackgroundTasks,
@@ -98,6 +107,6 @@ async def kakao_callback(request: Request, db: Db, background: BackgroundTasks,
         return _to_web(error=exc.code)
     if notification_id is not None:
         background.add_task(deliver_notification, int(invite["store_id"]), notification_id)
-    res = _to_web(next_path=saved.next)
-    await start_session(db, res, user_id=user_id)
+    res = _to_web(next_path=await next_after_login(db, user_id=user_id, requested=saved.next))
+    await start_session(db, res, user_id=user_id, user_agent=request.headers.get("user-agent", "")[:300] or None)
     return res

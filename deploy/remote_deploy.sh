@@ -4,6 +4,14 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+# 비밀값은 Parameter Store 가 정본이다. 배포 때마다 env 파일을 새로 만든다
+ENV_FILE="${ASKBUDDY_ENV_FILE:-/home/ubuntu/askbuddy.env}"
+if [ "${ASKBUDDY_ENV_FROM_SSM:-0}" = "1" ]; then
+  umask 077
+  aws ssm get-parameters-by-path --path /askbuddy/prod/ --with-decryption --output json \
+    | python3 render_env.py > "${ENV_FILE}.new"
+  mv "${ENV_FILE}.new" "$ENV_FILE"
+fi
 docker compose up -d --build --remove-orphans
 # 비공개 Storage 버킷(sources·avatars)을 맞춘다. 이미 있으면 넘어가므로 매번 돌려도 된다(2026-11-09: avatars 가 운영에 없었다)
 docker compose exec -T api python scripts/init_storage.py

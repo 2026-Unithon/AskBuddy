@@ -180,7 +180,7 @@ async def _result(conn, store_id: int, card_id: int, *, edit_id: int, changed: b
 
 async def create_owner_edit_version(conn, store_id: int, card_id: int, *, title: str,
                                     content: str, actor_id: int) -> int:
-    """새 OWNER_EDIT 초안 판 + 카드 초안 포인터·제목·본문을 한 문장으로 옮긴다(레거시 트리거 판 없음)."""
+    """새 OWNER_EDIT 초안 판을 만들고 카드 초안 포인터를 옮긴다. 제목·본문은 판에만 둔다(계획 9A)."""
     title = title[:_TITLE_MAX]
     version_id = await conn.fetchval(
         "insert into card_versions "
@@ -190,9 +190,9 @@ async def create_owner_edit_version(conn, store_id: int, card_id: int, *, title:
         "returning version_id",
         store_id, card_id, title, content, actor_id)
     await conn.execute(
-        "update knowledge_cards set title = $3, content = $4, draft_version_id = $5 "
+        "update knowledge_cards set draft_version_id = $3 "
         "where store_id = $1 and card_id = $2",
-        store_id, card_id, title, content, version_id)
+        store_id, card_id, version_id)
     return int(version_id)
 
 

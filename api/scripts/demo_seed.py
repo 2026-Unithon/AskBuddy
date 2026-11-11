@@ -107,8 +107,8 @@ async def main() -> int:
                 "insert into users (name, phone, email, password_hash, role) "
                 "values ($1,$2,$3,$4,'OWNER') returning user_id", OWNER[0], OWNER[2], OWNER[1], pw)
             store_id = await c.fetchval(
-                "insert into stores (owner_id, store_slug, store_name, business_type, deploy_threshold) "
-                "values ($1,$2,'카페 아무개','CAFE',80) returning store_id", owner_id, SLUG)
+                "insert into stores (owner_id, store_slug, store_name, business_type) "
+                "values ($1,$2,'카페 아무개','CAFE') returning store_id", owner_id, SLUG)
             await c.execute(
                 "insert into store_members (store_id,user_id,member_role) values ($1,$2,'OWNER')",
                 store_id, owner_id)
@@ -122,8 +122,8 @@ async def main() -> int:
                     "insert into users (name, phone, email, password_hash, role) "
                     "values ($1,$2,$3,$4,'STAFF') returning user_id", name, phone, email, pw)
                 mid = await c.fetchval(
-                    "insert into store_members (store_id,user_id,member_role,day_count) "
-                    "values ($1,$2,'STAFF',$3) returning member_id", store_id, uid, day)
+                    "insert into store_members (store_id,user_id,member_role) "
+                    "values ($1,$2,'STAFF') returning member_id", store_id, uid)
                 members[name] = (uid, mid)
 
             # ── 카테고리 ──────────────────────────────────────────────

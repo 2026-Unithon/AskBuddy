@@ -425,6 +425,33 @@ async def cancel_ingest_job(job_id: int, db: Db, claims: ApiClaims) -> IngestJob
     return await _job_detail(db, store_id, job_id)
 
 
+@router.get("/sources")
+async def list_ingest_sources(
+    db: Db,
+    claims: ApiClaims,
+    cursor: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict:
+    """올린 자료 관리(계획 8 설정). 사장님만. 지운 자료(tombstone)는 빼고 새것부터."""
+    _, store_id = _job_identity(claims)
+    rows = await repo.list_sources(db, store_id, cursor=cursor, limit=limit + 1)
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [
+            {
+                "source_id": int(r["source_id"]),
+                "title": r["title"],
+                "source_type": r["source_type"],
+                "file_size": r["file_size"],
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ],
+        "next_cursor": int(rows[-1]["source_id"]) if more else None,
+    }
+
+
 @router.delete("/sources/{source_id}", response_model=SourceDeleted)
 async def delete_ingest_source(source_id: int, db: Db, claims: ApiClaims) -> SourceDeleted:
     """자료 삭제 (D20). 점주만.

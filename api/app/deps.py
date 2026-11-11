@@ -77,17 +77,35 @@ def _claim_id(claims: dict[str, Any], name: str) -> int:
     return value
 
 
+def raise_if_closed(*, role: Any, closing_at: Any, deleted_at: Any) -> None:
+    """탈퇴 대기(closing_at)·파기된(deleted_at) 매장은 사장님, 알바생 모두 들어오지 못한다(계획 8, D22).
+
+    사장님이 대기 중이면 취소 화면으로 보내도록 OWNER_WITHDRAWING, 나머지는 STORE_CLOSED.
+    """
+    if closing_at is None and deleted_at is None:
+        return
+    from app.errors import ApiError  # errors 가 이 모듈을 import 하므로 여기서 늦게 부른다
+
+    if role == "OWNER" and deleted_at is None:
+        raise ApiError(403, "OWNER_WITHDRAWING", "탈퇴 대기 중인 매장입니다.")
+    raise ApiError(403, "STORE_CLOSED", "더 이상 이용할 수 없는 매장입니다.")
+
+
 # store-isolation-ok: store_id를 JWT에서 확정하는 인증 경계이며 조회에 반드시 사용한다.
 async def get_store_id(claims: Claims, db: Db) -> int:
-    """모든 조회의 선행 조건. 기본값도 Optional 도 두지 않는다."""
+    """모든 조회의 선행 조건. 기본값도 Optional 도 두지 않는다. 닫힌 매장은 매 요청 막는다."""
     store_id = _claim_id(claims, "store_id")
     user_id = _claim_id(claims, "user_id")
     member = await db.fetchrow(
-        "select member_role from store_members where store_id = $1 and user_id = $2 and removed_at is null",
+        "select m.member_role, s.closing_at, s.deleted_at from store_members m "
+        "join stores s on s.store_id = m.store_id "
+        "where m.store_id = $1 and m.user_id = $2 and m.removed_at is null",
         store_id, user_id,
     )
     if not member or member["member_role"] not in ("OWNER", "STAFF") or member["member_role"] != claims.get("role"):
         raise HTTPException(403, "current membership required")
+    # .get: 위 쿼리는 늘 두 칸을 돌려준다. 칸이 없는 옛 가짜 DB(단위 테스트)는 열린 매장으로 본다
+    raise_if_closed(role=member["member_role"], closing_at=member.get("closing_at"), deleted_at=member.get("deleted_at"))
     return store_id
 
 

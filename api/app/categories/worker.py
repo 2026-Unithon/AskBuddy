@@ -61,11 +61,15 @@ async def process_reclassification_job(store_id: int, job_id: int) -> None:
             rows = await conn.fetch(
                 """
                 select r.card_id, r.card_updated_at_snapshot,
-                       c.title, c.content, c.assignment_type,
+                       v.title, v.content, c.assignment_type,
                        tc.category_name
                 from reclassification_results r
                 join knowledge_cards c
                   on c.store_id = r.store_id and c.card_id = r.card_id
+                -- 분류는 가장 최근 글로 한다(계획 9A: 제목·본문은 판에만 있다)
+                left join card_versions v
+                  on v.store_id = c.store_id
+                 and v.version_id = coalesce(c.draft_version_id, c.published_version_id)
                 left join task_categories tc on tc.category_id = c.category_id
                 where r.store_id = $1 and r.reclass_job_id = $2 and r.result = 'PENDING'
                 order by r.card_id

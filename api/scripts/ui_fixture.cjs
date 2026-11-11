@@ -123,6 +123,8 @@ function initialState(overrides) {
     sessionsDelayMs: 0,
     itemContent: {},
     ...overrides,
+    // 계획 8: 브라우저 푸시 흉내(pushEnv)를 켠 검사는 서버 키도 준비된 것으로 본다
+    pushConfigured: overrides.pushConfigured ?? Boolean(overrides.pushEnv),
   };
 }
 
@@ -175,6 +177,13 @@ function syntheticApi(role, overrides = {}) {
     const reply = (payload, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(payload),
       headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true' } });
     let payload;
+    const noContent = () => route.fulfill({ status: 204, headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true' } });
+
+    // 계획 8: 닫힌 매장. 알바생은 STORE_CLOSED(시작 화면 포함), 탈퇴 대기 사장님은 시작 화면과 탈퇴 끝점만 연다
+    const authPath = p.startsWith('/auth/');
+    if (state.storeClosed && !authPath) return reply({ error: { code: 'STORE_CLOSED', message: '더 이상 이용할 수 없는 매장입니다.' } }, 403);
+    if (state.withdrawalDueAt && !authPath && p !== '/app/bootstrap' && !p.startsWith('/app/me/withdrawal'))
+      return reply({ error: { code: 'OWNER_WITHDRAWING', message: '탈퇴 대기 중인 매장입니다.' } }, 403);
 
     if (p === '/auth/refresh' && state.signedOut) return reply({ error: { message: '세션 없음' } }, 401);
     if (p === '/auth/login' && m === 'POST') {
@@ -198,7 +207,19 @@ function syntheticApi(role, overrides = {}) {
       payload = {};
     }
     else if (p === '/app/bootstrap') payload = { user: { ...user, role }, store, badges: { waiting_questions: state.pending.length, pending_cards: 2 },
-      default_destination: role === 'OWNER' ? '/owner' : '/staff' };
+      default_destination: state.withdrawalDueAt ? '/withdrawal' : role === 'OWNER' ? '/owner' : '/staff', withdrawal_due_at: state.withdrawalDueAt ?? null };
+    // 계획 8: 퇴사, 탈퇴, 탈퇴 취소, 로그인된 기기
+    else if ((p === '/app/me/leave-store' || p === '/app/me/withdraw') && m === 'POST') return noContent();
+    else if (p === '/app/me/withdrawal' && m === 'GET') payload = { due_at: state.withdrawalDueAt ?? null, grace_days: 30 };
+    else if (p === '/app/me/withdrawal/cancel' && m === 'POST') { state.withdrawalDueAt = null; return noContent(); }
+    else if (p === '/auth/sessions' && m === 'GET' && state.failDevices) return reply({ error: { message: '기기 목록 실패' } }, 503);
+    else if (p === '/auth/sessions' && m === 'GET') payload = state.deviceSessions ?? (state.deviceSessions = [
+      { family_id: 'f-this', label: '아이폰 Safari', last_used_at: NOW, current: true },
+      { family_id: 'f-mac', label: 'Mac Chrome', last_used_at: '2026-10-30T05:00:00Z', current: false }]);
+    else if (/^\/auth\/sessions\/[^/]+\/revoke$/.test(p) && m === 'POST') {
+      state.deviceSessions = (state.deviceSessions ?? []).filter((x) => x.family_id !== p.split('/')[3]);
+      return noContent();
+    }
     // 알림: 사장(/notifications 목록)과 직원(R 읽음 표시)이 같은 경로를 쓴다
     else if (p === '/notifications' && m === 'GET' && state.slowNotificationRefetchMs && (state.notificationGets = (state.notificationGets ?? 0) + 1) > 1 && await new Promise((r) => setTimeout(r, state.slowNotificationRefetchMs))) payload = null;
     else if (p === '/notifications' && m === 'GET') payload = { items: state.notifications, unread_count: state.unreadCount, next_cursor: null,
@@ -211,7 +232,14 @@ function syntheticApi(role, overrides = {}) {
     }
     else if (p === '/notifications/support') payload = { push_configured: state.pushConfigured, vapid_public_key: state.pushConfigured ? 'BAAA' : null, guide_version: '1', guide_seen: true };
     else if (p === '/auth/logout' && m === 'POST') payload = {};
+    else if (p === '/notifications/my-subscriptions' && m === 'POST' && body?.endpoint) payload = { subscription_id: 41, enabled: true };
     else if (p === '/notifications/my-subscriptions') payload = { subscription_id: 0, enabled: false };
+    // 계획 8: 설정의 이 기기 푸시(두 역할 공통 키, 역할별 구독 끝점)
+    else if (p === '/notifications/push-key' && m === 'GET') payload = { push_configured: state.pushConfigured, vapid_public_key: state.pushConfigured ? 'BAAA' : null };
+    else if (p === '/notifications/subscriptions' && m === 'POST') payload = { subscription_id: 42, enabled: true };
+    else if (p === '/learn/v2/knowledge/export' && m === 'GET' && state.failExport) return reply({ error: { code: 'DEADLINE_EXCEEDED', message: '내보내기 처리 시간이 초과되었습니다.' } }, 504);
+    else if (p === '/learn/v2/knowledge/export' && m === 'GET') payload = { store_id: '1', cards: [{ card_id: '1', title: '바닐라 라떼' }] };
+    else if (/^\/notifications\/(my-)?subscriptions\/\d+$/.test(p) && m === 'DELETE') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': req.headers().origin ?? '*', 'access-control-allow-credentials': 'true' } });
     // 사장 질문
     else if (p === '/learn/v2/pending') {
       const status = url.searchParams.get('status');
@@ -467,6 +495,17 @@ function syntheticApi(role, overrides = {}) {
       // 멈춘 업로드: 응답하지 않는다(화면의 시간 제한 검사용)
       if (state.stallUpload) return new Promise(() => {});
       payload = {};
+    }
+    // 계획 8: 문의하기, 의견 보내기
+    else if (p === '/app/feedback' && m === 'POST' && state.failFeedback) return reply({ error: { code: 'INTERNAL', message: '저장하지 못했습니다.' } }, 503);
+    else if (p === '/app/feedback' && m === 'POST') { if (state.feedbackDelayMs) await new Promise((r) => setTimeout(r, state.feedbackDelayMs)); return reply({ feedback_id: 7 }, 201); }
+    // 계획 8: 올린 자료 관리
+    else if (p === '/ingest/sources' && m === 'GET' && state.failSources) return reply({ error: { message: '자료 목록 실패' } }, 503);
+    else if (p === '/ingest/sources' && m === 'GET') payload = { items: state.sources ?? [{ source_id: 31, title: '레시피북.pdf', source_type: 'SCAN', file_size: 1024, created_at: NOW }], next_cursor: null };
+    else if (/^\/ingest\/sources\/\d+$/.test(p) && m === 'DELETE') {
+      const id = Number(p.split('/')[3]);
+      state.sources = (state.sources ?? [{ source_id: 31, title: '레시피북.pdf', source_type: 'SCAN', file_size: 1024, created_at: NOW }]).filter((x) => x.source_id !== id);
+      payload = { source_id: id, source_availability: 'DELETED', deleted_at: NOW, already_deleted: false };
     }
     else if (p === '/ingest/sources' && m === 'POST') payload = { source_id: 31, status: 'QUEUED', duplicate: Boolean(state.duplicateSource) };
     else if (/^\/ingest\/owner-answers\/\d+\/attachments$/.test(p) && m === 'POST') payload = { job_id: 7 };

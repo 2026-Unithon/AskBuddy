@@ -35,12 +35,13 @@ class TokenDb:
 
     async def fetchval(self, sql, *args):
         if sql.lstrip().startswith("insert into auth_refresh_tokens"):
-            user_id, token_hash, family_id, expires_at = args
+            # 계획 8: 기기 이름용 user_agent 가 다섯째 값이다
+            user_id, token_hash, family_id, expires_at, user_agent = args
             tid = self.next_id
             self.next_id += 1
             self.rows[tid] = dict(token_id=tid, user_id=user_id, token_hash=token_hash,
                                   family_id=family_id, expires_at=expires_at,
-                                  revoked_at=None, replaced_by=None)
+                                  revoked_at=None, replaced_by=None, user_agent=user_agent)
             return tid
         raise AssertionError(sql)
 

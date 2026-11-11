@@ -74,8 +74,8 @@ async def approve(db, *, store_id: int, request_id: int, owner_id: int) -> tuple
         # 내보냈던 직원이 다시 들어오면 같은 행을 되살린다. 학습 기록이 그대로 이어진다
         await db.execute(
             """
-            insert into store_members (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
-            values ($1, $2, 'STAFF', 0, 0, false)
+            insert into store_members (store_id, user_id, member_role)
+            values ($1, $2, 'STAFF')
             on conflict (store_id, user_id)
             do update set removed_at = null, removed_by = null
             """,

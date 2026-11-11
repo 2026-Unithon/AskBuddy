@@ -24,8 +24,9 @@ test('o12a 직원 설정도 같은 모양, 사장님 항목은 없다', async (b
   assert.equal(await page.getByRole('link', { name: /^직원 관리/ }).count(), 0);
   await ctx.close();
 });
+// 계획 8: 로그아웃은 마이페이지가 아니라 설정(/owner/settings/app)에 있다
 test('o12b 로그아웃은 확인 창을 거친다', async (b) => {
-  const { page, ctx, api } = await open(b, 'OWNER', '/owner/settings');
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/settings/app');
   await page.getByRole('button', { name: '로그아웃' }).click();
   const dialog = page.getByRole('dialog', { name: '로그아웃할까요?' });
   await dialog.waitFor();
@@ -34,7 +35,7 @@ test('o12b 로그아웃은 확인 창을 거친다', async (b) => {
   assert.equal(api.calls.filter((c) => c.path === '/auth/logout').length, 0);
   await page.getByRole('button', { name: '로그아웃' }).click();
   await dialog.getByRole('button', { name: '로그아웃' }).click();
-  await page.waitForURL((u) => u.pathname !== '/owner/settings');
+  await page.waitForURL((u) => u.pathname !== '/owner/settings/app');
   assert.equal(api.calls.filter((c) => c.path === '/auth/logout').length, 1);
   await ctx.close();
 });

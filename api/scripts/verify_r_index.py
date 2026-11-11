@@ -56,8 +56,8 @@ async def verify(pool, admin):
     assert sid == int(snap.store_id), "requires fresh UUID database"
     content = KnowledgeContent(**{k:v for k,v in snap.model_dump().items() if k in KnowledgeContent.model_fields})
     for card in snap.cards:
-        await admin.execute("""insert into knowledge_cards(card_id,store_id,title,content)
-            overriding system value values($1,$2,$3,'합성 승인 본문')""",int(card.card_id),sid,card.title)
+        await admin.execute("""insert into knowledge_cards(card_id,store_id)
+            overriding system value values($1,$2)""",int(card.card_id),sid)
         await admin.execute("""insert into card_versions(version_id,store_id,card_id,version_no,title,content,change_source)
             overriding system value values($1,$2,$3,2,$4,'합성 승인 본문','OWNER_EDIT')""",
             int(card.card_version_id),sid,int(card.card_id),card.title)

@@ -347,9 +347,10 @@ async def _occurrences_of(db, store, revision_ids):
 
 async def _card(db, store, card_id):
     return await db.fetchrow(
-        "select card_id, entity_id, source_id, origin_job_id, review_status, needs_review_reason, "
-        "title, content, draft_version_id, published_version_id from knowledge_cards "
-        "where store_id=$1 and card_id=$2", store, card_id)
+        "select k.card_id, k.entity_id, k.source_id, k.origin_job_id, k.review_status, k.needs_review_reason, "
+        "v.title, v.content, k.draft_version_id, k.published_version_id from knowledge_cards k "
+        "left join card_versions v on v.store_id = k.store_id and v.version_id = k.draft_version_id "
+        "where k.store_id=$1 and k.card_id=$2", store, card_id)
 
 
 async def _versions(db, store, card_id):
@@ -999,9 +1000,10 @@ def _plans(calls):
 
 async def _store_cards(db, store):
     return await db.fetch(
-        "select card_id, entity_id, review_status, needs_review_reason, title, content, "
-        "draft_version_id, published_version_id from knowledge_cards where store_id=$1 "
-        "order by card_id", store)
+        "select k.card_id, k.entity_id, k.review_status, k.needs_review_reason, v.title, v.content, "
+        "k.draft_version_id, k.published_version_id from knowledge_cards k "
+        "left join card_versions v on v.store_id = k.store_id and v.version_id = k.draft_version_id "
+        "where k.store_id=$1 order by k.card_id", store)
 
 
 async def _entity_cards(db, store, entity_id):
