@@ -9,7 +9,7 @@ import { useApp } from "@/lib/store";
 
 const circle = `relative flex size-11 items-center justify-center rounded-full bg-surface text-primary shadow-card ${pressable} ${focusRing}`;
 
-/** 화면 오른쪽 위: 알림 종(읽지 않은 수) + 설정 사람 아이콘(NAV-5·8·10). 두 역할 모두 같은 /notifications 를 본다. */
+/** 화면 오른쪽 위: 알림 종(읽지 않은 수) + 마이페이지 사람 아이콘(NAV-5·8·10, 계획 8). 두 역할 모두 같은 /notifications 를 본다. */
 export function HeaderActions({ role }: { role: "OWNER" | "STAFF" }) {
   const { state } = useApp();
   const notifications = useQuery(notificationsQuery(state.token, state.storeId));
@@ -29,7 +29,7 @@ export function HeaderActions({ role }: { role: "OWNER" | "STAFF" }) {
           </span>
         )}
       </Link>
-      <Link href={`${base}/settings`} aria-label="설정" className={circle}>
+      <Link href={`${base}/settings`} aria-label="마이페이지" className={circle}>
         <Icon name="user" size={20} />
       </Link>
     </div>

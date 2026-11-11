@@ -14,6 +14,7 @@ from app.auth.kakao_router import router as kakao_router
 from app.members.router import router as members_router
 from app.auth.router import router as auth_router
 from app.bootstrap.router import router as bootstrap_router
+from app.bootstrap.account_router import router as account_router
 from app.cards.owner_answer_worker import run_owner_answer_worker
 from app.cards.router import router as cards_router
 from app.categories.router import (
@@ -27,6 +28,7 @@ from app.ingest.job_repository import fail_stalled_jobs
 from app.ingest.router import router as ingest_router
 from app.learn.router import router as learn_router
 from app.learn.metadata_retention import retention_loop
+from app.bootstrap.withdrawal_loop import withdrawal_loop
 from app.notifications.router import router as notifications_router
 from app.ops.router import router as ops_router
 from app.preflight import router as preflight_router
@@ -58,6 +60,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.getLogger(__name__).exception("멈춘 정리 작업 확인 실패 — 작업 화면을 열 때 다시 확인한다")
     retention = asyncio.create_task(retention_loop(get_pool()))
+    # 사장님 탈퇴 유예가 지난 매장 파기(계획 8·9, D22)
+    withdrawals = asyncio.create_task(withdrawal_loop(get_pool()))
     # 점주 답변 반영 worker 는 플래그가 켜졌을 때만 돈다
     owner_worker_stop = asyncio.Event()
     owner_worker = None
@@ -76,8 +80,11 @@ async def lifespan(app: FastAPI):
                 with suppress(asyncio.CancelledError):
                     await owner_worker
         retention.cancel()
+        withdrawals.cancel()
         with suppress(asyncio.CancelledError):
             await retention
+        with suppress(asyncio.CancelledError):
+            await withdrawals
         from app.reg.embeddings import close_query_client
         await asyncio.to_thread(close_query_client)
         await close_pool()
@@ -101,6 +108,7 @@ app.include_router(kakao_router, prefix="/auth", tags=["auth"])
 app.include_router(members_router, prefix="/members", tags=["members"])
 app.include_router(ops_router, prefix="/ops", tags=["ops"])
 app.include_router(bootstrap_router, prefix="/app", tags=["app"])
+app.include_router(account_router, prefix="/app", tags=["app"])
 app.include_router(cards_router, prefix="/cards", tags=["cards"])
 app.include_router(categories_router, prefix="/categories", tags=["categories"])
 app.include_router(

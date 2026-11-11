@@ -92,6 +92,8 @@ test('o05c 미공개 카드는 오른쪽으로 밀면 공개', async (b) => {
 test('o05c 미공개 탭에서 왼쪽으로 밀면 삭제, 되돌리기로 살린다', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards?status=pending');
   await page.getByRole('button', { name: '삭제' }).first().press('Enter');
+  // 삭제는 먼저 묻는다(2026-11-10)
+  await page.getByRole('dialog', { name: '카드 1장을 삭제할까요?' }).getByRole('button', { name: '삭제하기' }).click();
   await page.getByRole('status').getByText('삭제했어요').waitFor();
   await page.getByText('오픈 준비').waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '되돌리기' }).click();
@@ -101,8 +103,12 @@ test('o05c 미공개 탭에서 왼쪽으로 밀면 삭제, 되돌리기로 살�
 });
 test('o05c 연달아 삭제해도 앞 카드는 삭제된 채', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards?status=pending');
-  await page.getByRole('button', { name: '삭제' }).nth(0).press('Enter');
-  await page.getByRole('button', { name: '삭제' }).nth(0).press('Enter');
+  const confirm = page.getByRole('dialog', { name: '카드 1장을 삭제할까요?' }).getByRole('button', { name: '삭제하기' });
+  await page.getByRole('button', { name: '오픈 준비 삭제' }).press('Enter');
+  await confirm.click();
+  await confirm.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '원두 보관 위치 삭제' }).press('Enter');
+  await confirm.click();
   await page.waitForTimeout(300);
   assert.equal(api.state.cards.filter((c) => c.review_status === 'EXCLUDED').length, 2);
   assert.equal(await page.locator('[data-status]').count(), 0);

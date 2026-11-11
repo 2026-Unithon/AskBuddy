@@ -17,7 +17,9 @@ export function useAuthGuard(role: Role, authPath: string): AuthGuardResult {
     else if (!state.token) destination = `/?next=${encodeURIComponent(pathname)}`;
     else if (bootstrap.data) {
       const data = bootstrap.data;
-      if (data.user.role !== role || (!data.store && pathname !== data.default_destination)) destination = data.default_destination;
+      // 탈퇴 대기 사장님은 매장 화면보다 취소 화면을 먼저 본다(계획 8)
+      if (data.withdrawal_due_at) destination = "/withdrawal";
+      else if (data.user.role !== role || (!data.store && pathname !== data.default_destination)) destination = data.default_destination;
     }
   }
   useEffect(() => { if (destination) router.replace(destination); }, [destination, router]);

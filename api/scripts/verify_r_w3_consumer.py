@@ -60,7 +60,7 @@ async def verify(pool, db):
         variant=dict(temperature=row['variant_temperature'], size=row['variant_size']),
         quantity=dict(value=str(row['quantity_value']), unit=row['quantity_unit']),
         provenance=(FactProvenance(owner_answer_id=str(aid)),))
-    cid = await db.fetchval("insert into knowledge_cards(store_id,title,content) values($1,'라테',$2) returning card_id", sid, fact.assertion)
+    cid = await db.fetchval("insert into knowledge_cards(store_id) values($1) returning card_id", sid)
     # Phase A(W Task 7, P-3 픽스처 예외): 카드 행 쓰기로 판을 만들던 레거시 트리거가 없어졌다 — 판 1 을 명시적으로 만든다
     vid = await db.fetchval("insert into card_versions(store_id,card_id,version_no,title,content,change_source) values($1,$2,1,'라테',$3,'EXTRACTION') returning version_id", sid, cid, fact.assertion)
     await db.execute('update knowledge_cards set draft_version_id=$3 where store_id=$1 and card_id=$2', sid, cid, vid)

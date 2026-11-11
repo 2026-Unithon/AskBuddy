@@ -62,4 +62,18 @@ assert_eq "$code" "1" "조회 오류 시 즉시 종료 코드 1"
 assert_contains "$out" "AccessDeniedException" "조회 오류 내용을 출력"
 assert_not_contains "$out" "서버 명령 상태" "오류 뒤 계속 기다리지 않음"
 
+# 6) 워크플로의 AWS_REGION 을 서버 배포 셸로 넘긴다(compose 의 awslogs 리전, 계획 9 Task 9)
+setup_stubs; install_aws_stub
+printf 'Success\n' > "$STUB_DIR/statuses"
+AWS_REGION=ap-northeast-2 run_deploy 900 "$SHA" >/dev/null; code=$?
+assert_eq "$code" "0" "리전이 있으면 성공"
+assert_contains "$(cat "$STUB_LOG")" "AWS_REGION=ap-northeast-2 bash deploy/remote_deploy.sh" "리전을 서버 셸에 넘김"
+
+# 7) 원격 셸에 들어가는 값이라 리전 모양이 아니면 보내지 않는다
+setup_stubs; install_aws_stub
+: > "$STUB_DIR/statuses"
+AWS_REGION='x; rm -rf /' run_deploy 900 "$SHA" >/dev/null; code=$?
+assert_eq "$code" "2" "잘못된 리전 거부"
+assert_not_contains "$(cat "$STUB_LOG")" "send-command" "잘못된 리전은 전송하지 않음"
+
 finish

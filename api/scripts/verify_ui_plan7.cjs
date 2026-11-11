@@ -152,12 +152,73 @@ test('SEL-6 일괄 삭제 뒤 되돌리기로 모두 돌아온다', async (b) =>
   await startSelect(page);
   await page.getByRole('button', { name: '전체 선택' }).click();
   await page.getByRole('toolbar', { name: '고른 카드 처리' }).getByRole('button', { name: '삭제', exact: true }).click();
+  await page.getByRole('dialog', { name: '카드 2장을 삭제할까요?' }).getByRole('button', { name: '삭제하기' }).click();
   const bar = page.getByRole('status').filter({ hasText: '2장 삭제했어요' });
   await bar.waitFor();
   await tile(page, '오픈 준비').waitFor({ state: 'detached' });
   await bar.getByRole('button', { name: '되돌리기' }).click();
   await tile(page, '오픈 준비').waitFor();
   assert.deepEqual(api.calls.filter((c) => c.path === '/cards/bulk').map((c) => c.body.action), ['exclude', 'restore']);
+  await ctx.close();
+});
+// ── 사용자 실화면(2026-11-10): 삭제했는데 전체에서만 사라지고 공개 탭·상세엔 남았다. 삭제는 먼저 묻는다 ──
+test('DEL-1 삭제는 먼저 묻고, 아니요면 아무것도 지우지 않는다', async (b) => {
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards');
+  await startSelect(page);
+  await tile(page, '바닐라 라떼').click();
+  await page.getByRole('toolbar', { name: '고른 카드 처리' }).getByRole('button', { name: '삭제', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '카드 1장을 삭제할까요?' });
+  await dialog.waitFor();
+  await dialog.getByRole('button', { name: '그대로 두기' }).click();
+  await dialog.waitFor({ state: 'detached' });
+  assert.equal(api.calls.filter((c) => c.path === '/cards/bulk').length, 0);
+  await tile(page, '바닐라 라떼').waitFor();
+  await ctx.close();
+});
+test('DEL-2 공개 카드를 삭제하면 공개 탭과 상세에서도 사라진다', async (b) => {
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards');
+  // 상세를 한 번 열어 둔다(사용자 흐름: 보고 나와서 지운다)
+  await page.getByRole('link', { name: '아메리카노, 공개' }).click(); await to(page, '/owner/cards/2');
+  await page.getByText('직원에게 보여요').waitFor();
+  await page.goBack();
+  // 공개 탭도 한 번 열어 둔다(목록이 캐시에 남는다)
+  await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: '공개', exact: true }).click();
+  await tile(page, '아메리카노').waitFor();
+  await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: '전체', exact: true }).click();
+  await startSelect(page);
+  await tile(page, '아메리카노').click();
+  await page.getByRole('toolbar', { name: '고른 카드 처리' }).getByRole('button', { name: '삭제', exact: true }).click();
+  await page.getByRole('dialog', { name: '카드 1장을 삭제할까요?' }).getByRole('button', { name: '삭제하기' }).click();
+  await page.getByRole('status').filter({ hasText: '1장 삭제했어요' }).waitFor();
+  assert.deepEqual(api.calls.find((c) => c.path === '/cards/bulk').body, { action: 'exclude', card_ids: [2] });
+  // 다른 탭에 갔다 오면 화면 상태(누른 즉시 숨김)는 사라지고 캐시만 남는다. 서버 응답을 늦춰 캐시로 그려지는 순간을 본다
+  api.state.listDelayMs = 1500;
+  await page.getByRole('link', { name: '오늘 매장' }).click(); await to(page, '/owner');
+  await page.getByRole('link', { name: '카드' }).click(); await to(page, '/owner/cards');
+  await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: '공개', exact: true }).click();
+  await page.getByRole('group', { name: '카드 상태' }).getByRole('button', { name: '공개', pressed: true }).waitFor();
+  await tile(page, '오픈 준비').waitFor({ state: 'detached' });
+  await tile(page, '우유 발주').waitFor();
+  assert.equal(await tile(page, '아메리카노').count(), 0, '공개 탭에 삭제한 카드가 남았다');
+  // 앞서 열어 둔 상세로 앱 안에서 이동: 캐시에 남은 '공개' 상세가 아니라 삭제 안내가 나온다
+  api.state.listDelayMs = 1500;
+  await page.evaluate(() => window.next.router.push('/owner/cards/2'));
+  await page.waitForFunction(() => location.pathname === '/owner/cards/2');
+  await page.waitForTimeout(400);
+  assert.equal(await page.getByText('직원에게 보여요').count(), 0, '삭제한 카드의 옛 상세가 그려졌다');
+  await page.getByText('삭제한 카드예요').waitFor();
+  await ctx.close();
+});
+test('DEL-3 밀어서 삭제도 먼저 묻는다', async (b) => {
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards?status=pending');
+  // 끝까지 밀면 바로 삭제가 실행되던 자리. 이제는 묻는 창이 먼저 뜬다
+  await swipeLeftRow(page, tile(page, '오픈 준비'));
+  const dialog = page.getByRole('dialog', { name: '카드 1장을 삭제할까요?' });
+  await dialog.waitFor();
+  assert.equal(api.calls.filter((c) => c.path === '/cards/4/exclude').length, 0);
+  await dialog.getByRole('button', { name: '삭제하기' }).click();
+  await page.getByRole('status').filter({ hasText: '삭제했어요' }).waitFor();
+  assert.equal(api.calls.filter((c) => c.path === '/cards/4/exclude').length, 1);
   await ctx.close();
 });
 test('SEL-7 이동은 카테고리 시트에서 고르고 선택 모드를 닫는다', async (b) => {

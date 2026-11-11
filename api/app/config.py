@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     request_store_per_minute: int = Field(default=120, ge=1)
     request_member_concurrency: int = Field(default=2, ge=1)
     request_store_concurrency: int = Field(default=8, ge=1)
+    # 사장님 탈퇴 유예 일수(D22). DB 는 이 값으로 계산한 purge_due_at 날짜만 본다
+    withdrawal_grace_days: int = Field(default=30, ge=1, le=365)
+    # 문의·의견 알림 메일(SES, 계획 9 Task 10). 셋 중 하나라도 비면 보내지 않는다
+    feedback_mail_from: str = ""
+    feedback_mail_to: str = ""
+    aws_region: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "askbuddy"

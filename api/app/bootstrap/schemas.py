@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -28,3 +29,5 @@ class BootstrapResponse(BaseModel):
     store: BootstrapStore | None
     badges: BootstrapBadges
     default_destination: str
+    # 사장님 탈퇴 대기 중이면 파기 예정 시각(stores.purge_due_at, 계획 8). 아니면 null
+    withdrawal_due_at: datetime | None = None

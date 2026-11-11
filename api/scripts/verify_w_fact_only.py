@@ -531,9 +531,10 @@ async def _scenario_d(pool, db, answer_card: tuple[NS, int, int]) -> None:
 
     # d-2 카드 행 직접 INSERT 는 판을 만들지 않는다
     bare = await db.fetchval(
-        "insert into knowledge_cards (store_id, title, content) values ($1,'합성 d 맨 카드','본문') "
+        "insert into knowledge_cards (store_id) values ($1) "
         "returning card_id", w.store)
-    await db.execute("update knowledge_cards set title='합성 d 맨 카드 2', content='본문 2' "
+    # 제목·본문 칸은 없어졌다(계획 9A). 다른 칸 UPDATE 도 판을 만들지 않는지 본다
+    await db.execute("update knowledge_cards set confidence = 50 "
                      "where store_id=$1 and card_id=$2", w.store, bare)
     row = await _card(db, w.store, bare)
     check("d-2 직접 INSERT·제목 UPDATE 는 판을 만들지 않는다(draft_version_id null)",

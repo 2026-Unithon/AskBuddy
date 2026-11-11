@@ -35,17 +35,19 @@ def _now() -> datetime:
 
 
 # store-isolation-ok: 세션은 사용자 단위다. 매장 범위는 access token 발급 때 정한다
-async def issue_refresh(db, *, user_id: int, family_id: uuid.UUID | None = None) -> tuple[str, int]:
+async def issue_refresh(db, *, user_id: int, family_id: uuid.UUID | None = None,
+                        user_agent: str | None = None) -> tuple[str, int]:
+    """user_agent 는 '로그인된 기기' 이름용(계획 8). 300자에서 자른다."""
     raw = secrets.token_urlsafe(32)
     expires_at = _now() + timedelta(days=get_settings().refresh_token_expire_days)
     async with db.transaction():
         await db.execute("select user_id from users where user_id = $1 for update", user_id)
         token_id = await db.fetchval(
             """
-            insert into auth_refresh_tokens (user_id, token_hash, family_id, expires_at)
-            values ($1, $2, $3, $4) returning token_id
+            insert into auth_refresh_tokens (user_id, token_hash, family_id, expires_at, user_agent)
+            values ($1, $2, $3, $4, $5) returning token_id
             """,
-            user_id, _hash(raw), family_id or uuid.uuid4(), expires_at)
+            user_id, _hash(raw), family_id or uuid.uuid4(), expires_at, (user_agent or None) and user_agent[:300])
     return raw, int(token_id)
 
 
@@ -59,7 +61,7 @@ async def rotate_refresh(db, *, raw: str) -> tuple[int, str]:
         await db.execute("select user_id from users where user_id = $1 for update", identity["user_id"])
         row = await db.fetchrow(
             """
-            select token_id, user_id, family_id, expires_at, revoked_at
+            select token_id, user_id, family_id, expires_at, revoked_at, user_agent
             from auth_refresh_tokens where token_hash = $1 for update
             """,
             _hash(raw))
@@ -69,8 +71,9 @@ async def rotate_refresh(db, *, raw: str) -> tuple[int, str]:
             if _now() - row["revoked_at"] > timedelta(seconds=REUSE_GRACE_SECONDS):
                 await _revoke_family(db, row["family_id"])
         else:
+            # 같은 기기다. 앞 행의 기기 정보를 이어받는다
             new_raw, new_id = await issue_refresh(
-                db, user_id=int(row["user_id"]), family_id=row["family_id"])
+                db, user_id=int(row["user_id"]), family_id=row["family_id"], user_agent=row["user_agent"])
             await db.execute(
                 """
                 update auth_refresh_tokens

@@ -59,8 +59,8 @@ async def seed(conn) -> dict:
         """, ids["cp04-a"], owner)
     ids["card"] = await conn.fetchval(
         """
-        insert into knowledge_cards (store_id, title, content)
-        values ($1, '검증용 카드', '내용') returning card_id
+        insert into knowledge_cards (store_id)
+        values ($1) returning card_id
         """, ids["cp04-a"])
     # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고 초안 포인터를 둔다
     ids["version"] = await conn.fetchval(

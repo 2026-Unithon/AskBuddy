@@ -82,9 +82,12 @@ import {
   listNotifications,
   listPending,
   listQuestions,
+  listSources,
   listProductCards,
   listProductCategories,
-  listStaff,
+  getPushKey,
+  getWithdrawal,
+  listDevices,
   type CardFilters,
 } from "@/lib/api";
 
@@ -125,11 +128,15 @@ export const queryKeys = {
   chat: (storeId: number | null, userId: number | null) => ["chat", storeId, userId] as const,
   pending: (storeId: number | null) => ["pending-questions", storeId] as const,
   questions: (storeId: number | null) => ["questions", storeId] as const,
-  staff: (storeId: number | null) => ["staff", storeId] as const,
   notificationsRoot: (storeId: number | null) => ["notifications", storeId] as const,
   notifications: (storeId: number | null) => [...queryKeys.notificationsRoot(storeId), "latest"] as const,
   notificationPages: (storeId: number | null) => [...queryKeys.notificationsRoot(storeId), "pages"] as const,
   notificationSupport: (storeId: number | null) => ["notification-support", storeId] as const,
+  pushKey: (storeId: number | null, userId: number | null) => ["push-key", storeId, userId] as const,
+  sources: (storeId: number | null) => ["sources", storeId] as const,
+  // 사용자 단위(매장 범위로 들어올 수 없는 탈퇴 대기 중에도 쓴다)
+  withdrawal: (userId: number | null) => ["withdrawal", userId] as const,
+  devices: (userId: number | null) => ["devices", userId] as const,
   ingestCapabilities: (storeId: number | null) => ["ingest-capabilities", storeId] as const,
 };
 
@@ -295,15 +302,6 @@ export function pendingQuery(token: string | null, storeId: number | null) {
   });
 }
 
-export function staffQuery(token: string | null, storeId: number | null) {
-  return queryOptions({
-    queryKey: queryKeys.staff(storeId),
-    queryFn: ({ signal }) => listStaff(token!, signal),
-    enabled: Boolean(token && storeId),
-    staleTime: 30_000,
-  });
-}
-
 export function notificationsQuery(token: string | null, storeId: number | null) {
   return queryOptions({
     queryKey: queryKeys.notifications(storeId),
@@ -324,6 +322,45 @@ export function notificationPagesQuery(token: string | null, storeId: number | n
     refetchInterval: (query) =>
       query.state.data?.pages.length === 1 ? 15_000 : false,
     staleTime: 10_000,
+  });
+}
+
+export function withdrawalQuery(token: string | null, userId: number | null) {
+  return queryOptions({
+    queryKey: queryKeys.withdrawal(userId),
+    queryFn: ({ signal }) => getWithdrawal(token!, signal),
+    enabled: Boolean(token && userId),
+  });
+}
+
+export function devicesQuery(token: string | null, userId: number | null) {
+  return queryOptions({
+    queryKey: queryKeys.devices(userId),
+    queryFn: ({ signal }) => listDevices(token!, signal),
+    enabled: Boolean(token && userId),
+    staleTime: 10_000,
+  });
+}
+
+/** 올린 자료 관리(계획 8). 30개씩 */
+export function sourcesQuery(token: string | null, storeId: number | null) {
+  return infiniteQueryOptions({
+    queryKey: queryKeys.sources(storeId),
+    queryFn: ({ pageParam, signal }) => listSources(token!, pageParam, signal),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: Boolean(token && storeId),
+    staleTime: 10_000,
+  });
+}
+
+/** 서버 푸시 키(두 역할 공통). 설정의 이 기기 푸시 줄이 '준비 안 됨'을 가린다 */
+export function pushKeyQuery(token: string | null, storeId: number | null, userId: number | null) {
+  return queryOptions({
+    queryKey: queryKeys.pushKey(storeId, userId),
+    queryFn: ({ signal }) => getPushKey(token!, signal),
+    enabled: Boolean(token && storeId),
+    staleTime: 5 * 60_000,
   });
 }
 

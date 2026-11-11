@@ -14,7 +14,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.deps import get_claims
+from app.deps import Db, get_claims, raise_if_closed
 
 
 class ApiError(Exception):
@@ -35,10 +35,10 @@ class ApiError(Exception):
         super().__init__(message)
 
 
-async def get_api_claims(
+async def get_api_claims_open(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    """기존 JWT 검증 결과를 신규 API 오류 형식으로 변환한다."""
+    """기존 JWT 검증 결과를 신규 API 오류 형식으로 변환한다. 닫힌 매장을 막지 않는다(시작 화면·탈퇴 취소 전용)."""
     try:
         return await get_claims(authorization)
     except HTTPException as exc:
@@ -48,7 +48,34 @@ async def get_api_claims(
         raise ApiError(401, code, message) from exc
 
 
+# store-isolation-ok: JWT 의 store_id 가 가리키는 매장이 열려 있는지만 본다(PK 한 줄)
+async def check_store_open(claims: dict[str, Any], db: Any) -> None:
+    """ApiClaims 를 쓰는 라우트(cards·ingest 등)는 get_store_id 를 거치지 않는다.
+    탈퇴로 매장이 닫힌 뒤 남은 access token 으로 쓰지 못하게 여기서도 막는다(계획 8 Review Focus 1)."""
+    store_id = claims.get("store_id")
+    if store_id is None:
+        return
+    try:
+        store_id = int(store_id)
+    except (TypeError, ValueError):
+        return  # 모양이 틀린 값은 각 라우트의 검사가 거절한다
+    row = await db.fetchrow("select closing_at, deleted_at from stores where store_id = $1", store_id)
+    if row is not None:
+        raise_if_closed(role=claims.get("role"), closing_at=row["closing_at"], deleted_at=row["deleted_at"])
+
+
+# store-isolation-ok: store_id 는 JWT 에서 오고, 그 매장이 열려 있는지만 확인하는 인증 경계다
+async def get_api_claims(
+    db: Db,
+    claims: Annotated[dict[str, Any], Depends(get_api_claims_open)],
+) -> dict[str, Any]:
+    await check_store_open(claims, db)
+    return claims
+
+
 ApiClaims = Annotated[dict[str, Any], Depends(get_api_claims)]
+# 닫힌 매장도 통과(시작 화면이 사장님을 탈퇴 취소 화면으로 보내야 한다)
+OpenApiClaims = Annotated[dict[str, Any], Depends(get_api_claims_open)]
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -77,6 +104,10 @@ def install_error_handlers(app: FastAPI) -> None:
             request.url.path == "/app/bootstrap"
             or request.url.path.startswith(
                 (
+                    # 계획 8 계정·설정
+                    "/app/feedback",
+                    "/app/me/leave-store",
+                    "/app/me/withdraw",
                     "/auth",
                     "/members",
                     "/categories",

@@ -11,11 +11,14 @@ services:
     environment:
       PORT: "8000"
     restart: unless-stopped
+    # 로그는 CloudWatch(/askbuddy/api, 30일 보존)로 보낸다. 리전은 env 파일이 아니라 배포 셸의 AWS_REGION 에서 온다
     logging:
-      driver: json-file
+      driver: awslogs
       options:
-        max-size: "10m"
-        max-file: "5"
+        awslogs-region: ${AWS_REGION:?AWS_REGION 이 필요하다}
+        awslogs-group: /askbuddy/api
+        awslogs-create-group: "true"
+        tag: "api-{{.ID}}"
 
   caddy:
     image: caddy:2

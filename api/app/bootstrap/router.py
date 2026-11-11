@@ -17,8 +17,8 @@ from app.bootstrap.schemas import (
 from app.bootstrap import profile
 from app.config import get_settings
 from app.ingest.preprocess.storage import create_signed_read_url, create_signed_upload_url
-from app.deps import Db
-from app.errors import ApiClaims, ApiError
+from app.deps import Db, raise_if_closed
+from app.errors import ApiClaims, ApiError, OpenApiClaims
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -37,8 +37,9 @@ def _default_destination(role: str | None, has_store: bool, guide_completed: boo
 @router.get("/bootstrap", response_model=BootstrapResponse)
 async def get_bootstrap(
     db: Db,
-    claims: ApiClaims,
+    claims: OpenApiClaims,
 ) -> BootstrapResponse:
+    """닫힌 매장도 여기까지는 온다: 탈퇴 대기 사장님은 취소 화면으로 보내고, 알바생은 STORE_CLOSED."""
     user_id = claims.get("user_id")
     if user_id is None:
         raise ApiError(401, "AUTH_INVALID", "로그인 정보가 올바르지 않습니다.")
@@ -58,7 +59,8 @@ async def get_bootstrap(
         membership = await db.fetchrow(
             """
             select sm.store_id, sm.member_role, s.store_name,
-                   s.guide_completed_at, s.category_version
+                   s.guide_completed_at, s.category_version,
+                   s.closing_at, s.deleted_at, s.purge_due_at
             from store_members sm
             join stores s on s.store_id = sm.store_id
             where sm.user_id = $1 and sm.store_id = $2 and sm.removed_at is null
@@ -73,6 +75,16 @@ async def get_bootstrap(
 
     if membership is not None and membership["member_role"] != user["role"]:
         raise ApiError(403, "ROLE_MISMATCH", "이 역할로 매장에 접근할 수 없습니다.")
+
+    withdrawal_due_at = None
+    # .get: 위 쿼리는 늘 세 칸을 돌려준다. 칸이 없는 옛 가짜 DB(단위 테스트)는 열린 매장으로 본다
+    closing_at = membership.get("closing_at") if membership is not None else None
+    deleted_at = membership.get("deleted_at") if membership is not None else None
+    if closing_at is not None or deleted_at is not None:
+        if user["role"] == "OWNER" and deleted_at is None:
+            withdrawal_due_at = membership.get("purge_due_at")
+        else:
+            raise_if_closed(role=user["role"], closing_at=closing_at, deleted_at=deleted_at)
 
     store: BootstrapStore | None = None
     badges = BootstrapBadges()
@@ -116,9 +128,10 @@ async def get_bootstrap(
         ),
         store=store,
         badges=badges,
-        default_destination=_default_destination(
+        default_destination="/withdrawal" if withdrawal_due_at is not None else _default_destination(
             user["role"], membership is not None, guide_completed
         ),
+        withdrawal_due_at=withdrawal_due_at,
     )
 
 

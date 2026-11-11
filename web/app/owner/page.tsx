@@ -31,7 +31,7 @@ import { useApp } from "@/lib/store";
 
 // 처음 한 번 안내(o01a). 화면이 다시 그려질 때마다 새 배열이면 안내가 처음부터 다시 기다리므로 밖에 둔다
 const HOME_COACH = [
-  { target: '[aria-label="설정"]', text: "매장 설정은 여기서 바꿔요" },
+  { target: '[aria-label="마이페이지"]', text: "매장 설정은 여기서 바꿔요" },
   { target: '[aria-label^="알림"]', text: "질문이 오면 여기에 알려 드려요" },
   { target: 'textarea[aria-label="새로 알려줄 것"]', text: "사진, 파일, 글 아무거나 넣으면 정리해 드려요" },
 ];

@@ -9,8 +9,9 @@ from app.cards.schemas import BulkRequest
 
 async def card(conn, store, status, published=None):
     card_id = await conn.fetchval(
-        "insert into knowledge_cards (store_id, title, content, review_status) values ($1, '합성', '합성', $2) returning card_id",
-        store, status)
+        "insert into knowledge_cards (store_id, review_status, is_verified) "
+        "values ($1, $2, $3) returning card_id",
+        store, status, status == "APPROVED")
     if published:
         await conn.execute("update knowledge_cards set published_version_id = draft_version_id where card_id = $1", card_id)
     return card_id

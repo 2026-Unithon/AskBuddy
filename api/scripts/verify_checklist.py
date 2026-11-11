@@ -40,8 +40,8 @@ async def verify(pool, db):
     async def card(store, title, content, status="APPROVED"):
         # 레거시 판 트리거가 없어졌다(Phase A) — 판 1 을 명시적으로 만들고, 승인 상태면 공개 포인터도 둔다.
         # 체크리스트는 공개 판의 제목만 읽는다(항목 = 카드 하나). 사실 블록은 필요 없다
-        card_id = await db.fetchval("""insert into knowledge_cards(store_id,title,content,review_status)
-            values($1,$2,$3,$4) returning card_id""", store, title, content, status)
+        card_id = await db.fetchval("""insert into knowledge_cards(store_id,review_status,is_verified)
+            values($1,$2,$3) returning card_id""", store, status, status == "APPROVED")
         version_id = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
             values($1,$2,1,$3,$4,'EXTRACTION') returning version_id""", store, card_id, title, content)
         await db.execute("""update knowledge_cards set draft_version_id=$3::bigint,
@@ -179,8 +179,8 @@ async def verify(pool, db):
     # 레거시 트리거가 없으므로 새 판(2)을 명시적으로 만들고 초안·공개 포인터를 옮긴다
     new_common = await db.fetchval("""insert into card_versions(store_id,card_id,version_no,title,content,change_source)
         values($1,$2,2,'합성 공통',$3,'OWNER_EDIT') returning version_id""", sid, common, '물 채우기\n컵 채우기')
-    await db.execute("""update knowledge_cards set content=$3, draft_version_id=$4, published_version_id=$4
-        where store_id=$1 and card_id=$2""", sid, common, '물 채우기\n컵 채우기', new_common)
+    await db.execute("""update knowledge_cards set draft_version_id=$3, published_version_id=$3
+        where store_id=$1 and card_id=$2""", sid, common, new_common)
     with patch.object(cl, '_now', return_value=NOON):
         member = await cl.require_member(session, s)
         fresh = await cl.today_view(session, member, now_utc=NOON, selected_shift_id=None, requested_date=None, include_all=True)

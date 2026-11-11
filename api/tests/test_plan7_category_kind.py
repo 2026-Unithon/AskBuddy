@@ -31,7 +31,7 @@ async def _source(conn, store_id, logic):
 
 async def _card(conn, store_id, category_id, source_id=None):
     return await conn.fetchval(
-        "insert into knowledge_cards (store_id, category_id, source_id, title, content) values ($1, $2, $3, '합성', '합성') returning card_id",
+        "insert into knowledge_cards (store_id, category_id, source_id) values ($1, $2, $3) returning card_id",
         store_id, category_id, source_id)
 
 

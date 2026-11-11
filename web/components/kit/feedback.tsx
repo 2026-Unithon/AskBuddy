@@ -181,7 +181,9 @@ export function ConfirmDialog({
       }}
       // 사용자 동작 없는 두 번째 Esc 는 크롬이 cancel 없이 바로 닫는다. 그때도 open 값을 맞춘다
       onClose={() => {
-        if (open) onCancel();
+        // close 이벤트는 비동기로 늦게 온다. 앞 창을 닫은 이벤트가 같은 창을 다시 연 뒤에 도착하면
+        // 지금 열린 창을 취소로 닫아 버린다(2026-11-11 CI: 연달아 삭제의 두 번째 확인 창이 사라짐). 실제로 닫혀 있을 때만 취소로 본다
+        if (open && !ref.current?.open) onCancel();
       }}
       onClick={(event) => {
         // 바깥(덮개)을 누르면 취소

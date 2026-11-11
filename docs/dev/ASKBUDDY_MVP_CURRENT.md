@@ -202,7 +202,9 @@ flowchart LR
 
 상세 자료형·상태·소유권은 §30~31, 실행 순서는 TODO, 실험의 분모와 승격 규칙은 실험설계가 담당한다.
 
-2026-09-14 pull `65c2403`에서 합의된 D18~D21을 이어받는다. D18은 순증 문턱(대조군 폭 × 1.5, 최소 5건)·must_have 악화 0·원장 재현율 하락 없음·3회 중 2회 같은 방향을 요구하고, 원가 중립은 대조군 폭 문턱으로 낮춘다. D19는 동일 메뉴 여러 규격을 한 카드에 나란히 표시하며 fact는 규격별로 분리한다. D20은 source 삭제 후 사실·카드·인용 관계와 `인용 끊김` 표시를 유지한다. D21은 사용자 후속 회신에 따라 월 운영 변동비 3,000원(AI+Storage, 서버/DB 고정비 제외)·등록비 별도 추적·답변 p95 5초이며 카드 생성 지연 상한은 보류한다. 사용량 시나리오와 계산은 실험설계 §9-1 및 [C0 상세 결정서](C0_DECISIONS_AND_PLAN.md)에 기록한다.
+2026-09-14 pull `65c2403`에서 합의된 D18~D21을 이어받는다. D18은 순증 문턱(대조군 폭 × 1.5, 최소 5건)·must_have 악화 0·원장 재현율 하락 없음·3회 중 2회 같은 방향을 요구하고, 원가 중립은 대조군 폭 문턱으로 낮춘다. D19는 동일 메뉴 여러 규격을 한 카드에 나란히 표시하며 fact는 규격별로 분리한다. D20은 source 삭제 후 사실·카드·인용 관계와 `인용 끊김` 표시를 유지한다. 이 보존도 매장이 활성인 동안이다. D21은 사용자 후속 회신에 따라 월 운영 변동비 3,000원(AI+Storage, 서버/DB 고정비 제외)·등록비 별도 추적·답변 p95 5초이며 카드 생성 지연 상한은 보류한다. 사용량 시나리오와 계산은 실험설계 §9-1 및 [C0 상세 결정서](C0_DECISIONS_AND_PLAN.md)에 기록한다.
+
+D13의 불변(초안/공개 포인터·불변 fact revision·snapshot)은 매장이 활성인 동안의 규칙이다. 매장 파기(D22)는 예외다. D22(2026-11-10): **사장님이 탈퇴하면 30일 뒤 그 매장을 파기한다.** 유예 동안 매장은 닫히고 사장님이 취소하면 다시 열린다. 기한이 지나면 그 매장의 모든 행과 Storage 파일을 지운다. 남기는 것은 원가 장부(ai_usage_attempts, cost_assessments)와 비운 stores 행뿐이다. 장부에는 사람 글이 없다. 유예 일수는 config.py 가 단일 출처다. 구현 계획은 `docs/dev/plan/DB_CLEANUP_PURGE_PLAN9_20261110.md`.
 
 ---
 
@@ -663,9 +665,12 @@ VAPID private key는 API 서버(EC2 env 파일)에만 둔다. 공개키는 API�
 | 초대·합류 | 공개 `GET /auth/invites/{token}`, `POST /auth/join-requests`, `GET /auth/join-status` |
 | 직원 관리(점주) | `GET /members/invite-link`, `POST /members/invite-link/rotate`, `GET /members`, `POST /members/requests/{request_id}/approve`, `POST /members/requests/{request_id}/reject`, `POST /members/{user_id}/remove` |
 | 로그인 사용자 Push | `GET /notifications/push-key`, `POST /notifications/my-subscriptions` (매장 없는 알바 포함) |
-| 진입 | `GET /app/bootstrap` |
+| 진입 | `GET /app/bootstrap` (탈퇴 대기 사장님이면 `withdrawal_due_at`, `default_destination=/withdrawal`) |
+| 계정·설정(계획 8) | `POST /app/feedback`, `POST /app/me/leave-store`, `POST /app/me/withdraw`, `GET /app/me/withdrawal`, `POST /app/me/withdrawal/cancel` |
+| 로그인된 기기(계획 8) | `GET /auth/sessions`, `POST /auth/sessions/{family_id}/revoke` |
+| 내보내기 | `GET /learn/v2/knowledge/export` (설정의 '매장 지식 내려받기') |
 | 카테고리 | `GET/POST/DELETE /categories`, `/reclassification-jobs/*`, 기존 `/ingest/categories` 호환 |
-| 업로드 | `GET /ingest/capabilities`, `/ingest/upload-url`, `/ingest/sources` |
+| 업로드 | `GET /ingest/capabilities`, `/ingest/upload-url`, `POST/GET /ingest/sources`(GET 은 올린 자료 관리, 사장님), `DELETE /ingest/sources/{id}` |
 | 작업 | `POST/GET /ingest/jobs`, `GET /ingest/jobs/{id}`, retry, 기존 process/status 호환 |
 | 카드 | `GET /cards`, 상세, draft, approve, exclude, restore, category, evidence |
 | 로드맵 | `/learn/roadmap`, `/learn/items/{id}`, completion |
@@ -683,6 +688,16 @@ VAPID private key는 API 서버(EC2 env 파일)에만 둔다. 공개키는 API�
 - 오류는 `code`, 사용자 메시지, `retryable`, request ID, details를 갖는 구조를 목표로 한다.
 - 권한 없는 다른 매장 데이터는 존재 여부를 노출하지 않게 404 또는 안전한 403 정책을 일관되게 적용한다.
 - 작업 응답에는 실제 상태와 실제 count만 포함하고 추정 퍼센트를 만들지 않는다.
+
+## 18-2-1. 설정·계정·탈퇴 계약 (계획 8, 2026-11-10)
+
+- 화면: 사람 아이콘 화면은 **마이페이지**(`/{owner|staff}/settings`), 그 끝에 문의하기, 의견 보내기, 설정. **설정**(`/{role}/settings/app`)은 알림 설정, 개인정보 보호, 계정 세 구역과 빨간 칸(퇴사했어요는 알바생만, 회원 탈퇴). 로그아웃은 설정에 있다.
+- 의견: 표 `user_feedback(store_id, user_id, kind INQUIRY|IDEA, body 1~2000자)`. 운영자는 DB 에서 본다. 매장 파기 때 함께 지운다.
+- 퇴사·탈퇴 확인: 화면은 'O하시겠습니까?' → 예 → `퇴사하겠습니다`/`탈퇴하겠습니다`를 그대로 입력. 서버도 같은 문구를 받아야 처리한다(앞뒤 공백만 무시, 다르면 400 `CONFIRM_MISMATCH`).
+- 알바생 탈퇴: 바로 계정을 비운다(이름 '탈퇴한 사용자', 연락처·사진 지움, `users.deleted_at`). 카카오 연결(`user_identities`)을 지워 같은 카카오로 다시 오면 새 계정이다. 질문 기록은 이름 없이 남는다.
+- 사장님 탈퇴: `stores.closing_at`, `stores.purge_due_at`(= 탈퇴 시각 + `config.withdrawal_grace_days`)을 채우고 그 매장 모든 사람의 세션을 끊는다. 기한은 `stores.purge_due_at` 한 곳에만 둔다. 기한 안에 다시 로그인하면 취소 화면(`/withdrawal`)이 먼저 나오고 취소하면 다시 열린다. 기한이 지나면 파기한다(D22, §5 D22 문단, 계획 9).
+- 닫힌 매장 차단: `get_store_id` 와 `ApiClaims` 둘 다 매 요청 `stores.closing_at/deleted_at` 을 본다. 사장님 대기 중이면 403 `OWNER_WITHDRAWING`(웹은 `/withdrawal`), 그 밖은 403 `STORE_CLOSED`(웹은 로그아웃 후 첫 화면). `GET /app/bootstrap` 과 탈퇴 조회·취소만 닫힌 매장에서도 열린다.
+- 로그인된 기기: refresh 토큰 계열 하나가 기기 하나. `auth_refresh_tokens.user_agent` 로 '아이폰 Safari' 같은 이름을 만든다. 남의 계열은 404.
 
 ## 18-3. 호환 API
 
@@ -882,6 +897,7 @@ R 독립 평가는 고정 승인 fixture의 Q_A를 사용한다. W/R 종단 비�
 - Supabase DB 비밀번호·service key, VAPID private key, AI key는 Git에 넣지 않는다.
 - API 서버(EC2 env 파일, Git 제외)에는 API·DB·AI·VAPID 비밀값을 둔다.
 - Vercel에는 `NEXT_PUBLIC_API_URL` 등 브라우저에 공개 가능한 값만 둔다.
+- 서버 비밀값을 Parameter Store(`/askbuddy/prod/`)로 옮긴 뒤에는 배포 때 `deploy/render_env.py` 가 env 파일을 새로 만든다(`ASKBUDDY_ENV_FROM_SSM=1` 일 때만, 계획 9 Task 8).
 - 백업 파일은 커밋하거나 공유하지 않는다.
 
 ---
@@ -1297,8 +1313,8 @@ REFUSE/SAFE_ROUTE는 별도 고정 정책 안내다. 생성 모델은 기존 Gem
 - 모델의 local_ref는 출력 내 참조이지 DB ID 발급 권한이 아니다. schema 검증 후 서버가 ID를 부여한다.
 - 카드 요약 대신 original_assertion을 보존한다. 선택적 typed 속성은 subject/entity, predicate, variant, value/unit, polarity, conditions, exceptions, order/dependencies다. 없는 속성은 null/미확정이며 생성해서 채우지 않는다.
 - 2026-11-08 사용자 결정(사람이 읽기 좋은 카드): `original_assertion` 은 근거 원문으로 그대로 보존하고 화면에는 보이지 않는다. 모델은 같은 사실의 `assertion` 을 사장님·알바생이 읽기 좋은 짧은 업무 문장(해요체)으로 함께 낸다. 서버(`app.ingest.friendly`)는 정리한 문장의 숫자가 모두 원문에 있고 사실 값의 숫자가 남아 있을 때만 그 문장을 사실 판의 `assertion` 으로 쓰고, 아니면 원문을 쓴다(지어내기 막기). 카드 본문(`render_card`)과 사장님 카드 화면은 `assertion` 을 보인다. 표 레시피 한눈에 보기는 '이름=값' 구조가 필요해 원문을 쓴다. 같은 대상은 같은 subject 로 묶도록 추출 프롬프트에 적었다. 실제 모델로는 아직 측정하지 않았다(D16).
-- 2026-11-08 같은 말 충돌: 두 사실의 원문이 띄어쓰기만 빼고 같거나, 부정 여부가 같고 값(수치·단위 또는 서술값)이 같으면 충돌을 열지 않는다(`fact_ledger.same_statement`). 이미 열린 그런 충돌은 migration `20261108120400_same_statement_conflicts` 가 OBSOLETE 로 닫는다. 검수 '맞는 것을 골라 주세요'는 같은 이름·같은 두 값의 질문을 한 번만 보이고, 하나를 고르면 같은 자리의 고르지 않은 값과 같은 글의 다른 사실도 함께 틀린 값(`fact_rejections`)으로 둔다.
-- 2026-11-08 프로필 사진: 비공개 버킷 `avatars`(설정 `avatar_bucket`, 5MB, JPG·PNG·WEBP, `scripts/init_storage.py` 가 만든다). 경로 `avatars/{store_id}/{user_id}/{uuid}.{ext}`. `POST /app/me/avatar/upload-url` 이 서명 업로드 URL 을 주고(불변식 7), `PUT /app/me/avatar {path}` 는 JWT 의 매장·본인 몫 경로만 받는다(null 이면 뺀다). `GET /app/bootstrap` 의 `user.avatar_url` 은 1시간짜리 읽기 URL, 못 만들면 null. migration `20261108120500_user_avatar`(`users.avatar_path`).
+- 2026-11-08 같은 말 충돌: 두 사실의 원문이 띄어쓰기만 빼고 같거나, 부정 여부가 같고 값(수치·단위 또는 서술값)이 같으면 충돌을 열지 않는다(`fact_ledger.same_statement`). 이미 열린 그런 충돌은 migration `20261108120400_same_statement_conflicts` 가 OBSOLETE 로 닫고, `20261109120000_same_statement_invisible` 이 보이지 않는 글자(NBSP·폭 0 공백·BOM)만 다른 쌍까지 닫는다(비교는 `app.ingest.text_norm.squash`). 검수 '맞는 것을 골라 주세요'는 같은 이름·같은 두 값의 질문을 한 번만 보이고, 하나를 고르면 같은 자리의 고르지 않은 값과 같은 글의 다른 사실도 함께 틀린 값(`fact_rejections`)으로 둔다.
+- 2026-11-08 프로필 사진: 비공개 버킷 `avatars`(설정 `avatar_bucket`, 5MB, JPG·PNG·WEBP, `scripts/init_storage.py` 가 만들고 운영 배포(`deploy/remote_deploy.sh`)가 매번 맞춘다). 경로 `avatars/{store_id}/{user_id}/{uuid}.{ext}`. `POST /app/me/avatar/upload-url` 이 서명 업로드 URL 을 주고(불변식 7), `PUT /app/me/avatar {path}` 는 JWT 의 매장·본인 몫 경로만 받는다(null 이면 뺀다). `GET /app/bootstrap` 의 `user.avatar_url` 은 1시간짜리 읽기 URL, 못 만들면 null. migration `20261108120500_user_avatar`(`users.avatar_path`).
 - 2026-11-08 직원 오늘 할 일: '오늘 할 일 끝났어요' 카드는 제출했고 남은 체크가 없을 때만. 남기고 제출했거나 제출 뒤 체크를 풀면 남은 개수와 '제출했어요' 표시.
 - 수치는 decimal string과 unit을 함께 보존한다. 단위 변환은 명시된 규칙·원래 값·반올림 이력을 갖고 테스트한다.
 - alias는 이름 정규화이지 HOT/ICE·사이즈 결합 규칙이 아니다. unknown variant는 wildcard가 아니며 여러 규격이 가능하면 보류·명확화한다.

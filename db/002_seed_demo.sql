@@ -19,21 +19,19 @@ insert into users (name, phone, email, password_hash, role) values
    '$2b$12$dP.FhlBdp//KvEltAkbUkO4EcMNk0XfvguAOKb.UgEBlwY8N0b4ky', 'STAFF');
 
 -- 2. 매장 -------------------------------------------------------------
-insert into stores (owner_id, store_slug, store_name, business_type, deploy_threshold)
-select user_id, 'demo-cafe', '카페 아무개', 'CAFE', 80
+insert into stores (owner_id, store_slug, store_name, business_type)
+select user_id, 'demo-cafe', '카페 아무개', 'CAFE'
 from users where name = '데모 사장님';
 
 -- 3. 구성원 -----------------------------------------------------------
-insert into store_members (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
-select s.store_id, u.user_id, 'OWNER', 0, 0, false
+insert into store_members (store_id, user_id, member_role)
+select s.store_id, u.user_id, 'OWNER'
 from stores s, users u where s.store_slug='demo-cafe' and u.name='데모 사장님';
 
-insert into store_members (store_id, user_id, member_role, day_count, progress_rate, is_deployable)
-select s.store_id, u.user_id, 'STAFF', v.day_cnt, v.rate, v.deployable
+insert into store_members (store_id, user_id, member_role)
+select s.store_id, u.user_id, 'STAFF'
 from stores s
-join (values ('박지호', 7, 90.00, true),
-             ('김민준', 3, 65.00, false),
-             ('이서연', 1, 28.00, false)) as v(nm, day_cnt, rate, deployable) on true
+join (values ('박지호'), ('김민준'), ('이서연')) as v(nm) on true
 join users u on u.name = v.nm
 where s.store_slug = 'demo-cafe';
 

@@ -207,9 +207,9 @@ const BASE = 'http://127.0.0.1:3011';
     }
     await page.setViewportSize({ width: 390, height: 844 });
 
-    // 설정 → 로그아웃은 저장 상태를 지운다
-    await page.goto(`${BASE}/owner/settings`);
-    await page.getByText('합성 매장', { exact: true }).waitFor();
+    // 설정 → 로그아웃은 저장 상태를 지운다(계획 8: 로그아웃은 /owner/settings/app 에 있다)
+    await page.goto(`${BASE}/owner/settings/app`);
+    await page.getByRole('heading', { name: '설정', level: 1 }).waitFor();
     await page.getByRole('button', { name: '로그아웃' }).click();
     // 화면 개선 계획 4b(o12b): 확인 창을 한 번 더 거친다
     await page.getByRole('dialog', { name: '로그아웃할까요?' }).getByRole('button', { name: '로그아웃' }).click();

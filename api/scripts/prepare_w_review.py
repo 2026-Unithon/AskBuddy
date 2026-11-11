@@ -105,7 +105,7 @@ def main():
         store_dir = API/"eval/data"/slug.replace("eval-", "store-")
         manifest = json.loads((store_dir/"manifest.json").read_text())
         truth = json.loads((store_dir/"truth/facts.json").read_text())["facts"]
-        cards = rows(f"select card_id,title,content,source_id,created_at,updated_at from knowledge_cards where store_id={store_id} order by card_id")
+        cards = rows(f"select k.card_id,v.title,v.content,k.source_id,k.created_at,k.updated_at from knowledge_cards k left join card_versions v on v.store_id=k.store_id and v.version_id=k.draft_version_id where k.store_id={store_id} order by k.card_id")
         versions = rows(f"select version_id,card_id,version_no,title,content,created_at from card_versions where store_id={store_id} order by card_id,version_no")
         ledger = rows(f"select * from source_facts where store_id={store_id} order by fact_id")
         sources = rows(f"select source_id,source_type,content_hash,created_at,processed_at from sources where store_id={store_id} order by source_id")

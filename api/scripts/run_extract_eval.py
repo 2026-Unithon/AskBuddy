@@ -241,8 +241,10 @@ async def fetch_cards(conn: asyncpg.Connection, store_id: int) -> list[dict[str,
     추출 품질은 점주 검수 전 단계의 문제다."""
     rows = await conn.fetch(
         """
-        select c.card_id, c.title, c.content, c.source_id
+        select c.card_id, v.title, v.content, c.source_id
         from knowledge_cards c
+        left join card_versions v
+          on v.store_id = c.store_id and v.version_id = c.draft_version_id
         where c.store_id = $1
         order by c.card_id
         """,

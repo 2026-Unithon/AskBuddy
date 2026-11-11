@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
+import pkg from "./package.json";
 
 const nextConfig: NextConfig = {
+  // 설정 화면의 '앱 버전' 줄(계획 8). package.json 이 단일 출처다
+  env: { NEXT_PUBLIC_APP_VERSION: pkg.version },
   async headers() {
     return [
       {
