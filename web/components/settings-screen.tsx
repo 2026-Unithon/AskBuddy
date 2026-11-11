@@ -6,7 +6,6 @@ import {
   BackButton,
   Button,
   Chip,
-  ConfirmDialog,
   CountBadge,
   ErrorInline,
   ListGroup,
@@ -16,12 +15,10 @@ import {
   Sheet,
   Skeleton,
   Surface,
-  TextButton,
   focusRing,
 } from "@/components/kit";
 import {
   apiErrorMessage,
-  logoutSession,
   putToStorage,
   renameMe,
   renameStore,
@@ -35,10 +32,14 @@ import {
   queryKeys,
 } from "@/lib/query";
 import { useApp } from "@/lib/store";
+import { FeedbackSheet } from "@/components/settings/feedback-sheet";
 
-type Row = { title: string; href: string; badge?: number };
+type Row = { title: string; href?: string; onClick?: () => void; badge?: number };
 
-/** 설정(o12a, s07a). 위는 프로필, 아래는 관리 항목. 기능이 없는 항목(언어 등)은 넣지 않는다. */
+/**
+ * 마이페이지(o12a, s07a, 계획 8). 위는 프로필, 아래는 관리 항목, 끝에 문의하기, 의견 보내기, 설정.
+ * 로그아웃은 설정 화면에 있다. 기능이 없는 항목(언어 등)은 넣지 않는다.
+ */
 export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   const { state } = useApp();
   const owner = role === "OWNER";
@@ -56,9 +57,10 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
   const unread = notifications.data?.unread_count ?? 0;
   const user = bootstrap.data?.user;
   const store = bootstrap.data?.store;
-  const [confirming, setConfirming] = useState(false);
   // 프로필 고치기 시트(o12a). 화면 상태
   const [editing, setEditing] = useState(false);
+  // 문의하기, 의견 보내기 시트(화면 상태)
+  const [feedback, setFeedback] = useState<"INQUIRY" | "IDEA" | null>(null);
 
   const rows: Row[] = owner
     ? [
@@ -76,17 +78,17 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
         { title: "내 기록", href: "/staff/me" },
         { title: "답변 알림", href: "/staff/notifications/v2", badge: unread },
       ];
-
-  // 서버의 세션을 먼저 폐기한다. 실패하면 설정 화면에서 재시도한다.
-  const logout = useMutation({
-    mutationFn: logoutSession,
-    onSuccess: () => window.location.replace("/"),
-  });
+  // 모든 역할 공통 끝 세 줄(사용자 결정 1). 문의하기, 의견 보내기는 시트를 연다
+  const tail: Row[] = [
+    { title: "문의하기", onClick: () => setFeedback("INQUIRY") },
+    { title: "의견 보내기", onClick: () => setFeedback("IDEA") },
+    { title: "설정", href: owner ? "/owner/settings/app" : "/staff/settings/app" },
+  ];
 
   return (
     <Screen>
       <BackButton parent={owner ? "/owner" : "/staff"} />
-      <PageHeader title="설정" />
+      <PageHeader title="마이페이지" />
       {bootstrap.isLoading && <Skeleton className="h-60" />}
       {bootstrap.error && (
         <ErrorInline
@@ -133,11 +135,12 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
             </Surface>
           </div>
           <ListGroup>
-            {rows.map((row) => (
+            {[...rows, ...tail].map((row) => (
               <ListRow
                 key={row.title}
                 title={row.title}
                 href={row.href}
+                onClick={row.onClick}
                 badge={
                   row.badge ? (
                     <CountBadge n={row.badge} tone="danger" />
@@ -148,21 +151,7 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
           </ListGroup>
         </>
       )}
-      <div className="mt-auto pt-6">
-        {logout.error && (
-          <ErrorInline
-            message={apiErrorMessage(logout.error, "로그아웃하지 못했어요.")}
-            onRetry={() => logout.mutate()}
-            retrying={logout.isPending}
-          />
-        )}
-        <TextButton
-          disabled={logout.isPending}
-          onClick={() => setConfirming(true)}
-        >
-          로그아웃
-        </TextButton>
-      </div>
+      {feedback && <FeedbackSheet kind={feedback} onClose={() => setFeedback(null)} />}
       {editing && user && (
         <ProfileSheet
           owner={owner}
@@ -172,18 +161,6 @@ export function SettingsScreen({ role }: { role: "OWNER" | "STAFF" }) {
           onClose={() => setEditing(false)}
         />
       )}
-      <ConfirmDialog
-        open={confirming}
-        title="로그아웃할까요?"
-        confirmLabel="로그아웃"
-        tone="danger"
-        loading={logout.isPending}
-        onConfirm={() => {
-          setConfirming(false);
-          logout.mutate();
-        }}
-        onCancel={() => setConfirming(false)}
-      />
     </Screen>
   );
 }

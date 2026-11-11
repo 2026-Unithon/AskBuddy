@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { SESSION_EXPIRED_EVENT } from "@/lib/api";
+import { logoutSession, SESSION_EXPIRED_EVENT, STORE_CLOSED_EVENT, type StoreClosedCode } from "@/lib/api";
 import { useApp } from "@/lib/store";
 
 export function SessionExpiryHandler() {
@@ -35,6 +35,29 @@ export function SessionExpiryHandler() {
     window.addEventListener(SESSION_EXPIRED_EVENT, handleExpiredSession);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpiredSession);
   }, [state.token, state.role, queryClient, dispatch, router]);
+
+  // 매장이 닫혔다(계획 8). 탈퇴 대기 사장님은 취소 화면으로, 나머지는 로그아웃 후 첫 화면으로
+  useEffect(() => {
+    function handleStoreClosed(event: Event) {
+      const code = (event as CustomEvent<{ code: StoreClosedCode }>).detail?.code;
+      if (code === "OWNER_WITHDRAWING") {
+        if (window.location.pathname !== "/withdrawal") router.replace("/withdrawal");
+        return;
+      }
+      if (handled.current) return;
+      handled.current = true;
+      void logoutSession()
+        .catch(() => undefined)
+        .finally(() => {
+          queryClient.clear();
+          dispatch({ type: "LOGOUT" });
+          router.replace("/");
+        });
+    }
+
+    window.addEventListener(STORE_CLOSED_EVENT, handleStoreClosed);
+    return () => window.removeEventListener(STORE_CLOSED_EVENT, handleStoreClosed);
+  }, [queryClient, dispatch, router]);
 
   return null;
 }

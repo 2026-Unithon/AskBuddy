@@ -15,6 +15,9 @@ function authHeader(token?: string): Record<string, string> {
 type FetchJsonInit = RequestInit & { timeoutMs?: number; sessionExpiry?: boolean };
 
 export const SESSION_EXPIRED_EVENT = "askbuddy:session-expired";
+/** 매장이 닫혔다(계획 8): 탈퇴 대기 사장님(OWNER_WITHDRAWING) 또는 닫힌 매장의 사람(STORE_CLOSED) */
+export const STORE_CLOSED_EVENT = "askbuddy:store-closed";
+export type StoreClosedCode = "OWNER_WITHDRAWING" | "STORE_CLOSED";
 export type ApiErrorKind = "http" | "timeout" | "offline" | "network" | "aborted";
 
 type ApiErrorMeta = {
@@ -125,6 +128,9 @@ async function fetchJsonOnce<T>(path: string, init?: FetchJsonInit): Promise<T> 
       } catch {
         // 본문이 JSON 이 아니면 상태 코드만으로 판단한다
       }
+      if (res.status === 403 && (code === "OWNER_WITHDRAWING" || code === "STORE_CLOSED") && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(STORE_CLOSED_EVENT, { detail: { code } }));
+      }
       throw new ApiError(res.status, detail, path, {
         code,
         retryable,
@@ -234,6 +240,8 @@ export type BootstrapResponse = {
     pending_cards: number;
   };
   default_destination: string;
+  /** 사장님 탈퇴 대기 중이면 파기 예정 시각(계획 8). 아니면 null */
+  withdrawal_due_at?: string | null;
 };
 
 export async function getBootstrap(token: string, signal?: AbortSignal) {
@@ -371,17 +379,6 @@ export type RoadmapDto = {
 
 export async function getRoadmap(token: string, signal?: AbortSignal) {
   return fetchJson<RoadmapDto>("/learn/roadmap", { headers: authHeader(token), signal });
-}
-
-export async function patchRoadmapItem(
-  itemId: number,
-  status: "LOCKED" | "IN_PROGRESS" | "DONE",
-  token: string
-) {
-  return fetchJson<{ item_id: number; status: string; progress_rate: number }>(
-    `/learn/roadmap/items/${itemId}`,
-    { method: "PATCH", headers: authHeader(token), body: JSON.stringify({ status }) }
-  );
 }
 
 export type SourceAvailability = "AVAILABLE" | "DELETED" | "UNAVAILABLE";
@@ -936,6 +933,33 @@ export async function getIngestJob(jobId: number, token: string, signal?: AbortS
   });
 }
 
+/** 문의하기(INQUIRY), 의견 보내기(IDEA). 서버에 저장하고 운영자가 DB 에서 본다(계획 8) */
+export async function postFeedback(kind: "INQUIRY" | "IDEA", body: string, token: string) {
+  return fetchJson<{ feedback_id: number }>("/app/feedback", {
+    method: "POST",
+    headers: authHeader(token),
+    body: JSON.stringify({ kind, body }),
+  });
+}
+
+export type UploadedSource = {
+  source_id: number;
+  title: string | null;
+  source_type: string;
+  file_size: number | null;
+  created_at: string;
+};
+
+/** 올린 자료 관리(계획 8, 사장님). 지우지 않은 자료만 새것부터 */
+export async function listSources(token: string, cursor?: number, signal?: AbortSignal) {
+  const query = new URLSearchParams({ limit: "30" });
+  if (cursor) query.set("cursor", String(cursor));
+  return fetchJson<{ items: UploadedSource[]; next_cursor: number | null }>(`/ingest/sources?${query}`, {
+    headers: authHeader(token),
+    signal,
+  });
+}
+
 // 자료 삭제: 원본 접근만 해제한다. 사실·카드·답변 근거는 남고 '인용 끊김'으로 표시된다
 export async function deleteIngestSource(sourceId: number, token: string) {
   return fetchJson<{
@@ -1160,21 +1184,6 @@ export type LearnPendingItem = {
 export async function listPending(token: string, status: "WAITING" | "ANSWERED" = "WAITING", signal?: AbortSignal) {
   return fetchJson<{ store_id: number; status: string; items: LearnPendingItem[] }>(
     `/learn/pending?status=${status}`,
-    { headers: authHeader(token), signal }
-  );
-}
-
-export type LearnStaffItem = {
-  member_id: number;
-  name: string;
-  day_count: number;
-  progress_rate: number;
-  is_deployable: boolean;
-};
-
-export async function listStaff(token: string, signal?: AbortSignal) {
-  return fetchJson<{ store_id: number; deploy_threshold: number; items: LearnStaffItem[] }>(
-    "/learn/staff",
     { headers: authHeader(token), signal }
   );
 }
@@ -1440,6 +1449,47 @@ export async function getPushKey(token: string, signal?: AbortSignal) {
 export async function saveMyPushSubscription(subscription: PushSubscriptionJSON, token: string) {
   return fetchJson<{ subscription_id: number; enabled: boolean }>("/notifications/my-subscriptions", {
     method: "POST", headers: authHeader(token), body: JSON.stringify(subscription),
+  });
+}
+
+// ── 퇴사, 탈퇴, 로그인된 기기(계획 8) ──
+/** 확인 문구는 서버도 다시 본다(화면 우회 방지). 성공하면 서버가 이 기기 세션도 끊는다 */
+export async function leaveStore(confirm: string, token: string) {
+  return fetchJson<void>("/app/me/leave-store", { method: "POST", headers: authHeader(token), body: JSON.stringify({ confirm }) });
+}
+
+export async function withdrawAccount(confirm: string, token: string) {
+  return fetchJson<void>("/app/me/withdraw", { method: "POST", headers: authHeader(token), body: JSON.stringify({ confirm }) });
+}
+
+export async function getWithdrawal(token: string, signal?: AbortSignal) {
+  return fetchJson<{ due_at: string | null; grace_days: number }>("/app/me/withdrawal", { headers: authHeader(token), signal, cache: "no-store" });
+}
+
+export async function cancelWithdrawal(token: string) {
+  return fetchJson<void>("/app/me/withdrawal/cancel", { method: "POST", headers: authHeader(token) });
+}
+
+export type DeviceSession = { family_id: string; label: string; last_used_at: string; current: boolean };
+
+export async function listDevices(token: string, signal?: AbortSignal) {
+  return fetchJson<DeviceSession[]>("/auth/sessions", { headers: authHeader(token), signal, cache: "no-store" });
+}
+
+export async function revokeDevice(familyId: string, token: string) {
+  return fetchJson<void>(`/auth/sessions/${encodeURIComponent(familyId)}/revoke`, { method: "POST", headers: authHeader(token) });
+}
+
+/** 승인된 매장 지식 JSON(계획 8 설정). 브라우저는 Storage·DB 에 직접 가지 않고 API 응답을 파일로 저장한다 */
+export async function downloadKnowledge(token: string): Promise<Blob> {
+  const payload = await fetchJson<unknown>("/learn/v2/knowledge/export", { headers: authHeader(token), cache: "no-store" });
+  return new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+}
+
+export async function deleteMyPushSubscription(subscriptionId: number, token: string) {
+  return fetchJson<void>(`/notifications/my-subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    headers: authHeader(token),
   });
 }
 
