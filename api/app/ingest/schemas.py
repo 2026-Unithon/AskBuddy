@@ -134,9 +134,15 @@ class IntakeLocatedFactExtractionResult(LocatedFactExtractionResult):
 # 모델은 이름표(E…·F…)·카테고리·블록 종류만 낸다. 제목·문장·값 필드를 두지 않는다 —
 # 카드 제목과 본문은 서버가 사실 판에서 렌더링한다(card_plan).
 
+class PlannedLine(BaseModel):
+    text: str                      # 모델이 쓴 줄 글(D23). 서버가 지어냄·빠뜨림을 검사한다
+    facts: list[str] = []          # 이 줄의 근거 사실 이름표(F1…)
+
+
 class PlannedBlock(BaseModel):
     kind: Literal["QUANTITIES", "STEPS", "NOTES"]
-    facts: list[str] = []          # 입력 사실 이름표(F1…). 순서가 표시 순서다
+    heading: str | None = None     # 구역 제목(규격 이름이나 하는 일). 없으면 빈 값
+    lines: list[PlannedLine] = []  # 표시 순서. 블록 사실 = 줄 사실의 합집합(줄 순서)
 
 
 class PlannedCard(BaseModel):

@@ -1,5 +1,6 @@
 // Web Push 구독. 점주 알림 설정과 알바 승인 알림이 같이 쓴다
 import {
+  apiErrorMessage,
   deleteMyPushSubscription,
   deletePushSubscription,
   getPushKey,
@@ -19,20 +20,38 @@ export function applicationServerKey(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-// 권한 요청은 반드시 사용자 버튼 클릭 안에서 부른다(iOS 요구)
-export async function enablePersonalPush(token: string): Promise<"enabled" | "denied" | "unsupported" | "not_configured"> {
+export type PersonalPushResult = "enabled" | "denied" | "unsupported" | "not_configured" | { failed: string };
+
+const SUBSCRIBE_FAILED = "이 기기에서 알림 구독을 만들지 못했어요.";
+
+// 권한 요청은 반드시 사용자 버튼 클릭 안에서 부른다(iOS 요구). 실패하면 이유를 돌려준다(계획 10)
+export async function enablePersonalPush(token: string): Promise<PersonalPushResult> {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return "unsupported";
-  const key = await getPushKey(token);
+  let key;
+  try {
+    key = await getPushKey(token);
+  } catch (error) {
+    return { failed: apiErrorMessage(error, "알림 설정을 불러오지 못했어요.") };
+  }
   if (!key.push_configured || !key.vapid_public_key) return "not_configured";
   if ((await Notification.requestPermission()) !== "granted") return "denied";
-  const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
-  await navigator.serviceWorker.ready;
-  const current = (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: applicationServerKey(key.vapid_public_key),
-    }));
-  await saveMyPushSubscription(current.toJSON(), token);
+  let current: PushSubscription;
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.ready;
+    current = (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey(key.vapid_public_key),
+      }));
+  } catch {
+    return { failed: SUBSCRIBE_FAILED };
+  }
+  try {
+    await saveMyPushSubscription(current.toJSON(), token);
+  } catch (error) {
+    return { failed: apiErrorMessage(error, "알림 구독을 저장하지 못했어요.") };
+  }
   return "enabled";
 }
 

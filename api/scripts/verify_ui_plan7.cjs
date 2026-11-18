@@ -241,11 +241,11 @@ test("PICK-1 검수 필요 카드를 열면 '맞는 것을 골라 주세요!'와
   await box.getByRole('button', { name: '일반휘핑(90g)' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '수정 완료' }).count(), 0, '수정하기 없이');
   // 고르는 상자가 카드 내용보다 위
-  const [boxTop, contentTop] = [(await box.boundingBox()).y, (await page.locator('[data-recipe-view]').boundingBox()).y];
+  const [boxTop, contentTop] = [(await box.boundingBox()).y, (await page.locator('[data-card-lines]').boundingBox()).y];
   assert.ok(boxTop < contentTop);
   // 고르기 전에는 내용에 어느 한 값을 보이지 않고, 공개도 막는다
-  await page.locator('[data-recipe-view]').getByText('골라 주세요').waitFor();
-  assert.equal(await page.locator('[data-recipe-view]').getByText('30g').count(), 0);
+  await page.locator('[data-card-lines]').getByText('골라 주세요').waitFor();
+  assert.equal(await page.locator('[data-card-lines]').getByText('30g').count(), 0);
   assert.ok(await page.getByRole('button', { name: '공개', exact: true }).isDisabled());
   await ctx.close();
 });
@@ -256,7 +256,7 @@ test('PICK-2 하나를 누르면 그 값만 남고 상자가 사라진다', asyn
   const call = api.calls.find((c) => c.path === '/cards/3/conflicts/7/choose');
   assert.equal(call.body.keep_fact_id, 32);
   assert.equal(call.body.expected_version_id, 30);
-  assert.equal(await page.locator('[data-recipe-view]').getByText('90g').count(), 0);
+  assert.equal(await page.locator('[data-card-lines]').getByText('90g').count(), 0);
   await page.getByText('아직 공개 전이에요').waitFor();
   await ctx.close();
 });
@@ -272,7 +272,7 @@ test('PICK-4 저장이 실패하면 버튼이 다시 눌리고 이유가 상자 
 // ── Task 7 수정 되돌리기 ──
 async function editAndSave(page) {
   await page.getByRole('button', { name: '수정하기' }).click();
-  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기', exact: true }).press('ArrowUp');
+  await page.getByRole('button', { name: '물을 붓는다. 옮기기', exact: true }).press('ArrowUp');
   await page.getByRole('button', { name: '수정 완료' }).click();
 }
 test("UNDO-1 수정 완료 알림의 '되돌리기'를 누르면 되돌린다", async (b) => {
@@ -468,34 +468,28 @@ test('OLD-2 합류 대기 상태를 못 불러오면 오류 줄과 다시 시도
 });
 
 // ── Task 11 작은 결정 ──
-test('EDIT-1 수정 모드에서 같은 문장에서 나온 줄은 한 덩어리', async (b) => {
+test('EDIT-1 수정 모드에서 같은 문장에서 나온 사실은 한 줄 타일', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/3', { overrides: { pickCard: true } });
   await page.getByRole('button', { name: '수정하기' }).click();
   await page.getByRole('button', { name: '수정 완료' }).waitFor();
-  // 제조순서 한 문장에서 나온 세 줄: 두 번째·세 번째 줄이 앞 줄에 붙는다
-  assert.equal(await page.locator('[data-same-sentence]').count(), 2);
+  // 제조순서 한 문장에서 나온 세 사실은 줄 하나(계획 10: 줄이 사실 셋을 인용한다)
+  assert.equal(await page.locator('[data-tile]').filter({ hasText: '제조순서=블랜더 → 믹싱 → 컵' }).count(), 1);
   await ctx.close();
 });
 
 // ── 사용자 실화면(2026-11-08): 수정 화면이 줄마다 칩·근거·'수치' 머리글이라 쓰기 어렵다, 안 고쳤는데 버릴지 묻는다 ──
-test('EDIT-2 수정 화면은 읽는 화면처럼 문장 줄, 누르면 고치기, 오른쪽 휴지통', async (b) => {
+test('EDIT-2 수정 화면은 읽는 화면처럼 줄 타일, 누르면 고치기, 빼기는 그 시트에서', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/3', { overrides: { pickCard: true } });
   await page.getByRole('button', { name: '수정하기' }).click();
   await page.getByRole('button', { name: '수정 완료' }).waitFor();
   const main = page.locator('main');
   assert.equal(await main.getByRole('button', { name: '고치기', exact: true }).count(), 0, '줄마다 고치기 칩 없음');
-  assert.equal(await main.getByRole('button', { name: '빼기', exact: true }).count(), 0, '줄마다 빼기 칩 없음');
+  assert.equal(await main.getByRole('button', { name: /빼기/ }).count(), 0, '줄마다 빼기 버튼 없음');
   assert.equal(await main.getByText(/^근거:/).count(), 0, '줄마다 근거 없음');
   assert.equal(await main.getByRole('heading', { name: /^(수치|순서|목록)$/ }).count(), 0, "'수치' 머리글 없음");
-  // 줄을 누르면 고치는 시트
-  const row = main.getByRole('button', { name: /^고치기: / }).first();
-  await row.click();
-  await page.getByRole('dialog').first().waitFor();
-  await page.keyboard.press('Escape');
-  // 휴지통은 줄 오른쪽
-  const trash = main.getByRole('button', { name: /^빼기: / }).first();
-  const [rowBox, trashBox] = [await row.boundingBox(), await trash.boundingBox()];
-  assert.ok(trashBox.x > rowBox.x + rowBox.width * 0.6, '오른쪽');
+  // 줄을 누르면 고치는 시트, 빼기는 그 안에
+  await main.locator('[data-tile]').first().click();
+  await page.getByRole('dialog', { name: '이 줄 고치기' }).getByRole('button', { name: '이 줄 빼기' }).waitFor();
   await ctx.close();
 });
 test('EDIT-3 아무것도 안 고치면 돌아가기도 수정 완료도 그냥 읽는 화면으로', async (b) => {
@@ -512,7 +506,8 @@ test('EDIT-3 아무것도 안 고치면 돌아가기도 수정 완료도 그냥 
 test('EDIT-4 고친 뒤 돌아가기는 버릴지 묻고, 계속 고치기가 기본', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/3', { overrides: { pickCard: true } });
   await page.getByRole('button', { name: '수정하기' }).click();
-  await page.locator('main').getByRole('button', { name: /^빼기: / }).first().click();
+  await page.locator('main [data-tile]').first().click();
+  await page.getByRole('dialog', { name: '이 줄 고치기' }).getByRole('button', { name: '이 줄 빼기' }).click();
   await page.getByRole('button', { name: '돌아가기', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '고친 내용을 버릴까요?' });
   await dialog.getByRole('button', { name: '계속 고치기' }).waitFor();
@@ -541,19 +536,19 @@ test("HEAD-1 보기 모드에 '수치·순서·목록' 머리글이 없다(규�
   await ctx.close();
 });
 
-test('RECIPE-1 직원 레시피도 한눈에 보기(가격은 제목 옆, HOT/ICE 따로)', async (b) => {
+test('RECIPE-1 직원 레시피도 사장님과 같은 줄 보기(HOT/ICE 구역 따로)', async (b) => {
+  // 계획 10: 한눈에 보기(compactRecipe)를 지우고 구역·줄 보기로. 가격을 제목 옆에 따로 두지 않는다
   const { page, ctx } = await open(b, 'STAFF', '/staff/recipes/11', { overrides: { staffTableRecipe: true } });
-  const view = page.locator('[data-recipe-view]');
+  const view = page.locator('[data-card-lines]');
   await view.waitFor();
-  await view.getByText('바닐라시럽 30ml', { exact: false }).waitFor();
-  await page.getByText('4,500원').waitFor();
-  for (const h of ['HOT', 'ICE']) await view.getByRole('heading', { name: h, exact: true }).waitFor();
+  await view.getByText('바닐라시럽 30ml', { exact: false }).first().waitFor();
+  for (const h of ['HOT', 'ICE']) await view.getByRole('heading', { name: h, exact: true }).first().waitFor();
   await ctx.close();
 });
 test('RECIPE-2 사실 묶음이 없는 레시피는 예전 본문 그대로', async (b) => {
   const { page, ctx } = await open(b, 'STAFF', '/staff/recipes/11');
   await page.getByText('바닐라 시럽 2펌프', { exact: false }).first().waitFor();
-  assert.equal(await page.locator('[data-recipe-view]').count(), 0);
+  assert.equal(await page.locator('[data-card-lines]').count(), 0);
   await ctx.close();
 });
 

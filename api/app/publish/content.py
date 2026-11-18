@@ -158,6 +158,15 @@ def _json_list(value) -> tuple[str, ...]:
 # 조립
 # ---------------------------------------------------------------------------
 
+def snapshot_block_payload(block: CardBlock) -> dict:
+    """공개 snapshot 이 싣는 블록 칸. 표시용 heading·lines(D23)는 싣지 않는다 — 답변은 사실을 인용한다.
+
+    사실 블록 카드만 공개하므로(RAW 블록 판은 InvalidContent) raw_span_id 도 싣지 않는다.
+    """
+    return {"block_id": block.block_id, "kind": block.kind, "order": block.order,
+            "fact_revision_ids": block.fact_revision_ids}
+
+
 async def _fact_card(
     conn, *, store_id: int, card_id: int, card_version_id: int, title: str,
     block_rows, fact_rows,
@@ -172,9 +181,9 @@ async def _fact_card(
         by_block.setdefault(row["block_id"], []).append(row["fact_revision_id"])
 
     blocks: list[CardBlock] = [
-        CardBlock(
+        CardBlock(**snapshot_block_payload(CardBlock(
             block_id=row["block_id"], kind=row["kind"], order=row["block_order"],
-            fact_revision_ids=tuple(str(r) for r in by_block.get(row["block_id"], ())))
+            fact_revision_ids=tuple(str(r) for r in by_block.get(row["block_id"], ())))))
         for row in block_rows]
 
     pinned = sorted({r for ids in by_block.values() for r in ids})

@@ -411,7 +411,16 @@ export type LearnItemDetail = {
   evidence: CardEvidenceDto[];
   return_to: { path: string; item_id: number };
   /** 사실 카드면 공개 판 사실 묶음(한눈에 보기용, 계획 7 Task 12) */
-  fact_blocks?: { kind: string; variant: { temperature: "HOT" | "ICE" | null; size: string | null }; facts: { sentence: string; step_order: number | null }[] }[] | null;
+  // 계획 10: 사장님 상세와 같은 보기(구역 제목·줄). 근거 판 id 는 오지 않는다
+  fact_blocks?: StaffLinesBlock[] | null;
+};
+
+export type StaffLinesBlock = {
+  kind: string;
+  variant: { temperature: "HOT" | "ICE" | null; size: string | null };
+  heading: string | null;
+  // 금액 줄이면 '2,000원'(화면은 제목 옆으로 옮긴다, lib/card-price)
+  lines: { line_no: number; text: string; price?: string | null }[];
 };
 
 export async function getLearnItem(itemId: number, token: string, signal?: AbortSignal) {
@@ -576,7 +585,10 @@ export type EditItem =
   | { op: "MODIFY"; fact_revision_id: number; fact: FactFields }
   | { op: "ADD"; client_ref: string; fact: FactFields };
 
-export type EditBlock = { kind: EditBlockKind; items: EditItem[] };
+// 사장님이 보는 그대로의 줄(D23). 근거는 이 블록 items 의 판 id 또는 ADD client_ref
+export type EditLine = { text: string; fact_revision_ids: number[]; client_refs: string[] };
+
+export type EditBlock = { kind: EditBlockKind; items: EditItem[]; heading?: string | null; lines?: EditLine[] | null };
 
 export type FactEditRequest = {
   expected_version_id: number;
@@ -646,7 +658,12 @@ export type FactBlockView = {
   order: number;
   variant: FactVariant;
   facts: FactRow[];
+  // 표시(D23). 줄 없는 옛 판도 서버가 사실마다 원문 줄을 만들어 준다
+  heading: string | null;
+  lines: LineView[];
 };
+
+export type LineView = { line_no: number; text: string; fact_revision_ids: number[] };
 
 export type CardFactsView = {
   card_id: number;

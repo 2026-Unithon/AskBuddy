@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
-FILES = ["extract_facts.ko.txt", "extract_facts_locator.ko.txt"]
+# 계획 10: 본문 한 벌(근거 위치 규칙만 따로)
+FILES = ["extract_facts_body.ko.txt"]
 
 
 @pytest.mark.parametrize("name", FILES)

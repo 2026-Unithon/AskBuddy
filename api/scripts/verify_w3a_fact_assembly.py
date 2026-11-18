@@ -39,7 +39,7 @@ from app.ingest.extract import gemini, mock
 from app.ingest.raw_responses import DbRawResponseSink
 from app.ingest.reuse import CACHE_STATE_REUSED
 from app.ingest.schemas import (CardPlanBatch, ExtractedAssertion, FactExtractionResult,
-                                PlannedBlock, PlannedCard)
+                                PlannedBlock, PlannedCard, PlannedLine)
 from app.learn.answer_storage import save_answer
 from app.learn.planner import decide
 from app.publish.approval import CardChange, publish_cards
@@ -426,10 +426,10 @@ async def _p1(db):
           len(versions) == 1 and versions[0]["change_source"] == "EXTRACTION"
           and row["draft_version_id"] == versions[0]["version_id"]
           and written.new_version_ids == (versions[0]["version_id"],))
-    expected = card_plan.render_card(card, facts, evidence=["합성 자료 A"])
-    check("본문 == render_card(근거 줄 포함)",
-          row["content"] == versions[0]["content"] == expected
-          and expected.endswith("근거: 합성 자료 A"))
+    # 계획 10(D23): 본문 = 구역 제목 + 줄 글. 근거 자료 이름은 본문에 붙이지 않는다(card_evidence 가 싣는다)
+    expected = card_plan.card_content(card.blocks)
+    check("본문 == card_content(구역·줄)",
+          row["content"] == versions[0]["content"] == expected and "근거: " not in expected)
     blocks, block_facts, prov = await _pins(db, w.store, row["draft_version_id"])
     exp_blocks, exp_facts = _expected_pins(card)
     check("블록·블록 사실이 계획과 같다", blocks == exp_blocks and block_facts == exp_facts)
@@ -482,11 +482,9 @@ async def _p2_p3(db, w, card_id):
     card = result.cards[0]
     facts = {f.fact_revision_id: f for f in group.facts}
     hot = await _revision_of(db, w.store, src_b, "물")
-    check("판 2 에 자료 B 사실·근거 줄에 두 자료",
+    check("판 2 에 자료 B 사실·본문 == card_content",
           hot["head_revision_id"] in card.fact_revision_ids()
-          and row["content"] == card_plan.render_card(
-              card, facts, evidence=["합성 자료 A", "합성 자료 B"])
-          and row["content"].endswith("근거: 합성 자료 A, 합성 자료 B"))
+          and row["content"] == card_plan.card_content(card.blocks))
     blocks, block_facts, _ = await _pins(db, w.store, row["draft_version_id"])
     check("판 2 블록 고정이 계획과 같다", (blocks, block_facts) == _expected_pins(card))
     legacy_facts, _, _ = await _legacy_counts(db, w.store, card_id)
@@ -761,15 +759,16 @@ async def _p9(db):
           and row["needs_review_reason"] == fact_cards.REVIEW_CONFLICT)
     hot = next(f for f in group.facts if f.variant_temperature == "HOT")
     ice = next(f for f in group.facts if f.variant_temperature == "ICE")
-    mixed = [ProposedCard("레시피", (ProposedBlock(
-        "QUANTITIES", tuple(f.fact_revision_id for f in group.facts)),))]
+    # 계획 10(D23): 규격 섞기는 막지 않는다. 모르는 이름표가 대체 계획으로 가는 경로를 본다
+    mixed = [ProposedCard("레시피", (ProposedBlock.from_refs(
+        "QUANTITIES", (*[f.fact_revision_id for f in group.facts], "F999")),))]
     group, result = await _plan(db, s, z, proposals=mixed)
     _, written = await _write(db, s, sources[0], job, group, result)
     row = await _card(db, s, written.card_ids[0])
-    check("HOT/ICE 섞인 제안 → 대체 계획·FALLBACK:PLAN_VARIANT_MIXED(충돌보다 우선)",
+    check("모르는 이름표 제안 → 대체 계획·FALLBACK:PLAN_UNKNOWN_REF(충돌보다 우선)",
           hot.fact_revision_id != ice.fact_revision_id
-          and result.model_error == card_plan.PLAN_VARIANT_MIXED
-          and row["needs_review_reason"] == "FALLBACK:PLAN_VARIANT_MIXED")
+          and result.model_error == card_plan.PLAN_UNKNOWN_REF
+          and row["needs_review_reason"] == "FALLBACK:PLAN_UNKNOWN_REF")
 
 
 async def _p10(db):
@@ -1162,10 +1161,12 @@ async def _e3(db, pool, w):
 
 
 def _mixed_plan(payload, categories):
-    """대상마다 모든 사실을 QUANTITIES 블록 하나에 — 규격이 섞인다."""
+    """대상마다 모든 사실을 QUANTITIES 블록 하나에 + 없는 이름표 — 대체 계획으로 간다(계획 10)."""
     return CardPlanBatch(cards=[
         PlannedCard(entity=e["대상"], category_name=categories[0],
-                    blocks=[PlannedBlock(kind="QUANTITIES", facts=[f["id"] for f in e["사실"]])])
+                    blocks=[PlannedBlock(kind="QUANTITIES", lines=[
+                        PlannedLine(text=f.get("원문", ""), facts=[f["id"]]) for f in e["사실"]]
+                        + [PlannedLine(text="합성 지어낸 줄", facts=["F999"])])])
         for e in payload])
 
 
@@ -1178,9 +1179,9 @@ async def _e4(db, pool):
         _assertion("f2", Z, "물", "225", "ml", variant="ICE"),
     ])], run_tag=804, plan_override=_mixed_plan)
     cards = await _store_cards(db, s)
-    check("카드 1 NEEDS_REVIEW·FALLBACK:PLAN_VARIANT_MIXED",
+    check("카드 1 NEEDS_REVIEW·FALLBACK:PLAN_UNKNOWN_REF",
           len(cards) == 1 and cards[0]["review_status"] == "NEEDS_REVIEW"
-          and cards[0]["needs_review_reason"] == "FALLBACK:PLAN_VARIANT_MIXED")
+          and cards[0]["needs_review_reason"] == "FALLBACK:PLAN_UNKNOWN_REF")
     mixed = await db.fetchval(
         "select count(*) from (select f.block_id from card_block_facts f "
         "join fact_revisions r on r.store_id = f.store_id "

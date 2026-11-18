@@ -22,3 +22,10 @@ test("위로 끌어도 같은 범위", () => {
 test("목록에 없는 카드면 처음 상태 그대로", () => {
   assert.deepEqual(ids(rangeSelect(order, 9, 2, new Set([1]))), [1]);
 });
+
+// 계획 10 Task 11: 가장자리 자동 스크롤 속도(선형, 최대 max px/프레임)
+import { edgeScrollSpeed } from "../lib/drag-select.ts";
+test("가장자리 밖이면 멈춤", () => assert.equal(edgeScrollSpeed(400, 0, 800), 0));
+test("아래 가장자리 끝이면 최대 속도", () => assert.equal(edgeScrollSpeed(800, 0, 800), 18));
+test("위 가장자리 중간이면 반 속도로 위로", () => assert.equal(edgeScrollSpeed(24, 0, 800), -9));
+test("영역 밖으로 나가도 최대 속도를 넘지 않는다", () => assert.equal(edgeScrollSpeed(900, 0, 800), 18));

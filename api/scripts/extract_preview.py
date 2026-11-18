@@ -4,7 +4,7 @@
     INGEST_MODE=real python scripts/extract_preview.py --file data/sample_transcript.ko.txt
 
 정식 등록과 같은 사실 추출만 본다. 카드 조립은 원장·대상 상태가 필요해 DB 경로에서만 돈다.
-프롬프트는 extract_facts.ko.txt 다.
+프롬프트는 extract_facts_body.ko.txt(+ 근거 위치 규칙 extract_facts_evidence_*.ko.txt) 다.
 카드를 DB 에 넣어보려면 set_transcript.py 로 주입한 뒤 /ingest/process 를 친다.
 """
 import argparse

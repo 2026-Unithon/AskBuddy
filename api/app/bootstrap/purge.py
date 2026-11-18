@@ -46,7 +46,7 @@ PURGE_ORDER: tuple[str, ...] = (
     "reclassification_jobs", "reclassification_results", "roadmap_stages", "snapshot_card_versions",
     "source_fact_occurrences", "source_fact_revision_links", "source_facts", "store_glossary",
     "store_join_requests", "store_shifts", "today_task_targets", "today_tasks", "upload_change_proposal_facts",
-    "upload_change_proposals", "card_block_facts", "card_version_blocks", "evaluation_cases", "evaluation_runs",
+    "upload_change_proposals", "card_block_facts", "card_version_lines", "card_version_blocks", "evaluation_cases", "evaluation_runs",
     "extraction_runs", "fact_occurrences", "fact_owner_answer_links", "ingest_jobs", "knowledge_cards",
     "r_answer_receipts", "r_evaluation_budgets", "r_index_preparations", "r_owner_answer_revisions",
     "task_categories", "card_versions", "chat_sessions", "knowledge_facts", "knowledge_snapshots", "raw_spans",

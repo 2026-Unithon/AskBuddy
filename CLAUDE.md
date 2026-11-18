@@ -140,6 +140,7 @@ W 개발은 `docs/dev/`의 문서만 기준으로 읽는다. `docs/release/`는 
 | D20 | **자료를 지워도 사실과 카드는 남는다.** source tombstone·원본 파일 접근 해제, facts/card_versions/citations 보존. API의 occurrence별 source_availability와 UI `인용 끊김`으로 표시. 기존 CASCADE FK 보강 후 활성화; 개인정보 삭제는 별도 절차. 이 보존도 매장이 활성인 동안이다 |
 | D21 | **원가·지연 상한.** 월 운영 변동비 3,000원(AI 전 단계·Storage 저장/전송 포함, API 서버(AWS EC2)/Vercel/DB 고정비 제외). 등록비는 별도 추적·예산환산/잔여 예산 보전 개월 보고. 첫 달/안정기 시나리오 검증, 미관측은 UNKNOWN. 답변 전체·저장 `p95` 5초, 카드 생성 지연 상한 보류. 계측 CP-00A~C 선행 |
 | D22 | **사장님이 탈퇴하면 30일 뒤 그 매장을 파기한다.** 유예 동안 매장은 닫히고 사장님이 취소하면 다시 열린다. 기한이 지나면 그 매장의 모든 행과 Storage 파일을 지운다. 남기는 것은 원가 장부(ai_usage_attempts, cost_assessments)와 비운 stores 행뿐이다. 장부에는 사람 글이 없다. 유예 일수는 config.py 가 단일 출처다 |
+| D23 | **카드 표시는 모델이 쓰고 서버가 검사한다.** 줄마다 근거 사실 인용, 줄의 숫자·단위는 근거 사실에 있어야 하고 사실 값은 빠지면 안 된다(문자열 검사). 실패한 줄만 사실 원문으로. 답변은 줄이 아니라 사실을 인용한다(D12 유지). 사실 모양으로 보기를 고르는 규칙은 두지 않는다 |
 
 확정 결정의 변경은 `docs/dev/ASKBUDDY_MVP_CURRENT.md`와 `docs/dev/DEV_TODO_CURRENT.md`에 먼저 반영하고, 평가 결과와 migration 호환성을 함께 검토한다.
 

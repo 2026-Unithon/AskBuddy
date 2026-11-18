@@ -1,8 +1,9 @@
-"""카드 계획 검증·대체 계획·서버 렌더링 (W3a). DB·모델·설정에 닿지 않는 순수 모듈.
+"""카드 계획 검증·대체 계획·서버 렌더링 (W3a, D23). DB·모델·설정에 닿지 않는 순수 모듈.
 
-모델은 사실을 고르고 배치만 한다. 제목·문장·수량·단위·조건·부정·예외는 이 모듈이
-사실 판에서 직접 렌더링한다. 모델 계획이 규칙을 어기면 문장을 지우지 않고 통째로
-버린 뒤 결정적 대체 계획으로 간다.
+모델은 구역(heading)·순서·줄 글을 쓰고 줄마다 근거 사실을 단다(D23). 서버는 줄이 근거 사실에
+없는 숫자·단위를 지어냈는지, 사실 값을 빠뜨렸는지만 문자열로 검사한다(`line_check`).
+검사에 실패한 줄만 사실 원문으로 바꾸고, 빠진 사실은 원문 줄로 덧붙인다. 이름표가 틀리거나
+줄이 하나도 없으면 계획을 버리고 결정적 대체 계획(규격마다 원문 줄)으로 간다.
 """
 
 from __future__ import annotations
@@ -12,15 +13,19 @@ from dataclasses import replace, dataclass
 import re
 from decimal import Decimal
 
-from app.contracts.card import CardBlock, CardPlan
+from app.contracts.card import CardBlock, CardPlan, DisplayLine
 from app.contracts.common import Variant
+from app.ingest.line_check import check_line, uncovered_facts
 
 KIND_RANK = {"QUANTITIES": 1, "STEPS": 2, "NOTES": 3}
-KIND_LABEL = {"QUANTITIES": "수치", "STEPS": "순서", "NOTES": "목록"}
 NO_VARIANT_LABEL = "규격 표시 없음"
-EVIDENCE_PREFIX = "근거: "
 MAX_FACTS_PER_BLOCK = 50
+MAX_LINES_PER_BLOCK = 60
 MAX_BLOCKS_PER_CARD = 20
+HEADING_MAX = 40
+LINE_MAX = 300
+# 모델이 실패해 대체 계획을 쓴 카드의 검수 표시(카드 단위)
+AUTO_LAYOUT = "AUTO_LAYOUT"
 TITLE_MAX = 120
 NAME_MAX = 100
 
@@ -28,12 +33,6 @@ NAME_MAX = 100
 PLAN_EMPTY = "PLAN_EMPTY"
 PLAN_UNKNOWN_REF = "PLAN_UNKNOWN_REF"
 PLAN_OUTSIDE_GROUP = "PLAN_OUTSIDE_GROUP"
-PLAN_DUPLICATE_IN_CARD = "PLAN_DUPLICATE_IN_CARD"
-PLAN_KIND_MISMATCH = "PLAN_KIND_MISMATCH"
-PLAN_VARIANT_MIXED = "PLAN_VARIANT_MIXED"
-PLAN_STEP_ORDER = "PLAN_STEP_ORDER"
-PLAN_STEPS_INCOMPLETE = "PLAN_STEPS_INCOMPLETE"
-PLAN_REQUIRES_MISSING = "PLAN_REQUIRES_MISSING"
 PLAN_UNPLACED = "PLAN_UNPLACED"
 
 # 데이터 오류 — 대체 계획도 불가능하다. 카드 없이 검수 대기
@@ -80,9 +79,31 @@ class EntityGroup:
 
 
 @dataclass(frozen=True)
+class ProposedLine:
+    # 모델(또는 사장님)이 쓴 줄 글. None 이면 인용한 사실마다 원문 줄을 서버가 쓴다
+    text: str | None
+    refs: tuple[int | str, ...]  # 판 id(int) 또는 풀지 못한 이름표(str)
+
+
+@dataclass(frozen=True)
 class ProposedBlock:
     kind: str  # 모델이 준 그대로
-    refs: tuple[int | str, ...]  # 판 id(int) 또는 풀지 못한 이름표(str)
+    heading: str | None = None
+    lines: tuple[ProposedLine, ...] = ()
+
+    @classmethod
+    def from_refs(cls, kind: str, refs: Sequence[int | str], heading: str | None = None) -> "ProposedBlock":
+        """글 없이 사실만 고른 블록 — 사실마다 원문 줄."""
+        return cls(kind=kind, heading=heading, lines=tuple(ProposedLine(None, (r,)) for r in refs))
+
+    @property
+    def refs(self) -> tuple[int | str, ...]:
+        """줄 순서대로, 중복 없이."""
+        seen: dict[int | str, None] = {}
+        for line in self.lines:
+            for r in line.refs:
+                seen.setdefault(r, None)
+        return tuple(seen)
 
 
 @dataclass(frozen=True)
@@ -97,7 +118,10 @@ class ValidatedBlock:
     kind: str  # QUANTITIES | STEPS | NOTES
     order: int  # 카드 안 1부터
     fact_revision_ids: tuple[int, ...]  # 표시 순서
-    variant: VariantKey
+    variant: VariantKey  # 블록 사실 규격이 모두 같으면 그 값, 아니면 (None, None)
+    heading: str | None = None
+    # (줄 글, 근거 판 id 들). 검사를 거친 표시 줄(D23)
+    lines: tuple[tuple[str, tuple[int, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,6 +131,8 @@ class ValidatedCard:
     category_name: str
     variant: VariantKey  # 모든 블록 규격이 같으면 그 값, 아니면 (None, None)
     blocks: tuple[ValidatedBlock, ...]
+    # 모델 계획을 버리고 대체 계획을 썼으면 AUTO_LAYOUT
+    needs_review_reason: str | None = None
 
     def fact_revision_ids(self) -> tuple[int, ...]:
         """블록 순서대로, 중복 없이."""
@@ -128,6 +154,9 @@ class ValidatedCard:
                     kind=b.kind,
                     order=b.order,
                     fact_revision_ids=tuple(str(r) for r in b.fact_revision_ids),
+                    heading=b.heading,
+                    lines=tuple(DisplayLine(text=t, fact_revision_ids=tuple(str(r) for r in refs))
+                                for t, refs in b.lines),
                 )
                 for b in self.blocks
             ],
@@ -216,157 +245,183 @@ def _chunks(items: Sequence, size: int) -> list[list]:
     return [list(items[i : i + size]) for i in range(0, len(items), size)]
 
 
+def _one_heading(text: str | None) -> str | None:
+    text = _one_line((text or "").strip())[:HEADING_MAX].strip()
+    return text or None
+
+
+def raw_line_text(f: PlanFact) -> str:
+    """사실 원문 줄: 보이는 문장 + 문장에 없는 조건·예외. 한 줄로 접는다."""
+    text = _assertion(f)
+    extra_cond = [_one_line(c) for c in f.conditions if _one_line(c) not in text]
+    extra_exc = [_one_line(c) for c in f.exceptions if _one_line(c) not in text]
+    if extra_cond:
+        text += f" (조건: {'; '.join(extra_cond)})"
+    if extra_exc:
+        text += f" (예외: {'; '.join(extra_exc)})"
+    return text[:LINE_MAX]
+
+
+def _raw_lines(refs: Sequence[int], by_id: Mapping[int, PlanFact]) -> list[tuple[str, tuple[int, ...]]]:
+    """사실마다 원문 줄. 한 문장에서 값마다 나뉜 사실은 같은 글이라 한 줄로 합친다."""
+    merged: dict[str, list[int]] = {}
+    for r in refs:
+        merged.setdefault(raw_line_text(by_id[r]), []).append(r)
+    return [(text, tuple(ids)) for text, ids in merged.items()]
+
+
+def _block_variant(refs: Sequence[int], by_id: Mapping[int, PlanFact]) -> VariantKey:
+    variants = {by_id[r].variant for r in refs}
+    return next(iter(variants)) if len(variants) == 1 else _NO_VARIANT
+
+
+def _chunk_lines(lines: Sequence[tuple[str, tuple[int, ...]]]) -> list[list[tuple[str, tuple[int, ...]]]]:
+    """블록 한 개가 사실 50개·줄 60개를 넘지 않게 줄 경계에서 자른다."""
+    out: list[list[tuple[str, tuple[int, ...]]]] = []
+    current: list[tuple[str, tuple[int, ...]]] = []
+    facts: set[int] = set()
+    for line in lines:
+        grown = facts | set(line[1])
+        if current and (len(grown) > MAX_FACTS_PER_BLOCK or len(current) >= MAX_LINES_PER_BLOCK):
+            out.append(current)
+            current, facts = [], set()
+            grown = set(line[1])
+        current.append(line)
+        facts = grown
+    if current:
+        out.append(current)
+    return out
+
+
 def validate_proposals(
-    group: EntityGroup, proposals: Sequence[ProposedCard]
+    group: EntityGroup, proposals: Sequence[ProposedCard], *, check_lines: bool = True
 ) -> tuple[ValidatedCard, ...]:
+    """모델(또는 사장님) 계획 → 검사한 카드들.
+
+    버리는 것(PlanInvalid): 줄이 하나도 없음, 모르는 이름표, 다른 대상의 사실, 어디에도 없는 사실.
+    구역·순서·종류·규격 섞기·한 사실 여러 줄은 막지 않는다(D23 — 모양은 모델이 정한다).
+    `check_lines` 이면 줄마다 지어냄을 검사해 실패한 줄을 원문으로 바꾸고, 빠진 사실을 덧붙인다.
+    사장님 줄은 검사하지 않는다(사장님이 원천이다).
+    """
     by_id = {f.fact_revision_id: f for f in group.facts}
 
-    # 1) 빈 블록·빈 카드를 버린다
+    # 1) 근거 없는 줄·빈 블록·빈 카드를 버린다
     cards: list[tuple[str, list[ProposedBlock]]] = []
     for p in proposals:
-        blocks = [b for b in p.blocks if b.refs]
+        blocks = []
+        for b in p.blocks:
+            lines = tuple(line for line in b.lines if line.refs)
+            if lines:
+                blocks.append(replace(b, lines=lines))
         if blocks:
             cards.append((p.category_name, blocks))
-
-    # 2) 블록 규칙 — 판정 순서 고정
-    for _, blocks in cards:
-        for b in blocks:
-            if b.kind not in KIND_RANK:
-                raise PlanInvalid(PLAN_KIND_MISMATCH, f"kind={b.kind}")
-            if any(type(r) is not int for r in b.refs):
-                raise PlanInvalid(PLAN_UNKNOWN_REF)
-            if any(r not in by_id for r in b.refs):
-                raise PlanInvalid(PLAN_OUTSIDE_GROUP)
-            facts = [by_id[r] for r in b.refs]  # type: ignore[index]
-            if b.kind == "STEPS":
-                if any(f.step_order is None for f in facts):
-                    raise PlanInvalid(PLAN_KIND_MISMATCH, "STEPS 에 단계 없는 사실")
-            elif any(f.step_order is not None for f in facts):
-                raise PlanInvalid(PLAN_KIND_MISMATCH, "단계 사실이 STEPS 밖에 있다")
-            if len({f.variant for f in facts}) > 1:
-                raise PlanInvalid(PLAN_VARIANT_MIXED)
-            if b.kind == "STEPS":
-                orders = [f.step_order for f in facts]
-                if any(later < earlier for earlier, later in zip(orders, orders[1:])):  # type: ignore[operator]
-                    raise PlanInvalid(PLAN_STEP_ORDER)
-
-    # 3) 한 카드 안 중복 (다른 카드끼리는 허용)
-    for _, blocks in cards:
-        seen: set[int] = set()
-        for b in blocks:
-            for r in b.refs:
-                if r in seen:
-                    raise PlanInvalid(PLAN_DUPLICATE_IN_CARD)
-                seen.add(r)  # type: ignore[arg-type]
-
-    # 4)
     if not cards:
         raise PlanInvalid(PLAN_EMPTY)
 
-    # 5) 종류 순서로 정렬하고 블록·카드를 나눈다
-    split: list[tuple[str, list[tuple[str, tuple[int, ...]]]]] = []
+    # 2) 이름표
+    for _, blocks in cards:
+        for b in blocks:
+            for line in b.lines:
+                if any(type(r) is not int for r in line.refs):
+                    raise PlanInvalid(PLAN_UNKNOWN_REF)
+                if any(r not in by_id for r in line.refs):
+                    raise PlanInvalid(PLAN_OUTSIDE_GROUP)
+
+    # 3) 줄 검사 — 지어낸 줄은 그 줄이 인용한 사실마다 원문 줄로
+    checked: list[tuple[str, list[tuple[str, str | None, list[tuple[str, tuple[int, ...]]]]]]] = []
     for category, blocks in cards:
-        ordered = sorted(enumerate(blocks), key=lambda ib: (KIND_RANK[ib[1].kind], ib[0]))
-        pieces = [
-            (b.kind, tuple(chunk))
-            for _, b in ordered
-            for chunk in _chunks(b.refs, MAX_FACTS_PER_BLOCK)
-        ]
+        out_blocks = []
+        for b in blocks:
+            kind = b.kind if b.kind in KIND_RANK else "NOTES"
+            lines: list[tuple[str, tuple[int, ...]]] = []
+            for line in b.lines:
+                refs = tuple(dict.fromkeys(int(r) for r in line.refs))
+                text = _one_line((line.text or "").strip())
+                if line.text is None or not text or len(text) > LINE_MAX or (
+                        check_lines and check_line(text, [by_id[r] for r in refs]) is not None):
+                    lines.extend(_raw_lines(refs, by_id))
+                else:
+                    lines.append((text, refs))
+            out_blocks.append((kind, _one_heading(b.heading), lines))
+        checked.append((category, out_blocks))
+
+    # 4) 빠뜨림 — 인용했지만 값이 빠진 사실은 그 블록 끝에, 어디에도 없는 사실은 마지막 블록 끝에
+    if check_lines:
+        for _, blocks in checked:
+            card_lines = [line for _, _, lines in blocks for line in lines]
+            cited = list(dict.fromkeys(r for _, refs in card_lines for r in refs))
+            for rid in uncovered_facts(card_lines, [by_id[r] for r in cited]):
+                target = next(lines for _, _, lines in blocks if any(rid in refs for _, refs in lines))
+                target.extend(_raw_lines([rid], by_id))
+        everywhere = {r for _, blocks in checked for _, _, lines in blocks for _, refs in lines for r in refs}
+        missing = [f.fact_revision_id for f in group.facts if f.fact_revision_id not in everywhere]
+        if missing:
+            checked[-1][1][-1][2].extend(_raw_lines(missing, by_id))
+
+    # 붙어 있는 같은 글 줄은 한 줄로(한 문장에서 값마다 나뉜 사실). 근거는 합친다
+    for _, blocks in checked:
+        for i, (kind, heading, lines) in enumerate(blocks):
+            merged: list[tuple[str, tuple[int, ...]]] = []
+            for text, refs in lines:
+                if merged and merged[-1][0] == text:
+                    merged[-1] = (text, tuple(dict.fromkeys((*merged[-1][1], *refs))))
+                else:
+                    merged.append((text, refs))
+            blocks[i] = (kind, heading, merged)
+
+    # 5) 블록·카드를 한도에 맞게 나눈다
+    split: list[tuple[str, list[tuple[str, str | None, list[tuple[str, tuple[int, ...]]]]]]] = []
+    for category, blocks in checked:
+        pieces = [(kind, heading, chunk) for kind, heading, lines in blocks for chunk in _chunk_lines(lines)]
         for part in _chunks(pieces, MAX_BLOCKS_PER_CARD):
             split.append((category, part))
 
-    # 6) 선행·단계 완전성
-    for _, part in split:
-        # 같은 규격의 단계는 여러 STEPS 블록에 걸쳐서도 순서가 줄지 않아야 한다
-        last_step: dict[VariantKey, int] = {}
-        for kind, refs in part:
-            if kind != "STEPS":
-                continue
-            for r in refs:
-                f = by_id[r]
-                if f.step_order < last_step.get(f.variant, f.step_order):  # type: ignore[operator]
-                    raise PlanInvalid(PLAN_STEP_ORDER, "블록 사이 단계 순서")
-                last_step[f.variant] = f.step_order  # type: ignore[assignment]
-        in_card = {r for _, refs in part for r in refs}
-        fact_ids_in_card = {by_id[r].fact_id for r in in_card}
-        for r in in_card:
-            if any(req not in fact_ids_in_card for req in by_id[r].requires_fact_ids):
-                raise PlanInvalid(PLAN_REQUIRES_MISSING)
-        step_ids = {r for kind, refs in part if kind == "STEPS" for r in refs}
-        step_variants = {by_id[r].variant for r in step_ids}
-        for f in group.facts:
-            if f.step_order is not None and f.variant in step_variants:
-                if f.fact_revision_id not in step_ids:
-                    raise PlanInvalid(PLAN_STEPS_INCOMPLETE)
-
-    # 7) 어느 카드에도 없는 판
-    placed = {r for _, part in split for _, refs in part for r in refs}
+    # 6) 어느 카드에도 없는 판
+    placed = {r for _, part in split for _, _, lines in part for _, refs in lines for r in refs}
     if any(f.fact_revision_id not in placed for f in group.facts):
         raise PlanInvalid(PLAN_UNPLACED)
 
-    # 8) 결과
+    # 7) 결과
     total = len(split)
     result: list[ValidatedCard] = []
     for i, (category, part) in enumerate(split, start=1):
-        blocks: list[ValidatedBlock] = []
-        for n, (kind, refs) in enumerate(part, start=1):
-            blocks.append(
-                ValidatedBlock(
-                    block_id=f"b{n}",
-                    kind=kind,
-                    order=n,
-                    fact_revision_ids=tuple(refs),
-                    variant=by_id[refs[0]].variant,
-                )
-            )
-        variants = {b.variant for b in blocks}
+        blocks_out: list[ValidatedBlock] = []
+        for n, (kind, heading, lines) in enumerate(part, start=1):
+            refs = tuple(dict.fromkeys(r for _, line_refs in lines for r in line_refs))
+            blocks_out.append(ValidatedBlock(
+                block_id=f"b{n}", kind=kind, order=n, fact_revision_ids=refs,
+                variant=_block_variant(refs, by_id), heading=heading, lines=tuple(lines)))
+        variants = {b.variant for b in blocks_out}
         variant = next(iter(variants)) if len(variants) == 1 else _NO_VARIANT
-        result.append(
-            ValidatedCard(
-                entity_id=group.entity_id,
-                title=card_title(group.canonical_name, i, total),
-                category_name=category.strip() or "기타",
-                variant=variant,
-                blocks=tuple(blocks),
-            )
-        )
+        result.append(ValidatedCard(
+            entity_id=group.entity_id,
+            title=card_title(group.canonical_name, i, total),
+            category_name=category.strip() or "기타",
+            variant=variant,
+            blocks=tuple(blocks_out)))
     return tuple(result)
 
 
 def fallback_cards(group: EntityGroup, *, category_name: str) -> tuple[ValidatedCard, ...]:
-    """규격별 결정적 배치. 모델 없이 모든 사실을 싣는다."""
+    """모델이 실패했을 때만. 규격마다 블록 하나, 줄 = 사실 원문, 구역 제목 = 규격 이름(없으면 없음).
+
+    종류는 NOTES(목록)다 — 사실 모양으로 단계를 추측하지 않는다(D23).
+    """
     variants = sorted(
         {f.variant for f in group.facts},
         key=lambda v: (v[0] is None, v[0] or "", v[1] is None, v[1] or ""),
     )
-    blocks: list[ProposedBlock] = []
-    for v in variants:
-        facts = [f for f in group.facts if f.variant == v]
-        quantities = [
-            f.fact_revision_id
-            for f in facts
-            if f.step_order is None and f.polarity == "AFFIRM" and f.quantity_value is not None
-        ]
-        steps = [
-            f.fact_revision_id
-            for f in sorted(
-                (f for f in facts if f.step_order is not None),
-                key=lambda f: (f.step_order, f.fact_revision_id),
-            )
-        ]
-        quantity_set = set(quantities)
-        notes = [
-            f.fact_revision_id
-            for f in facts
-            if f.step_order is None and f.fact_revision_id not in quantity_set
-        ]
-        for kind, refs in (("QUANTITIES", quantities), ("STEPS", steps), ("NOTES", notes)):
-            if refs:
-                blocks.append(ProposedBlock(kind=kind, refs=tuple(refs)))
+    blocks = [
+        ProposedBlock.from_refs(
+            "NOTES", [f.fact_revision_id for f in group.facts if f.variant == v],
+            heading=(variant_label(v) if v != _NO_VARIANT else None))
+        for v in variants
+    ]
     try:
-        return validate_proposals(group, [ProposedCard(category_name, tuple(blocks))])
+        cards = validate_proposals(group, [ProposedCard(category_name, tuple(blocks))])
     except PlanInvalid as e:
         raise PlanInvalid(DATA_TOO_LARGE, e.code) from e
+    return tuple(replace(c, needs_review_reason=AUTO_LAYOUT) for c in cards)
 
 
 _SEQUENCE_MARK = re.compile(r"→|->|⇒|➔")
@@ -410,35 +465,42 @@ def _kind_of(f: PlanFact) -> str:
 
 
 def append_facts(layout: Sequence[tuple[str, tuple[int, ...]]], group: EntityGroup,
-                 new_ids: Sequence[int], *, category_name: str) -> ValidatedCard:
+                 new_ids: Sequence[int], *, category_name: str,
+                 display: Sequence[tuple[str | None, Sequence[tuple[str, tuple[int, ...]]]]] | None = None
+                 ) -> ValidatedCard:
     """공개 판 배치를 그대로 두고 새 사실만 붙인다. 모델을 부르지 않는다(A-D4).
 
-    layout 은 공개 판의 (종류, 판 id 들) 블록 순서다. 새 사실은 같은 종류·같은 규격의 첫 블록
-    끝에 붙는다. STEPS 는 (단계 순서, 판 id) 로 다시 줄 세운다. 맞는 블록이 없으면 그 종류의
-    새 블록을 끝에 둔다. 검증은 validate_proposals 가 하고, 카드가 한 장이 아니면 거절한다.
+    layout 은 공개 판의 (종류, 판 id 들) 블록 순서다. display 는 같은 순서의 (구역 제목, 표시 줄)이다 —
+    있으면 그 줄을 그대로 두고(모델·사장님이 쓴 글), 새 사실은 원문 줄로 붙인다. 줄이 없는 옛 판은
+    사실마다 원문 줄이다. 새 사실은 같은 종류·같은 규격의 첫 블록 끝에, 맞는 블록이 없으면 그 종류의
+    새 블록을 끝에 둔다. 이미 검사한 줄을 다시 검사하지 않는다. 카드가 한 장이 아니면 거절한다.
     """
     by_id = {f.fact_revision_id: f for f in group.facts}
-    blocks: list[tuple[str, list[int]]] = []
-    for kind, ids in layout:
+    blocks: list[tuple[str, list[int], str | None, list[ProposedLine]]] = []
+    for i, (kind, ids) in enumerate(layout):
         if any(r not in by_id for r in ids):
             raise PlanInvalid(PLAN_OUTSIDE_GROUP, "layout")
-        blocks.append((kind, list(ids)))
+        heading, shown = (display[i] if display is not None and i < len(display) else (None, ()))
+        lines = [ProposedLine(text, tuple(refs)) for text, refs in shown]
+        cited = {r for line in lines for r in line.refs}
+        # 줄이 인용하지 않은 블록 사실(옛 판)은 원문 줄로
+        lines.extend(ProposedLine(None, (r,)) for r in ids if r not in cited)
+        blocks.append((kind, list(ids), heading, lines))
     for rid in new_ids:
         f = by_id.get(rid)
         if f is None:
             raise PlanInvalid(PLAN_OUTSIDE_GROUP, f"new={rid}")
         kind = _kind_of(f)
-        target = next((ids for k, ids in blocks
-                       if k == kind and ids and by_id[ids[0]].variant == f.variant), None)
+        target = next((b for b in blocks
+                       if b[0] == kind and b[1] and by_id[b[1][0]].variant == f.variant), None)
         if target is None:
-            blocks.append((kind, [rid]))
+            blocks.append((kind, [rid], None, [ProposedLine(None, (rid,))]))
             continue
-        target.append(rid)
-        if kind == "STEPS":
-            target.sort(key=lambda r: (by_id[r].step_order, r))
-    proposal = ProposedCard(category_name,
-                            tuple(ProposedBlock(k, tuple(ids)) for k, ids in blocks))
-    cards = validate_proposals(group, [proposal])
+        target[1].append(rid)
+        target[3].append(ProposedLine(None, (rid,)))
+    proposal = ProposedCard(category_name, tuple(
+        ProposedBlock(kind=k, heading=h, lines=tuple(lines)) for k, _, h, lines in blocks))
+    cards = validate_proposals(group, [proposal], check_lines=False)
     if len(cards) != 1:
         raise PlanInvalid(DATA_TOO_LARGE, "append")
     return cards[0]
@@ -471,59 +533,11 @@ def _assertion(f: PlanFact) -> str:
     return _one_line((f.assertion or f.original_assertion).strip())
 
 
-def render_card(
-    card: ValidatedCard, facts: Mapping[int, PlanFact], *, evidence: Sequence[str] = ()
-) -> str:
-    """카드 본문을 사실 판에서 렌더링한다. 사실을 생략·요약하지 않는다."""
-    in_card: dict[int, PlanFact] = {}
-    for rid in card.fact_revision_ids():
-        f = facts[rid]
-        in_card.setdefault(f.fact_id, f)
-
-    def prerequisite_label(fact_id: int) -> str | None:
-        f = in_card.get(fact_id)
-        if f is None:
-            return None
-        if f.step_order is not None:
-            return f"{f.step_order}번"
-        return f"「{_assertion(f)[:40]}」"
-
-    sections: list[str] = []
-    for b in card.blocks:
-        head = f"[{KIND_LABEL[b.kind]}"
-        if b.variant != _NO_VARIANT:
-            head += f" · {variant_label(b.variant)}"
-        lines = [head + "]"]
-        seen: set[str] = set()
-        for rid in b.fact_revision_ids:
-            f = facts[rid]
-            line = f"{f.step_order}. " if b.kind == "STEPS" else "- "
-            line += _assertion(f)
-            if f.conditions:
-                line += f" (조건: {'; '.join(_one_line(c) for c in f.conditions)})"
-            if f.exceptions:
-                line += f" (예외: {'; '.join(_one_line(c) for c in f.exceptions)})"
-            labels = [x for x in (prerequisite_label(r) for r in f.requires_fact_ids) if x]
-            if labels:
-                line += f" (먼저: {', '.join(labels)})"
-            # 한 문장에서 값마다 나뉜 사실은 같은 줄이 된다. 같은 줄은 한 번만 쓴다(render_missing 은 포함 여부로 본다)
-            if line in seen:
-                continue
-            seen.add(line)
-            lines.append(line)
-        sections.append("\n".join(lines))
-    text = "\n\n".join(sections)
-    if evidence:
-        text += "\n\n" + EVIDENCE_PREFIX + ", ".join(evidence)
-    return text
-
-
-def render_missing(card: ValidatedCard, facts: Mapping[int, PlanFact], content: str) -> list[int]:
-    """본문에 원문·조건·예외가 빠진 판 id (정렬·중복 제거)."""
-    missing: set[int] = set()
-    for rid in card.fact_revision_ids():
-        f = facts[rid]
-        needles = [_assertion(f), *map(_one_line, f.conditions), *map(_one_line, f.exceptions)]
-        if any(n not in content for n in needles):
-            missing.add(rid)
-    return sorted(missing)
+def card_content(blocks: Sequence[ValidatedBlock]) -> str:
+    """판 본문(검색·임베딩이 쓰는 글) = 블록 순서대로 구역 제목(있으면) + 줄 글, 줄바꿈으로 잇는다 (D23)."""
+    out: list[str] = []
+    for b in sorted(blocks, key=lambda b: b.order):
+        if b.heading:
+            out.append(b.heading)
+        out.extend(text for text, _ in b.lines)
+    return "\n".join(out)

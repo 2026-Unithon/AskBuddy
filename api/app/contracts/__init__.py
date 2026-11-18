@@ -48,6 +48,7 @@ from app.contracts.publication import (
 from app.contracts.card import (
     BlockKind,
     CardBlock,
+    DisplayLine,
     CardPlan,
     Disposition,
     OccurrenceDisposition,
@@ -89,7 +90,7 @@ from app.contracts.validate import AnswerPlanViolation, validate_answer_plan, va
 
 __all__ = [
     "AnswerAction", "AnswerPlan", "SelectedBlock",
-    "BlockKind", "CardBlock", "CardPlan", "Disposition", "OccurrenceDisposition",
+    "BlockKind", "CardBlock", "DisplayLine", "CardPlan", "Disposition", "OccurrenceDisposition",
     "Contract", "EntityId", "FrozenContract", "Polarity", "Quantity", "Variant",
     "RawText", "RevisionId", "Sha256Hex", "HashRef", "UtcDatetime", "MAX_BIGINT",
     "as_id",

@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.cards.fact_edit_schemas import CardFactsView, FactBlockView, FactRow, FactVariant
+from app.cards.fact_edit_schemas import CardFactsView, FactBlockView, FactRow, FactVariant, LineView
 from app.learn.recipe_blocks import blocks_for_staff
 from app.learn import router as learn_router
 
@@ -13,13 +13,31 @@ def row(fact_id, sentence, step=None):
 
 
 class BlocksForStaffTest(unittest.TestCase):
-    def test_only_sentence_order_variant_leave_the_server(self):
+    def test_only_heading_lines_variant_leave_the_server(self):
+        # 계획 10(D23): 직원도 사장님과 같은 보기(구역 제목·줄). 근거 판 id·사실 칸은 내보내지 않는다
         view = CardFactsView(card_id=1, version_id=10, title="합성", review_status="APPROVED", editable=True, blocks=[
-            FactBlockView(block_id="b1", kind="QUANTITIES", order=1, variant=FactVariant(temperature="ICE"), facts=[row(1, "컵=20")]),
-            FactBlockView(block_id="b2", kind="STEPS", order=2, facts=[row(2, "제조순서=컵 → 재료", 1)])])
+            FactBlockView(block_id="b1", kind="QUANTITIES", order=1, variant=FactVariant(temperature="ICE"), facts=[row(1, "컵=20")],
+                          heading="ICE", lines=[LineView(line_no=1, text="컵 20", fact_revision_ids=[10])]),
+            FactBlockView(block_id="b2", kind="STEPS", order=2, facts=[row(2, "제조순서=컵 → 재료", 1)],
+                          lines=[LineView(line_no=1, text="컵", fact_revision_ids=[20]), LineView(line_no=2, text="재료", fact_revision_ids=[20])])])
         self.assertEqual(blocks_for_staff(view), [
-            {"kind": "QUANTITIES", "variant": {"temperature": "ICE", "size": None}, "facts": [{"sentence": "컵=20", "step_order": None}]},
-            {"kind": "STEPS", "variant": {"temperature": None, "size": None}, "facts": [{"sentence": "제조순서=컵 → 재료", "step_order": 1}]}])
+            {"kind": "QUANTITIES", "variant": {"temperature": "ICE", "size": None}, "heading": "ICE",
+             "lines": [{"line_no": 1, "text": "컵 20", "price": None}]},
+            {"kind": "STEPS", "variant": {"temperature": None, "size": None}, "heading": None,
+             "lines": [{"line_no": 1, "text": "컵", "price": None}, {"line_no": 2, "text": "재료", "price": None}]}])
+
+
+    def test_price_line_carries_price(self):
+        # 2026-11-18: 금액은 제목 옆에. 단위 칸이 원인 수치 사실만 인용한 줄에 금액 글을 붙인다(화면은 사장님과 같은 lib/card-price)
+        price = row(1, "금액=2000원").model_copy(update={"value": "2000", "unit": "원"})
+        water = row(2, "물=120ml").model_copy(update={"value": "120", "unit": "ml"})
+        view = CardFactsView(card_id=1, version_id=10, title="합성", review_status="APPROVED", editable=True, blocks=[
+            FactBlockView(block_id="b1", kind="NOTES", order=1, facts=[price, water], lines=[
+                LineView(line_no=1, text="금액 2,000원", fact_revision_ids=[10]),
+                LineView(line_no=2, text="물 120ml", fact_revision_ids=[20]),
+                LineView(line_no=3, text="물 120ml 금액 2,000원", fact_revision_ids=[10, 20])])])
+        lines = blocks_for_staff(view)[0]["lines"]
+        self.assertEqual([line["price"] for line in lines], ["2,000원", None, None])
 
 
 class RoadmapItemTest(unittest.IsolatedAsyncioTestCase):

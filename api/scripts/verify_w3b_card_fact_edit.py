@@ -705,8 +705,9 @@ async def _s2(db, pool):
           and _j(new["conditions"]) == ["매장 안에서"] and new["quantity_value"] is None
           and new["value_text"] == "끼우지 않는다")
     content = (await _card(db, w.store, w.card))["content"]
-    check("본문에 (조건: …) 과 새 문장",
-          "음료Z 홀더는 매장 안에서 끼우지 않는다 (조건: 매장 안에서)" in content)
+    # 계획 10: 원문 줄은 문장에 이미 있는 조건을 다시 붙이지 않는다
+    check("본문에 새 문장(조건 포함)",
+          "음료Z 홀더는 매장 안에서 끼우지 않는다" in content and "(조건:" not in content)
     after = await _facts_view(pool, w, w.card)
     row = _find(after, fact_revision_id=rev.fact_revision_id)
     check("읽기 화면 — NEGATE·이전 문장·OWNER_TEXT 근거",
@@ -857,7 +858,10 @@ async def _s6(db, pool):
           same_other and rows[new[shot.fact_revision_id]]["step_order"] == 3
           and rows[new[lid.fact_revision_id]]["step_order"] == 2)
     content = (await _card(db, w.store, w.card))["content"]
-    check("본문 번호 갱신", f"2. {lid.sentence}" in content and f"3. {shot.sentence}" in content)
+    # 계획 10: 본문은 줄 글이라 번호를 싣지 않는다. 바뀐 순서대로 줄이 놓인다
+    body = content.split("\n")
+    check("본문 줄 순서 갱신", lid.sentence in body and shot.sentence in body
+          and body.index(lid.sentence) < body.index(shot.sentence))
     view = await _facts_view(pool, w, w.card)
     ice, shot = _find(view, step_order=1), _find(view, step_order=3)
     before = await _counts(db, w.store)

@@ -69,11 +69,10 @@ test('s02b 레시피 목록은 글 대신 표시, 차례 등장', async (b) => {
   await page.getByRole('link', { name: /아메리카노/ }).waitFor();
   await ctx.close();
 });
-test('s03a 레시피 보기는 HOT·ICE 를 카드 밖 제목으로', async (b) => {
+test('s03a 사실 카드가 아닌 레시피는 본문 그대로(계획 10: 본문을 HOT·ICE 로 나누는 추측 삭제)', async (b) => {
   const { page, ctx } = await open(b, 'STAFF', '/staff/recipes/12');
-  await page.getByRole('heading', { name: 'HOT', exact: true }).waitFor();
-  await page.getByRole('heading', { name: 'ICE', exact: true }).waitFor();
-  await page.getByText('물 275ml 샷 2', { exact: true }).waitFor();
+  await page.getByText('HOT 물 275ml 샷 2', { exact: false }).first().waitFor();
+  assert.equal(await page.getByRole('heading', { name: 'HOT', exact: true }).count(), 0);
   for (const gone of [/^출처/, '확인했어요. 내용이 바뀌면 다시 알려드려요.']) assert.equal(await page.getByText(gone).count(), 0, String(gone));
   await ctx.close();
 });
@@ -225,15 +224,4 @@ test('검토 2 가입할 때 이름이 비면 보내지 않고 칸 아래 빨간
   assert.equal(api.calls.filter((c) => c.path === '/auth/signup').length, 0);
   await ctx.close();
 });
-test('검토 3 서버 본문 형식([재료 · HOT])도 규격 제목으로 나눈다', async (b) => {
-  const content = '[재료 · HOT]\n- 물 275ml\n- 샷 2\n\n[재료 · ICE]\n- 물 225ml\n- 얼음 가득\n\n[순서]\n1. 컵에 얼음을 담는다\n2. 샷을 붓는다\n\n근거 자료: 레시피 메모.jpg';
-  const { page, ctx } = await open(b, 'STAFF', '/staff/recipes/12', { overrides: { itemContent: { 12: content } } });
-  await page.getByRole('heading', { name: 'HOT 재료', exact: true }).waitFor();
-  await page.getByRole('heading', { name: 'ICE 재료', exact: true }).waitFor();
-  await page.getByRole('heading', { name: '순서', exact: true }).waitFor();
-  await page.getByText('물 225ml', { exact: true }).waitFor();
-  for (const gone of ['[재료 · HOT]', '근거 자료', '- 물 275ml']) assert.equal(await page.getByText(gone, { exact: false }).count(), 0, gone);
-  await ctx.close();
-});
-
 run();

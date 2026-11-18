@@ -220,7 +220,7 @@ async def test_same_input_twice_calls_model_once_and_ledgers_reuse():
 
 @pytest.mark.asyncio
 async def test_prompt_file_one_char_change_calls_again(tmp_path):
-    prompt = tmp_path / "extract_facts.ko.txt"
+    prompt = tmp_path / "extract_facts_body.ko.txt"
     prompt.write_text(gemini.FACTS_PROMPT_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     sink, calls = MemorySink(), Calls()
     with patch.object(gemini, "get_settings", return_value=_settings()), \

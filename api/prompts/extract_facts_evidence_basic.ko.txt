@@ -1,0 +1,4 @@
+8. **근거 위치를 남긴다.** `evidence` 에 자료에서 그 사실이 나온 자리를 적는다.
+   영상·음성은 `type="TIMESTAMP"` 와 `timestamp_sec` (`[03:14]` → 194),
+   문서는 `type="PAGE"` 와 `page`, 채팅은 `type="LINE"` 과 `line`.
+   위치를 모르면 `type="WHOLE_SOURCE"` 로 둔다. 지어내지 않는다.

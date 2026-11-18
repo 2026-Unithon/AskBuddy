@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cardQuery } from "@/lib/query";
 import { useApp } from "@/lib/store";
@@ -37,20 +37,27 @@ export function CardTile({
   left,
   right,
   select,
+  href: hrefOverride,
+  badge,
 }: {
-  card: CardListItem;
+  card: Pick<CardListItem, "card_id" | "title">;
   status: TileStatus;
   proposal?: boolean;
   left?: SwipeAction;
   right?: SwipeAction;
   /** 선택 모드(계획 7 Task 5): 누르면 고르기, 상세로 가지 않고 밀기도 없다 */
   select?: { selected: boolean; onToggle: () => void };
+  /** 직원 레시피 목록(계획 10): 직원 상세로 간다. 사장님 상세 미리 받기·제목 이어 움직이기는 하지 않는다 */
+  href?: string;
+  /** 제목 옆 작은 표시(직원 확인함·내용 바뀜) */
+  badge?: ReactNode;
 }) {
   const router = useRouter();
   const client = useQueryClient();
   const { state } = useApp();
   const title = useRef<HTMLSpanElement>(null);
-  const href = proposal ? `/owner/cards/proposals?card_id=${card.card_id}` : `/owner/cards/${card.card_id}`;
+  const href = hrefOverride ?? (proposal ? `/owner/cards/proposals?card_id=${card.card_id}` : `/owner/cards/${card.card_id}`);
+  const ownerDetail = !hrefOverride && !proposal;
   const dot = DOT_CLASS[status];
   if (select) {
     return (
@@ -88,18 +95,18 @@ export function CardTile({
       href={href}
       draggable={false}
       onNavigate={(event) => {
-        // 상세로 갈 때만 제목을 이어 움직인다(제안 화면은 제목이 없다)
-        if (proposal) return;
+        // 사장님 상세로 갈 때만 제목을 이어 움직인다(제안 화면·직원 화면은 제목 짝이 없다)
+        if (!ownerDetail) return;
         event.preventDefault();
         navigateWithSharedTitle(() => router.push(href), title.current, `card-title-${card.card_id}`);
       }}
       data-status={status}
       data-card-tile=""
       data-card-id={card.card_id}
-      aria-label={`${card.title}, ${STATUS_WORD[status]}${proposal ? ", 다른 답이 있어요" : ""}`}
+      aria-label={hrefOverride ? undefined : `${card.title}, ${STATUS_WORD[status]}${proposal ? ", 다른 답이 있어요" : ""}`}
       // 누르는 순간 상세를 미리 받아 둔다(제목이 이어 움직이는 동안 기다리지 않게)
       onPointerDown={() => {
-        if (!proposal) void client.prefetchQuery(cardQuery(state.token, state.storeId, card.card_id));
+        if (ownerDetail) void client.prefetchQuery(cardQuery(state.token, state.storeId, card.card_id));
       }}
       className={`relative flex min-h-[72px] flex-col justify-between gap-2 rounded-[18px] px-3.5 py-3 ${STATUS_CLASS[status]} ${pressable} ${focusRing}`}
     >
@@ -108,6 +115,7 @@ export function CardTile({
         <span ref={title} className={`line-clamp-2 min-w-0 flex-1 text-[15px] font-bold leading-[1.4] [word-break:keep-all] ${status === "pending" ? "text-ink-muted" : "text-ink"}`}>
             {card.title}
           </span>
+        {badge}
         <span aria-hidden className="text-[18px] leading-none text-ink-muted">
           ›
         </span>

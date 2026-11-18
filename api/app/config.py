@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     # 반복(D17/D18)이 전부 같아져 변동 측정이 무너진다. 이 플래그를 따로 켤 때만 재사용한다
     extract_reuse_for_evaluation: bool = False
     # W1-4 근거 위치 표지. 켜면 사실 추출에 쪽·메시지 번호(page·line)를 받는다 —
-    # 위치 표지 프롬프트(extract_facts_locator.ko.txt)·스키마(LocatedFactExtractionResult)·
+    # 위치 표지 근거 규칙(extract_facts_evidence_locator.ko.txt)·스키마(LocatedFactExtractionResult)·
     # 카톡 `[#N]` 표지를 쓰고, 서버가 그 번호를 검사해 PAGE·LINE 위치로 남긴다.
     # 끄면 추출 요청이 이전과 같다(D16 비교 기준 유지). 근거 위치 표 기록·서버 검사는 플래그와 무관하다
     extract_locator_hints: bool = False

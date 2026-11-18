@@ -110,9 +110,40 @@ class EditAdd(BaseModel):
 EditItem = Annotated[EditKeep | EditModify | EditAdd, Field(discriminator="op")]
 
 
+class EditLine(BaseModel):
+    """사장님이 보는 그대로의 줄 하나(D23). 근거는 이 블록 items 의 판 id 또는 ADD client_ref."""
+
+    text: str = Field(min_length=1, max_length=300)
+    fact_revision_ids: list[int] = Field(default_factory=list, max_length=50)
+    client_refs: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _text(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = re.sub(r"[\r\n]+", " ", value).strip()
+            if not value:
+                raise ValueError("비워 둘 수 없습니다.")
+        return value
+
+    @model_validator(mode="after")
+    def _has_ref(self) -> "EditLine":
+        if not self.fact_revision_ids and not self.client_refs:
+            raise ValueError("줄에는 근거 사실이 하나 이상 있어야 합니다.")
+        return self
+
+
 class EditBlock(BaseModel):
     kind: EditBlockKind
     items: list[EditItem] = Field(min_length=1, max_length=50)
+    # 표시(D23). 없으면(None) 서버가 블록 사실마다 원문 줄을 만든다
+    heading: str | None = Field(default=None, max_length=40)
+    lines: list[EditLine] | None = Field(default=None, max_length=60)
+
+    @field_validator("heading", mode="before")
+    @classmethod
+    def _heading(cls, value: Any) -> Any:
+        return _strip_or_none(value) if isinstance(value, str) else value
 
 
 class FactEditRequest(BaseModel):
@@ -222,12 +253,21 @@ class FactRow(BaseModel):
     edit_block: Literal["CHANGED_ELSEWHERE", "MOVED_ENTITY"] | None = None
 
 
+class LineView(BaseModel):
+    line_no: int
+    text: str
+    fact_revision_ids: list[int]
+
+
 class FactBlockView(BaseModel):
     block_id: str
     kind: Literal["QUANTITIES", "STEPS", "NOTES", "RAW"]
     order: int
     variant: FactVariant = Field(default_factory=FactVariant)
     facts: list[FactRow]
+    # 표시(D23). 줄 없는 옛 판은 서버가 블록 사실마다 원문 줄을 만들어 준다
+    heading: str | None = None
+    lines: list[LineView] = Field(default_factory=list)
 
 
 class ReviewOption(BaseModel):

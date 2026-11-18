@@ -15,14 +15,16 @@ from app.cards import fact_parse
 from app.cards import repository as repo
 from app.cards.review_items import load_review_items, write_items
 from app.cards.fact_edit_revert import plan_revert
-from app.ingest import fact_revisions
+from app.ingest import card_plan, fact_revisions
 from app.checklist import repository as checklist_repo
 from app.cards.fact_edit_plan import CardFactState, EditError
 from app.cards.fact_edit_schemas import (
     CardFactsView,
     EditBlock,
     EditKeep,
+    EditLine,
     FactBlockView,
+    LineView,
     FactEditRequest,
     FactEditResult,
     FactOrigin,
@@ -687,6 +689,26 @@ def fact_row_view(
     )
 
 
+def display_of_block(state: CardFactState, block_id: str, facts) -> tuple[str | None, list]:
+    """블록의 (구역 제목, 줄). 저장된 줄이 있으면 그대로, 없는 옛 판은 사실마다 원문 줄(같은 글은 한 줄)
+    이고 구역 제목은 블록 사실 규격이 하나면 그 이름이다(D23)."""
+    stored = state.lines.get(block_id)
+    if stored:
+        return state.headings.get(block_id), list(stored)
+    merged: list[tuple[str, tuple[int, ...]]] = []
+    for f in facts:
+        text = card_plan.raw_line_text(f)
+        if merged and merged[-1][0] == text:
+            merged[-1] = (text, (*merged[-1][1], f.fact_revision_id))
+        else:
+            merged.append((text, (f.fact_revision_id,)))
+    variants = {f.variant for f in facts}
+    heading = state.headings.get(block_id)
+    if heading is None and len(variants) == 1 and next(iter(variants)) != (None, None):
+        heading = card_plan.variant_label(next(iter(variants)))
+    return heading, merged
+
+
 def build_facts_view(
     state: CardFactState,
     rows: dict[int, dict[str, Any]],
@@ -708,9 +730,13 @@ def build_facts_view(
             for p in lines
         ]
         variant = facts[0].variant if facts else FactVariant()
+        heading, shown = display_of_block(state, block_id, [p.fact for p in lines])
         blocks.append(
             FactBlockView(
-                block_id=block_id, kind=kind, order=order, variant=variant, facts=facts
+                block_id=block_id, kind=kind, order=order, variant=variant, facts=facts,
+                heading=heading,
+                lines=[LineView(line_no=n, text=text, fact_revision_ids=list(ids))
+                       for n, (text, ids) in enumerate(shown, start=1)],
             )  # type: ignore[arg-type]
         )
     return CardFactsView(
@@ -782,7 +808,15 @@ async def write_review_value(
                                         variant=f.variant, predicate=f.predicate)
                     items.append(EditModify(op="MODIFY", fact_revision_id=f.fact_revision_id, fact=fields))
                 if items:
-                    blocks.append(EditBlock(kind=b.kind, items=items))
+                    # 다른 줄은 그대로, 고친 사실을 인용한 줄은 사장님 글 한 줄로(D23)
+                    lines: list[EditLine] = []
+                    for line in b.lines:
+                        if req.fact_revision_id in line.fact_revision_ids:
+                            if not any(req.fact_revision_id in l.fact_revision_ids for l in lines):
+                                lines.append(EditLine(text=req.text.strip(), fact_revision_ids=[req.fact_revision_id]))
+                            continue
+                        lines.append(EditLine(text=line.text, fact_revision_ids=line.fact_revision_ids))
+                    blocks.append(EditBlock(kind=b.kind, items=items, heading=b.heading, lines=lines))
             edit = FactEditRequest(expected_version_id=req.expected_version_id,
                                    idempotency_key=req.idempotency_key, blocks=blocks)
             return await fact_edit.save_fact_edit(db, store_id, card_id=card_id, actor_id=user_id, req=edit)
@@ -849,9 +883,14 @@ async def choose_review_value(
                 db, store_id, conflict_id, keep_fact_id=req.keep_fact_id, actor_id=user_id)
             view = await get_card_facts(card_id, db, claims)
             gone = [f.fact_revision_id for b in view.blocks for f in b.facts if f.fact_id == rejected]
+            gone_set = set(gone)
             blocks = [
                 EditBlock(kind=b.kind, items=[EditKeep(op="KEEP", fact_revision_id=f.fact_revision_id)
-                                              for f in b.facts if f.fact_id != rejected])
+                                              for f in b.facts if f.fact_id != rejected],
+                          heading=b.heading,
+                          # 뺀 값을 인용한 줄은 그 인용만 떼고, 남은 근거가 없으면 줄째 뺀다(D23)
+                          lines=[EditLine(text=l.text, fact_revision_ids=[r for r in l.fact_revision_ids if r not in gone_set])
+                                 for l in b.lines if any(r not in gone_set for r in l.fact_revision_ids)])
                 for b in view.blocks if b.kind != "RAW"
             ]
             edit = FactEditRequest(

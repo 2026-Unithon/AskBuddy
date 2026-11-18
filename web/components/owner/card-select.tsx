@@ -2,13 +2,10 @@
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { focusRing } from "@/components/kit/buttons";
-import { rangeSelect } from "@/lib/drag-select";
+import { edgeScrollSpeed, rangeSelect } from "@/lib/drag-select";
 
 // 손가락이 이만큼 움직이면 어느 쪽 끌기인지 정한다. 가로로 먼저 움직이면 고르기, 세로면 스크롤
 const DECIDE_PX = 8;
-// 고르며 끄는 손가락이 스크롤 영역 위·아래 끝에서 이만큼 안이면 그쪽으로 저절로 스크롤한다(사진 앱처럼)
-const EDGE_PX = 72;
-const SCROLL_STEP = 12;
 
 type Drag = { anchor: number; x: number; y: number; base: Set<number>; mode: "undecided" | "select" | "scroll" };
 
@@ -60,13 +57,14 @@ export function useCardSelection(order: number[]) {
         const tick = () => {
           const box = scroller.getBoundingClientRect();
           const { x, y } = edge.current;
-          const dir = y > box.bottom - EDGE_PX ? 1 : y < box.top + EDGE_PX ? -1 : 0;
+          // 위·아래 가장자리 안이면 끝에 가까울수록 빠르게(계획 10, 선형)
+          const speed = edgeScrollSpeed(y, box.top, box.bottom);
           const live = drag.current;
-          if (dir === 0 || !live || live.mode !== "select") {
+          if (speed === 0 || !live || live.mode !== "select") {
             edge.current.frame = null;
             return;
           }
-          scroller.scrollTop += dir * SCROLL_STEP;
+          scroller.scrollTop += speed;
           const under = cardAt(x, y);
           if (under !== null) setSelected(rangeSelect(order, live.anchor, under, live.base));
           edge.current.frame = requestAnimationFrame(tick);

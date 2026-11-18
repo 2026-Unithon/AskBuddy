@@ -26,7 +26,7 @@ import asyncpg
 from app.categories import repository as categories_repo
 from app.ingest import card_plan
 from app.ingest import repository as repo
-from app.ingest.card_plan import EntityGroup, EntityPlanResult, PlanFact, ValidatedCard
+from app.ingest.card_plan import EntityGroup, EntityPlanResult, PlanFact, ValidatedBlock, ValidatedCard
 from app.ingest.fact_assembly import _value_of
 
 logger = logging.getLogger(__name__)
@@ -332,6 +332,36 @@ async def _pinned(conn: asyncpg.Connection, store_id: int, card_version_id: int)
                  for b in blocks)
 
 
+async def write_card_blocks(conn: asyncpg.Connection, store_id: int, *, version_id: int,
+                            blocks: Sequence[ValidatedBlock]) -> None:
+    """판의 블록(구역 제목)·블록 사실·표시 줄을 한 번에 쓰고, 판 본문을 줄 글로 맞춘다 (D23).
+
+    본문 = 블록 순서대로 구역 제목(있으면) + 줄 글. 검색·임베딩이 이 글을 쓴다.
+    줄이 하나도 없는 블록만 있으면(옛 호출) 본문을 건드리지 않는다.
+    """
+    await conn.executemany(
+        "insert into card_version_blocks "
+        "(store_id, card_version_id, block_id, kind, block_order, raw_span_id, heading) "
+        "values ($1, $2, $3, $4, $5, null, $6)",
+        [(store_id, version_id, b.block_id, b.kind, b.order, b.heading) for b in blocks])
+    await conn.executemany(
+        "insert into card_block_facts "
+        "(store_id, card_version_id, block_id, fact_revision_id, position) "
+        "values ($1, $2, $3, $4, $5)",
+        [(store_id, version_id, b.block_id, rid, pos)
+         for b in blocks for pos, rid in enumerate(b.fact_revision_ids, start=1)])
+    lines = [(store_id, version_id, b.block_id, n, text, list(refs))
+             for b in blocks for n, (text, refs) in enumerate(b.lines, start=1)]
+    if lines:
+        await conn.executemany(
+            "insert into card_version_lines "
+            "(store_id, card_version_id, block_id, line_no, text, fact_revision_ids) "
+            "values ($1, $2, $3, $4, $5, $6::bigint[])", lines)
+        await conn.execute(
+            "update card_versions set content = $3 where store_id = $1 and version_id = $2",
+            store_id, version_id, card_plan.card_content(blocks))
+
+
 async def pin_card_version(conn: asyncpg.Connection, store_id: int, card_version_id: int,
                            card: ValidatedCard, provenance: Mapping[int, Sequence[Origin]]) -> None:
     """판에 블록·블록 사실·판별 근거를 고정한다. 이미 고정됐으면 같아야 한다(불변)."""
@@ -341,17 +371,7 @@ async def pin_card_version(conn: asyncpg.Connection, store_id: int, card_version
             raise RuntimeError(
                 f"카드 판 {card_version_id} 의 블록 고정이 이미 다르게 있다 — 판은 불변이다")
         return
-    await conn.executemany(
-        "insert into card_version_blocks "
-        "(store_id, card_version_id, block_id, kind, block_order, raw_span_id) "
-        "values ($1, $2, $3, $4, $5, null)",
-        [(store_id, card_version_id, b.block_id, b.kind, b.order) for b in card.blocks])
-    await conn.executemany(
-        "insert into card_block_facts "
-        "(store_id, card_version_id, block_id, fact_revision_id, position) "
-        "values ($1, $2, $3, $4, $5)",
-        [(store_id, card_version_id, b.block_id, rid, pos)
-         for b in card.blocks for pos, rid in enumerate(b.fact_revision_ids, start=1)])
+    await write_card_blocks(conn, store_id, version_id=card_version_id, blocks=card.blocks)
     rows = [(store_id, card_version_id, rid, o.occurrence_id, o.owner_answer_id)
             for rid in card.fact_revision_ids() for o in provenance.get(rid, ())]
     if rows:
@@ -489,13 +509,11 @@ def _render_one(card: ValidatedCard, facts: Mapping[int, PlanFact], ctx: _Render
     revisions = card.fact_revision_ids()
     card_fact_ids = sorted({facts[r].fact_id for r in revisions})
     origins = tuple(o for r in revisions for o in ctx.provenance.get(r, ()))
-    card_sources = sorted({o.source_id for o in origins if o.source_id is not None})
-    content = card_plan.render_card(
-        card, facts,
-        evidence=[ctx.source_names[s] for s in card_sources if s in ctx.source_names])
-    missing = card_plan.render_missing(card, facts, content)
+    content = card_plan.card_content(card.blocks)
+    cited = {r for b in card.blocks for _, refs in b.lines for r in refs}
+    missing = [r for r in revisions if r not in cited]
     if missing:
-        raise RuntimeError(f"렌더링이 사실을 빠뜨렸다 — 저장하지 않는다: 판 {missing[:5]}")
+        raise RuntimeError(f"줄이 사실을 빠뜨렸다 — 저장하지 않는다: 판 {missing[:5]}")
     reason = card_review_reason(
         missing_provenance=any(not ctx.provenance.get(r) for r in revisions),
         model_error=model_error,
@@ -813,7 +831,9 @@ async def redraft_published_card(conn: asyncpg.Connection, store_id: int, *, sou
     try:
         card = card_plan.append_facts(
             layout, group, [f.fact_revision_id for f in new_facts],
-            category_name=(card_row["category_name"] or _DEFAULT_CATEGORY))
+            category_name=(card_row["category_name"] or _DEFAULT_CATEGORY),
+            display=[(base.headings.get(block_id), base.lines.get(block_id, ()))
+                     for block_id, _, _ in base.blocks])
     except card_plan.PlanInvalid as e:
         logger.warning("A-D4 새 사실 붙이기 실패 store=%s 대상 %s %s", store_id, entity_id, e)
         return await defer(e.code)
