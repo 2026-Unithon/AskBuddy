@@ -93,7 +93,7 @@ async def load_card_fact_state(
     if card is None:
         return None
     block_rows = await conn.fetch(
-        "select block_id, kind, block_order from card_version_blocks "
+        "select block_id, kind, block_order, heading from card_version_blocks "
         "where store_id = $1 and card_version_id = $2 order by block_order",
         store_id, version_id)
     fact_rows = await conn.fetch(
@@ -147,7 +147,21 @@ async def load_card_fact_state(
         published_version_id=card["published_version_id"], entity_id=entity_id,
         entity_name=entity_name, alias_norms=alias_norms, entity_problem=entity_problem,
         blocks=tuple((b["block_id"], b["kind"], b["block_order"]) for b in block_rows),
-        pinned=pinned)
+        pinned=pinned,
+        headings={b["block_id"]: b.get("heading") for b in block_rows},
+        lines=await load_version_lines(conn, store_id, version_id))
+
+
+async def load_version_lines(conn, store_id: int, version_id: int
+                             ) -> dict[str, tuple[tuple[str, tuple[int, ...]], ...]]:
+    """판의 표시 줄(D23). block_id → (줄 글, 근거 판 id 들) 줄 순서. 줄 없는 옛 판이면 빈 사전."""
+    out: dict[str, list[tuple[str, tuple[int, ...]]]] = {}
+    for r in await conn.fetch(
+            "select block_id, text, fact_revision_ids from card_version_lines "
+            "where store_id = $1 and card_version_id = $2 order by block_id, line_no",
+            store_id, version_id):
+        out.setdefault(r["block_id"], []).append((r["text"], tuple(int(x) for x in r["fact_revision_ids"])))
+    return {k: tuple(v) for k, v in out.items()}
 
 
 async def classify_head(

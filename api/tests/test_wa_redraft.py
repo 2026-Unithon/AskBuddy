@@ -27,11 +27,12 @@ def test_append_facts_keeps_published_layout():
         ("QUANTITIES", (10, 12)), ("STEPS", (11,))]
 
 
-def test_append_step_resorts_by_order():
+def test_append_step_goes_to_block_end():
+    # 계획 10(D23): 사실 모양(단계 번호)으로 줄을 다시 세우지 않는다. 새 사실은 블록 끝, 순서는 사장님이 옮긴다
     s2, s1 = _fact(20, 1, predicate="젓기", step=2), _fact(21, 2, predicate="붓기", step=1)
     group = EntityGroup(entity_id=4, canonical_name="음료Z", facts=(s1, s2))
     card = append_facts([("STEPS", (20,))], group, [21], category_name="기타")
-    assert [blk.fact_revision_ids for blk in card.blocks] == [(21, 20)]
+    assert [blk.fact_revision_ids for blk in card.blocks] == [(20, 21)]
 
 
 def test_append_new_kind_goes_to_new_block():

@@ -4,19 +4,18 @@
 // 서버 값은 cardFactsQuery 가 정본이다. 편집 중 초안은 저장 성공 전까지 서버에 쓰지 않는다.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, Surface, TextButton, useFeedback } from "@/components/kit";
-import { ApiError, apiErrorMessage, revertFactEdit, saveCardFacts, type CardDetailDto, type FactEditRequest, type FactFields, type ParsedFactProposal } from "@/lib/api";
+import { Button, Caption, ConfirmDialog, Empty, ErrorInline, RefreshingHint, Sheet, Skeleton, TextButton, useFeedback } from "@/components/kit";
+import { ApiError, apiErrorMessage, parseCardFacts, revertFactEdit, saveCardFacts, type CardDetailDto, type CardFactsView, type ParsedFactProposal } from "@/lib/api";
 import { cardFactsQuery, checklistKeys, queryKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
 import { FactAddSheet } from "./fact-add-sheet";
-import { FactEditSheet } from "./fact-edit-sheet";
 import { CARD_EXCLUDED_TEXT, errorCode, isRetryable, saveErrorMessage } from "./fact-messages";
-import { EditFactRow, FactGroupRow, blockHeading, groupFacts } from "./fact-row";
-import { compactRecipe } from "./fact-group";
-import { RecipeView } from "./recipe-view";
-import { SortableList } from "@/components/kit/sortable-list";
+import { CardLinesView, PICK_TEXT, type LinesBlock } from "./card-lines-view";
+import { priceOfFact, priceOfLine, splitPrice } from "@/lib/card-price";
+import { LineEditSheet } from "./line-edit-sheet";
+import { LineTilesEditor } from "./line-tiles-editor";
 import { focusRing } from "@/components/kit/buttons";
-import { disturbsLocked, fieldsOf, isModified, moveStepRows, useFactEditDraft, type DraftBlock } from "./use-fact-edit-draft";
+import { useFactEditDraft } from "./use-fact-edit-draft";
 
 const CONFLICT_CODES = ["CARD_VERSION_CONFLICT", "FACT_CHANGED_ELSEWHERE"];
 
@@ -29,7 +28,7 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
   const client = useQueryClient();
   const { toast, snackbar } = useFeedback();
   const facts = useQuery(cardFactsQuery(state.token, state.storeId, cardId, enabled));
-  const { draft, dirty, remaining, actions, buildRequest } = useFactEditDraft();
+  const { draft, dirty, remaining, actions, parseNeeds, buildRequest } = useFactEditDraft();
   const [editKey, setEditKey] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirmLast, setConfirmLast] = useState(false);
@@ -59,8 +58,18 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
     },
     onError: (error) => toast(apiErrorMessage(error, "되돌리지 못했어요."), { durationMs: 5000 }),
   });
+  // 저장: 고친 줄은 서버가 다시 분석해 사실 후보를 받고(MODIFY/ADD), 줄과 함께 한 번에 저장한다(계획 10)
   const save = useMutation({
-    mutationFn: (request: FactEditRequest) => saveCardFacts(cardId, request, state.token!),
+    mutationFn: async () => {
+      const parsed = new Map<string, ParsedFactProposal[]>();
+      for (const need of parseNeeds()) {
+        const result = await parseCardFacts(cardId, { text: need.text, mode: need.mode, base_fact_revision_id: need.base }, state.token!);
+        parsed.set(need.key, result.proposals);
+      }
+      const request = buildRequest(parsed);
+      if (!request) throw new Error("no draft");
+      return saveCardFacts(cardId, request, state.token!);
+    },
     onSuccess: async (result) => {
       await refreshAll();
       actions.clear();
@@ -100,9 +109,8 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
     setConfirmLast(false);
   };
   const submit = () => {
-    const request = buildRequest();
     setReloadError(null);
-    if (request) save.mutate(request);
+    if (draft) save.mutate();
   };
   // 충돌 뒤 "최신 내용 불러오기": 고친 내용은 버리고 서버 최신 판으로 다시 시작한다
   // 다시 읽기가 실패하면 TanStack 은 옛 캐시를 돌려준다 → 초안·충돌 배너를 그대로 두고 오류만 보인다
@@ -121,8 +129,8 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
     if (remaining <= 1) setConfirmLast(true);
     else actions.remove(key);
   };
-  const applyEdit = (fields: FactFields) => {
-    if (editKey) actions.modify(editKey, fields);
+  const applyEdit = (text: string) => {
+    if (editKey) actions.edit(editKey, text);
     setEditKey(null);
   };
   const addProposals = (proposals: ParsedFactProposal[]) => {
@@ -167,53 +175,6 @@ export function useFactCardEditor(cardId: number, enabled: boolean) {
 
 export type FactCardEditor = ReturnType<typeof useFactCardEditor>;
 
-
-/** 두 줄 사이에 같은 블록 선행 관계가 있나(어느 쪽이든). */
-function dependsOn(a: DraftBlock["rows"][number], b: DraftBlock["rows"][number]): boolean {
-  const req = (x: typeof a, y: typeof a) => Boolean(x.base && y.base && x.base.requires.some((r) => r.fact_id === y.base!.fact_id));
-  return req(a, b) || req(b, a);
-}
-
-/**
- * 이웃(j)과 자리를 바꿀 수 있나.
- * 순서 블록: 다른 곳에서 바뀐 줄·선행 관계가 걸린 두 줄·번호가 같거나 없는 두 줄은 막는다
- * (서버가 거절하거나, 맞바꿔도 저장할 변화가 없다). 새로 넣은 줄은 자리만 옮기고 번호를 다시 매기므로
- * 기존 절차 중간에 끼울 수 있다 — 단 다시 매긴 번호가 다른 곳에서 바뀐 줄을 건드리면 막는다.
- * 수치·목록은 표시 자리만 바뀐다.
- */
-function canSwap(block: DraftBlock, i: number, j: number): boolean {
-  const a = block.rows[i];
-  const b = block.rows[j];
-  if (!a || !b) return false;
-  if (block.kind !== "STEPS") return true;
-  if (a.base?.edit_block || b.base?.edit_block) return false;
-  if (!a.base || !b.base) {
-    const moved = moveStepRows(block.rows, i, j);
-    return moved !== null && !disturbsLocked(moved);
-  }
-  if (a.fields.step_order === null || b.fields.step_order === null || a.fields.step_order === b.fields.step_order) return false;
-  return !dependsOn(a, b);
-}
-
-/** 같은 블록 선행은 지금 초안의 단계 번호로, 블록 밖 선행은 서버 라벨 그대로. */
-function draftRequireLabels(block: DraftBlock, i: number): string[] | undefined {
-  const base = block.rows[i]?.base;
-  if (!base) return undefined;
-  return base.requires.map((r) => {
-    const target = block.rows.find((row) => row.base?.fact_id === r.fact_id);
-    return target && target.fields.step_order !== null ? `${target.fields.step_order}번` : r.label;
-  });
-}
-
-/** 저장 실패 줄 표시: details 의 ref·fact_revision_id 가 가리키는 줄. */
-function flaggedKey(error: unknown): string | null {
-  if (!(error instanceof ApiError)) return null;
-  const ref = error.details.ref ?? error.details.fact_revision_id;
-  if (typeof ref === "number") return `r${ref}`;
-  if (typeof ref === "string") return /^\d+$/.test(ref) ? `r${ref}` : ref;
-  return null;
-}
-
 export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: CardDetailDto }) {
   const { facts, draft, save } = editor;
   if (facts.isLoading) {
@@ -237,10 +198,7 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
     );
   }
   const view = facts.data;
-  // 아직 고르지 않은 칸은 값 대신 '골라 주세요'(검수 고르기, 계획 7 Task 6)
-  const compact = compactRecipe(view.blocks, new Set((view.review_items ?? []).flatMap((item) => (item.label ? [item.label] : []))));
   const excluded = card.review_status === "EXCLUDED";
-  const flagged = save.error ? flaggedKey(save.error) : null;
   const locked = save.isPending;
 
   return (
@@ -261,51 +219,14 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
       )}
       {!editor.editing && view.editable && editor.hasRaw && !excluded && <Caption>{RAW_TEXT}</Caption>}
       {draft
-        ? draft.blocks.map((block) => {
-            const steps = block.kind === "STEPS";
-            return (
-              <section key={block.key} className="flex flex-col gap-2">
-                {/* 머리글은 읽는 화면처럼 규격(HOT/ICE)이 있을 때만. '수치·순서·목록'은 사장님에게 뜻이 없다 */}
-                {(block.variant.temperature || block.variant.size) && (
-                  <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
-                )}
-                <Surface className="flex flex-col py-1 pl-[14px] pr-1">
-                  <SortableList
-                    // 손잡이 이름: 순서 블록은 번호와 문장 전체(메뉴 이름으로 시작하는 줄끼리 같아지지 않게)
-                    items={block.rows.map((row, i) => ({ ...row, label: steps ? `${i + 1}번 ${row.fields.sentence}` : row.fields.sentence }))}
-                    canMove={(from, to) => !locked && canSwap(block, from, to)}
-                    onMove={(key, dir) => (steps ? editor.actions.moveStep(key, dir) : editor.actions.moveDisplay(key, dir))}
-                    renderItem={(row, i) => (
-                      // 줄을 누르면 고치기, 오른쪽 휴지통으로 빼기(칩 없음). 같은 문장에서 나온 줄은 앞 줄에 붙여 값만
-                      <EditFactRow
-                        fields={row.fields}
-                        base={row.base}
-                        state={!row.base ? "ADDED" : isModified(row) ? "MODIFIED" : null}
-                        flagged={flagged === row.key}
-                        joined={i > 0 && block.rows[i - 1].fields.sentence.trim() === row.fields.sentence.trim()}
-                        requireLabels={steps ? draftRequireLabels(block, i) : undefined}
-                        edit={{ locked, onEdit: () => editor.setEditKey(row.key), onRemove: () => editor.remove(row.key) }}
-                      />
-                    )}
-                  />
-                </Surface>
-              </section>
-            );
-          })
-        : compact
-          ? <RecipeView recipe={compact} />
-          : view.blocks.map((block) => (
-            // 보기 모드(o06b): 머리글은 카드 밖에 굵게, 칩과 줄마다 근거는 없다
-            <section key={block.block_id} className="flex flex-col gap-2">
-              {/* 보기 모드 머리글은 규격(HOT/ICE)이 있을 때만. '수치·순서·목록'은 사장님에게 뜻이 없다(2026-11-08) */}
-              {(block.variant.temperature || block.variant.size) && (
-                <h3 className="px-1 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">{blockHeading(block.kind, block.variant)}</h3>
-              )}
-              <Surface className="flex flex-col px-[18px] py-1">
-                <FactGroupList rows={block.facts.map(fieldsOf)} />
-              </Surface>
-            </section>
-          ))}
+        ? (
+          // 수정(계획 10): 보기와 같은 모양의 줄 타일을 끌어 옮기고, 누르면 그 줄을 고친다
+          <LineTilesEditor blocks={draft.blocks} locked={locked} onMove={editor.actions.move} onEdit={editor.setEditKey} />
+        )
+        : (
+          // 보기(계획 10): 모델·사장님이 쓴 구역·줄 그대로. 직원 레시피와 같은 부품이다
+          <CardLinesView blocks={viewLines(view).blocks} />
+        )}
       {draft && (
         <button
           type="button"
@@ -318,6 +239,35 @@ export function FactCardPanel({ editor, card }: { editor: FactCardEditor; card: 
       )}
     </div>
   );
+}
+
+/**
+ * 보기 줄. 아직 고르지 않은 충돌 값을 인용한 줄은 값 대신 '골라 주세요'(계획 7 Task 6) — 이어진 같은 자리는 한 줄로.
+ * 금액 줄은 본문에서 빼고 제목 옆 금액으로 낸다(2026-11-18 사용자).
+ */
+export function viewLines(view: CardFactsView): { price: string[]; blocks: LinesBlock[] } {
+  return splitPrice(linesForView(view));
+}
+
+function linesForView(view: CardFactsView): LinesBlock[] {
+  const waiting = new Set((view.review_items ?? []).flatMap((item) => (item.kind === "CHOOSE" ? item.options.map((o) => o.fact_id) : [])));
+  const pendingRevisions = new Set(view.blocks.flatMap((block) => block.facts.filter((f) => waiting.has(f.fact_id)).map((f) => f.fact_revision_id)));
+  return view.blocks
+    .filter((block) => block.lines.length > 0)
+    .map((block) => {
+      const lines: LinesBlock["lines"] = [];
+      const factPrice = new Map(block.facts.map((f) => [f.fact_revision_id, priceOfFact(f)]));
+      for (const line of block.lines) {
+        const pick = line.fact_revision_ids.some((id) => pendingRevisions.has(id));
+        if (pick && lines.at(-1)?.pick) continue;
+        lines.push(
+          pick
+            ? { line_no: line.line_no, text: PICK_TEXT, pick: true }
+            : { line_no: line.line_no, text: line.text, price: priceOfLine(line.fact_revision_ids.map((id) => factPrice.get(id) ?? null)) },
+        );
+      }
+      return { key: block.block_id, kind: block.kind, heading: block.heading, lines };
+    });
 }
 
 /**
@@ -336,17 +286,18 @@ export function FactCardSheets({
   excludeError: unknown;
 }) {
   const { draft } = editor;
-  const editRow = editor.editKey && draft ? draft.blocks.flatMap((b) => b.rows).find((r) => r.key === editor.editKey) : null;
+  const editLine = editor.editKey && draft ? draft.blocks.flatMap((b) => b.lines).find((l) => l.key === editor.editKey) : null;
   return (
     <>
-      {editRow && (
-        <FactEditSheet
-          key={editRow.key}
-          cardId={editor.cardId}
-          baseRevisionId={editRow.base?.fact_revision_id ?? null}
-          initial={editRow.fields}
-          hadValue={editRow.base ? editRow.base.value !== null : editRow.fields.value !== null}
+      {editLine && (
+        <LineEditSheet
+          key={editLine.key}
+          initial={editLine.text}
           onApply={editor.applyEdit}
+          onRemove={() => {
+            editor.setEditKey(null);
+            editor.remove(editLine.key);
+          }}
           onClose={() => editor.setEditKey(null)}
         />
       )}
@@ -435,17 +386,5 @@ export function FactCardEditFooter({ editor }: { editor: FactCardEditor }) {
         }}
       />
     </>
-  );
-}
-
-/** 보기 모드 블록 목록: 같은 문장은 한 줄로 묶는다. */
-function FactGroupList({ rows }: { rows: FactFields[] }) {
-  const { groups, numbered } = groupFacts(rows);
-  return (
-    <ul className="flex flex-col">
-      {groups.map((group) => (
-        <FactGroupRow key={group.key} group={group} numbered={numbered} />
-      ))}
-    </ul>
   );
 }

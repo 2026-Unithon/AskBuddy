@@ -43,19 +43,7 @@ test('KIT-3 차례 등장은 자식 key 를 쓴다', async (b) => {
 
 // ── Task 4 문구 ──
 async function startEdit(page) { await page.getByRole('button', { name: '수정하기' }).click(); await page.getByRole('button', { name: '수정 완료' }).waitFor(); }
-test('COPY-1 사실 고치기의 하지 않음은 스위치 줄', async (b) => {
-  const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
-  await startEdit(page);
-  // 수정 화면에서 줄을 누르면 고치는 시트(2026-11-08, 길게 누르기 메뉴 없앰)
-  await page.locator('[data-testid="fact-row"]').filter({ hasText: '뚜껑을 닫는다.' }).getByRole('button', { name: /^고치기: / }).click();
-  const sheet = page.getByRole('dialog', { name: '이 사실 고치기' });
-  const toggle = sheet.getByRole('switch', { name: '하지 않는 일이에요' });
-  assert.equal(await toggle.getAttribute('aria-checked'), 'false');
-  await toggle.click();
-  assert.equal(await toggle.getAttribute('aria-checked'), 'true');
-  assert.equal(await sheet.getByText(/켜짐|꺼짐/).count(), 0);
-  await ctx.close();
-});
+// COPY-1(사실 고치기 시트의 '하지 않음' 스위치)은 계획 10 Task 9 로 고치기가 줄 글 시트가 되어 지웠다(ledger Ruling)
 
 // ── Task 5 넣기 ──
 const jobKeys = (api) => api.calls.filter((c) => c.method === 'POST' && c.path === '/ingest/jobs').map((c) => c.headers['idempotency-key']);
@@ -196,7 +184,7 @@ test('SHIFT-1 할 일 카드는 공통 없이 근무조 스위치만, 공통이�
 });
 test('SHIFT-2 레시피 카드는 근무조를 묻지 않는다', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1', { overrides: { tableRecipe: true } });
-  await page.locator('[data-recipe-view]').waitFor();
+  await page.locator('[data-card-lines]').waitFor();
   assert.equal(await page.getByText('어느 근무조 할 일인가요?').count(), 0);
   await ctx.close();
 });
@@ -205,7 +193,9 @@ test('SHIFT-2 레시피 카드는 근무조를 묻지 않는다', async (b) => {
 test("CARD-1 상세에서 삭제 되돌리기가 실패하면 '다시' 스낵바", async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/5', { overrides: { singleFactCard: true, failRestore: true } });
   await startEdit(page);
-  await page.getByRole('button', { name: /^빼기: / }).click();
+  // 계획 10: 줄을 눌러 고치기 시트에서 빼면, 마지막 줄이라 카드를 지울지 묻는다
+  await page.locator('[data-tile]').first().click();
+  await page.getByRole('dialog', { name: '이 줄 고치기' }).getByRole('button', { name: '이 줄 빼기' }).click();
   await page.getByRole('dialog').getByRole('button', { name: '카드 지우기' }).click();
   await page.getByRole('status').getByRole('button', { name: '되돌리기' }).click();
   const bar = page.getByRole('status').filter({ hasText: '되돌리지 못했어요' });
@@ -220,11 +210,11 @@ test('CARD-2 타일을 누르는 순간 상세를 미리 받는다', async (b) =
   assert.ok(api.calls.some((c) => c.method === 'GET' && c.path === '/cards/2'), '누르는 순간 상세 조회');
   await ctx.close();
 });
-test('CARD-3 손잡이 이름은 순서와 문장 전체, 카테고리 칩은 바꾸기', async (b) => {
+test('CARD-3 타일 이름은 줄 글 전체, 카테고리 칩은 바꾸기', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
   await page.getByRole('button', { name: '카테고리 바꾸기, 지금 음료 레시피' }).waitFor();
   await startEdit(page);
-  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기', exact: true }).waitFor();
+  await page.getByRole('button', { name: '물을 붓는다. 옮기기', exact: true }).waitFor();
   await page.getByRole('button', { name: '바닐라 라떼 ICE 우유는 225ml 넣는다. 옮기기', exact: true }).waitFor();
   await ctx.close();
 });

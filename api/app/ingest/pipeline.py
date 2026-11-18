@@ -25,6 +25,7 @@ from app.ingest.intake import route as intake_route
 from app.ingest.raw_responses import TruncatedOutputError
 from app.ingest.preprocess import audio, document, kakao, storage, video
 from app.ingest.variant_split import split_hot_ice
+from app.ingest.fact_normalize import normalize_extracted
 from app.ingest.schemas import ExtractedAssertion
 
 logger = logging.getLogger(__name__)
@@ -1233,6 +1234,8 @@ async def _persist_ledger(
     # W3-0 §3-1 — HOT/ICE 가 함께 적힌 사실을 규격별 두 사실로 나눈다(D19).
     # 반환 열쇠도 갈라진 이름표다
     assertions = split_hot_ice(assertions)
+    # 계획 10 — 표 칸의 절차 번호를 지우고, 반복된 화살표 통문장을 조각별 문장으로 나눈다
+    assertions = normalize_extracted(assertions)
     extract_version = f"{s.gemini_model}@t{s.extract_temperature}/{s.ingest_mode}"
     hints = bool(getattr(s, "extract_locator_hints", False))
     rows = []

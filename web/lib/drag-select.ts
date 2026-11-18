@@ -17,3 +17,14 @@ export function rangeSelect(order: number[], anchor: number, current: number, ba
   }
   return next;
 }
+
+/**
+ * 끌어 고르는 손가락이 스크롤 영역 위·아래 가장자리 안에 있을 때 프레임마다 스크롤할 양(계획 10).
+ * 위 가장자리 안이면 음수, 아래면 양수. 끝에 가까울수록 빠르다(선형, 최대 max px/프레임). 가장자리 밖이면 0.
+ */
+export function edgeScrollSpeed(y: number, top: number, bottom: number, edge = 48, max = 18): number {
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  if (y < top + edge) return -max * clamp((top + edge - y) / edge);
+  if (y > bottom - edge) return max * clamp((y - (bottom - edge)) / edge);
+  return 0;
+}

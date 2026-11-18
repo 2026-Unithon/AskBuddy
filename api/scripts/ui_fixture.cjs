@@ -56,6 +56,60 @@ function tableRecipeView(version, status) {
     ] };
 }
 
+// 계획 10(D23): 서버처럼 블록마다 구역 제목·줄을 단다. 줄이 없으면 사실마다 원문 줄(같은 글은 한 줄),
+// 구역 제목은 블록 규격 이름(없으면 null)
+function rawLine(f) {
+  let text = f.assertion || f.sentence;
+  const cond = (f.conditions || []).filter((c) => !text.includes(c));
+  const exc = (f.exceptions || []).filter((c) => !text.includes(c));
+  if (cond.length) text += ` (조건: ${cond.join('; ')})`;
+  if (exc.length) text += ` (예외: ${exc.join('; ')})`;
+  return text;
+}
+function withLines(view) {
+  return { ...view, blocks: view.blocks.map((b) => {
+    if (b.lines) return { heading: null, ...b };
+    const lines = [];
+    for (const f of b.facts) {
+      const text = rawLine(f);
+      const last = lines.at(-1);
+      if (last && last.text === text) last.fact_revision_ids.push(f.fact_revision_id);
+      else lines.push({ line_no: lines.length + 1, text, fact_revision_ids: [f.fact_revision_id] });
+    }
+    const variant = [b.variant?.temperature, b.variant?.size].filter(Boolean).join(' ');
+    return { ...b, heading: b.heading ?? (variant || null), lines };
+  }) };
+}
+
+// 계획 10 줄 카드 세 모양: short(짧은 단계 → 화살표), long(긴 단계 → 번호 목록 + 보관 구역), legacy(줄 없는 옛 판)
+function lineCardView(shape, version, status) {
+  const v = { temperature: null, size: null };
+  const r = (id, sentence, extra = {}) => factRow({ fact_revision_id: id, fact_id: id, position: id, sentence, variant: v, origins: [memo(1)], ...extra });
+  const base = { card_id: 1, version_id: version, title: '합성 꿀 커피', entity_id: 9, entity_name: '합성 꿀 커피', review_status: status,
+    published_version_id: 10, editable: true, entity_problem: null };
+  const line = (n, text, ids) => ({ line_no: n, text, fact_revision_ids: ids });
+  if (shape === 'short') return { ...base, blocks: [
+    { block_id: 'b1', kind: 'STEPS', order: 1, variant: v, heading: 'HOT', facts: [r(701, '샷=2', { value: '2' }), r(702, '얼음=가득'), r(703, '물=붓기')],
+      lines: [line(1, '2샷', [701]), line(2, '얼음 가득', [702]), line(3, '물 붓기', [703])] }] };
+  if (shape === 'long') return { ...base, blocks: [
+    { block_id: 'b1', kind: 'STEPS', order: 1, variant: v, heading: 'HOT', facts: [r(711, '샷=2', { value: '2' }), r(712, '재료=꿀 2래들 (샷잔 1/4선)')],
+      lines: [line(1, '2샷 내리기', [711]), line(2, '꿀 2래들 투입 (샷잔 1/4선)', [712])] },
+    { block_id: 'b2', kind: 'NOTES', order: 2, variant: v, heading: '보관', facts: [r(713, '보관=24시간')], lines: [line(1, '24시간 보관', [713])] }] };
+  // 금액 줄(2026-11-18): 규격마다 금액이 다르다. 화면은 금액 줄을 빼고 제목 옆에 낸다
+  if (shape === 'price') return { ...base, blocks: [
+    { block_id: 'b1', kind: 'NOTES', order: 1, variant: v, heading: 'HOT', facts: [r(731, '금액=1500원', { value: '1500', unit: '원' }), r(732, '물=180ml', { value: '180', unit: 'ml' })],
+      lines: [line(1, '물 180ml', [732]), line(2, '금액 1,500원', [731])] },
+    { block_id: 'b2', kind: 'NOTES', order: 2, variant: v, heading: 'ICE', facts: [r(733, '금액=2000원', { value: '2000', unit: '원' })],
+      lines: [line(1, '금액 2,000원(₩2,000)', [733])] }] };
+  return withLines({ ...base, blocks: [
+    { block_id: 'b1', kind: 'NOTES', order: 1, variant: v, facts: [r(721, '샷=2', { value: '2' }), r(722, '얼음=가득')] }] });
+}
+// 서버 recipe_blocks._line_price 와 같은 규칙: 인용 사실이 모두 단위 '원' 수치면 그 금액
+const factPrice = (f) => (f && f.unit === '원' && f.value != null ? `${Number(f.value).toLocaleString('ko-KR')}원` : null);
+const linePrice = (b, ids) => { const ps = ids.map((id) => factPrice(b.facts.find((f) => f.fact_revision_id === id))); return ps.length && ps.every(Boolean) ? [...new Set(ps)].join(', ') : null; };
+const staffBlocks = (view) => withLines(view).blocks.map((b) => ({ kind: b.kind, variant: b.variant, heading: b.heading,
+  lines: b.lines.map(({ line_no, text, fact_revision_ids }) => ({ line_no, text, price: linePrice(b, fact_revision_ids) })) }));
+
 const category = (id) => { const c = CATEGORIES.find((x) => x.category_id === id); return { category_id: c.category_id, name: c.name }; };
 
 function initialState(overrides) {
@@ -130,6 +184,12 @@ function initialState(overrides) {
 
 function syntheticApi(role, overrides = {}) {
   const state = initialState(overrides);
+  // 계획 10 Task 11: 합성 카드 n 장을 '음료 레시피' 에(선택 모드 자동 스크롤 검사용)
+  for (let i = 0; i < (state.manyCards ?? 0); i++) {
+    state.cards.push({ card_id: 100 + i, review_status: 'APPROVED', title: `합성 음료 ${i + 1}`, content: `합성 음료 ${i + 1} 만들기`, category_id: 10 });
+  }
+  // 계획 10 Task 12: 실측 결과 카드를 카드 1 자리에 그대로 넣어 화면으로 본다(factView = 사실 카드 보기 JSON)
+  if (state.factView) state.cards[0] = { ...state.cards[0], title: state.factView.title, review_status: state.factView.review_status };
   const misses = [];
   const calls = [];
   // 이름 고치기가 다른 검사에 새지 않게 복사본을 쓴다
@@ -232,6 +292,7 @@ function syntheticApi(role, overrides = {}) {
     }
     else if (p === '/notifications/support') payload = { push_configured: state.pushConfigured, vapid_public_key: state.pushConfigured ? 'BAAA' : null, guide_version: '1', guide_seen: true };
     else if (p === '/auth/logout' && m === 'POST') payload = {};
+    else if (p === '/notifications/my-subscriptions' && m === 'POST' && body?.endpoint && state.failMySubscription) return reply({ error: { code: 'PUSH_SAVE_FAILED', message: '구독 저장 실패' } }, 409);
     else if (p === '/notifications/my-subscriptions' && m === 'POST' && body?.endpoint) payload = { subscription_id: 41, enabled: true };
     else if (p === '/notifications/my-subscriptions') payload = { subscription_id: 0, enabled: false };
     // 계획 8: 설정의 이 기기 푸시(두 역할 공통 키, 역할별 구독 끝점)
@@ -304,7 +365,14 @@ function syntheticApi(role, overrides = {}) {
       const c = state.cards.find((x) => x.card_id === Number(p.split('/')[2]));
       c.category_id = body.category_id;
       payload = { card_id: c.card_id, review_status: c.review_status, draft_version_id: c.card_id * 10, published_version_id: null, updated_at: NOW, undo_until: null };
-    } else if (p === '/cards/1/facts' && m === 'GET') payload = (state.tableRecipe ? tableRecipeView : factCardView)(state.factVersion, state.cards[0].review_status, state.friendly);
+    } else if (p === '/cards/1/facts' && m === 'GET') payload = state.factView ? state.factView : state.lineCard ? lineCardView(state.lineCard, state.factVersion, state.cards[0].review_status)
+      : (state.tableRecipe ? tableRecipeView : factCardView)(state.factVersion, state.cards[0].review_status, state.friendly);
+    else if (/^\/cards\/\d+\/facts\/parse$/.test(p) && m === 'POST') {
+      // 점주 글 분석(합성): 글 하나를 사실 하나로. 숫자가 있으면 값으로
+      const value = (body.text.match(/\d+(?:\.\d+)?/) || [null])[0];
+      payload = { mode: body.mode, warnings: [], proposals: [{ client_ref: 'p1', block_kind: 'NOTES', warnings: [],
+        fact: { sentence: body.text, polarity: 'AFFIRM', value, unit: null, conditions: [], exceptions: [], step_order: null, variant: { temperature: null, size: null }, predicate: null } }] };
+    }
     else if (p === '/cards/1/facts' && m === 'PUT') {
       state.factVersion += 1;
       payload = { card_id: 1, review_status: state.cards[0].review_status, draft_version_id: state.factVersion, published_version_id: 10, updated_at: NOW, undo_until: null, changed: true, edit_id: state.factVersion, revisions: [] };
@@ -375,7 +443,8 @@ function syntheticApi(role, overrides = {}) {
       if (!item) return reply({ error: { message: '없는 항목' } }, 404);
       const c = state.cards.find((x) => x.card_id === item.card_id);
       // 표 레시피 사실 묶음(계획 7 Task 12): 직원 레시피도 한눈에 보기
-      const factBlocks = state.staffTableRecipe ? tableRecipeView(10, 'APPROVED').blocks.map((b) => ({ kind: b.kind, variant: b.variant, facts: b.facts.map((f) => ({ sentence: f.sentence, step_order: f.step_order })) })) : null;
+      const factBlocks = state.lineCard && item.card_id === 1 ? staffBlocks(lineCardView(state.lineCard, 10, 'APPROVED'))
+        : state.staffTableRecipe ? staffBlocks(tableRecipeView(10, 'APPROVED')) : null;
       payload = { ...item, content: state.itemContent[item.item_id] ?? c.content, category: stateCategory(c.category_id), evidence: [], return_to: { path: '/staff/recipes', item_id: item.item_id }, fact_blocks: factBlocks };
     }
     else if (p === '/learn/v2/notifications' && m === 'GET') payload = { notifications: state.rNotifications, next_after: null };
@@ -538,10 +607,12 @@ function syntheticApi(role, overrides = {}) {
       misses.push(`${m} ${p}`);
       return reply({ error: { message: 'synthetic: unknown endpoint' } }, 404);
     }
+    // 사실 카드 보기는 서버처럼 언제나 구역 제목·줄을 싣는다(계획 10)
+    if (m === 'GET' && /^\/cards\/\d+\/facts$/.test(p) && payload?.blocks) payload = withLines(payload);
     return reply(payload);
   }
 
   return { handler, misses, calls, state };
 }
 
-module.exports = { syntheticApi };
+module.exports = { syntheticApi, withLines };

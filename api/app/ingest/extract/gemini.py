@@ -21,8 +21,13 @@ logger = logging.getLogger(__name__)
 # response_schema 를 쓰면 SDK 가 AFC 경고를 매 호출마다 찍는다. 우리는 함수 호출을 쓰지 않는다
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
+# 계획 10: 추출 프롬프트는 본문 한 벌. 근거 위치 규칙(8번)만 W1-4 표지 여부로 갈린다
 FACTS_PROMPT_PATH = (
-    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts.ko.txt")
+    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_body.ko.txt")
+FACTS_EVIDENCE_BASIC_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_evidence_basic.ko.txt")
+FACTS_EVIDENCE_LOCATOR_PATH = (
+    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_evidence_locator.ko.txt")
 # W3a 사실 조립 — 이름표만 고르고 배치한다
 CARD_PLAN_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "assemble_card_plan.ko.txt")
@@ -31,9 +36,6 @@ PARSE_OWNER_PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "prompts" / "parse_owner_fact.ko.txt")
 # 이 머리 줄 다음 줄부터 끝까지가 JSON 입력이다
 PARSE_INPUT_MARKER = "## 점주 입력"
-# W1-4 위치 표지 판. extract_locator_hints 를 켰을 때만 쓴다
-FACTS_LOCATOR_PROMPT_PATH = (
-    Path(__file__).resolve().parents[3] / "prompts" / "extract_facts_locator.ko.txt")
 
 
 def locator_hints(settings) -> bool:
@@ -344,10 +346,11 @@ def render_facts_prompt(*, source_type: str, text: str, glossary,
                         locator_hints: bool = False) -> str:
     """사실 추출 프롬프트 완성본. 재사용 키(W1-3)는 이 완성본 전체를 hash 한다.
 
-    `locator_hints` 는 W1-4 위치 표지 판을 고른다. 파일이 달라 키도 따로 갈린다.
+    `locator_hints` 는 근거 위치 규칙(W1-4 표지 판)을 고른다. 완성본이 달라 키도 따로 갈린다.
     """
-    path = FACTS_LOCATOR_PROMPT_PATH if locator_hints else FACTS_PROMPT_PATH
-    return (path.read_text(encoding="utf-8")
+    evidence = FACTS_EVIDENCE_LOCATOR_PATH if locator_hints else FACTS_EVIDENCE_BASIC_PATH
+    return (FACTS_PROMPT_PATH.read_text(encoding="utf-8")
+            .replace("{evidence_rules}", evidence.read_text(encoding="utf-8").rstrip("\n"))
             .replace("{glossary}", _glossary_block(list(glossary or [])))
             .replace("{source_type}", source_type)
             .replace("{transcript}", text))

@@ -72,14 +72,6 @@ function singleView(cardId, extra = {}) {
 }
 
 // 카드 8: 번호가 같은 두 단계 / 카드 9: 사실로 나뉘지 않은 RAW 블록이 섞임
-function equalStepsView() {
-  const v = singleView(8);
-  v.blocks = [{ block_id: "e1", kind: "STEPS", order: 1, variant: { temperature: null, size: null }, facts: [
-    row({ fact_revision_id: 801, fact_id: 81, position: 1, sentence: "합성음료A 컵을 꺼낸다.", step_order: 1 }),
-    row({ fact_revision_id: 802, fact_id: 82, position: 2, sentence: "합성음료A 얼음을 담는다.", step_order: 1 }),
-  ] }];
-  return v;
-}
 function rawMixedView() {
   const v = singleView(9);
   v.blocks.push({ block_id: "raw1", kind: "RAW", order: 2, variant: { temperature: null, size: null }, facts: [
@@ -89,7 +81,6 @@ function rawMixedView() {
 }
 
 // 카드 12: 단계 1~4 가 있는 절차. 새 단계를 끼워 넣는 시나리오(물을 붓는다는 얼음 단계가 먼저)
-const INSERT_BASE = { 1201: 1, 1202: 2, 1203: 3, 1204: 4 };
 function stepsInsertView() {
   const v = singleView(12);
   v.blocks = [{ block_id: "i1", kind: "STEPS", order: 1, variant: { temperature: null, size: null }, facts: [
@@ -131,7 +122,10 @@ function cardDetail(cardId) {
   };
 }
 
-const json = (route, status, payload) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
+// 계획 10: 사실 카드 보기는 서버처럼 언제나 구역 제목·줄을 싣는다
+const { withLines } = require("./ui_fixture.cjs");
+const json = (route, status, payload) => route.fulfill({ status, contentType: "application/json",
+  body: JSON.stringify(payload && Array.isArray(payload.blocks) && payload.blocks.every((b) => Array.isArray(b.facts)) ? withLines(payload) : payload) });
 const apiError = (route, status, code, message, details, retryable = false) => json(route, status, { error: { code, message, retryable, details } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -171,7 +165,6 @@ async function handle(route) {
       return apiError(route, 500, "INTERNAL_ERROR", "합성 다시 읽기 오류예요.");
     }
     if (id === 1) return json(route, 200, factCardView(state.version));
-    if (id === 8) return json(route, 200, equalStepsView());
     if (id === 9) return json(route, 200, rawMixedView());
     if (id === 12) return json(route, 200, stepsInsertView());
     if (id === 11) return apiError(route, 404, "CARD_NOT_FOUND", "카드를 찾을 수 없습니다.");
@@ -278,12 +271,22 @@ async function handle(route) {
     await panel().waitFor();
     check("사실 목록 오류 뒤 다시 시도로 복구", state.factsCalls[5] >= 2);
 
-    // 화면 개선 계획 3: 순서는 줄 오른쪽 손잡이(키보드 화살표)로, 막힌 이동은 눌러도 순서가 그대로다
-    // 손잡이 이름은 '{n}번 {문장} 옮기기'(순서 블록) 또는 '{문장} 옮기기'(백로그 일괄 처리)
-    const moveHandle = (sentence) => page.getByRole("button", { name: new RegExp(`^(\\d+번 )?${sentence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} 옮기기$`) });
-    const sentences = async () => (await page.getByTestId("fact-row").allInnerTexts()).map((t) => t.split("\n").map((x) => x.trim()).filter(Boolean).find((x) => !/^\d+$/.test(x)));
-    const press = async (sentence, key) => { await moveHandle(sentence).press(key); await page.waitForTimeout(50); };
-    const blocked = async (sentence, key) => { const before = JSON.stringify(await sentences()); await press(sentence, key); return JSON.stringify(await sentences()) === before; };
+    // 계획 10 Task 9: 수정은 보기와 같은 줄 타일. 타일 이름은 '{줄 글} 옮기기', 누르면 '이 줄 고치기' 시트
+    const tile = (lineText) => page.getByRole("button", { name: `${lineText} 옮기기`, exact: true });
+    const tiles = async () => page.locator("[data-tile]").allInnerTexts();
+    const press = async (lineText, key) => { await tile(lineText).press(key); await page.waitForTimeout(50); };
+    const editTile = async (lineText, next) => {
+      await tile(lineText).click();
+      const sheet = page.getByRole("dialog", { name: "이 줄 고치기" });
+      await sheet.waitFor();
+      await sheet.getByRole("textbox").fill(next);
+      await sheet.getByRole("button", { name: "바꾸기", exact: true }).click();
+      await sheet.waitFor({ state: "detached" });
+    };
+    const removeTile = async (lineText) => {
+      await tile(lineText).click();
+      await page.getByRole("dialog", { name: "이 줄 고치기" }).getByRole("button", { name: "이 줄 빼기", exact: true }).click();
+    };
     const leaveEdit = async () => {
       await page.getByRole("button", { name: "돌아가기", exact: true }).click();
       const discard = page.getByRole("dialog", { name: "고친 내용을 버릴까요?" });
@@ -298,7 +301,8 @@ async function handle(route) {
     check("블록 머리글은 규격만",
       await page.getByRole("heading", { name: "ICE", exact: true }).isVisible() && await page.getByRole("heading", { name: "순서", exact: true }).count() === 0 && await page.getByRole("heading", { name: "목록", exact: true }).count() === 0);
     check("보기 모드에 하지 않음 칩 없음", await page.locator("main").getByText("하지 않음", { exact: true }).count() === 0);
-    check("조건·예외 줄", await text("조건: 손님이 연하게 원하면 한 번만").isVisible() && await text("예외: 손님이 따로 요청하면").isVisible());
+    // 계획 10: 원문 줄은 문장 뒤에 (조건: …)·(예외: …) 를 붙인다
+    check("조건·예외 줄", await page.getByText("(조건: 손님이 연하게 원하면 한 번만)", { exact: false }).isVisible() && await page.getByText("(예외: 손님이 따로 요청하면)", { exact: false }).isVisible());
     check("보기 모드에 줄마다 근거·이전 문장 없음", await page.getByText(/^근거:|^이전:|^먼저:/).count() === 0);
     const evidenceLine = await page.getByText(/^근거 자료 /).innerText();
     check("근거 자료 한 줄", ["합성 매뉴얼.pdf", "합성 영상.mp4", "사장님 답변", "사장님 직접 입력", "지난 메모.jpg (원본 지워짐)"].every((n) => evidenceLine.includes(n)));
@@ -321,29 +325,22 @@ async function handle(route) {
     await page.getByRole("button", { name: "수정하기", exact: true }).click();
     await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor();
     check("편집 전 수정 완료는 저장 요청 없음", state.saveBodies.length === 0);
-    await page.getByRole("button", { name: /^고치기: 음료Z ICE 물은/ }).click();
-    const dialog = page.getByRole("dialog");
+    await tile("음료Z ICE 물은 225ml 넣는다.").click();
+    const dialog = page.getByRole("dialog", { name: "이 줄 고치기" });
     await dialog.waitFor();
     check("고치기 시트가 화면 안에 뜸(스크롤과 무관)", await inViewport(dialog));
-    await dialog.getByRole("button", { name: "문장으로 다시 분석" }).click();
-    await dialog.getByTestId("parse-notices").waitFor();
-    check("다시 분석 MODIFY 요청", state.parseBodies.at(-1).mode === "MODIFY" && state.parseBodies.at(-1).base_fact_revision_id === 101);
-    check("MODIFY_SPLIT 안내", (await dialog.getByTestId("parse-notices").innerText()).includes("첫 번째만 칸에 채웠어요"));
-    check("첫 제안으로 칸 채움", (await dialog.getByLabel("값").inputValue()) === "250");
     await shot("04-edit-sheet-390");
-    await dialog.getByRole("button", { name: "이대로 고치기" }).click();
-    check("고친 줄 표시", await text("고침").count() === 1);
+    await dialog.getByRole("button", { name: "그만두기", exact: true }).click();
+    await editTile("음료Z ICE 물은 225ml 넣는다.", "음료Z ICE 물은 250ml 넣는다.");
+    check("고친 줄 글이 타일에 남음", (await tiles()).includes("음료Z ICE 물은 250ml 넣는다."));
+    check("저장 전에는 다시 분석하지 않음", state.parseBodies.length === 0);
 
-    // ── 순서 블록: 선행이 걸린 이동은 막힘, 선행 없는 두 줄은 step_order 맞바꿈
-    check("선행(1번)이 바로 위면 위로 막힘",
-      await blocked("샷을 붓는다.", "ArrowUp"));
-    check("선행이 바로 아래에 있으면 아래로 막힘",
-      await blocked("컵에 얼음을 담는다.", "ArrowDown"));
+    // ── 줄 순서: 막는 규칙 없이 옮긴다(줄은 보이는 순서일 뿐, 사실의 단계 번호는 그대로)
     await press("물을 붓는다.", "ArrowUp");
-    check("순서 이동 뒤 두 줄 고침 표시", await text("고침").count() === 3);
-    check("선행 라벨은 초안 번호(2번 → 3번)", await text("먼저: 3번").isVisible() && await text("먼저: 2번").count() === 0);
-    check("선행이 바로 위로 온 줄은 위로 막힘",
-      await blocked("뚜껑을 닫는다.", "ArrowUp"));
+    // 샷 줄은 조건이 붙어 '샷을 붓는다. (조건: …)' 이다 → 문장 앞부분으로 맞춘다
+    const STEP_SENTENCES = ["컵에 얼음을 담는다.", "샷을 붓는다.", "물을 붓는다.", "뚜껑을 닫는다."];
+    const stepTiles = (await tiles()).map((t) => STEP_SENTENCES.find((x) => t.startsWith(x))).filter(Boolean);
+    check("키보드로 물을 샷 앞으로", JSON.stringify(stepTiles) === JSON.stringify(["컵에 얼음을 담는다.", "물을 붓는다.", "샷을 붓는다.", "뚜껑을 닫는다."]));
     for (const [w, h] of [[390, 844], [360, 800]]) {
       await page.setViewportSize({ width: w, height: h });
       check(`편집 ${w}px 가로 넘침 없음`, await noOverflow());
@@ -352,43 +349,41 @@ async function handle(route) {
     await page.setViewportSize({ width: 390, height: 844 });
 
     // ── 저장: 네트워크 실패 → 같은 키로 다시 시도 → 422 값-문장
-    state.saveQueue.push("network", "value", "steps", "conflict");
+    state.saveQueue.push("network", "value", "conflict");
     await page.getByRole("button", { name: "수정 완료", exact: true }).click();
     await page.getByRole("button", { name: "다시 시도", exact: true }).waitFor();
-    check("네트워크 실패에 입력 유지", await text("고침").count() === 3);
+    check("네트워크 실패에 입력 유지", (await tiles()).includes("음료Z ICE 물은 250ml 넣는다."));
+    check("저장할 때 고친 줄만 다시 분석(MODIFY, 원래 판 101)",
+      state.parseBodies.length === 1 && state.parseBodies[0].mode === "MODIFY" && state.parseBodies[0].base_fact_revision_id === 101
+      && state.parseBodies[0].text === "음료Z ICE 물은 250ml 넣는다.");
     const first = state.saveBodies[0];
-    const blocks = Object.fromEntries(first.blocks.map((b) => [b.kind, b.items]));
-    check("요청: 수치 블록 MODIFY 101(250) + KEEP 102",
-      blocks.QUANTITIES[0].op === "MODIFY" && blocks.QUANTITIES[0].fact_revision_id === 101 && blocks.QUANTITIES[0].fact.value === "250"
-      && blocks.QUANTITIES[1].op === "KEEP" && blocks.QUANTITIES[1].fact_revision_id === 102);
-    check("요청: STEPS 선행 없는 두 줄 MODIFY 의 step_order 맞바꿈",
-      blocks.STEPS[0].op === "KEEP" && blocks.STEPS[0].fact_revision_id === 201
-      && blocks.STEPS[1].op === "MODIFY" && blocks.STEPS[1].fact_revision_id === 203 && blocks.STEPS[1].fact.step_order === 2
-      && blocks.STEPS[2].op === "MODIFY" && blocks.STEPS[2].fact_revision_id === 202 && blocks.STEPS[2].fact.step_order === 3
-      && blocks.STEPS[3].op === "KEEP" && blocks.STEPS[3].fact_revision_id === 204);
-    check("요청: 목록 KEEP 301·삭제 없음·기대 판", blocks.NOTES[0].op === "KEEP" && first.deleted_fact_revision_ids.length === 0 && first.expected_version_id === 10);
+    const blocks = Object.fromEntries(first.blocks.map((b) => [b.kind, b]));
+    const q = blocks.QUANTITIES;
+    check("요청: 수치 블록 MODIFY 101(250) + KEEP 102, 나머지 제안은 그 줄에 붙는 ADD",
+      q.items[0].op === "MODIFY" && q.items[0].fact_revision_id === 101 && q.items[0].fact.value === "250"
+      && q.items[1].op === "KEEP" && q.items[1].fact_revision_id === 102
+      && q.items[2].op === "ADD" && q.items[2].fact.sentence === "얼음은 가득 채운다."
+      && q.lines[0].text === "음료Z ICE 물은 250ml 넣는다." && q.lines[0].client_refs.includes(q.items[2].client_ref));
+    check("요청: 단계 사실은 모두 KEEP·원래 순서, 줄만 옮긴 순서",
+      JSON.stringify(blocks.STEPS.items.map((i) => [i.op, i.fact_revision_id])) === JSON.stringify([["KEEP", 201], ["KEEP", 202], ["KEEP", 203], ["KEEP", 204]])
+      && JSON.stringify(blocks.STEPS.lines.map((l) => l.fact_revision_ids[0])) === JSON.stringify([201, 203, 202, 204]));
+    check("요청: 목록 KEEP 301·삭제 없음·기대 판", blocks.NOTES.items[0].op === "KEEP" && first.deleted_fact_revision_ids.length === 0 && first.expected_version_id === 10);
     await page.getByRole("button", { name: "다시 시도", exact: true }).click();
     await text("숫자 칸과 문장 속 숫자가 달라요. 문장도 같이 고쳐 주세요.").waitFor();
     check("재시도는 같은 idempotency_key", state.saveBodies[1].idempotency_key === state.saveBodies[0].idempotency_key);
-    check("422 FACT_VALUE_NOT_IN_SENTENCE 문구·줄 표시·입력 유지",
-      await text("이 줄을 확인해 주세요").isVisible() && await text("고침").count() === 3);
+    check("422 FACT_VALUE_NOT_IN_SENTENCE 문구·입력 유지", (await tiles()).includes("음료Z ICE 물은 250ml 넣는다."));
     await shot("06-validation-422-390");
-
-    // ── 422 STEP_REQUIRES_ORDER 문구
-    await page.getByRole("button", { name: "수정 완료", exact: true }).click();
-    await text("먼저 해야 하는 단계보다 앞으로 옮길 수 없어요.").waitFor();
-    check("422 STEP_REQUIRES_ORDER 문구·입력 유지", await text("고침").count() === 3);
 
     // ── 409 충돌 → 배너·그대로 두기
     await page.getByRole("button", { name: "수정 완료", exact: true }).click();
     await page.getByTestId("fact-conflict").waitFor();
     check("409 충돌 배너 문구", await text("그사이 카드가 바뀌었어요. 최신 내용을 불러온 뒤 다시 고쳐 주세요.").isVisible());
-    check("충돌에 입력 유지", await text("고침").count() === 3);
+    check("충돌에 입력 유지", (await tiles()).includes("음료Z ICE 물은 250ml 넣는다."));
     await shot("07-conflict-390");
     await page.getByRole("button", { name: "그대로 두기", exact: true }).click();
     await page.getByTestId("fact-conflict").waitFor({ state: "detached" });
     check("그대로 두기 뒤 배너 닫힘·편집 유지",
-      await page.getByTestId("fact-conflict").count() === 0 && await text("고침").count() === 3);
+      await page.getByTestId("fact-conflict").count() === 0 && (await tiles()).includes("음료Z ICE 물은 250ml 넣는다."));
 
     // ── 사실 추가: 분석 3제안 + 경고, 체크한 것만 ADD
     await page.getByRole("button", { name: "+ 사실 추가", exact: true }).click();
@@ -406,14 +401,14 @@ async function handle(route) {
     check("SUBJECT_MISMATCH 제안은 처음에 체크 해제", !(await boxes.nth(1).isChecked()) && await boxes.nth(0).isChecked());
     await shot("08-add-proposals-390");
     await add.getByRole("button", { name: /^카드에 넣기/ }).click();
-    check("새로 넣은 줄 표시", await text("새로 넣음").count() === 1);
+    check("새로 넣은 줄 타일", (await tiles()).includes("음료Z는 빨대를 꽂아 낸다."));
 
     // ── 저장 성공 → 보기 상태
     await page.getByRole("button", { name: "수정 완료", exact: true }).click();
     await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor({ state: "detached" });
     const ok = state.saveBodies.at(-1);
     const adds = ok.blocks.flatMap((b) => b.items).filter((i) => i.op === "ADD");
-    check("체크한 제안만 ADD", adds.length === 1 && adds[0].fact.sentence === "음료Z는 빨대를 꽂아 낸다." && /^[A-Za-z0-9_-]+$/.test(adds[0].client_ref));
+    check("체크한 제안만 ADD(고친 줄의 나머지 제안 1건 포함)", adds.length === 2 && adds.some((a) => a.fact.sentence === "음료Z는 빨대를 꽂아 낸다." && /^[A-Za-z0-9_-]+$/.test(a.client_ref)) && /^[A-Za-z0-9_-]+$/.test(adds[0].client_ref));
     check("추가는 같은 규격 목록 블록 끝", ok.blocks.find((b) => b.kind === "NOTES").items.at(-1).op === "ADD");
     check("본문이 바뀌면 새 idempotency_key", ok.idempotency_key !== state.saveBodies[0].idempotency_key);
     await page.getByRole("button", { name: "수정하기", exact: true }).waitFor();
@@ -424,7 +419,7 @@ async function handle(route) {
 
     // ── 다시 편집 → 충돌 → 최신 내용 불러오기
     await page.getByRole("button", { name: "수정하기", exact: true }).click();
-    await page.getByRole("button", { name: /^빼기: 음료Z ICE 시럽은/ }).click();
+    await removeTile("음료Z ICE 시럽은 10g 넣는다.");
     check("뺀 줄이 목록에서 사라짐", await page.getByText("음료Z ICE 시럽은 10g 넣는다.", { exact: true }).count() === 0);
     state.saveQueue.push("conflict");
     await page.getByRole("button", { name: "수정 완료", exact: true }).click();
@@ -443,7 +438,7 @@ async function handle(route) {
     await page.getByText("음료Z ICE 시럽은 10g 넣는다.", { exact: true }).waitFor();
     check("최신 내용 불러오기: 카드 상세도 다시 읽음", await (async () => { for (let k = 0; k < 20 && !(state.cardCalls[1] > cardBefore); k++) await sleep(100); return state.cardCalls[1] > cardBefore; })());
     check("최신 내용 불러오기: 다시 읽고 편집을 새로 시작", state.factsCalls[1] > callsBefore
-      && await page.getByTestId("fact-conflict").count() === 0 && await text("고침").count() === 0);
+      && await page.getByTestId("fact-conflict").count() === 0 && (await tiles()).includes("음료Z ICE 시럽은 10g 넣는다."));
     await leaveEdit();
     await page.getByRole("button", { name: "수정하기", exact: true }).waitFor();
 
@@ -451,7 +446,8 @@ async function handle(route) {
     await page.goto(`${BASE}/owner/cards/4`);
     await panel().waitFor();
     await page.getByRole("button", { name: "수정하기", exact: true }).click();
-    await page.getByRole("button", { name: /^빼기: / }).click();
+    await page.locator("[data-tile]").first().click();
+    await page.getByRole("dialog", { name: "이 줄 고치기" }).getByRole("button", { name: "이 줄 빼기", exact: true }).click();
     const last = page.getByRole("dialog");
     await last.getByText("사실이 하나도 남지 않아요. 이 카드를 지울까요?", { exact: true }).waitFor();
     await shot("10-last-fact-390");
@@ -462,22 +458,10 @@ async function handle(route) {
     check("마지막 줄 빼기 → /exclude 호출(빈 카드 저장 없음)", state.excludeCalls.includes(4) && !state.saveBodies.some((b) => b.blocks.length === 0));
     await shot("11-excluded-390");
 
-    // ── 번호가 같은 두 단계: 옮겨도 저장할 변화가 없으니 이동 막음 (카드 8)
-    await page.goto(`${BASE}/owner/cards/8`);
-    await panel().waitFor();
-    await page.getByRole("button", { name: "수정하기", exact: true }).click();
-    await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor();
-    const sameBefore = JSON.stringify(await sentences());
-    for (const sentence of await sentences()) { await press(sentence, "ArrowUp"); await press(sentence, "ArrowDown"); }
-    check("번호가 같은 단계는 위·아래 막힘", JSON.stringify(await sentences()) === sameBefore);
-    await leaveEdit();
-
-    // ── 기존 절차 중간에 단계 끼워 넣기 (카드 12): 추가 → 위로 두 번 → 3번 자리, 뒤 단계 번호 다시 매김
+    // ── 기존 절차에 단계 넣기 (카드 12): 추가 → 블록 끝 줄 → 위로 두 번 → 셋째 줄. 사실의 단계 번호는 분석 그대로
     await page.goto(`${BASE}/owner/cards/12`);
     await panel().waitFor();
     await page.getByRole("button", { name: "수정하기", exact: true }).click();
-    check("선행이 걸린 기존 두 단계(얼음→물)는 여전히 맞바꿀 수 없음",
-      await blocked("합성음료A 물을 붓는다.", "ArrowUp"));
     await page.getByRole("button", { name: "+ 사실 추가", exact: true }).click();
     const addStep = page.getByRole("dialog");
     await addStep.waitFor();
@@ -486,41 +470,31 @@ async function handle(route) {
     await addStep.getByTestId("parse-proposals").waitFor();
     await addStep.getByRole("button", { name: /^카드에 넣기/ }).click();
     await addStep.waitFor({ state: "detached" });
-    const stepRows = async () => (await page.getByTestId("fact-row").allInnerTexts()).map((t) => t.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 2).join(" "));
-    check("새 단계는 처음에 블록 끝(5번)", (await stepRows()).at(-1) === "5 합성음료A 시럽을 넣는다.");
-    check("새 단계는 위로 옮길 수 있음", !(await blocked("합성음료A 시럽을 넣는다.", "ArrowUp")));
+    check("새 줄은 처음에 블록 끝", (await tiles()).at(-1) === "합성음료A 시럽을 넣는다.");
     await press("합성음료A 시럽을 넣는다.", "ArrowUp");
-    check("위로 두 번: 3번 자리, 뒤 단계 4·5번으로 다시 매김", JSON.stringify(await stepRows()) === JSON.stringify([
-      "1 합성음료A 컵을 꺼낸다.", "2 합성음료A 얼음을 담는다.", "3 합성음료A 시럽을 넣는다.", "4 합성음료A 물을 붓는다.", "5 합성음료A 뚜껑을 닫는다.",
+    await press("합성음료A 시럽을 넣는다.", "ArrowUp");
+    check("위로 두 번: 셋째 줄", JSON.stringify(await tiles()) === JSON.stringify([
+      "합성음료A 컵을 꺼낸다.", "합성음료A 얼음을 담는다.", "합성음료A 시럽을 넣는다.", "합성음료A 물을 붓는다.", "합성음료A 뚜껑을 닫는다.",
     ]));
-    check("다시 매긴 두 줄은 고침, 새 줄은 새로 넣음", await text("고침").count() === 2 && await text("새로 넣음").count() === 1);
-    check("선행 라벨은 다시 매긴 번호를 따라감(얼음 2번 그대로)", await text("먼저: 2번").isVisible());
     for (const [w, h] of [[390, 844], [360, 800]]) {
       await page.setViewportSize({ width: w, height: h });
-      check(`단계 끼워 넣기 ${w}px 가로 넘침 없음`, await noOverflow());
+      check(`단계 넣기 ${w}px 가로 넘침 없음`, await noOverflow());
       await shot(`17-step-insert-${w}`);
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    // 서버가 PLAN_STEP_ORDER 로 거절하면 "새로고침" 이 아니라 자리를 옮기라는 문구
-    state.saveQueue.push("stepOrder");
-    await page.getByRole("button", { name: "수정 완료", exact: true }).click();
-    await text("순서 단계 번호가 앞뒤 단계와 맞지 않아요. 넣은 단계를 위나 아래로 옮겨 알맞은 자리에 둔 뒤 다시 저장해 주세요.").waitFor();
-    check("422 PLAN_STEP_ORDER 전용 문구(새로고침 안내 없음)·입력 유지",
-      !(await page.locator("main").innerText()).includes("새로고침") && await text("새로 넣음").count() === 1);
-    await shot("18-step-order-422-390");
     const before = state.saveBodies.length;
     await page.getByRole("button", { name: "수정 완료", exact: true }).click();
     await page.getByRole("button", { name: "수정 완료", exact: true }).waitFor({ state: "detached" });
     const insertBody = state.saveBodies[before];
-    const items = insertBody.blocks.find((b) => b.kind === "STEPS").items;
-    const orders = items.map((i) => (i.op === "KEEP" ? INSERT_BASE[i.fact_revision_id] : i.fact.step_order));
-    check("요청: KEEP 1201·1202, ADD 3번, MODIFY 1203→4·1204→5",
-      JSON.stringify(items.map((i) => [i.op, i.fact_revision_id ?? i.fact.sentence])) === JSON.stringify([
-        ["KEEP", 1201], ["KEEP", 1202], ["ADD", "합성음료A 시럽을 넣는다."], ["MODIFY", 1203], ["MODIFY", 1204],
-      ]) && JSON.stringify(orders) === JSON.stringify([1, 2, 3, 4, 5]));
-    // 서버 W3a 규칙(card_plan.validate_proposals): 블록 안 단계 번호는 줄지 않는다. 선행(얼음 2 < 물 4)도 지킨다
-    check("요청: 단계 번호가 줄지 않음(PLAN_STEP_ORDER 통과)·선행 순서 유지",
-      orders.every((o, k) => k === 0 || orders[k - 1] <= o) && orders[1] < orders[3] && insertBody.deleted_fact_revision_ids.length === 0);
+    const steps = insertBody.blocks.find((b) => b.kind === "STEPS");
+    check("요청: 기존 단계 KEEP(번호 그대로), 새 단계 ADD",
+      JSON.stringify(steps.items.map((i) => [i.op, i.fact_revision_id ?? i.fact.sentence])) === JSON.stringify([
+        ["KEEP", 1201], ["KEEP", 1202], ["KEEP", 1203], ["KEEP", 1204], ["ADD", "합성음료A 시럽을 넣는다."],
+      ]) && insertBody.deleted_fact_revision_ids.length === 0);
+    const added = steps.items.find((i) => i.op === "ADD");
+    check("요청: 줄 순서는 사장님이 옮긴 대로, 새 줄은 새 사실을 인용",
+      steps.lines.length === 5 && steps.lines[2].client_refs[0] === added.client_ref
+      && JSON.stringify(steps.lines.map((l) => l.fact_revision_ids[0] ?? null)) === JSON.stringify([1201, 1202, null, 1203, 1204]));
 
     // ── RAW 블록 섞임: 고치기 없음 + 이유 안내 (카드 9)
     await page.goto(`${BASE}/owner/cards/9`);

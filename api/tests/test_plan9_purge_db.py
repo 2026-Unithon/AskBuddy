@@ -3,7 +3,7 @@ import unittest
 
 from tests._plan7_db import ENABLED, SKIP_REASON, drop_db, fresh_db, seed_store
 
-GUARDED = ["evaluation_results", "evaluation_runs", "extraction_results", "extraction_runs", "fact_revision_meta",
+GUARDED = ["card_version_lines", "evaluation_results", "evaluation_runs", "extraction_results", "extraction_runs", "fact_revision_meta",
            "fact_revisions", "knowledge_entity_events", "knowledge_snapshots", "owner_answers", "r_answer_citations",
            "r_answer_receipts", "r_index_documents", "r_owner_answer_deliveries", "r_owner_answer_revisions",
            "r_search_lexicons", "task_categories"]

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from app.cards.fact_edit_schemas import (
@@ -26,9 +26,11 @@ from app.ingest.card_plan import (
     PlanInvalid,
     ProposedBlock,
     ProposedCard,
+    ProposedLine,
     ValidatedBlock,
     ValidatedCard,
     check_group,
+    raw_line_text,
     fact_sort_key,
     validate_proposals,
 )
@@ -72,6 +74,9 @@ class CardFactState:
     entity_problem: str | None  # None | "MIXED_ENTITY" | "MERGED_ENTITY"
     blocks: tuple[tuple[str, str, int], ...]  # (block_id, kind, order) 순서대로
     pinned: tuple[PinnedFact, ...]  # 블록 순 → position 순
+    # 표시(D23). block_id → 구역 제목, block_id → (줄 글, 근거 판 id 들) 줄 순서. 줄 없는 옛 판은 비어 있다
+    headings: Mapping[str, str | None] = field(default_factory=dict)
+    lines: Mapping[str, tuple[tuple[str, tuple[int, ...]], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,8 @@ class EditPlan:
                     order=b.order,
                     fact_revision_ids=tuple(actual(r) for r in b.fact_revision_ids),
                     variant=b.variant,
+                    heading=b.heading,
+                    lines=tuple((text, tuple(actual(r) for r in refs)) for text, refs in b.lines),
                 )
                 for b in self.card.blocks
             ),
@@ -264,6 +271,52 @@ def _current_layout(state: CardFactState) -> list[tuple[str, tuple, tuple[int, .
     return lines
 
 
+def _owner_lines(block, refs: list[int], id_map: Mapping[int, int],
+                 ref_map: Mapping[str, int]) -> list[ProposedLine]:
+    """사장님 줄(D23) → 계획 줄. 줄 근거는 이 블록 항목만. 줄이 인용하지 않은 블록 사실은 원문 줄로 끝에 붙인다.
+
+    `lines` 가 없으면(옛 화면·서버 내부 호출) 사실마다 원문 줄이다. 사장님 줄은 지어냄 검사를 하지 않는다.
+    """
+    if block.lines is None:
+        return [ProposedLine(None, (r,)) for r in refs]
+    out: list[ProposedLine] = []
+    for line in block.lines:
+        outside = ([r for r in line.fact_revision_ids if r not in id_map]
+                   + [c for c in line.client_refs if c not in ref_map])
+        if outside:
+            raise EditError(400, "LINE_REF_OUTSIDE_BLOCK", {"refs": outside})
+        ids = [id_map[r] for r in line.fact_revision_ids] + [ref_map[c] for c in line.client_refs]
+        out.append(ProposedLine(line.text, tuple(dict.fromkeys(ids))))
+    cited = {r for line in out for r in line.refs}
+    out.extend(ProposedLine(None, (r,)) for r in refs if r not in cited)
+    return out
+
+
+def _display(card_blocks) -> list[tuple]:
+    return [(b.heading, tuple(b.lines)) for b in card_blocks]
+
+
+def _current_display(state: CardFactState) -> list[tuple]:
+    """지금 판의 (구역 제목, 줄). 줄 없는 옛 판은 원문 줄로 본다 — 바꾼 것 없는 저장이 새 판을 만들지 않게."""
+    out: list[tuple] = []
+    for block_id, _kind, _order in state.blocks:
+        pins = [p.fact for p in state.pinned if p.block_id == block_id]
+        if not pins:
+            continue
+        stored = state.lines.get(block_id)
+        if not stored:
+            merged: list[tuple[str, tuple[int, ...]]] = []
+            for f in pins:
+                text = raw_line_text(f)
+                if merged and merged[-1][0] == text:
+                    merged[-1] = (text, (*merged[-1][1], f.fact_revision_id))
+                else:
+                    merged.append((text, (f.fact_revision_id,)))
+            stored = tuple(merged)
+        out.append((state.headings.get(block_id), tuple(stored)))
+    return out
+
+
 def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
     # 1) 대상 문제
     if state.entity_problem:
@@ -305,8 +358,12 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
     modifies: list[PlannedModify] = []
     adds: list[PlannedAdd] = []
     kept: list[int] = []
+    block_lines: list[tuple[str | None, list[ProposedLine]]] = []
     for block in req.blocks:
         refs: list[int] = []
+        # 이 블록 항목 → 새 판 계획의 판 id(임시 포함). 줄 근거를 옮겨 적는 데 쓴다
+        id_map: dict[int, int] = {}
+        ref_map: dict[str, int] = {}
         for item in block.items:
             if isinstance(item, EditKeep):
                 pin = pinned_by_id[item.fact_revision_id].fact
@@ -314,6 +371,7 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
                 ref_of[pin.fact_revision_id] = pin.fact_revision_id
                 kept.append(pin.fact_revision_id)
                 refs.append(pin.fact_revision_id)
+                id_map[pin.fact_revision_id] = pin.fact_revision_id
             elif isinstance(item, EditModify):
                 base = pinned_by_id[item.fact_revision_id].fact
                 try:
@@ -334,6 +392,7 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
                     ref_of[base.fact_revision_id] = base.fact_revision_id
                     kept.append(base.fact_revision_id)
                     refs.append(base.fact_revision_id)
+                    id_map[base.fact_revision_id] = base.fact_revision_id
                     continue
                 temp = next_temp
                 next_temp -= 1
@@ -343,6 +402,7 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
                 final_facts[temp] = _modified_fact(base, n, temp)
                 ref_of[temp] = base.fact_revision_id
                 refs.append(temp)
+                id_map[base.fact_revision_id] = temp
             else:
                 try:
                     n = normalize_fields(item.fact)
@@ -359,7 +419,9 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
                 final_facts[temp] = _added_fact(state, n, temp)
                 ref_of[temp] = item.client_ref
                 refs.append(temp)
+                ref_map[item.client_ref] = temp
         block_refs.append((block.kind, refs))
+        block_lines.append((block.heading, _owner_lines(block, refs, id_map, ref_map)))
 
     # 5) 값-문장 일치 (바뀐 줄만)
     for m in modifies:
@@ -418,7 +480,10 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
     try:
         cards = validate_proposals(
             group,
-            [ProposedCard(_CATEGORY, tuple(ProposedBlock(kind, tuple(refs)) for kind, refs in block_refs))],
+            [ProposedCard(_CATEGORY, tuple(
+                ProposedBlock(kind=kind, heading=heading, lines=tuple(lines))
+                for (kind, _), (heading, lines) in zip(block_refs, block_lines)))],
+            check_lines=False,
         )
     except PlanInvalid as e:
         raise EditError(422, "CARD_LAYOUT_INVALID", {"plan_code": e.code}) from e
@@ -431,7 +496,8 @@ def build_plan(state: CardFactState, req: FactEditRequest) -> EditPlan:
     display_reordered = False
     if not facts_changed:
         # 판이 그대로면 id 가 모두 실제 id 라 줄 목록을 바로 견줄 수 있다
-        display_reordered = _layout(card.blocks) != _current_layout(state)
+        display_reordered = (_layout(card.blocks) != _current_layout(state)
+                             or _display(card.blocks) != _current_display(state))
     changed = facts_changed or display_reordered
     return EditPlan(
         changed=changed,

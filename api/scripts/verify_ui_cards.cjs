@@ -222,62 +222,49 @@ test('o06d 보기 모드에는 손잡이가 없고 수정 모드에만 있다', 
   assert.equal(await page.getByRole('button', { name: /^위로|^아래로/ }).count(), 0);
   await ctx.close();
 });
-test('o06d 손잡이를 끌어 순서를 바꾸고 수정 완료하면 저장, 수정 완료 토스트', async (b) => {
+// 계획 10 Task 9: 손잡이 줄 대신 보기와 같은 줄 타일. 끌기 자체는 verify_ui_plan10 TILE-1·3 이 본다
+const tileOrder = (page) => page.locator('[data-tile]').allInnerTexts();
+test('o06d 타일을 옮기고 수정 완료하면 저장, 수정 완료 토스트', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  const handle = page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' });
-  await handle.scrollIntoViewIfNeeded(); await page.waitForTimeout(200);
-  const box = await handle.boundingBox();
-  // 수정 모드 줄은 근거·버튼까지 있어 높다. 한 줄 높이의 3/4 만큼 끌면 한 칸 옮겨진다
-  const rowHeight = await handle.evaluate((el) => el.closest('li').getBoundingClientRect().height);
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - rowHeight * 0.75, { steps: 12 }); await page.mouse.up();
-  const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
-  assert.ok(order.findIndex((t) => t.includes('물을 붓는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
+  await page.getByRole('button', { name: '물을 붓는다. 옮기기', exact: true }).press('ArrowUp');
+  const order = await tileOrder(page);
+  assert.ok(order.indexOf('물을 붓는다.') < order.indexOf('샷을 붓는다.'));
   await page.getByRole('button', { name: '수정 완료' }).click();
   await page.getByRole('status').getByText('수정했어요').waitFor();
-  assert.ok(api.calls.some((c) => c.method === 'PUT' && c.path === '/cards/1/facts'));
+  const body = api.calls.find((c) => c.method === 'PUT' && c.path === '/cards/1/facts').body;
+  const steps = body.blocks.find((x) => x.kind === 'STEPS');
+  assert.deepEqual(steps.lines.map((l) => l.text), ['컵에 얼음을 담는다.', '물을 붓는다.', '샷을 붓는다.', '뚜껑을 닫는다.']);
+  // 줄은 보기 순서일 뿐, 사실(단계 번호)은 그대로 보낸다
+  assert.deepEqual(steps.items.map((i) => i.fact_revision_id), [201, 202, 203, 204]);
   await page.getByRole('button', { name: '수정하기' }).waitFor();
   await ctx.close();
 });
-test('o06d 손잡이는 키보드 화살표로도 옮긴다', async (b) => {
-  const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
+test('o06d 수정 모드에서 줄을 누르면 고치기 시트, 거기서 줄 빼기', async (b) => {
+  const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' }).press('ArrowUp');
-  const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
-  assert.ok(order.findIndex((t) => t.includes('물을 붓는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
-  await ctx.close();
-});
-test('o06d 선행 단계 앞으로는 끌어도 안 옮겨진다', async (b) => {
-  const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
-  await startEdit(page);
-  await page.getByRole('button', { name: '2번 샷을 붓는다. 옮기기' }).press('ArrowUp'); // 샷은 1번(얼음) 뒤여야 한다
-  const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
-  assert.ok(order.findIndex((t) => t.includes('컵에 얼음을 담는다.')) < order.findIndex((t) => t.includes('샷을 붓는다.')));
-  await ctx.close();
-});
-test('o06d 수정 모드에서 줄을 누르면 고치기, 오른쪽 휴지통으로 빼기(2026-11-08 길게 누르기 메뉴 대신)', async (b) => {
-  const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
-  await startEdit(page);
-  const row = page.locator('[data-testid="fact-row"]').filter({ hasText: '뚜껑을 닫는다.' });
-  await row.getByRole('button', { name: /^빼기: / }).waitFor();
-  await row.getByRole('button', { name: /^고치기: / }).click();
-  await page.getByRole('dialog', { name: '이 사실 고치기' }).waitFor();
+  await page.getByRole('button', { name: '뚜껑을 닫는다. 옮기기', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: '이 줄 고치기' });
+  await sheet.getByRole('button', { name: '이 줄 빼기' }).click();
+  assert.ok(!(await tileOrder(page)).includes('뚜껑을 닫는다.'));
+  await page.getByRole('button', { name: '수정 완료' }).click();
+  await page.getByRole('button', { name: '수정하기' }).waitFor();
+  const body = api.calls.find((c) => c.method === 'PUT' && c.path === '/cards/1/facts').body;
+  assert.deepEqual(body.deleted_fact_revision_ids, [204]);
   await ctx.close();
 });
 test('o06f 돌아가기는 저장하지 않는다', async (b) => {
   const { page, ctx, api } = await open(b, 'OWNER', '/owner/cards/1');
   await startEdit(page);
-  await page.getByRole('button', { name: '3번 물을 붓는다. 옮기기' }).press('ArrowUp');
+  await page.getByRole('button', { name: '물을 붓는다. 옮기기', exact: true }).press('ArrowUp');
   await page.getByRole('button', { name: '돌아가기' }).click();
   await page.getByRole('dialog', { name: '고친 내용을 버릴까요?' }).getByRole('button', { name: '버리고 나가기' }).click();
   await page.getByRole('button', { name: '수정하기' }).waitFor();
   assert.equal(api.calls.filter((c) => c.method === 'PUT').length, 0);
-  const order = await page.locator('[data-testid="fact-row"]').allInnerTexts();
+  const order = await page.locator('[data-line]').allInnerTexts();
   assert.ok(order.findIndex((t) => t.includes('샷을 붓는다.')) < order.findIndex((t) => t.includes('물을 붓는다.')));
   await ctx.close();
 });
-
 test('o08a 바뀐 부분만 강조, 지금 카드 제안 내용 상자 없음', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/proposals');
   assert.equal(await page.locator('main del, main s, main [data-diff="del"]').filter({ hasText: '2펌프' }).count(), 1);
@@ -317,23 +304,20 @@ test('검토 2 손가락으로 맨 위에서 당기면 새로고침된다', asyn
   await page.getByText('새로고침 1번').waitFor({ timeout: 3000 });
   await ctx.close();
 });
-test('검토 3 손잡이를 아래로 두 줄 끌면 두 칸 옮겨진다', async (b) => {
+test('검토 3 타일을 두 칸 끌어 놓은 뒤 누르지 않고 지나가도 순서가 그대로', async (b) => {
   const { page, ctx } = await open(b, 'OWNER', '/owner/cards/1');
-  await page.getByRole('button', { name: '수정하기' }).click(); await page.getByRole('button', { name: '수정 완료' }).waitFor();
-  const handle = page.getByRole('button', { name: '바닐라 라떼 ICE 우유는 225ml 넣는다. 옮기기' });
-  await handle.scrollIntoViewIfNeeded(); await page.waitForTimeout(200);
-  const box = await handle.boundingBox();
-  const rowHeight = await handle.evaluate((el) => el.closest('li').getBoundingClientRect().height);
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  // 손잡이 줄에서 왼쪽으로 벗어나 끌고, 벗어난 자리에서 놓는다(줄이 DOM 에서 옮겨지며 포인터 붙잡기가 풀리는 경우)
-  await page.mouse.move(box.x - 150, box.y + box.height / 2 + rowHeight * 1.8, { steps: 24 }); await page.mouse.up();
-  const iceOrder = async () => (await page.locator('[data-testid="fact-row"]').allInnerTexts()).filter((t) => /ICE/.test(t)).map((t) => t.split('\n')[0]);
-  const ice = await iceOrder();
-  assert.ok(ice[2].includes('우유는 225ml'), JSON.stringify(ice));
-  // 놓은 뒤 누르지 않고 손잡이 위를 지나가도 순서가 바뀌면 안 된다
-  const other = await page.getByRole('button', { name: /옮기기$/ }).filter({ hasNotText: '카테고리' }).first().boundingBox();
+  await startEdit(page);
+  const ice = page.locator('[data-layout]').first().locator('[data-tile]');
+  const before = await ice.allInnerTexts();
+  const from = await ice.nth(0).boundingBox(), to = await ice.nth(2).boundingBox();
+  await page.mouse.move(from.x + 10, from.y + from.height / 2); await page.mouse.down();
+  await page.mouse.move(to.x + 10, to.y + to.height - 2, { steps: 16 }); await page.mouse.up();
+  const after = await ice.allInnerTexts();
+  assert.equal(after[2], before[0], JSON.stringify(after));
+  // 떼고 나서 버튼 없이 다른 타일 위를 지나가도 바뀌면 안 된다
+  const other = await ice.nth(0).boundingBox();
   await page.mouse.move(other.x + 10, other.y + 10); await page.mouse.move(other.x + 10, other.y + 200, { steps: 10 });
-  assert.deepEqual(await iceOrder(), ice);
+  assert.deepEqual(await ice.allInnerTexts(), after);
   await ctx.close();
 });
 test('검토 4 검수 필요 카드에 걸린 제안은 뱃지를 두 번 세지 않는다', async (b) => {

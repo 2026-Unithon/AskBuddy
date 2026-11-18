@@ -4,14 +4,17 @@
 고정 필드를 두면 안 맞는 사실은 버려지고 빈 칸은 지어내진다. 그래서 필드가 아니라
 **블록**을 고정한다 — 해당 사실이 없으면 그 블록이 통째로 빠진다.
 
-업무 사실을 자유 생성하는 설명 필드를 두지 않는다. 블록은 **사실을 고를 뿐**
-새 문장을 만들지 않는다 (MVP 31-3).
+업무 사실을 자유 생성하는 설명 필드를 두지 않는다. 블록은 사실을 고르고, 모델이 쓴
+표시 줄(`heading`·`lines`)을 함께 가진다 (MVP 31-3, D23). 줄은 근거 사실을 인용하고,
+숫자·단위는 근거 사실에 있어야 한다. 답변(R)은 줄이 아니라 사실을 인용한다(D12) —
+그래서 줄은 W 표시용이고 snapshot 에 싣지 않는다.
 """
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from app.contracts.common import (
     SCHEMA_CARD_PLAN,
@@ -34,6 +37,16 @@ RAW         typed 파싱이 불확실한 승인 원문 그대로. **답변 가�
 Disposition = Literal["LINKED", "REVIEW_PENDING", "EXCLUDED"]
 
 
+class DisplayLine(FrozenContract):
+    """블록의 표시 줄 하나 (D23). 모델(또는 사장님)이 쓴 글과 그 근거 사실 판.
+
+    W 표시용이다. 답변(R)은 줄이 아니라 사실을 인용하므로 snapshot 에 싣지 않는다.
+    """
+
+    text: str = Field(min_length=1, max_length=300)
+    fact_revision_ids: tuple[EntityId, ...] = Field(min_length=1, max_length=50)
+
+
 class CardBlock(FrozenContract):
     """카드의 한 줄. 사실을 고를 뿐 새 사실을 만들지 않는다.
 
@@ -51,6 +64,10 @@ class CardBlock(FrozenContract):
     # RAW 전용 — typed 로 쪼개지 않고 승인된 원문 구간 (RV-05).
     # 이것이 없으면 승인된 원문 카드를 표현하려고 사실을 억지로 만들어야 했다
     raw_span_id: EntityId | None = None
+    # 표시용(D23). 구역 제목과 줄. snapshot 직렬화(exclude)·내보낸 JSON schema(SkipJsonSchema)
+    # 어디에도 나오지 않는다 — W·R 공용 계약 파일은 그대로다
+    heading: SkipJsonSchema[str | None] = Field(default=None, max_length=40, exclude=True)
+    lines: SkipJsonSchema[tuple[DisplayLine, ...]] = Field(default=(), max_length=60, exclude=True)
 
     @model_validator(mode="after")
     def _payload_matches_kind(self) -> "CardBlock":
@@ -64,6 +81,11 @@ class CardBlock(FrozenContract):
                 raise ValueError(f"{self.kind} 블록에는 사실이 최소 하나 필요하다")
         if len(set(self.fact_revision_ids)) != len(self.fact_revision_ids):
             raise ValueError(f"블록 {self.block_id} 안에서 같은 사실을 두 번 인용했다")
+        mine = set(self.fact_revision_ids)
+        for line in self.lines:
+            outside = [f for f in line.fact_revision_ids if f not in mine]
+            if outside:
+                raise ValueError(f"블록 {self.block_id} 의 줄이 블록 밖 사실을 인용했다: {outside}")
         return self
 
 

@@ -1,13 +1,9 @@
 "use client";
 
-// 고치기 시트: 사실 한 줄의 문장·조건·예외·부정·값·단위. 규격은 읽기 전용.
-// "문장으로 다시 분석" 은 서버 분석(상태 없음)으로 칸만 채운다. 저장은 하단 "고친 내용 저장" 에서.
-import { useMutation } from "@tanstack/react-query";
-import { useId, useState } from "react";
-import { Button, Caption, ErrorInline, Sheet, Switch, focusRing } from "@/components/kit";
-import { parseCardFacts, type FactFields, type FactParseResponse } from "@/lib/api";
-import { useApp } from "@/lib/store";
-import { NO_FACT_TEXT, VALUE_CLEAR_TEXT, parseErrorMessage, warningText } from "./fact-messages";
+// 사실 한 줄의 칸 편집기(추가 시트의 제안 카드가 쓴다). 규격은 읽기 전용.
+import { useId } from "react";
+import { Caption, Switch, focusRing } from "@/components/kit";
+import type { FactFields } from "@/lib/api";
 import { variantLabel } from "./fact-row";
 
 const inputClass = `min-h-12 w-full rounded-[16px] bg-surface px-4 text-[16px] text-ink shadow-card disabled:opacity-60 ${focusRing}`;
@@ -111,83 +107,5 @@ export function FactFieldsEditor({
       <ListEditor label="예외" items={fields.exceptions} disabled={disabled} onChange={(exceptions) => set({ exceptions })} />
       <Caption>규격 {variantLabel(fields.variant)} (바꿀 수 없어요)</Caption>
     </div>
-  );
-}
-
-export function FactEditSheet({
-  cardId,
-  baseRevisionId,
-  initial,
-  hadValue,
-  onApply,
-  onClose,
-}: {
-  cardId: number;
-  /** 카드에 고정된 판. 새로 넣은 줄이면 null(다시 분석 없음) */
-  baseRevisionId: number | null;
-  initial: FactFields;
-  /** 원래 값이 있던 줄만 값·단위를 고친다. 값 지우기는 서버가 거절한다 */
-  hadValue: boolean;
-  onApply: (fields: FactFields) => void;
-  onClose: () => void;
-}) {
-  const { state } = useApp();
-  const [form, setForm] = useState<FactFields>(initial);
-  const [notices, setNotices] = useState<string[]>([]);
-  const parse = useMutation({
-    mutationFn: (text: string) =>
-      parseCardFacts(cardId, { text, mode: "MODIFY", base_fact_revision_id: baseRevisionId }, state.token!),
-    onSuccess: (result: FactParseResponse) => {
-      const first = result.proposals[0];
-      if (!first) {
-        setNotices([NO_FACT_TEXT]);
-        return;
-      }
-      if (first.warnings.includes("STEP_CHANGED")) {
-        setNotices([warningText("STEP_CHANGED")]);
-        return;
-      }
-      // 규격·속성·단계 번호는 이 줄 값 그대로. 원래 값이 없던 줄은 값을 붙이지 않는다
-      setForm((prev) => ({
-        ...prev,
-        sentence: first.fact.sentence,
-        polarity: first.fact.polarity,
-        value: hadValue ? first.fact.value : prev.value,
-        unit: hadValue ? first.fact.unit : prev.unit,
-        conditions: first.fact.conditions,
-        exceptions: first.fact.exceptions,
-      }));
-      setNotices([...result.warnings, ...first.warnings].filter((w) => w !== "MULTIPLE_FACTS").map((w) => warningText(w)));
-    },
-  });
-  const valueMissing = hadValue && !(form.value ?? "").trim();
-  const sentenceMissing = !form.sentence.trim();
-
-  return (
-    <Sheet open onClose={onClose} title="이 사실 고치기" description="문장이 기준이에요. 숫자를 바꾸면 문장 속 숫자도 같이 고쳐 주세요.">
-      <FactFieldsEditor fields={form} onChange={setForm} showValue={hadValue} disabled={parse.isPending} />
-      {valueMissing && <Caption className="text-danger-700">{VALUE_CLEAR_TEXT}</Caption>}
-      {baseRevisionId !== null && (
-        <Button variant="secondary" loading={parse.isPending} disabled={sentenceMissing} onClick={() => parse.mutate(form.sentence)}>
-          {parse.isPending ? "분석하는 중" : "문장으로 다시 분석"}
-        </Button>
-      )}
-      {parse.error && <ErrorInline message={parseErrorMessage(parse.error)} onRetry={() => parse.mutate(form.sentence)} retrying={parse.isPending} />}
-      {notices.length > 0 && (
-        <ul className="flex flex-col gap-1" data-testid="parse-notices">
-          {notices.map((text, i) => (
-            <li key={i} className="rounded-[14px] bg-warn-50 px-3.5 py-2.5 text-[13px] leading-[1.45] text-warn-700 [word-break:keep-all]">
-              {text}
-            </li>
-          ))}
-        </ul>
-      )}
-      <Button disabled={parse.isPending || valueMissing || sentenceMissing} onClick={() => onApply(form)}>
-        이대로 고치기
-      </Button>
-      <Button variant="secondary" onClick={onClose}>
-        그만두기
-      </Button>
-    </Sheet>
   );
 }

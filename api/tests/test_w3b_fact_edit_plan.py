@@ -275,11 +275,6 @@ def _step_add(step):
     return _add("n1", sentence="ICE 컵을 흔든다", step_order=step, variant={"temperature": "ICE"})
 
 
-def test_add_step_numbered_mid_but_placed_last_is_step_order_error():
-    # 분석이 2번이라 읽은 단계를 블록 끝에 두면 번호가 준다(1, 2, 3, 2)
-    e = _err(_state(), _req([("QUANTITIES", [3]), ("QUANTITIES", [1, 2]),
-                             ("STEPS", [4, 5, 6, _step_add(2)]), ("NOTES", [7])]))
-    assert (e.code, e.details) == ("CARD_LAYOUT_INVALID", {"plan_code": "PLAN_STEP_ORDER"})
 
 
 def test_add_step_mid_procedure_with_renumber_is_accepted():
@@ -295,11 +290,6 @@ def test_add_step_mid_procedure_with_renumber_is_accepted():
     assert orders == [1, 2, 3, 4]
 
 
-def test_add_in_steps_block_without_step_is_layout_error():
-    add = _add("n1", variant={"temperature": "ICE"})
-    e = _err(_state(), _req([("QUANTITIES", [3]), ("QUANTITIES", [1, 2]),
-                             ("STEPS", [4, 5, 6, add]), ("NOTES", [7])]))
-    assert (e.code, e.details) == ("CARD_LAYOUT_INVALID", {"plan_code": "PLAN_KIND_MISMATCH"})
 
 
 def test_add_unknown_size_is_unresolved():
@@ -309,11 +299,6 @@ def test_add_unknown_size_is_unresolved():
     assert (e.code, e.details) == ("VARIANT_UNRESOLVED", {"ref": "n1"})
 
 
-def test_add_variant_differs_from_block():
-    add = _add("n1", sentence="ICE 얼음 100g", value="100", unit="g", variant={"temperature": "HOT"})
-    e = _err(_state(), _req([("QUANTITIES", [3]), ("QUANTITIES", [1, 2, add]),
-                             ("STEPS", [4, 5, 6]), ("NOTES", [7])]))
-    assert (e.code, e.details) == ("CARD_LAYOUT_INVALID", {"plan_code": "PLAN_VARIANT_MIXED"})
 
 
 def test_add_value_not_in_sentence_uses_client_ref():
@@ -353,6 +338,8 @@ def test_bind_swaps_temp_ids_and_keeps_layout():
     assert [b.block_id for b in card.blocks] == [b.block_id for b in plan.card.blocks]
     assert card.blocks[1].fact_revision_ids == (1, 900)
     assert facts[900] is new and all(k > 0 for k in facts) and set(facts) == {1, 3, 4, 5, 6, 7, 900}
+    # 계획 10: 표시 줄도 실제 판 id 를 인용한다(새 사실 글이 줄로 남는다)
+    assert card.blocks[1].lines[-1] == ("ICE 시럽 30ml", (900,))
 
 
 def test_deterministic():

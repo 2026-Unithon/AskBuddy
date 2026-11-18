@@ -63,6 +63,7 @@ _TITLE_MAX = 200
 # 오류 코드 → 서버 메시지 (common §8 문장)
 _MESSAGES = {
     "CARD_NOT_FOUND": "카드를 찾을 수 없습니다.",
+    "LINE_REF_OUTSIDE_BLOCK": "줄이 다른 구역의 내용을 가리켜요. 화면을 새로 고친 뒤 다시 저장해 주세요.",
     "CARD_EXCLUDED": "제외된 카드를 먼저 복원해 주세요.",
     "NOT_FACT_CARD": "사실 단위로 고칠 수 있는 카드가 아닙니다.",
     "CARD_VERSION_CONFLICT": "그사이 카드가 바뀌었어요. 최신 내용을 불러온 뒤 다시 고쳐 주세요.",
@@ -360,18 +361,7 @@ async def save_fact_edit(conn, store_id: int, *, card_id: int, actor_id: int,
     if any(r in new_ids for r in no_origin):
         raise RuntimeError(f"새 판에 근거가 없다 — 저장하지 않는다: {sorted(no_origin)[:5]}")
     origins: list[Origin] = [o for r in revisions for o in provenance.get(r, ())]
-    source_ids = sorted({o.source_id for o in origins if o.source_id is not None})
-    names: dict[int, str] = {}
-    if source_ids:
-        for r in await conn.fetch(
-                "select source_id, title, source_type from sources "
-                "where store_id = $1 and source_id = any($2::bigint[])", store_id, source_ids):
-            names[int(r["source_id"])] = (r["title"] or "").strip() or f"{r['source_type']} 자료"
-    content = card_plan.render_card(card_v, facts,
-                                    evidence=[names[s] for s in source_ids if s in names])
-    missing = card_plan.render_missing(card_v, facts, content)
-    if missing:
-        raise RuntimeError(f"렌더링이 사실을 빠뜨렸다 — 저장하지 않는다: 판 {missing[:5]}")
+    content = card_plan.card_content(card_v.blocks)
 
     # 11. 새 카드 판·고정·근거·레거시
     version_id = await create_owner_edit_version(conn, store_id, card_id, title=state.title,

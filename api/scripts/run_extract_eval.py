@@ -483,7 +483,7 @@ def _campaign_settings(s: Any, args: argparse.Namespace) -> dict[str, Any]:
     settings = {
         "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
         "code_version": code_version(),
-        "extract_prompt_version": prompt_digest("extract_facts.ko.txt"),
+        "extract_prompt_version": prompt_digest("extract_facts_body.ko.txt"),
         "assemble_prompt_version": prompt_digest("assemble_card_plan.ko.txt"),
         "extraction_schema_hash": sha256_file(
             Path(__file__).resolve().parents[1] / "app" / "ingest" / "schemas.py"
@@ -685,7 +685,7 @@ async def main() -> int:
         "scorer_version": SCORER_VERSION, "scoring_rules": DEFAULT_RULES.domain,
         "truth_hash": "sha256:" + hashlib.sha256(json.dumps(truth, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         "code_version": code_version(),
-        "prompt_version": prompt_digest("extract_facts.ko.txt"),
+        "prompt_version": prompt_digest("extract_facts_body.ko.txt"),
         "assemble_prompt_version": prompt_digest("assemble_card_plan.ko.txt"),
         "extract_model": s.gemini_model,
         "stt_model": s.stt_model,

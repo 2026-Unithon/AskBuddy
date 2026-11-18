@@ -10,7 +10,7 @@ import re
 from app.config import get_settings
 from app.ingest import raw_responses, reuse
 from app.ingest.schemas import (CardPlanBatch, Evidence, ExtractedAssertion,
-                                FactExtractionResult, PlannedBlock, PlannedCard)
+                                FactExtractionResult, PlannedBlock, PlannedCard, PlannedLine)
 
 
 # 원래 응답 행의 model 열. 실제 모델명이 아니다 — mode='mock' 과 함께 합성 응답임을 밝힌다
@@ -124,9 +124,24 @@ def _planned(entities, category_names) -> CardPlanBatch:
             notes = [f["id"] for f in facts if f["순서"] == 0 and f["부정"]]
             for kind, refs in (("QUANTITIES", quantities), ("STEPS", steps), ("NOTES", notes)):
                 if refs:
-                    blocks.append(PlannedBlock(kind=kind, facts=refs))
+                    # 합성 줄 = 사실 원문 + 원문에 없는 조건·예외(프롬프트 규칙 6을 따르는 모델 흉내).
+                    # 서버는 조건 글자를 검사하지 않으므로(D23 값만) 모의가 빠뜨리면 본문에서 사라진다
+                    text_of = {f["id"]: _line_text(f) for f in facts}  # 비면 서버가 원문 줄을 쓴다
+                    blocks.append(PlannedBlock(kind=kind, heading=None, lines=[
+                        PlannedLine(text=text_of[r], facts=[r]) for r in refs]))
         cards.append(PlannedCard(entity=entity["대상"], category_name=category, blocks=blocks))
     return CardPlanBatch(cards=cards)
+
+
+def _line_text(fact: dict) -> str:
+    text = fact.get("원문", "")
+    if not text:
+        return ""
+    for label, items in (("조건", fact.get("조건", [])), ("예외", fact.get("예외", []))):
+        missing = [c for c in items if c not in text]
+        if missing:
+            text += f" ({label}: {'; '.join(missing)})"
+    return text
 
 
 _NUMBER_UNIT = re.compile(

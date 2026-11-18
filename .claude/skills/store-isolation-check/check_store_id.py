@@ -52,7 +52,7 @@ TENANT_TABLES = {
     # W2-4 업로드 검수 제안 (가산)
     "upload_change_proposals", "upload_change_proposal_facts",
     # W3a 카드 판 블록·근거 (가산)
-    "card_version_blocks", "card_block_facts", "card_version_fact_provenance",
+    "card_version_blocks", "card_block_facts", "card_version_lines", "card_version_fact_provenance",
     # W3b 카드 사실 편집 (가산)
     "card_fact_edits",
     # P5 근무조 체크리스트 (가산)

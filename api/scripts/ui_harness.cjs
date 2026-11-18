@@ -34,7 +34,8 @@ async function open(browser, role, url, { viewport = { width: 390, height: 844 }
       if (e.standalone) Object.defineProperty(navigator, 'standalone', { get: () => true });
       if (e.hasPushApi) {
         window.PushManager = function PushManager() {};
-        Object.defineProperty(navigator, 'serviceWorker', { get: () => ({ register: async () => registration, ready: Promise.resolve(registration), getRegistration: async () => registration }) });
+        Object.defineProperty(navigator, 'serviceWorker', { get: () => ({ register: async () => registration, ready: Promise.resolve(registration), getRegistration: async () => registration,
+          addEventListener() {}, removeEventListener() {} }) });
       } else {
         delete window.PushManager;
       }

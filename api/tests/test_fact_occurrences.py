@@ -102,9 +102,9 @@ def test_kakao_parsed_text_numbers_each_message():
 
 
 def test_prompt_explains_page_and_line_markers():
-    from app.ingest.extract.gemini import FACTS_LOCATOR_PROMPT_PATH, FACTS_PROMPT_PATH
-    assert "[#12]" not in FACTS_PROMPT_PATH.read_text(encoding="utf-8")
-    prompt = FACTS_LOCATOR_PROMPT_PATH.read_text(encoding="utf-8")
+    from app.ingest.extract.gemini import render_facts_prompt
+    assert "[#12]" not in render_facts_prompt(source_type="KAKAO", text="x", glossary=[], locator_hints=False)
+    prompt = render_facts_prompt(source_type="KAKAO", text="x", glossary=[], locator_hints=True)
     assert "[3쪽]" in prompt and "[#12]" in prompt and "`page`" in prompt and "`line`" in prompt
 
 

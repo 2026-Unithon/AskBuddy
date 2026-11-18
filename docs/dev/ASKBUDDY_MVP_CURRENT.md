@@ -1329,6 +1329,8 @@ ExtractionEnvelope 최소 필드: schema_version, source_id, segment_id, attempt
 
 CardPlan은 schema_version, entity_id, variant, title 참조, blocks[]를 갖는다. 각 block은 kind와 fact_revision_ids를 선택한다. 업무 사실을 자유 생성하는 설명 필드를 두지 않는다.
 
+**D23 (2026-11-11, 계획 10):** 블록은 사실을 고르고, 모델이 쓴 표시 줄(`heading`·`lines`)을 함께 가진다. 줄은 근거 사실을 인용하고, 숫자·단위는 근거 사실에 있어야 하며 사실 값이 빠지면 안 된다(서버 문자열 검사, 모델 호출 아님). 검사에 실패한 줄만 사실 원문으로 바뀐다. 줄은 W 표시용(`card_version_lines`)이며 snapshot 에 싣지 않는다. 답변(R)은 줄이 아니라 사실을 인용한다(D12 유지). 사실 모양으로 보기를 고르는 규칙은 두지 않는다.
+
 D19에 따라 카드 표시 단위는 동일 entity의 여러 규격을 담을 수 있다. QUANTITIES는 규격별 블록/행으로 구분하고 R은 확정된 규격만 선택한다. 승인 RAW는 immutable raw_span 참조로 별도 표현하며 fact를 역추출해 승인을 상속시키지 않는다. 현재 CardBlock의 fact-only shape는 CP-01에서 보강한다.
 
 | kind | 렌더링 규칙 |

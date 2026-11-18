@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from app.ingest import batching
-from app.ingest.card_plan import (EntityGroup, PlanFact, ProposedBlock, ProposedCard,
+from app.ingest.card_plan import (EntityGroup, PlanFact, ProposedBlock, ProposedCard, ProposedLine,
                                   fact_sort_key, normalize_step_orders, variant_label)
 from app.ingest.entities import _follow_merged
 from app.ingest.schemas import CardPlanBatch
@@ -241,8 +241,9 @@ def proposals_from_output(batch: PlanBatch, out: CardPlanBatch
         by_entity[entity_id].append(ProposedCard(
             category_name=card.category_name,
             blocks=tuple(
-                ProposedBlock(kind=b.kind,
-                              refs=tuple(batch.fact_handles.get(h, h) for h in b.facts))
+                ProposedBlock(kind=b.kind, heading=b.heading, lines=tuple(
+                    ProposedLine(line.text, tuple(batch.fact_handles.get(h, h) for h in line.facts))
+                    for line in b.lines))
                 for b in card.blocks)))
     proposals = {eid: tuple(cards) for eid, cards in by_entity.items()}
     return proposals, notes + list(out.unresolved)

@@ -24,6 +24,7 @@ import {
 } from "@/components/kit";
 import { SelectBar, useCardSelection } from "@/components/owner/card-select";
 import { CardTile, tileStatus } from "@/components/owner/card-tile";
+import { CardSectionGrid } from "@/components/cards/card-section-grid";
 import { apiErrorMessage, bulkCards, mutateProductCard, type BulkAction, type CardFilters, type CardListItem, type CardListResponse } from "@/lib/api";
 import { cardsInfiniteQuery, productCategoriesQuery, proposalsQuery, queryKeys } from "@/lib/query";
 import { useCardReviewCount } from "@/lib/card-review-count";
@@ -378,53 +379,44 @@ function CardsScreen() {
           <Empty title="아직 카드가 없어요" description="자료를 올리면 카드가 만들어져요." />
         ))}
 
-      {sections.map(([name, list], index) => {
-        // aria-labelledby 는 공백으로 id 를 나누므로 이름 대신 순번으로 id 를 만든다
-        const id = `cards-section-${index}`;
-        return (
-          <section key={name} aria-labelledby={id} className="flex flex-col gap-3">
-            <h2 id={id} className="border-b-2 border-ink pb-1.5 text-[17px] font-bold leading-[1.4] tracking-[-0.34px] text-ink">
-              {name}
-            </h2>
-            <div
-              className={`grid gap-3 ${cardKind(list[0]?.category ?? { name }) === "RECIPE" ? "grid-cols-2" : "grid-cols-1"}`}
-              {...(selecting ? selection.containerProps : {})}
-            >
-              {list.map((card) => {
-                const proposal = proposalCards.has(card.card_id);
-                const tile = tileStatus(card, proposal);
-                const canPublish = tile === "pending" && (status === "all" || status === "pending") && !publishing.has(card.card_id);
-                if (selecting) {
-                  return (
-                    <CardTile
-                      key={card.card_id}
-                      card={card}
-                      status={tile}
-                      select={{ selected: selection.selected.has(card.card_id), onToggle: () => selection.toggle(card.card_id) }}
-                    />
-                  );
-                }
-                return (
-                  <CardTile
-                    key={card.card_id}
-                    card={card}
-                    status={tile}
-                    proposal={proposal}
-                    right={canPublish ? { label: "공개", ariaLabel: `${card.title} 공개`, tone: "primary", onAction: () => publishOnce(card.card_id) } : undefined}
-                    left={
-                      tile === "pending" && status === "pending"
-                        ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => setAskDelete({ ids: [card.card_id], bulk: false }) }
-                        : tile === "approved" && card.review_status === "APPROVED" && (status === "all" || status === "approved") && !unpublish.isPending
-                          ? { label: "미공개", ariaLabel: `${card.title} 미공개`, tone: "neutral", onAction: () => unpublish.mutate(card.card_id) }
-                          : undefined
-                    }
-                  />
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
+      <CardSectionGrid
+        items={sections.flatMap(([, list]) => list)}
+        sectionOf={(card) => card.category?.name ?? "기타"}
+        sectionOrder={(name) => order.get(name) ?? 999}
+        kindOf={(card) => cardKind(card.category ?? { name: "기타" })}
+        gridProps={selecting ? selection.containerProps : undefined}
+        renderTile={(card) => {
+          const proposal = proposalCards.has(card.card_id);
+          const tile = tileStatus(card, proposal);
+          const canPublish = tile === "pending" && (status === "all" || status === "pending") && !publishing.has(card.card_id);
+          if (selecting) {
+            return (
+              <CardTile
+                key={card.card_id}
+                card={card}
+                status={tile}
+                select={{ selected: selection.selected.has(card.card_id), onToggle: () => selection.toggle(card.card_id) }}
+              />
+            );
+          }
+          return (
+            <CardTile
+              key={card.card_id}
+              card={card}
+              status={tile}
+              proposal={proposal}
+              right={canPublish ? { label: "공개", ariaLabel: `${card.title} 공개`, tone: "primary", onAction: () => publishOnce(card.card_id) } : undefined}
+              left={
+                tile === "pending" && status === "pending"
+                  ? { label: "삭제", ariaLabel: `${card.title} 삭제`, tone: "danger", onAction: () => setAskDelete({ ids: [card.card_id], bulk: false }) }
+                  : tile === "approved" && card.review_status === "APPROVED" && (status === "all" || status === "approved") && !unpublish.isPending
+                    ? { label: "미공개", ariaLabel: `${card.title} 미공개`, tone: "neutral", onAction: () => unpublish.mutate(card.card_id) }
+                    : undefined
+              }
+            />
+          );
+        }}
+      />
       {cards.hasNextPage && (
         <Button variant="secondary" loading={cards.isFetchingNextPage} onClick={() => void cards.fetchNextPage()}>
           카드 더 보기

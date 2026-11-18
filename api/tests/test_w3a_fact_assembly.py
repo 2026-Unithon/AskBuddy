@@ -13,7 +13,7 @@ from app.ingest import extract
 from app.ingest import fact_assembly as fa
 from app.ingest.card_plan import EntityGroup, PlanFact
 from app.ingest.extract import gemini, mock
-from app.ingest.schemas import CardPlanBatch, PlannedBlock, PlannedCard
+from app.ingest.schemas import CardPlanBatch, PlannedBlock, PlannedLine, PlannedCard
 
 
 def _fact(rev, fact_id, *, t=None, s=None, step=None, q=None, unit="ml", neg=False, cond=(),
@@ -119,13 +119,15 @@ def test_proposals_from_output_maps_handles():
     (batch,) = fa.build_plan_batches([g1, g2], limit=200)
     out = CardPlanBatch(cards=[
         PlannedCard(entity="E1", category_name="레시피", blocks=[
-            PlannedBlock(kind="QUANTITIES", facts=["F1", "F99", "F3"])]),
+            PlannedBlock(kind="QUANTITIES", heading="HOT", lines=[
+                PlannedLine(text="합성 줄", facts=["F1", "F99"]), PlannedLine(text="둘째 줄", facts=["F3"])])]),
         PlannedCard(entity="E9", category_name="레시피", blocks=[
-            PlannedBlock(kind="NOTES", facts=["F2"])]),
+            PlannedBlock(kind="NOTES", lines=[PlannedLine(text="x", facts=["F2"])])]),
     ], unresolved=["값 확인 필요"])
     proposals, notes = fa.proposals_from_output(batch, out)
     assert proposals[1] == (cp.ProposedCard("레시피", (
-        cp.ProposedBlock("QUANTITIES", (11, "F99", 21)),)),)
+        cp.ProposedBlock("QUANTITIES", "HOT", (cp.ProposedLine("합성 줄", (11, "F99")),
+                                               cp.ProposedLine("둘째 줄", (21,)))),)),)
     assert proposals[2] == ()
     assert notes == ["알 수 없는 대상 이름표 E9", "값 확인 필요"]
 

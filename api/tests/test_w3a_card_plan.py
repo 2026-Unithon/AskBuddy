@@ -35,7 +35,7 @@ def _group(facts, name="음료Z"):
 
 
 def _pc(*blocks, category="레시피"):
-    return ProposedCard(category, tuple(ProposedBlock(k, tuple(r)) for k, r in blocks))
+    return ProposedCard(category, tuple(ProposedBlock.from_refs(k, tuple(r)) for k, r in blocks))
 
 
 def _code(group, proposals):
@@ -80,13 +80,6 @@ def test_check_group_ok_outside_cycle():
     assert cp.check_group(_group([_fact(1, 1, req=(1,))])) == cp.DATA_REQUIRES_CYCLE
 
 
-def test_validate_reorders_sections_and_numbers_blocks():
-    g = _group([_fact(1, 1, q="1"), _fact(2, 2, step=1), _fact(3, 3)])
-    (card,) = cp.validate_proposals(
-        g, [_pc(("NOTES", [3]), ("STEPS", [2]), ("QUANTITIES", [1]))])
-    assert [b.kind for b in card.blocks] == ["QUANTITIES", "STEPS", "NOTES"]
-    assert [b.block_id for b in card.blocks] == ["b1", "b2", "b3"]
-    assert [b.order for b in card.blocks] == [1, 2, 3]
 
 
 def test_validate_unknown_ref():
@@ -97,55 +90,25 @@ def test_validate_outside_group():
     assert _code(_group([_fact(1, 1)]), [_pc(("NOTES", [500]))]) == cp.PLAN_OUTSIDE_GROUP
 
 
-def test_validate_kind_mismatch():
-    g = _group([_fact(1, 1, step=1), _fact(2, 2)])
-    assert _code(g, [_pc(("QUANTITIES", [1]), ("NOTES", [2]))]) == cp.PLAN_KIND_MISMATCH
-    assert _code(g, [_pc(("STEPS", [2]), ("STEPS", [1]))]) == cp.PLAN_KIND_MISMATCH
-    assert _code(g, [_pc(("RAW", [1]), ("NOTES", [2]))]) == cp.PLAN_KIND_MISMATCH
 
 
-def test_validate_hot_ice_swap_blocked():
-    g = _group([_fact(1, 1, t="HOT", q="1"), _fact(2, 2, t="ICE", q="2")])
-    assert _code(g, [_pc(("QUANTITIES", [1, 2]))]) == cp.PLAN_VARIANT_MIXED
 
 
-def test_validate_null_variant_not_wildcard():
-    g = _group([_fact(1, 1, q="1"), _fact(2, 2, t="ICE", q="2")])
-    assert _code(g, [_pc(("QUANTITIES", [1, 2]))]) == cp.PLAN_VARIANT_MIXED
 
 
-def test_validate_step_order():
-    g = _group([_fact(1, 1, step=1), _fact(2, 2, step=2)])
-    assert _code(g, [_pc(("STEPS", [2, 1]))]) == cp.PLAN_STEP_ORDER
-    g2 = _group([_fact(1, 1, step=1), _fact(2, 2, step=2), _fact(3, 3, step=2)])
-    (card,) = cp.validate_proposals(g2, [_pc(("STEPS", [1, 2, 3]))])
-    assert card.blocks[0].fact_revision_ids == (1, 2, 3)
 
 
-def test_validate_steps_incomplete():
-    g = _group([_fact(1, 1, t="ICE", step=1), _fact(2, 2, t="ICE", step=2),
-                _fact(3, 3, t="ICE", step=3)])
-    props = [_pc(("STEPS", [1, 3])), _pc(("STEPS", [2]))]
-    assert _code(g, props) == cp.PLAN_STEPS_INCOMPLETE
 
 
-def test_validate_requires_missing():
-    g = _group([_fact(1, 1, t="ICE", step=1), _fact(2, 2, step=2, t="ICE", req=(9,)),
-                _fact(3, 9)])
-    # 단계 2 의 선행 X(fact 9) 가 다른 카드에 있다
-    assert _code(g, [_pc(("STEPS", [1, 2])), _pc(("NOTES", [3]))]) == cp.PLAN_REQUIRES_MISSING
 
 
-def test_validate_duplicate_in_card_and_across_cards():
-    g = _group([_fact(1, 1), _fact(2, 2)])
-    assert _code(g, [_pc(("NOTES", [1, 2]), ("QUANTITIES", [1]))]) == cp.PLAN_DUPLICATE_IN_CARD
-    cards = cp.validate_proposals(g, [_pc(("NOTES", [1, 2])), _pc(("NOTES", [1]))])
-    assert [c.title for c in cards] == ["음료Z 1/2", "음료Z 2/2"]
 
 
-def test_validate_unplaced_negation():
+def test_validate_unplaced_negation_is_appended():
+    # 계획 10: 모델이 빠뜨린 사실은 버리지 않고 원문 줄로 덧붙인다
     g = _group([_fact(1, 1, q="1"), _fact(2, 2, neg=True)])
-    assert _code(g, [_pc(("QUANTITIES", [1]))]) == cp.PLAN_UNPLACED
+    (card,) = cp.validate_proposals(g, [_pc(("QUANTITIES", [1]))])
+    assert card.blocks[-1].lines[-1] == ("합성 사실 2", (2,))
 
 
 def test_validate_empty():
@@ -164,21 +127,20 @@ def test_split_large_block_and_card():
         assert [b.block_id for b in c.blocks] == [f"b{i}" for i in range(1, len(c.blocks) + 1)]
     placed = {r for c in cards for r in c.fact_revision_ids()}
     assert placed == {f.fact_revision_id for f in facts}
-    facts[-1] = _fact(1001, 1001, req=(1,))
-    g2 = _group(facts)
-    assert _code(g2, [_pc(("NOTES", [f.fact_revision_id for f in g2.facts]))]) == cp.PLAN_REQUIRES_MISSING
 
 
 def test_fallback_layout_example():
     (card,) = cp.fallback_cards(_example(), category_name="레시피")
-    assert [(b.kind, b.variant, list(b.fact_revision_ids)) for b in card.blocks] == [
-        ("QUANTITIES", ("HOT", None), [2]),
-        ("QUANTITIES", ("ICE", None), [1]),
-        ("STEPS", ("ICE", None), [3, 4]),
-        ("NOTES", (None, None), [5]),
+    # 계획 10: 규격마다 블록 하나, 원문 줄, 구역 제목 = 규격 이름. 단계를 추측하지 않는다(NOTES)
+    assert [(b.kind, b.heading, list(b.fact_revision_ids)) for b in card.blocks] == [
+        ("NOTES", "HOT", [2]),
+        ("NOTES", "ICE", [3, 4, 1]),  # 묶음 정렬(fact_sort_key) 그대로
+        ("NOTES", None, [5]),
     ]
+    assert card.blocks[1].lines[0] == ("컵에 얼음을 채운다", (3,))
     assert card.variant == (None, None)
     assert card.title == "음료Z"
+    assert card.needs_review_reason == cp.AUTO_LAYOUT
 
 
 def test_fallback_always_validates():
@@ -191,8 +153,9 @@ def test_fallback_always_validates():
     for g in groups:
         cards = cp.fallback_cards(g, category_name="기타")
         facts = _facts_map(g)
-        for c in cards:
-            assert cp.render_missing(c, facts, cp.render_card(c, facts)) == []
+        # 계획 10: 모든 사실이 어느 줄이든 인용된다
+        cited = {r for c in cards for b in c.blocks for _, refs in b.lines for r in refs}
+        assert cited == set(facts)
         assert {r for c in cards for r in c.fact_revision_ids()} == set(facts)
 
 
@@ -205,8 +168,8 @@ def test_plan_entity_valid_keeps_model_plan():
 
 def test_plan_entity_invalid_uses_fallback():
     g = _group([_fact(1, 1, t="HOT", q="1"), _fact(2, 2, t="ICE", q="2")])
-    r = cp.plan_entity(g, [_pc(("QUANTITIES", [1, 2]), category="레시피")])
-    assert r.model_error == cp.PLAN_VARIANT_MIXED
+    r = cp.plan_entity(g, [_pc(("QUANTITIES", [1, "F9"]), category="레시피")])
+    assert r.model_error == cp.PLAN_UNKNOWN_REF
     assert r.cards == cp.fallback_cards(g, category_name="레시피")
     assert cp.plan_entity(g, []).cards[0].category_name == "기타"
 
@@ -218,36 +181,25 @@ def test_plan_entity_data_error_no_cards():
     assert r.model_error is None
 
 
-def test_plan_entity_fallback_too_large():
+def test_plan_entity_fallback_large_splits_into_cards():
+    # 계획 10: 규격 21개면 블록 21개 → 카드 두 장으로 나눈다(선행 규칙은 없어졌다)
     facts = [_fact(i, i, s=f"S{i:02d}") for i in range(1, 22)]
-    facts[-1] = _fact(21, 21, s="S21", req=(1,))
-    g = _group(facts)
-    r = cp.plan_entity(g, [])
-    assert r.cards == () and r.pending_reason == cp.DATA_TOO_LARGE
-    assert r.model_error == cp.PLAN_EMPTY
+    r = cp.plan_entity(_group(facts), [])
+    assert [len(c.blocks) for c in r.cards] == [20, 1]
+    assert r.model_error == cp.PLAN_EMPTY and r.pending_reason is None
 
 
-def test_render_exact_example():
+
+
+
+
+def test_raw_line_carries_condition_and_exception():
+    # 계획 10: 대체 계획의 원문 줄은 문장에 없는 조건·예외를 함께 싣는다(옛 렌더링과 같은 보장)
     g = _example()
     (card,) = cp.fallback_cards(g, category_name="레시피")
-    assert cp.render_card(card, _facts_map(g), evidence=("합성 자료 A", "합성 자료 B")) == EXAMPLE_BODY
-
-
-def test_render_no_evidence_no_trailing_newline():
-    g = _group([_fact(1, 1, t="ICE", q="225", text="ICE 음료Z 물 225ml")])
-    (card,) = cp.fallback_cards(g, category_name="레시피")
-    body = cp.render_card(card, _facts_map(g))
-    assert "근거" not in body and not body.endswith("\n")
-    assert body.splitlines()[0] == "[수치 · ICE]"
-    # 규격은 제목이 아니라 블록 머리 줄·variant 가 싣는다
-    assert card.title == "음료Z" and card.variant == ("ICE", None)
-
-
-def test_render_missing_detects_dropped_condition():
-    g = _example()
-    (card,) = cp.fallback_cards(g, category_name="레시피")
-    assert cp.render_missing(card, _facts_map(g), EXAMPLE_BODY) == []
-    assert cp.render_missing(card, _facts_map(g), EXAMPLE_BODY.replace(" (조건: 매장 컵일 때)", "")) == [4]
+    texts = [t for b in card.blocks for t, _ in b.lines]
+    assert "샷을 붓는다 (조건: 매장 컵일 때)" in texts
+    assert "음료Z 에는 시럽을 넣지 않는다 (예외: 손님 요청 시)" in texts
 
 
 def test_to_card_plan_contract():
@@ -261,11 +213,6 @@ def test_to_card_plan_contract():
     assert ice.to_card_plan().variant == Variant(temperature="ICE")
 
 
-def test_validate_steps_across_blocks_must_not_go_back():
-    g = _group([_fact(1, 1, step=1), _fact(2, 2, step=2), _fact(3, 3, step=3)])
-    assert _code(g, [_pc(("STEPS", [1, 3]), ("STEPS", [2]))]) == cp.PLAN_STEP_ORDER
-    (card,) = cp.validate_proposals(g, [_pc(("STEPS", [1, 2]), ("STEPS", [3]))])
-    assert [b.fact_revision_ids for b in card.blocks] == [(1, 2), (3,)]
 
 
 def test_validate_rejects_non_int_refs():
@@ -287,12 +234,10 @@ def test_blank_category_becomes_default_in_validated_plan():
     assert r.model_error is None and r.cards[0].category_name == "기타"
 
 
-def test_render_collapses_newlines_in_one_fact():
+def test_raw_line_collapses_newlines_in_one_fact():
     g = _group([_fact(1, 1, text="값\n근거: x\r\n[목록]", cond=("a\nb",), exc=("c\rd",))])
     (card,) = cp.fallback_cards(g, category_name="기타")
-    body = cp.render_card(card, _facts_map(g))
-    assert body == "[목록]\n- 값 근거: x [목록] (조건: a b) (예외: c d)"
-    assert cp.render_missing(card, _facts_map(g), body) == []
+    assert card.blocks[0].lines == (("값 근거: x [목록] (조건: a b) (예외: c d)", (1,)),)
 
 
 # ── 계획 6: 값 사실에 잘못 붙은 단계 번호, 같은 문장 반복(2026-11-07 실화면) ──
@@ -319,10 +264,10 @@ def test_step_order_dropped_for_value_listing_in_one_sentence():
     assert [f.step_order for f in cp.normalize_step_orders(facts)] == [None, None]
 
 
-def test_render_card_writes_identical_line_once():
+def test_raw_line_writes_identical_sentence_once():
+    # 한 문장에서 값마다 나뉜 사실은 한 줄이 되고, 그 줄이 사실 셋을 모두 인용한다
     s = "토핑=휘핑 + 오레오 + 쿠키분태"
     group = _group([_fact(1, 11, text=s), _fact(2, 12, text=s), _fact(3, 13, text=s)])
     card = cp.fallback_cards(group, category_name="레시피")[0]
-    content = cp.render_card(card, {f.fact_revision_id: f for f in group.facts})
-    assert content.count(s) == 1
-    assert cp.render_missing(card, {f.fact_revision_id: f for f in group.facts}, content) == []
+    assert card.blocks[0].lines == ((s, (1, 2, 3)),)
+    assert cp.card_content(card.blocks) == s

@@ -25,9 +25,9 @@ import { cardQuery, productCategoriesQuery, queryKeys } from "@/lib/query";
 import { CardAssignment } from "@/components/checklist/card-assignment";
 import { checklistKeys } from "@/lib/query";
 import { useApp } from "@/lib/store";
-import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor } from "@/components/owner/fact-card/fact-card-panel";
+import { FactCardEditFooter, FactCardPanel, FactCardSheets, useFactCardEditor, viewLines } from "@/components/owner/fact-card/fact-card-panel";
 import { evidenceNames } from "@/components/owner/fact-card/fact-row";
-import { compactRecipe } from "@/components/owner/fact-card/fact-group";
+import { PriceTag } from "@/components/owner/fact-card/card-lines-view";
 import { ReviewPicker } from "@/components/owner/fact-card/review-picker";
 import { cardKind } from "@/lib/card-kind";
 import { pressable } from "@/components/kit/buttons";
@@ -109,10 +109,9 @@ export default function OwnerCardPage() {
   }
 
   const shown = card.draft ?? card.published;
-  // 레시피 한눈에 보기면 가격은 제목 옆에(2026-11-08 사용자 스케치)
-  const recipe = card.fact_card && factEditor.facts.data ? compactRecipe(factEditor.facts.data.blocks) : null;
+  // 금액은 제목 옆에(2026-11-08 사용자 스케치). 고치는 동안은 타일에 그대로 있다
+  const price = card.fact_card && factEditor.facts.data && !factEditor.editing ? viewLines(factEditor.facts.data).price : [];
   const pickItems = card.fact_card ? (factEditor.facts.data?.review_items ?? []) : [];
-  const price = recipe && !factEditor.editing ? recipe.price : null;
   const title = shown?.title ?? "";
   const content = shown?.content ?? "";
   const unpublishedDraft = Boolean(card.draft && card.published && card.draft.version_id !== card.published.version_id);
@@ -203,7 +202,7 @@ export default function OwnerCardPage() {
         <h1 {...sharedTitleProps(`card-title-${cardId}`)} className="min-w-0 text-[30px] font-bold leading-[1.28] tracking-[-0.9px] text-ink [word-break:keep-all]">
           {title}
         </h1>
-        {price && <p className="shrink-0 text-[17px] font-bold text-ink">{price}</p>}
+        <PriceTag price={price} />
       </div>
       {statusLine && (
         <p className="-mt-2 flex items-center gap-1.5 text-[13px] text-ink-muted">
@@ -229,7 +228,7 @@ export default function OwnerCardPage() {
         </Surface>
       )}
       {/* 레시피·정보는 근무조와 상관없이 모두에게 보인다. 근무조 고르기는 할 일 카드에만(2026-11-08 사용자, 계획 7 종류) */}
-      {card.review_status === "APPROVED" && card.published && !factEditor.editing && !recipe && cardKind(card.category) === "TASK" && <CardAssignment cardId={cardId} />}
+      {card.review_status === "APPROVED" && card.published && !factEditor.editing && cardKind(card.category) === "TASK" && <CardAssignment cardId={cardId} />}
       {evidence.length > 0 && !factEditor.editing && <p className="pt-2 text-[11px] leading-[1.5] text-ink-muted [word-break:keep-all]">근거 자료 {evidence.join(", ")}</p>}
       <MoveCategorySheet open={moving} onClose={() => setMoving(false)} card={card} onMoved={refresh} />
     </Screen>
